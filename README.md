@@ -94,7 +94,7 @@ Why not just write a basic regex script? Basic regex scripts break on streaming 
   - **Tier 2 (NER Engine):** Person Names and unstructured entities.
 - **Deterministic Re-Hydration Vault:** Swaps PII with session-bound tokens (e.g., `Sarah` -> `[PERSON_1]`). Maps back deterministically when the LLM streams responses. Supports request-scoped and session-scoped (`X-Session-ID`) vaults.
 - **SOC 2 Structured Audit Logging:** Emits JSON structured audit logs for compliance monitoring.
-- **Opt-In Telemetry:** Strictly opt-in (`TELEMETRY_ENABLED=false` by default) telemetry worker collecting aggregated volumetric metrics with an explicit zero-PII guarantee.
+- **Tier 2 (NER Engine):** A lightweight, quantized ONNX Named Entity Recognition (NER) model. It uses local AI to catch unstructured names and entities that slip past standard regex, executing in ~10ms without requiring heavy Python frameworks or cloud APIs.
 
 ---
 
