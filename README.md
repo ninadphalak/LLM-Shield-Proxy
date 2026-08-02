@@ -1,12 +1,14 @@
 # LLM-Shield-Proxy - Enterprise Privacy Redaction Engine
 
-[![PyPI Version](https://img.shields.io/pypi/v/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
+[![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 
+A zero-latency, zero-egress, streaming-safe PII redaction proxy for Enterprise LLMs.
+
 **LLM-Shield-Proxy** is an open-source, zero-egress middleware proxy that intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your local infrastructure, and deterministically re-hydrates real-time SSE streaming responses without breaking stream latency.
 
-Designed for enterprise privacy compliance (**SOC 2 / HIPAA**).
+Designed to unblock enterprise privacy compliance (**SOC 2 / HIPAA**).
 
 Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
 
@@ -40,6 +42,7 @@ flowchart TD
     end
 
     UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / vLLM)"]:::upstream
+
     %% Inbound Flow (Prompt Sanitization)
     UserApp -- "1. Inbound Raw Prompt Payload" --> FastAPIProxy
     FastAPIProxy -- "2. Scan Payload" --> Tier1
@@ -68,6 +71,17 @@ flowchart TD
 5. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE). 
 6. **Lookahead Buffer:** Because tags can be split across chunks (e.g., `[PER` and `SON_1]`), the proxy's sliding-window buffer holds back unclosed brackets to prevent data leaks.
 7. **Re-hydration:** Once a tag is fully caught, the proxy swaps the real data back in from the local vault and streams the final, un-redacted text to the user's screen in real-time.
+
+---
+
+## 🔒 Why LLM-Shield-Proxy? (Architectural Moats)
+
+Why not just write a basic regex script? Basic regex scripts break on streaming responses, leak split tokens, and slow down your application. LLM-Shield-Proxy is purpose-built for production:
+
+- **Streaming Safety:** Includes a proprietary **Sliding-Window Lookahead Buffer** that prevents Server-Sent Event (SSE) chunking leaks across split tokens (e.g., holding back `[PER` until `SON_1]` arrives).
+- **Speed & Accuracy:** Leverages a **Two-Tier Cascade Engine** (sub-millisecond compiled Regex + Quantized ONNX NER) that catches unstructured names in ~10ms with zero cloud dependencies.
+- **Context Preservation:** Uses a **Local TTL Session Vault** that maps PII to session-bound tokens (`[PERSON_1]`), enabling the LLM to retain full conversational context without receiving raw sensitive data.
+- **Zero-Egress Security:** Runs 100% on your local infrastructure. Your raw data never leaves your server; only sanitized, redacted payloads reach upstream LLM providers.
 
 ---
 
