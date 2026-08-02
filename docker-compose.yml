@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  llm-shield:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - UPSTREAM_BASE_URL=https://api.openai.com
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
