@@ -61,16 +61,16 @@ flowchart TD
 
 ### How It Works (The Data Flow)
 
-**Inbound (Prompt Sanitization)**
-1. **Intercept:** Your application sends a standard OpenAI/LangChain payload to `localhost:8000`.
-2. **Cascade Redaction:** The proxy intercepts the JSON and routes text through a high-speed compiled Regex engine (for SSNs, emails), falling back to a local ONNX model for unstructured names.
+#### 📥 Inbound (Prompt Sanitization)
+1. **Intercept:** Your application sends a standard OpenAI / LangChain payload to `localhost:8000`.
+2. **Cascade Redaction:** The proxy intercepts the JSON and routes text through a high-speed compiled Regex engine (SSNs, emails, credit cards), falling back to a local ONNX model for unstructured names.
 3. **Vault Storage:** The original PII is mapped to a deterministic tag (e.g., `[PERSON_1]`) and stored locally in a TTL-backed session vault.
-4. **Clean Egress:** A 100% sanitized payload is forwarded to OpenAI. OpenAI never sees your real data.
+4. **Clean Egress:** A 100% sanitized payload is forwarded to OpenAI. OpenAI never sees your raw sensitive data.
 
-**Outbound (Streaming De-redaction)**
-5. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE). 
-6. **Lookahead Buffer:** Because tags can be split across chunks (e.g., `[PER` and `SON_1]`), the proxy's sliding-window buffer holds back unclosed brackets to prevent data leaks.
-7. **Re-hydration:** Once a tag is fully caught, the proxy swaps the real data back in from the local vault and streams the final, un-redacted text to the user's screen in real-time.
+#### 📤 Outbound (Streaming De-redaction)
+5. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE).
+6. **Lookahead Buffer:** Because tags can be split across SSE chunks (e.g., `[PER` in chunk N and `SON_1]` in chunk N+1), the proxy's sliding-window buffer holds back unclosed brackets to prevent tag leaks.
+7. **Re-hydration:** Once a tag is fully assembled, the proxy swaps the real data back from the local vault and streams the final, un-redacted text to the user's application in real-time.
 
 ---
 
