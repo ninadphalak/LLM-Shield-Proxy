@@ -6,7 +6,8 @@ from app.vault import Vault
 TIER1_PATTERNS = [
     ("EMAIL", re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')),
     ("SSN", re.compile(r'\b\d{3}-\d{2}-\d{4}\b')),
-    ("PHONE", re.compile(r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b')),
+    ("PHONE", re.compile(r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?(?:\d{3}[-.\s]?)?\d{4}\b')),
+
     ("CREDIT_CARD", re.compile(r'\b(?:\d[ -]*?){13,16}\b')),
     ("IP_ADDRESS", re.compile(r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b')),
     ("API_KEY", re.compile(r'\b(?:sk-[a-zA-Z0-9]{32,48}|AKIA[0-9A-Z]{16})\b')),
