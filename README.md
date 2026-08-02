@@ -68,9 +68,9 @@ flowchart TD
 4. **Clean Egress:** A 100% sanitized payload is forwarded to OpenAI. OpenAI never sees your raw sensitive data.
 
 #### 📤 Outbound (Streaming De-redaction)
-5. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE).
-6. **Lookahead Buffer:** Because tags can be split across SSE chunks (e.g., `[PER` in chunk N and `SON_1]` in chunk N+1), the proxy's sliding-window buffer holds back unclosed brackets to prevent tag leaks.
-7. **Re-hydration:** Once a tag is fully assembled, the proxy swaps the real data back from the local vault and streams the final, un-redacted text to the user's application in real-time.
+1. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE).
+2. **Lookahead Buffer:** Because tags can be split across SSE chunks (e.g., `[PER` in chunk N and `SON_1]` in chunk N+1), the proxy's sliding-window buffer holds back unclosed brackets to prevent tag leaks.
+3. **Re-hydration:** Once a tag is fully assembled, the proxy swaps the real data back from the local vault and streams the final, un-redacted text to the user's application in real-time.
 
 ---
 
@@ -108,6 +108,18 @@ Install the package from PyPI:
 pip install llm-shield-proxy
 ```
 
+### Configuration
+Create a `.env` file in the root directory before starting the server.
+
+```env
+# Required upstream provider key (or pass via Authorization header)
+OPENAI_API_KEY=sk-your-openai-key-here
+
+# Optional configuration
+PORT=8000
+TELEMETRY_ENABLED=false
+```
+
 #### 1. Start the Proxy
 
 Run the proxy locally via Docker or Uvicorn. No external database required for the open-source core.
@@ -143,6 +155,15 @@ response = client.chat.completions.create(
 for chunk in response:
     print(chunk.choices[0].delta.content or "", end="")
 ```
+
+---
+
+## ⚠️ Known Limitations
+
+Transparency is critical for security tooling. Please be aware of the following current limitations:
+- **Text Only:** The proxy does not currently scan or redact text embedded inside base64 image payloads (e.g., OpenAI Vision models).
+- **Supported Languages:** The Tier-2 ONNX NER model is currently optimized for English-language entities. 
+- **Non-Standard Streaming:** Designed for standard Server-Sent Events (SSE). Custom or proprietary streaming protocols may bypass the sliding-window buffer.
 
 ---
 
