@@ -196,6 +196,35 @@ py -m pytest tests/
 
 ---
 
+## 🚀 Enterprise Deployment & Operations
+
+Designed for zero-friction adoption by DevOps, Site Reliability Engineers (SREs), and Network Administrators:
+
+### 1. 🏥 Health Check Endpoints (Kubernetes & Swarm Probes)
+Built-in liveness and readiness endpoints return `HTTP 200 OK` for Kubernetes, Docker Swarm, or AWS ECS health monitors:
+```bash
+curl http://localhost:8000/health
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.2"}
+
+curl http://localhost:8000/livez
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.2"}
+```
+
+### 2. ⚙️ 12-Factor Environment Configuration
+100% compliant with 12-factor app standards. All upstream target routing and API keys are injected via environment variables or a `.env` file without code modifications:
+- `UPSTREAM_BASE_URL`: Base target URL (e.g. `https://api.openai.com` or internal `vLLM` server).
+- `OPENAI_API_KEY`: Upstream API key passed to target providers.
+- `REDIS_URL`: Optional Redis connection string for distributed multi-instance session caching.
+
+### 3. 📈 Stateless & Horizontal Scaling
+LLM-Shield-Proxy runs completely stateless by default. For high-volume enterprise deployments, instances scale horizontally behind edge proxies (NGINX, Traefik, AWS ALB):
+```bash
+docker-compose up -d --scale proxy=5
+```
+When configured with `REDIS_URL`, session vaults are shared across all proxy replicas, ensuring seamless session isolation across multi-instance clusters.
+
+---
+
 ## 🏢 Using LLM-Shield-Proxy in Production?
 
 We are actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.

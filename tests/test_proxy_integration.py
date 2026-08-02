@@ -76,3 +76,14 @@ def test_proxy_streaming_chat_completion(httpx_mock):
     assert "alice@domain.com" in content
     assert "[EMAIL_1]" not in content
 
+
+def test_health_and_livez_check_endpoints():
+    res_health = client.get("/health")
+    assert res_health.status_code == 200
+    assert res_health.json()["status"] == "ok"
+    assert res_health.json()["service"] == "llm-shield-proxy"
+
+    res_livez = client.get("/livez")
+    assert res_livez.status_code == 200
+    assert res_livez.json()["status"] == "ok"
+

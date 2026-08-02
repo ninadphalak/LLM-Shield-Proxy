@@ -42,6 +42,16 @@ def build_target_url(upstream_base: str, path: str) -> str:
     return f"{base}/{p}"
 
 
+@app.get("/health", tags=["Health"])
+@app.get("/livez", tags=["Health"])
+async def health_check():
+    return {
+        "status": "ok",
+        "service": "llm-shield-proxy",
+        "version": "1.0.2"
+    }
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_catch_all(
     request: Request,
