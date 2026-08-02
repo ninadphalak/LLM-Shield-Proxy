@@ -14,8 +14,9 @@ TIER1_PATTERNS = [
 
 # Tier 2 NER Pattern Rules (Names, Titles, Locations)
 TIER2_PATTERNS = [
-    ("PERSON", re.compile(r'\b(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b')),
+    ("PERSON", re.compile(r'\b(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)?\s*[A-Z][a-z]+\s+[A-Z][a-z]+\b')),
 ]
+
 
 
 class PIIEngine:

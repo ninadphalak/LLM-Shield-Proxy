@@ -19,10 +19,10 @@ async def mock_chat_completions(request: Request):
     print("============================================================\n")
 
     async def sse_generator():
-        # Stream response back in chunks with split tokens
+        # Stream response back in chunks with split tokens across deltas
         chunks = [
             'data: {"choices":[{"delta":{"content":"Hello [PER"}}]}\n\n',
-            'data: {"choices":[{"delta":{"content":"SON_1]! I received your message about privacy.\n\n"}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"SON_1]! I received your message about privacy. "}}]}\n\n',
             'data: {"choices":[{"delta":{"content":"I see your registered phone number is [PHO"}}]}\n\n',
             'data: {"choices":[{"delta":{"content":"NE_1]. All PII has been safely isolated."}}]}\n\n',
             'data: [DONE]\n\n'
