@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-shield"
+version = "1.0.0"
+description = "Enterprise Zero-Egress Privacy Redaction Proxy Engine for LLMs"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [
+    {name = "Ninad Phalak", email = "ninad.phalak@gmail.com"}
+]
+keywords = [
+    "llm",
+    "pii",
+    "redaction",
+    "privacy",
+    "proxy",
+    "fastapi",
+    "streaming",
+    "soc2",
+    "hipaa"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "httpx>=0.24.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-httpx>=0.24.0",
+    "pytest-mock>=3.10.0",
+    "openai>=1.0.0",
+    "build",
+    "twine"
+]
+
+[project.urls]
+Homepage = "https://github.com/ninadphalak/LLM-Shield"
+Repository = "https://github.com/ninadphalak/LLM-Shield"
+"Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield/issues"

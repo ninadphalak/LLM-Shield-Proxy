@@ -1,8 +1,14 @@
 # LLM-Shield - Enterprise Privacy Redaction Engine
 
+[![PyPI Version](https://img.shields.io/pypi/v/llm-shield.svg)](https://pypi.org/project/llm-shield/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+
 **LLM-Shield** is an open-source, zero-egress middleware proxy that intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your local infrastructure, and deterministically re-hydrates real-time SSE streaming responses without breaking stream latency.
 
 Designed for enterprise privacy compliance (**SOC 2 / HIPAA**).
+
+Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
 
 ---
 
@@ -13,13 +19,35 @@ Designed for enterprise privacy compliance (**SOC 2 / HIPAA**).
 - **Two-Tier PII Cascade Engine:**
   - **Tier 1 (Sub-millisecond Regex):** SSNs, Credit Cards, Email Addresses, Phone Numbers, IPv4/IPv6, API Keys.
   - **Tier 2 (NER Engine):** Person Names and unstructured entities.
-- **Deterministic Re-Hydration Vault:** Swaps PII with session-bound tokens (e.g. `Sarah` -> `[PERSON_1]`). Maps back deterministically when the LLM streams responses. Supports request-scoped and session-scoped (`X-Session-ID`) vaults.
+- **Deterministic Re-Hydration Vault:** Swaps PII with session-bound tokens (e.g., `Sarah` -> `[PERSON_1]`). Maps back deterministically when the LLM streams responses. Supports request-scoped and session-scoped (`X-Session-ID`) vaults.
 - **SOC 2 Structured Audit Logging:** Emits JSON structured audit logs for compliance monitoring.
-- **Anonymous Volumetric Telemetry:** Opt-out (`TELEMETRY_OPT_OUT=true`) telemetry worker collecting aggregated volumetric metrics with an explicit zero-PII guarantee.
+- **Opt-In Telemetry:** Strictly opt-in (`TELEMETRY_ENABLED=false` by default) telemetry worker collecting aggregated volumetric metrics with an explicit zero-PII guarantee.
+
+---
+
+## 📦 Installation
+
+Install `llm-shield` directly from PyPI via `pip`:
+
+```bash
+pip install llm-shield
+```
+
+Or install locally in editable mode:
+
+```bash
+pip install -e .
+```
 
 ---
 
 ## 🚀 Quickstart
+
+### Running via Python / Uvicorn
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
 ### Running via Docker Compose
 
@@ -27,16 +55,9 @@ Designed for enterprise privacy compliance (**SOC 2 / HIPAA**).
 docker-compose up -d
 ```
 
-### Running via Python / Uvicorn
-
-```bash
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
 ### Usage with OpenAI Client
 
-Simply point your base URL to LLM-Shield (`http://localhost:8000/v1`):
+Point your base URL to LLM-Shield (`http://localhost:8000/v1`):
 
 ```python
 from openai import OpenAI
@@ -47,7 +68,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4",
+    model="gpt-4o-mini",
     messages=[
         {"role": "user", "content": "Contact Sarah Connor at sarah@example.com"}
     ],
@@ -70,7 +91,7 @@ py -m pytest tests/
 
 ---
 
-🏢 Using LLM-Shield in Production?
+## 🏢 Using LLM-Shield in Production?
 
 We are actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
 
