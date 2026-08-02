@@ -37,6 +37,14 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
     return request.app.state.http_client
 
 
+def build_target_url(upstream_base: str, path: str) -> str:
+    base = upstream_base.rstrip("/")
+    p = path.lstrip("/")
+    if base.endswith("/v1") and p.startswith("v1/"):
+        p = p[3:]
+    return f"{base}/{p}"
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 async def proxy_catch_all(
     request: Request,
@@ -45,7 +53,8 @@ async def proxy_catch_all(
     x_upstream_base_url: Optional[str] = Header(None, alias="X-Upstream-Base-Url")
 ):
     upstream_base = x_upstream_base_url or settings.UPSTREAM_BASE_URL
-    target_url = f"{upstream_base.rstrip('/')}/{path.lstrip('/')}"
+    target_url = build_target_url(upstream_base, path)
+
 
     # Prepare forwarding headers (strip hop-by-hop and compression headers)
     headers = dict(request.headers)
