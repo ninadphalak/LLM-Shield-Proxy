@@ -10,16 +10,13 @@ from app.config import settings
 from app.vault import vault_store
 from app.pii_engine import pii_engine
 from app.streaming import rehydrate_sse_stream
-from app.telemetry import telemetry_tracker
 from app.audit import AuditLogger
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient(timeout=120.0)
-    telemetry_tracker.start()
     yield
-    telemetry_tracker.stop()
     await app.state.http_client.aclose()
 
 
@@ -68,94 +65,88 @@ async def proxy_catch_all(
     vault = vault_store.get_vault(x_session_id)
     http_client: httpx.AsyncClient = get_http_client(request)
 
-    telemetry_tracker.increment_active()
-    try:
-        if request.method == "POST":
-            try:
-                body_bytes = await request.body()
-                payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
-            except Exception:
-                payload = {}
+    if request.method == "POST":
+        try:
+            body_bytes = await request.body()
+            payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+        except Exception:
+            payload = {}
 
-            if isinstance(payload, dict):
-                is_streaming = payload.get("stream", False)
-                redacted_payload = pii_engine.redact_payload(payload, vault)
-                redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
+        if isinstance(payload, dict):
+            is_streaming = payload.get("stream", False)
+            redacted_payload = pii_engine.redact_payload(payload, vault)
+            redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
 
-                redaction_count = sum(vault.type_counters.values())
-                telemetry_tracker.record_request(redaction_count)
-                AuditLogger.log_redaction_event(x_session_id, vault.type_counters, path)
+            AuditLogger.log_redaction_event(x_session_id, vault.type_counters, path)
 
-                if is_streaming:
-                    req = http_client.build_request(
-                        method=request.method,
-                        url=target_url,
-                        headers=headers,
-                        content=redacted_bytes
-                    )
-                    upstream_res = await http_client.send(req, stream=True)
+            if is_streaming:
+                req = http_client.build_request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    content=redacted_bytes
+                )
+                upstream_res = await http_client.send(req, stream=True)
 
-                    res_headers = dict(upstream_res.headers)
-                    res_headers.pop("content-encoding", None)
-                    res_headers.pop("content-length", None)
-                    res_headers.pop("transfer-encoding", None)
+                res_headers = dict(upstream_res.headers)
+                res_headers.pop("content-encoding", None)
+                res_headers.pop("content-length", None)
+                res_headers.pop("transfer-encoding", None)
 
-                    if upstream_res.status_code >= 400:
-                        err_content = await upstream_res.aread()
-                        await upstream_res.aclose()
-                        return Response(
-                            content=err_content,
-                            status_code=upstream_res.status_code,
-                            headers=res_headers,
-                            media_type=res_headers.get("content-type", "application/json")
-                        )
-
-                    return StreamingResponse(
-                        rehydrate_sse_stream(upstream_res.aiter_bytes(), vault),
+                if upstream_res.status_code >= 400:
+                    err_content = await upstream_res.aread()
+                    await upstream_res.aclose()
+                    return Response(
+                        content=err_content,
                         status_code=upstream_res.status_code,
                         headers=res_headers,
-                        media_type="text/event-stream"
+                        media_type=res_headers.get("content-type", "application/json")
                     )
-                else:
-                    upstream_res = await http_client.request(
-                        method=request.method,
-                        url=target_url,
-                        headers=headers,
-                        content=redacted_bytes
+
+                return StreamingResponse(
+                    rehydrate_sse_stream(upstream_res.aiter_bytes(), vault),
+                    status_code=upstream_res.status_code,
+                    headers=res_headers,
+                    media_type="text/event-stream"
+                )
+            else:
+                upstream_res = await http_client.request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    content=redacted_bytes
+                )
+                res_headers = dict(upstream_res.headers)
+                res_headers.pop("content-encoding", None)
+                res_headers.pop("content-length", None)
+                res_headers.pop("transfer-encoding", None)
+
+                try:
+                    res_json = upstream_res.json()
+                    rehydrated_res = _rehydrate_json_response(res_json, vault)
+                    return JSONResponse(content=rehydrated_res, status_code=upstream_res.status_code, headers=res_headers)
+                except Exception:
+                    return Response(
+                        content=vault.rehydrate(upstream_res.text),
+                        status_code=upstream_res.status_code,
+                        headers=res_headers
                     )
-                    res_headers = dict(upstream_res.headers)
-                    res_headers.pop("content-encoding", None)
-                    res_headers.pop("content-length", None)
-                    res_headers.pop("transfer-encoding", None)
-
-                    try:
-                        res_json = upstream_res.json()
-                        rehydrated_res = _rehydrate_json_response(res_json, vault)
-                        return JSONResponse(content=rehydrated_res, status_code=upstream_res.status_code, headers=res_headers)
-                    except Exception:
-                        return Response(
-                            content=vault.rehydrate(upstream_res.text),
-                            status_code=upstream_res.status_code,
-                            headers=res_headers
-                        )
 
 
-        # For non-POST or pass-through requests
-        AuditLogger.log_proxy_event(x_session_id, path, request.method)
-        body_bytes = await request.body()
-        upstream_res = await http_client.request(
-            method=request.method,
-            url=target_url,
-            headers=headers,
-            content=body_bytes
-        )
-        return Response(
-            content=upstream_res.content,
-            status_code=upstream_res.status_code,
-            headers=dict(upstream_res.headers)
-        )
-    finally:
-        telemetry_tracker.decrement_active()
+    # For non-POST or pass-through requests
+    AuditLogger.log_proxy_event(x_session_id, path, request.method)
+    body_bytes = await request.body()
+    upstream_res = await http_client.request(
+        method=request.method,
+        url=target_url,
+        headers=headers,
+        content=body_bytes
+    )
+    return Response(
+        content=upstream_res.content,
+        status_code=upstream_res.status_code,
+        headers=dict(upstream_res.headers)
+    )
 
 
 def _rehydrate_json_response(res_json: dict, vault) -> dict:
