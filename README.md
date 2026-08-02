@@ -1,10 +1,10 @@
-# LLM-Shield - Enterprise Privacy Redaction Engine
+# LLM-Shield-Proxy - Enterprise Privacy Redaction Engine
 
 [![PyPI Version](https://img.shields.io/pypi/v/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 
-**LLM-Shield** is an open-source, zero-egress middleware proxy that intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your local infrastructure, and deterministically re-hydrates real-time SSE streaming responses without breaking stream latency.
+**LLM-Shield-Proxy** is an open-source, zero-egress middleware proxy that intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your local infrastructure, and deterministically re-hydrates real-time SSE streaming responses without breaking stream latency.
 
 Designed for enterprise privacy compliance (**SOC 2 / HIPAA**).
 
@@ -49,14 +49,14 @@ docker-compose up -d
 
 #### 2. Update your Application (1-Line Change)
 
-Point your existing OpenAI SDK `base_url` to your local LLM-Shield proxy instance.
+Point your existing OpenAI SDK `base_url` to your local LLM-Shield-Proxy instance.
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     api_key="your-openai-api-key",
-    base_url="http://localhost:8000/v1" # Point to LLM-Shield proxy
+    base_url="http://localhost:8000/v1" # Point to LLM-Shield-Proxy
 )
 
 response = client.chat.completions.create(
@@ -83,8 +83,8 @@ py -m pytest tests/
 
 ---
 
-## 🏢 Using LLM-Shield in Production?
+## 🏢 Using LLM-Shield-Proxy in Production?
 
-We are actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
+We are actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
 
-Email the core maintainer at ninad.phalak@gmail.com  to share your feedback, request a feature, or feature your team as a case study.
+Email the core maintainer at ninad.phalak@gmail.com to share your feedback, request a feature, or feature your team as a case study.

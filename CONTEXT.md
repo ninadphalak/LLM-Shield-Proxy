@@ -1,4 +1,4 @@
-# Project: LLM-Shield (Enterprise Privacy Redaction Engine)
+# Project: LLM-Shield-Proxy (Enterprise Privacy Redaction Engine)
 
 ## 1. Project Objective
 Build an open-source, stateless middleware proxy that intercepts LLM API requests, redacts Personally Identifiable Information (PII) before it leaves the local infrastructure, and deterministically re-hydrates the response. This must be an enterprise-grade tool designed for extreme privacy compliance (SOC 2 / HIPAA).

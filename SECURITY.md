@@ -1,7 +1,7 @@
 # Security Policy & Vulnerability Reporting
 
 ## Security Overview
-LLM-Shield is engineered for extreme zero-egress data privacy and enterprise compliance (SOC 2 / HIPAA). Security and confidentiality are core to the architecture.
+LLM-Shield-Proxy is engineered for extreme zero-egress data privacy and enterprise compliance (SOC 2 / HIPAA). Security and confidentiality are core to the architecture.
 
 ## Supported Versions
 Only the latest release version on `main` is actively supported with security updates.
@@ -13,7 +13,7 @@ Only the latest release version on `main` is actively supported with security up
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in LLM-Shield, please **do not** open a public issue.
+If you discover a security vulnerability in LLM-Shield-Proxy, please **do not** open a public issue.
 
 Instead, confidentially report the issue directly to the core maintainer:
 

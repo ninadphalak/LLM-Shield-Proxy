@@ -54,6 +54,6 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ninadphalak/LLM-Shield"
-Repository = "https://github.com/ninadphalak/LLM-Shield"
-"Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield/issues"
+Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy"
+Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
+"Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
