@@ -91,6 +91,16 @@ async def proxy_catch_all(
                     res_headers.pop("content-length", None)
                     res_headers.pop("transfer-encoding", None)
 
+                    if upstream_res.status_code >= 400:
+                        err_content = await upstream_res.aread()
+                        await upstream_res.aclose()
+                        return Response(
+                            content=err_content,
+                            status_code=upstream_res.status_code,
+                            headers=res_headers,
+                            media_type=res_headers.get("content-type", "application/json")
+                        )
+
                     return StreamingResponse(
                         rehydrate_sse_stream(upstream_res.aiter_bytes(), vault),
                         status_code=upstream_res.status_code,
