@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-shield"
+name = "llm-shield-proxy"
 version = "1.0.0"
 description = "Enterprise Zero-Egress Privacy Redaction Proxy Engine for LLMs"
 readme = "README.md"
@@ -26,7 +26,6 @@ keywords = [
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",

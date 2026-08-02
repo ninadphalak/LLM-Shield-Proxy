@@ -1,6 +1,6 @@
 # LLM-Shield - Enterprise Privacy Redaction Engine
 
-[![PyPI Version](https://img.shields.io/pypi/v/llm-shield.svg)](https://pypi.org/project/llm-shield/)
+[![PyPI Version](https://img.shields.io/pypi/v/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 
@@ -27,11 +27,12 @@ Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
 
 ## 📦 Installation
 
-Install `llm-shield` directly from PyPI via `pip`:
+Install `llm-shield-proxy` directly from PyPI via `pip`:
 
 ```bash
-pip install llm-shield
+pip install llm-shield-proxy
 ```
+
 
 Or install locally in editable mode:
 
