@@ -47,10 +47,11 @@ async def proxy_catch_all(
     upstream_base = x_upstream_base_url or settings.UPSTREAM_BASE_URL
     target_url = f"{upstream_base.rstrip('/')}/{path.lstrip('/')}"
 
-    # Prepare forwarding headers
+    # Prepare forwarding headers (strip hop-by-hop and compression headers)
     headers = dict(request.headers)
     headers.pop("host", None)
     headers.pop("content-length", None)
+    headers.pop("accept-encoding", None)
 
     if settings.OPENAI_API_KEY:
         headers["authorization"] = f"Bearer {settings.OPENAI_API_KEY}"
@@ -85,11 +86,16 @@ async def proxy_catch_all(
                     )
                     upstream_res = await http_client.send(req, stream=True)
 
+                    res_headers = dict(upstream_res.headers)
+                    res_headers.pop("content-encoding", None)
+                    res_headers.pop("content-length", None)
+                    res_headers.pop("transfer-encoding", None)
+
                     return StreamingResponse(
                         rehydrate_sse_stream(upstream_res.aiter_bytes(), vault),
                         status_code=upstream_res.status_code,
-                        headers=dict(upstream_res.headers),
-                        media_type=upstream_res.headers.get("content-type", "text/event-stream")
+                        headers=res_headers,
+                        media_type="text/event-stream"
                     )
                 else:
                     upstream_res = await http_client.request(
@@ -98,16 +104,22 @@ async def proxy_catch_all(
                         headers=headers,
                         content=redacted_bytes
                     )
+                    res_headers = dict(upstream_res.headers)
+                    res_headers.pop("content-encoding", None)
+                    res_headers.pop("content-length", None)
+                    res_headers.pop("transfer-encoding", None)
+
                     try:
                         res_json = upstream_res.json()
                         rehydrated_res = _rehydrate_json_response(res_json, vault)
-                        return JSONResponse(content=rehydrated_res, status_code=upstream_res.status_code)
+                        return JSONResponse(content=rehydrated_res, status_code=upstream_res.status_code, headers=res_headers)
                     except Exception:
                         return Response(
                             content=vault.rehydrate(upstream_res.text),
                             status_code=upstream_res.status_code,
-                            headers=dict(upstream_res.headers)
+                            headers=res_headers
                         )
+
 
         # For non-POST or pass-through requests
         AuditLogger.log_proxy_event(x_session_id, path, request.method)
