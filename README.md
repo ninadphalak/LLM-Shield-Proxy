@@ -15,7 +15,7 @@ Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
 ## 🏗️ Architecture & Data Flow
 
 ```mermaid
-flowchart LR
+flowchart TD
     classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1,font-weight:bold;
     classDef proxyEngine fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold;
     classDef piiSecurity fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
@@ -25,7 +25,7 @@ flowchart LR
     UserApp["👤 User Application\n(OpenAI / LangChain SDK)"]:::client
 
     subgraph SecurityMoat ["🛡️ Zero-Egress Local Environment (Apache 2.0 Licensed)"]
-        direction LR
+        direction TD
         FastAPIProxy["⚡ FastAPI Catch-All Proxy\n(/{path:path})"]:::proxyEngine
 
         subgraph CascadeEngine ["🔒 Two-Tier PII Cascade Engine"]
@@ -39,7 +39,7 @@ flowchart LR
         Rehydrator["🔄 Stream Re-hydrator\n(Token -> Original Value)"]:::proxyEngine
     end
 
-    UpstreamLLM["☁️ Upstream LLM\n(OpenAI / Anthropic / vLLM)"]:::upstream
+    UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / vLLM)"]:::upstream
 
     %% Inbound Flow (Prompt Sanitization)
     UserApp -- "1. Inbound Request (Raw Prompt)" --> FastAPIProxy
@@ -56,6 +56,19 @@ flowchart LR
     style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
     style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
 ```
+
+### How It Works (The Data Flow)
+
+**Inbound (Prompt Sanitization)**
+1. **Intercept:** Your application sends a standard OpenAI/LangChain payload to `localhost:8000`.
+2. **Cascade Redaction:** The proxy intercepts the JSON and routes text through a high-speed compiled Regex engine (for SSNs, emails), falling back to a local ONNX model for unstructured names.
+3. **Vault Storage:** The original PII is mapped to a deterministic tag (e.g., `[PERSON_1]`) and stored locally in a TTL-backed session vault.
+4. **Clean Egress:** A 100% sanitized payload is forwarded to OpenAI. OpenAI never sees your real data.
+
+**Outbound (Streaming De-redaction)**
+5. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE). 
+6. **Lookahead Buffer:** Because tags can be split across chunks (e.g., `[PER` and `SON_1]`), the proxy's sliding-window buffer holds back unclosed brackets to prevent data leaks.
+7. **Re-hydration:** Once a tag is fully caught, the proxy swaps the real data back in from the local vault and streams the final, un-redacted text to the user's screen in real-time.
 
 ---
 
