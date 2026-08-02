@@ -25,47 +25,38 @@ Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
 
 ---
 
-## 📦 Installation
+## 🛠️ Quickstart
 
-Install `llm-shield-proxy` directly from PyPI via `pip`:
+### Installation
+
+Install the package from PyPI:
 
 ```bash
 pip install llm-shield-proxy
 ```
 
+#### 1. Start the Proxy
 
-Or install locally in editable mode:
-
-```bash
-pip install -e .
-```
-
----
-
-## 🚀 Quickstart
-
-### Running via Python / Uvicorn
+Run the proxy locally via Docker or Uvicorn. No external database required for the open-source core.
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-
-### Running via Docker Compose
-
+or via Docker Compose:
 ```bash
 docker-compose up -d
 ```
 
-### Usage with OpenAI Client
+#### 2. Update your Application (1-Line Change)
 
-Point your base URL to LLM-Shield (`http://localhost:8000/v1`):
+Point your existing OpenAI SDK `base_url` to your local LLM-Shield proxy instance.
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="your-openai-api-key"
+    api_key="your-openai-api-key",
+    base_url="http://localhost:8000/v1" # Point to LLM-Shield proxy
 )
 
 response = client.chat.completions.create(
