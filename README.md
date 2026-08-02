@@ -12,6 +12,53 @@ Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
 
 ---
 
+## 🏗️ Architecture & Data Flow
+
+```mermaid
+flowchart LR
+    classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1,font-weight:bold;
+    classDef proxyEngine fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold;
+    classDef piiSecurity fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
+    classDef vault fill:#fffbebe,stroke:#f59e0b,stroke-width:2px,color:#92400e,font-weight:bold;
+    classDef upstream fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#6b21a8,font-weight:bold;
+
+    UserApp["👤 User Application\n(OpenAI / LangChain SDK)"]:::client
+
+    subgraph SecurityMoat ["🛡️ Zero-Egress Local Environment (Apache 2.0 Licensed)"]
+        direction LR
+        FastAPIProxy["⚡ FastAPI Catch-All Proxy\n(/{path:path})"]:::proxyEngine
+
+        subgraph CascadeEngine ["🔒 Two-Tier PII Cascade Engine"]
+            Tier1["Tier 1: Compiled Regex"]:::piiSecurity
+            Tier2["Tier 2: Quantized ONNX NER"]:::piiSecurity
+            Tier1 --> Tier2
+        end
+
+        VaultStore[("🔑 Session Vault Store\n(Deterministic Tokens)")]:::vault
+        LookaheadBuffer["⏱️ Sliding-Window Lookahead Buffer\n(Prevent SSE Tag Leaks)"]:::proxyEngine
+        Rehydrator["🔄 Stream Re-hydrator\n(Token -> Original Value)"]:::proxyEngine
+    end
+
+    UpstreamLLM["☁️ Upstream LLM\n(OpenAI / Anthropic / vLLM)"]:::upstream
+
+    %% Inbound Flow (Prompt Sanitization)
+    UserApp -- "1. Inbound Request (Raw Prompt)" --> FastAPIProxy
+    FastAPIProxy -- "2. Scan Payload" --> Tier1
+    Tier2 -- "3. Store Keys" --> VaultStore
+    Tier2 -- "4. Redacted JSON Payload" --> UpstreamLLM
+
+    %% Outbound Flow (Streaming De-redaction)
+    UpstreamLLM -. "5. SSE Stream Deltas" .-> LookaheadBuffer
+    LookaheadBuffer -- "6. Tag-Safe Buffer" --> Rehydrator
+    Rehydrator <--> VaultStore
+    Rehydrator -. "7. Sanitized Real-Time Stream" .-> UserApp
+
+    style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
+    style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
+```
+
+---
+
 ## ⚡ Core Features
 
 - **Zero Latency Streaming:** Sliding-window tag-safety buffer intercepts SSE streams delta-by-delta without buffering full requests or responses.
