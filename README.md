@@ -42,16 +42,16 @@ flowchart TD
     UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / vLLM)"]:::upstream
 
     %% Inbound Flow (Prompt Sanitization)
-    UserApp -- "Inbound Request (Raw Prompt)" --> FastAPIProxy
-    FastAPIProxy -- "Scan Payload" --> Tier1
-    Tier2 -- "Store Vault Keys" --> VaultStore
-    Tier2 -- "Sanitized Redacted Payload" --> UpstreamLLM
+    UserApp -- "1. Raw Prompt Payload" --> FastAPIProxy
+    FastAPIProxy -- "2. Scan Payload" --> Tier1
+    Tier2 -- "3. Store Vault Keys" --> VaultStore
+    Tier2 -- "4. Redacted JSON Payload" --> UpstreamLLM
 
     %% Outbound Flow (Streaming De-redaction)
-    UpstreamLLM -. "Raw SSE Stream Deltas" .-> LookaheadBuffer
-    LookaheadBuffer -- "Tag-Safe Assembly" --> Rehydrator
+    UpstreamLLM -. "5. Raw SSE Stream Deltas" .-> LookaheadBuffer
+    LookaheadBuffer -- "6. Tag-Safe Assembly" --> Rehydrator
     Rehydrator <--> VaultStore
-    Rehydrator -. "Sanitized Real-Time Stream" .-> UserApp
+    Rehydrator -. "7. Sanitized Real-Time Stream" .-> UserApp
 
     style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
     style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
