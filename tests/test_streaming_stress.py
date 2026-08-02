@@ -1,0 +1,119 @@
+import pytest
+import asyncio
+import os
+import psutil
+from app.vault import Vault
+from app.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+
+
+def test_extreme_split_tag_across_chunks():
+    """
+    Simulates a placeholder tag like [PERSON_1] deliberately shattered across 5+ consecutive tiny chunks:
+    ['Hello ', '[', 'PE', 'RSON', '_1', ']', '! Welcome.']
+    Verifies that the buffer holds partial brackets and only re-hydrates once the closing ']' tag arrives.
+    """
+    vault = Vault()
+    token = vault.get_or_create_token("John Doe", "PERSON")
+    assert token == "[PERSON_1]"
+
+    buffer = SSERehydrationBuffer(vault)
+
+    # Shattered chunks
+    chunks = ["Hello ", "[", "PE", "RSON", "_1", "]", "! Welcome."]
+    emitted_parts = []
+
+    for chunk in chunks:
+        emitted = buffer.process_delta_text(chunk)
+        emitted_parts.append(emitted)
+
+    # Flush any remaining buffer at stream end
+    final_flush = buffer.process_delta_text("", is_final=True)
+    if final_flush:
+        emitted_parts.append(final_flush)
+
+    # Verify holding behavior: chunks 2-5 held back partial tag
+    assert emitted_parts[0] == "Hello "
+    assert emitted_parts[1] == ""  # '[' held
+    assert emitted_parts[2] == ""  # '[PE' held
+    assert emitted_parts[3] == ""  # '[PERSON' held
+    assert emitted_parts[4] == ""  # '[PERSON_1' held
+    assert emitted_parts[5] == "John Doe"  # Completed '[PERSON_1]' -> re-hydrated to 'John Doe'
+    assert emitted_parts[6] == "! Welcome."
+
+    full_output = "".join(emitted_parts)
+    assert full_output == "Hello John Doe! Welcome."
+
+
+def test_massive_streaming_response_memory_bounds():
+    """
+    Simulates a 10,000-token SSE streaming response to ensure the sliding-window buffer
+    flushes continuously chunk-by-chunk and does not accumulate memory or cause a RAM spike.
+    """
+    vault = Vault()
+    vault.get_or_create_token("John Doe", "PERSON")
+    buffer = SSERehydrationBuffer(vault)
+
+    process = psutil.Process(os.getpid())
+    initial_rss = process.memory_info().rss
+
+    total_chunks = 10000
+    for i in range(total_chunks):
+        chunk_text = f"Token_{i} [PERSON_1] chunk content. "
+        emitted = buffer.process_delta_text(chunk_text)
+        assert len(buffer.content_buffer) <= buffer.MAX_TAG_LENGTH
+
+    final_flush = buffer.process_delta_text("", is_final=True)
+    assert buffer.content_buffer == ""
+
+    final_rss = process.memory_info().rss
+    rss_diff_mb = (final_rss - initial_rss) / (1024.0 * 1024.0)
+
+    # Verify RAM usage remains tightly bounded (< 15 MB variance)
+    assert rss_diff_mb < 15.0
+
+
+def test_markdown_code_brackets_no_lockup():
+    """
+    Tests behavior when unclosed brackets appear in code blocks or markdown
+    (e.g., Python lists `my_list = [1, 2, 3]` or long unclosed bracket text)
+    to ensure the buffer releases content once MAX_TAG_LENGTH is exceeded.
+    """
+    vault = Vault()
+    buffer = SSERehydrationBuffer(vault)
+
+    # Natural Python list bracket
+    code_chunk_1 = "my_list = [1, 2, 3]\n"
+    emitted_1 = buffer.process_delta_text(code_chunk_1)
+    assert "my_list = [1, 2, 3]" in (emitted_1 + buffer.content_buffer)
+
+    # Long unclosed bracket exceeding MAX_TAG_LENGTH (64 chars)
+    long_bracket_text = "[" + ("x" * 80)
+    emitted_2 = buffer.process_delta_text(long_bracket_text)
+
+    # Because 80 chars > MAX_TAG_LENGTH (64), the buffer must NOT lock up or hold indefinitely
+    assert len(emitted_2) > 0 or len(buffer.content_buffer) <= buffer.MAX_TAG_LENGTH
+
+    flush = buffer.process_delta_text("", is_final=True)
+    full_output = emitted_1 + emitted_2 + flush
+    assert "[" + ("x" * 80) in full_output
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_sse_stream_async_stress():
+    """
+    Tests async SSE stream rehydration generator under stream stress.
+    """
+    vault = Vault()
+    vault.get_or_create_token("Sarah Connor", "PERSON")
+
+    async def mock_sse_stream():
+        yield b'data: {"choices":[{"delta":{"content":"Contact [PER"}}]}\n\n'
+        yield b'data: {"choices":[{"delta":{"content":"SON_1] for privacy details."}}]}\n\n'
+        yield b'data: [DONE]\n\n'
+
+    rehydrated_chunks = []
+    async for chunk_bytes in rehydrate_sse_stream(mock_sse_stream(), vault):
+        rehydrated_chunks.append(chunk_bytes.decode("utf-8"))
+
+    full_response = "".join(rehydrated_chunks)
+    assert "Sarah Connor" in full_response
