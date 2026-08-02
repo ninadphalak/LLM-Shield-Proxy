@@ -23,8 +23,9 @@ print(f"============================================================")
 print(f"Streaming Response (Watching Real-Time Re-hydration):\n")
 
 try:
+    model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
     response = client.chat.completions.create(
-        model="gpt-4",
+        model=model_name,
         messages=[
             {"role": "user", "content": test_prompt}
         ],
