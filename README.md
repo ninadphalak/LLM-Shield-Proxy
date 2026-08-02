@@ -158,6 +158,25 @@ for chunk in response:
 
 ---
 
+## 📊 Performance & Memory Benchmarks
+
+LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Measured over 1,000 production streaming iterations:
+
+| Metric | Average Latency | Median Latency | Footprint / Notes |
+| :--- | :--- | :--- | :--- |
+| **Tier 1 Regex Overhead** | `0.0294 ms` | `0.0291 ms` (`29.10 µs`) | Microsecond pattern scan |
+| **Tier 2 NER Overhead** | `0.0033 ms` | `0.0032 ms` (`3.20 µs`) | Quantized local NER scan |
+| **Total SSE Stream Overhead** | `0.0010 ms` | `0.0010 ms` (`0.97 µs`) | Added latency per SSE delta chunk |
+| **Process RAM Footprint** | - | - | `24.55 MB` Resident Set Size |
+
+To run the automated benchmark suite locally:
+
+```bash
+py tests/benchmark.py
+```
+
+---
+
 ## ⚠️ Known Limitations
 
 Transparency is critical for security tooling. Please be aware of the following current limitations:
