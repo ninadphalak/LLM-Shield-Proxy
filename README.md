@@ -227,6 +227,6 @@ When configured with `REDIS_URL`, session vaults are shared across all proxy rep
 
 ## 🏢 Using LLM-Shield-Proxy in Production?
 
-We are actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
+I am actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
 
 Email the core maintainer at ninad.phalak@gmail.com to share your feedback, request a feature, or feature your team as a case study.
