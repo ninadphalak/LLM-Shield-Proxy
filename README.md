@@ -101,6 +101,7 @@ When streaming LLM responses, Server-Sent Events (SSE) send text in arbitrary to
 If unbuffered, `[PER` leaks to the user's screen as raw un-hydrated text.
 
 **The Engineering Solution:** An asynchronous `SSERehydrationBuffer` tracks bracket boundaries (`[` and `]`). When an open bracket is detected near the tail of an incoming delta without a matching closing bracket, the buffer holds back the tail bytes until the completing chunk arrives. Once complete, the deterministic token is re-hydrated to its original value with zero UI jitter or streaming stalls.
+
 </details>
 
 <details>
@@ -111,6 +112,7 @@ To achieve sub-millisecond execution without blowing up infrastructure costs:
 - **Tier 2 (Quantized Local ONNX NER):** Uses a tiny, quantized ONNX Named Entity Recognition (NER) model to catch unstructured person names in **~5–12ms**.
 
 By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
+
 </details>
 
 <details>
@@ -118,6 +120,7 @@ By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shie
 
 - **Zero-Egress Security:** 100% of PII scanning and re-hydration happens locally within your VPC. No prompt data or telemetry ever leaves your server.
 - **Stateless Privacy (Self-Destructing Redis TTL):** Real PII is mapped to session-bound tokens (e.g. `Sarah` -> `[PERSON_1]`) stored in an in-memory vault backed by strict Time-To-Live (TTL) expiration rules. When configured with Redis (`REDIS_URL`), vaults are shared across multi-replica clusters without building a permanent database of user PII.
+
 </details>
 
 <details>
@@ -139,13 +142,55 @@ Emits structured JSON audit events (`app/audit.py`) directly to `stdout` compati
   "compliance_status": "zero_egress_passed"
 }
 ```
+
 </details>
 
 ---
 
 ## 🏗️ Architecture Diagram
 
-![LLM-Shield-Proxy Architecture](docs/architecture.png)
+```mermaid
+flowchart TD
+    classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1,font-weight:bold;
+    classDef proxyEngine fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold;
+    classDef piiSecurity fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
+    classDef vault fill:#fffbebe,stroke:#f59e0b,stroke-width:2px,color:#92400e,font-weight:bold;
+    classDef upstream fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#6b21a8,font-weight:bold;
+
+    UserApp["👤 User Application\n(OpenAI / LangChain SDK)"]:::client
+
+    subgraph SecurityMoat ["🛡️ Zero-Egress Local Environment (Apache 2.0 Licensed)"]
+        direction TD
+        FastAPIProxy["⚡ FastAPI Catch-All Proxy\n(/{path:path})"]:::proxyEngine
+
+        subgraph CascadeEngine ["🔒 Two-Tier PII Cascade Engine"]
+            Tier1["Tier 1: Compiled Regex"]:::piiSecurity
+            Tier2["Tier 2: Quantized ONNX NER"]:::piiSecurity
+            Tier1 --> Tier2
+        end
+
+        VaultStore[("🔑 Session Vault Store\n(Deterministic Tokens)")]:::vault
+        LookaheadBuffer["⏱️ Sliding-Window Lookahead Buffer\n(Prevent SSE Tag Leaks)"]:::proxyEngine
+        Rehydrator["🔄 Stream Re-hydrator\n(Token -> Original Value)"]:::proxyEngine
+    end
+
+    UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / vLLM)"]:::upstream
+
+    %% Inbound Flow (Prompt Sanitization)
+    UserApp -- "1. Inbound Raw Prompt Payload" --> FastAPIProxy
+    FastAPIProxy -- "2. Scan Payload" --> Tier1
+    Tier2 -- "3. Store Vault Keys" --> VaultStore
+    Tier2 -- "4. Redacted JSON Payload" --> UpstreamLLM
+
+    %% Outbound Flow (Streaming De-redaction)
+    UpstreamLLM -. "5. Raw SSE Stream Deltas" .-> LookaheadBuffer
+    LookaheadBuffer -- "6. Tag-Safe Assembly" --> Rehydrator
+    Rehydrator <--> VaultStore
+    Rehydrator -. "7. Sanitized Real-Time Stream" .-> UserApp
+
+    style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
+    style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
+```
 
 ### How It Works (The Data Flow)
 
