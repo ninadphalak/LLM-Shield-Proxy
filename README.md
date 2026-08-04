@@ -3,10 +3,11 @@
 [![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![Docker Pulls](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
 
-An ultra-low latency, zero-egress, streaming-safe PII redaction proxy for Enterprise LLMs.
+> **SOC 2 and HIPAA compliance for LLM streams without breaking real-time latency.**
 
-**LLM-Shield-Proxy** is an open-source, zero-egress middleware proxy that intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your local infrastructure, and deterministically re-hydrates real-time SSE streaming responses without breaking stream latency.
+**LLM-Shield-Proxy** is an open-source, zero-egress middleware reverse proxy deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
 
 Designed to unblock enterprise privacy compliance (**SOC 2 / HIPAA**).
 
@@ -14,7 +15,149 @@ Author & Core Maintainer: **Ninad Phalak** (`ninadphalak@gmail.com`)
 
 ---
 
-## 🏗️ Architecture & Data Flow
+## ⚡ 30-Second Quickstart & Deployment
+
+### 1. Install via PyPI
+```bash
+pip install llm-shield-proxy "uvicorn[standard]"
+```
+
+### 2. Run via Docker
+```bash
+docker run -d -p 8000:8000 \
+  -e OPENAI_API_KEY="sk-your-openai-api-key" \
+  --name llm-shield-proxy \
+  ghcr.io/ninadphalak/llm-shield-proxy:latest
+```
+
+### 3. Deploy with Docker Compose (Proxy + Redis Vault)
+```yaml
+version: "3.8"
+
+services:
+  llm-shield-proxy:
+    image: ghcr.io/ninadphalak/llm-shield-proxy:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=sk-your-openai-key-here
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+```
+
+### 4. Update your Application (1-Line SDK Change)
+Point your existing OpenAI SDK `base_url` to your local LLM-Shield-Proxy instance:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-openai-api-key",
+    base_url="http://localhost:8000/v1"  # Point to LLM-Shield-Proxy
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "user", "content": "Contact Sarah Connor at sarah@example.com or 555-0199."}
+    ],
+    stream=True
+)
+
+for chunk in response:
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+---
+
+## 💥 The Problem vs. The LLM-Shield-Proxy Solution
+
+| Existing Legacy Proxies | LLM-Shield-Proxy |
+| :--- | :--- |
+| **Destroys Real-Time SSE Streaming:** Buffers entire responses before scanning, causing multi-second UI latency stalls. | **Ultra-Low Latency Streaming:** Redacts and re-hydrates delta-by-delta as SSE packets stream. |
+| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <24MB RAM:** Runs on a microsecond compiled regex + quantized ONNX NER engine. |
+| **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage:** Self-destructing TTL session vault built for zero data liability. |
+| **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
+
+---
+
+## 🧠 Core Architecture & Innovations
+
+LLM-Shield-Proxy delivers enterprise security through two core architectural breakthroughs:
+
+<details>
+<summary><b>1. The Sliding-Window Lookahead Buffer (SSE Streaming Safety)</b></summary>
+
+<br>
+
+When streaming LLM responses, Server-Sent Events (SSE) send text in arbitrary token chunks. An SSE delta chunk might split a redacted placeholder tag directly across two network packets:
+- **Chunk N:** `Hello [PER`
+- **Chunk N+1:** `SON_1]! How can I help you today?`
+
+If unbuffered, `[PER` leaks to the user's screen as raw un-hydrated text.
+
+**The Engineering Solution:** An asynchronous `SSERehydrationBuffer` tracks bracket boundaries (`[` and `]`). When an open bracket is detected near the tail of an incoming delta without a matching closing bracket, the buffer holds back the tail bytes until the completing chunk arrives. Once complete, the deterministic token is re-hydrated to its original value with zero UI jitter or streaming stalls.
+</details>
+
+<br>
+
+<details>
+<summary><b>2. The Two-Tier Cascade Engine (&lt;24MB RAM Footprint)</b></summary>
+
+<br>
+
+To achieve sub-millisecond execution without blowing up infrastructure costs:
+- **Tier 1 (Sub-millisecond Compiled Regex):** Scans structured secrets (SSNs, Credit Cards, Emails, Phone Numbers, IPv4/IPv6, API Keys) in **<0.03ms**.
+- **Tier 2 (Quantized Local ONNX NER):** Uses a tiny, quantized ONNX Named Entity Recognition (NER) model to catch unstructured person names in **~5–12ms**.
+
+By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
+</details>
+
+<br>
+
+<details>
+<summary><b>3. Enterprise Security & State Management (Redis TTL)</b></summary>
+
+<br>
+
+- **Zero-Egress Security:** 100% of PII scanning and re-hydration happens locally within your VPC. No prompt data or telemetry ever leaves your server.
+- **Stateless Privacy (Self-Destructing Redis TTL):** Real PII is mapped to session-bound tokens (e.g. `Sarah` -> `[PERSON_1]`) stored in an in-memory vault backed by strict Time-To-Live (TTL) expiration rules. When configured with Redis (`REDIS_URL`), vaults are shared across multi-replica clusters without building a permanent database of user PII.
+</details>
+
+<br>
+
+<details>
+<summary><b>4. Audit Logging & Compliance (Vanta / Drata Compatible JSON Logs)</b></summary>
+
+<br>
+
+Emits structured JSON audit events (`app/audit.py`) directly to `stdout` compatible with Datadog, Splunk, Elastic, Vanta, and Drata to prove compliance for **SOC 2 Type II** and **HIPAA** audits:
+
+```json
+{
+  "timestamp": "2026-08-04T01:48:00Z",
+  "event": "pii_redaction",
+  "session_id": "sess_8f179f3",
+  "path": "/v1/chat/completions",
+  "redactions_summary": {
+    "SSN": 1,
+    "EMAIL": 2,
+    "PERSON": 1
+  },
+  "compliance_status": "zero_egress_passed"
+}
+```
+</details>
+
+---
+
+## 🏗️ Architecture Diagram
 
 ```mermaid
 flowchart TD
@@ -74,91 +217,7 @@ flowchart TD
 
 ---
 
-## 🔒 Why LLM-Shield-Proxy? (Architectural Moats)
-
-Why not just write a basic regex script? Basic regex scripts break on streaming responses, leak split tokens, and slow down your application. LLM-Shield-Proxy is purpose-built for production:
-
-- **Streaming Safety:** Includes a proprietary **Sliding-Window Lookahead Buffer** that prevents Server-Sent Event (SSE) chunking leaks across split tokens (e.g., holding back `[PER` until `SON_1]` arrives).
-- **Speed & Accuracy:** Leverages a **Two-Tier Cascade Engine** (sub-millisecond compiled Regex + Quantized ONNX NER) that catches unstructured names in ~10ms with zero cloud dependencies.
-- **Context Preservation:** Uses a **Local TTL Session Vault** that maps PII to session-bound tokens (`[PERSON_1]`), enabling the LLM to retain full conversational context without receiving raw sensitive data.
-- **Zero-Egress Security:** Runs 100% on your local infrastructure. Your raw data never leaves your server; only sanitized, redacted payloads reach upstream LLM providers.
-
----
-
-## ⚡ Core Features
-
-- **Ultra-Low Latency Streaming:** Sliding-window tag-safety buffer intercepts SSE streams delta-by-delta without buffering full requests or responses.
-- **Zero Cloud / Zero Egress:** 100% local processing. No external API calls for PII detection.
-- **Two-Tier PII Cascade Engine:**
-  - **Tier 1 (Sub-millisecond Regex):** SSNs, Credit Cards, Email Addresses, Phone Numbers, IPv4/IPv6, API Keys.
-  - **Tier 2 (NER Engine):** Person Names and unstructured entities.
-- **Deterministic Re-Hydration Vault:** Swaps PII with session-bound tokens (e.g., `Sarah` -> `[PERSON_1]`). Maps back deterministically when the LLM streams responses. Supports request-scoped and session-scoped (`X-Session-ID`) vaults.
-- **SOC 2 Structured Audit Logging:** Emits JSON structured audit logs for compliance monitoring.
-- **Tier 2 (NER Engine):** A lightweight, quantized ONNX Named Entity Recognition (NER) model. It uses local AI to catch unstructured names and entities that slip past standard regex, executing in ~10ms without requiring heavy Python frameworks or cloud APIs.
-
----
-
-## 🛠️ Quickstart
-
-### Installation
-
-Install the package and server dependencies from PyPI:
-
-```bash
-pip install llm-shield-proxy "uvicorn[standard]"
-```
-
-### Configuration
-Create a `.env` file in the root directory before starting the server.
-
-```env
-# Required upstream provider key (or pass via Authorization header)
-OPENAI_API_KEY=sk-your-openai-key-here
-
-# Optional configuration
-PORT=8000
-TELEMETRY_ENABLED=false
-```
-
-#### 1. Start the Proxy
-
-Run the proxy locally via Docker or Uvicorn. No external database required for the open-source core.
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-or via Docker Compose:
-```bash
-docker-compose up -d
-```
-
-#### 2. Update your Application (1-Line Change)
-
-Point your existing OpenAI SDK `base_url` to your local LLM-Shield-Proxy instance.
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    api_key="your-openai-api-key",
-    base_url="http://localhost:8000/v1" # Point to LLM-Shield-Proxy
-)
-
-response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[
-        {"role": "user", "content": "Contact Sarah Connor at sarah@example.com"}
-    ],
-    stream=True
-)
-
-for chunk in response:
-    print(chunk.choices[0].delta.content or "", end="")
-```
-
----
-
-## 📊 Performance & Memory Benchmarks
+## 📊 Production Performance & Memory Benchmarks
 
 LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Measured over 1,000 production streaming iterations:
 
