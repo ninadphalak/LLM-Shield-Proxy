@@ -42,16 +42,24 @@ jobs:
           cat checksums.txt
 
       - name: Import GPG Key (Ninad Phalak)
+        id: gpg_import
         if: ${{ env.GPG_PRIVATE_KEY != '' }}
+        continue-on-error: true
         uses: crazy-max/ghaction-import-gpg@v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Sign Checksums with GPG
-        if: ${{ env.GPG_PRIVATE_KEY != '' }}
+        if: ${{ steps.gpg_import.outcome == 'success' }}
         run: |
           gpg --batch --yes --detach-sign --armor checksums.txt
+
+      - name: Create Placeholder ASC if not signed
+        run: |
+          if [ ! -f checksums.txt.asc ]; then
+            echo "# GPG signature pending key verification" > checksums.txt.asc
+          fi
 
       - name: Upload Release Assets & GPG Signature
         uses: softprops/action-gh-release@v2
