@@ -1,4 +1,4 @@
-# LLM-Shield-Proxy - Enterprise Privacy Redaction Engine
+# LLM-Shield-Proxy : Enterprise Privacy Redaction Engine
 
 [![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
