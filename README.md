@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 
-A zero-latency, zero-egress, streaming-safe PII redaction proxy for Enterprise LLMs.
+An ultra-low latency, zero-egress, streaming-safe PII redaction proxy for Enterprise LLMs.
 
 **LLM-Shield-Proxy** is an open-source, zero-egress middleware proxy that intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your local infrastructure, and deterministically re-hydrates real-time SSE streaming responses without breaking stream latency.
 
@@ -87,7 +87,7 @@ Why not just write a basic regex script? Basic regex scripts break on streaming 
 
 ## ⚡ Core Features
 
-- **Zero Latency Streaming:** Sliding-window tag-safety buffer intercepts SSE streams delta-by-delta without buffering full requests or responses.
+- **Ultra-Low Latency Streaming:** Sliding-window tag-safety buffer intercepts SSE streams delta-by-delta without buffering full requests or responses.
 - **Zero Cloud / Zero Egress:** 100% local processing. No external API calls for PII detection.
 - **Two-Tier PII Cascade Engine:**
   - **Tier 1 (Sub-millisecond Regex):** SSNs, Credit Cards, Email Addresses, Phone Numbers, IPv4/IPv6, API Keys.
@@ -102,10 +102,10 @@ Why not just write a basic regex script? Basic regex scripts break on streaming 
 
 ### Installation
 
-Install the package from PyPI:
+Install the package and server dependencies from PyPI:
 
 ```bash
-pip install llm-shield-proxy
+pip install llm-shield-proxy "uvicorn[standard]"
 ```
 
 ### Configuration
@@ -241,18 +241,18 @@ gpg --verify checksums.txt.asc checksums.txt
 
 ## 🌍 Internationalization (i18n) & GDPR Roadmap
 
-Currently, LLM-Shield-Proxy's Tier 1 Regex engine is optimized for North American PII (US SSNs, Phone Formats). To support global GDPR compliance, we are actively looking for contributors to help expand our regex payloads and Tier 2 ONNX models for:
+Currently, LLM-Shield-Proxy's Tier 1 Regex engine is optimized for North American PII (US SSNs, Phone Formats). To support global GDPR compliance, I am actively looking for contributors to help expand regex payloads and Tier 2 ONNX models for:
 - **European Formats:** UK NIN, EU Phone Numbers, IBANs.
 - **APAC Data Structures:** India Aadhaar, APAC localized identifiers.
 - **Multilingual NER ONNX Models:** Multilingual entity recognition models.
 
-If you want to contribute to enterprise AI security, check out our [CONTRIBUTING.md](CONTRIBUTING.md) and claim a locale!
+If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim a locale!
 
 ---
 
 ## 🗺️ Future Technical Roadmap (Performance & Scale)
 
-We are committed to maintaining LLM-Shield-Proxy as the fastest zero-latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
+I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
 
 1. **ONNX Thread Tuning (Preventing CPU Contention)**
    - *Problem:* By default, ONNX Runtime attempts to use every available CPU core. In FastAPI, this competes with the event loop handling thousands of concurrent connections.
