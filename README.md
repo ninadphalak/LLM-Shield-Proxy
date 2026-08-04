@@ -239,6 +239,39 @@ gpg --verify checksums.txt.asc checksums.txt
 
 ---
 
+## 🌍 Internationalization (i18n) & GDPR Roadmap
+
+Currently, LLM-Shield-Proxy's Tier 1 Regex engine is optimized for North American PII (US SSNs, Phone Formats). To support global GDPR compliance, we are actively looking for contributors to help expand our regex payloads and Tier 2 ONNX models for:
+- **European Formats:** UK NIN, EU Phone Numbers, IBANs.
+- **APAC Data Structures:** India Aadhaar, APAC localized identifiers.
+- **Multilingual NER ONNX Models:** Multilingual entity recognition models.
+
+If you want to contribute to enterprise AI security, check out our [CONTRIBUTING.md](CONTRIBUTING.md) and claim a locale!
+
+---
+
+## 🗺️ Future Technical Roadmap (Performance & Scale)
+
+We are committed to maintaining LLM-Shield-Proxy as the fastest zero-latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
+
+1. **ONNX Thread Tuning (Preventing CPU Contention)**
+   - *Problem:* By default, ONNX Runtime attempts to use every available CPU core. In FastAPI, this competes with the event loop handling thousands of concurrent connections.
+   - *The Fix:* Restrict ONNX by setting `sess_options.intra_op_num_threads = 1`. This forces ONNX execution onto a single thread, keeping CPU cores free for FastAPI's event loop to stream packets instantly.
+
+2. **Persistent Connection Pooling (The TLS Trick)**
+   - *Problem:* Opening a new TLS/SSL connection to OpenAI per request adds 50–100ms latency.
+   - *The Fix:* Maintain a persistent `httpx.AsyncClient` HTTP/2 connection pool on server startup. The proxy opens pre-warmed secure tunnels, routing requests instantly with zero TLS setup overhead.
+
+3. **Swap to `orjson` for Chunk Parsing**
+   - *Problem:* In an SSE stream, standard Python `json.loads` parses hundreds of delta chunks per second.
+   - *The Fix:* Swap built-in `json` for `orjson` (written in Rust). It parses streaming LLM chunks up to 10x faster, dropping proxy overhead to near zero.
+
+4. **Cythonize the Sliding-Window Buffer**
+   - *Problem:* The sliding-window buffer performs frequent string slicing and bracket matching.
+   - *The Fix:* Use Cython or `mypyc` to compile `streaming.py` directly into a C-extension binary module. Retains Python readability while executing string operations at native C speed.
+
+---
+
 ## 🏢 Using LLM-Shield-Proxy in Production?
 
 I am actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
