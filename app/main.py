@@ -48,7 +48,7 @@ async def health_check():
     return {
         "status": "ok",
         "service": "llm-shield-proxy",
-        "version": "1.0.3"
+        "version": "1.0.4"
     }
 
 
