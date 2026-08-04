@@ -223,14 +223,18 @@ docker-compose up -d --scale proxy=5
 ```
 When configured with `REDIS_URL`, session vaults are shared across all proxy replicas, ensuring seamless session isolation across multi-instance clusters.
 
-### 4. 🔒 Supply Chain Integrity Verification
-Every published release includes automated SHA-256 checksums (`checksums.txt`) attached to the GitHub Release assets. You can verify the integrity of downloaded archives before deployment using:
+### 4. 🔒 Supply Chain Integrity & GPG Signature Verification
+Every published release includes automated SHA-256 checksums (`checksums.txt`) and GPG detached signatures (`checksums.txt.asc`) signed by maintainer **Ninad Phalak**. You can verify checksums and cryptographic authenticity before deployment using:
+
 ```bash
-# On Linux / macOS:
+# 1. Verify SHA-256 Checksums (Linux / macOS):
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
 Get-FileHash llm-shield-proxy-source-v1.0.2.zip -Algorithm SHA256
+
+# 2. Verify Cryptographic GPG Signature:
+gpg --verify checksums.txt.asc checksums.txt
 ```
 
 ---

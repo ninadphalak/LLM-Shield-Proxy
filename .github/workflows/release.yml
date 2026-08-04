@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build-release-artifacts:
-    name: Build & Verify Artifacts
+    name: Build & Sign Release Artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -37,12 +37,25 @@ jobs:
           echo "Generated SHA-256 Checksums:"
           cat checksums.txt
 
-      - name: Upload Release Assets & Checksums
+      - name: Import GPG Key (Ninad Phalak)
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign Checksums with GPG
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: |
+          gpg --batch --yes --detach-sign --armor checksums.txt
+
+      - name: Upload Release Assets & GPG Signature
         uses: softprops/action-gh-release@v2
         with:
           files: |
             llm-shield-proxy-source-${{ env.RELEASE_VERSION }}.zip
             llm-shield-proxy-docker-${{ env.RELEASE_VERSION }}.tar
             checksums.txt
+            checksums.txt.asc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
