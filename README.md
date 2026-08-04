@@ -94,8 +94,6 @@ LLM-Shield-Proxy delivers enterprise security through two core architectural bre
 <details>
 <summary><b>1. The Sliding-Window Lookahead Buffer (SSE Streaming Safety)</b></summary>
 
-<br>
-
 When streaming LLM responses, Server-Sent Events (SSE) send text in arbitrary token chunks. An SSE delta chunk might split a redacted placeholder tag directly across two network packets:
 - **Chunk N:** `Hello [PER`
 - **Chunk N+1:** `SON_1]! How can I help you today?`
@@ -105,12 +103,8 @@ If unbuffered, `[PER` leaks to the user's screen as raw un-hydrated text.
 **The Engineering Solution:** An asynchronous `SSERehydrationBuffer` tracks bracket boundaries (`[` and `]`). When an open bracket is detected near the tail of an incoming delta without a matching closing bracket, the buffer holds back the tail bytes until the completing chunk arrives. Once complete, the deterministic token is re-hydrated to its original value with zero UI jitter or streaming stalls.
 </details>
 
-<br>
-
 <details>
 <summary><b>2. The Two-Tier Cascade Engine (&lt;24MB RAM Footprint)</b></summary>
-
-<br>
 
 To achieve sub-millisecond execution without blowing up infrastructure costs:
 - **Tier 1 (Sub-millisecond Compiled Regex):** Scans structured secrets (SSNs, Credit Cards, Emails, Phone Numbers, IPv4/IPv6, API Keys) in **<0.03ms**.
@@ -119,23 +113,15 @@ To achieve sub-millisecond execution without blowing up infrastructure costs:
 By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
 </details>
 
-<br>
-
 <details>
 <summary><b>3. Enterprise Security & State Management (Redis TTL)</b></summary>
-
-<br>
 
 - **Zero-Egress Security:** 100% of PII scanning and re-hydration happens locally within your VPC. No prompt data or telemetry ever leaves your server.
 - **Stateless Privacy (Self-Destructing Redis TTL):** Real PII is mapped to session-bound tokens (e.g. `Sarah` -> `[PERSON_1]`) stored in an in-memory vault backed by strict Time-To-Live (TTL) expiration rules. When configured with Redis (`REDIS_URL`), vaults are shared across multi-replica clusters without building a permanent database of user PII.
 </details>
 
-<br>
-
 <details>
 <summary><b>4. Audit Logging & Compliance (Vanta / Drata Compatible JSON Logs)</b></summary>
-
-<br>
 
 Emits structured JSON audit events (`app/audit.py`) directly to `stdout` compatible with Datadog, Splunk, Elastic, Vanta, and Drata to prove compliance for **SOC 2 Type II** and **HIPAA** audits:
 
