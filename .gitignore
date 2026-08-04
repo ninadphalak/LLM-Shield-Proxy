@@ -8,3 +8,9 @@ dist/
 
 .env.*
 !.env.example
+
+# Security & Private Keys
+*.asc
+*.key
+*.gpg
+private_key.asc

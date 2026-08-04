@@ -10,7 +10,7 @@ A zero-latency, zero-egress, streaming-safe PII redaction proxy for Enterprise L
 
 Designed to unblock enterprise privacy compliance (**SOC 2 / HIPAA**).
 
-Author & Core Maintainer: **Ninad Phalak** (`ninad.phalak@gmail.com`)
+Author & Core Maintainer: **Ninad Phalak** (`ninadphalak@gmail.com`)
 
 ---
 
@@ -243,4 +243,4 @@ gpg --verify checksums.txt.asc checksums.txt
 
 I am actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
 
-Email the core maintainer at ninad.phalak@gmail.com to share your feedback, request a feature, or feature your team as a case study.
+Email the core maintainer at ninadphalak@gmail.com to share your feedback, request a feature, or feature your team as a case study.
