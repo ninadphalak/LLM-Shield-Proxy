@@ -204,10 +204,10 @@ Designed for zero-friction adoption by DevOps, Site Reliability Engineers (SREs)
 Built-in liveness and readiness endpoints return `HTTP 200 OK` for Kubernetes, Docker Swarm, or AWS ECS health monitors:
 ```bash
 curl http://localhost:8000/health
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.2"}
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.3"}
 
 curl http://localhost:8000/livez
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.2"}
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.3"}
 ```
 
 ### 2. ⚙️ 12-Factor Environment Configuration
@@ -231,7 +231,7 @@ Every published release includes automated SHA-256 checksums (`checksums.txt`) a
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
-Get-FileHash llm-shield-proxy-source-v1.0.2.zip -Algorithm SHA256
+Get-FileHash llm-shield-proxy-source-v1.0.3.zip -Algorithm SHA256
 
 # 2. Verify Cryptographic GPG Signature:
 gpg --verify checksums.txt.asc checksums.txt
