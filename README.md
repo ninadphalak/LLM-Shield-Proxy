@@ -145,48 +145,7 @@ Emits structured JSON audit events (`app/audit.py`) directly to `stdout` compati
 
 ## 🏗️ Architecture Diagram
 
-```mermaid
-flowchart TD
-    classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1,font-weight:bold;
-    classDef proxyEngine fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold;
-    classDef piiSecurity fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
-    classDef vault fill:#fffbebe,stroke:#f59e0b,stroke-width:2px,color:#92400e,font-weight:bold;
-    classDef upstream fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#6b21a8,font-weight:bold;
-
-    UserApp["👤 User Application\n(OpenAI / LangChain SDK)"]:::client
-
-    subgraph SecurityMoat ["🛡️ Zero-Egress Local Environment (Apache 2.0 Licensed)"]
-        direction TD
-        FastAPIProxy["⚡ FastAPI Catch-All Proxy\n(/{path:path})"]:::proxyEngine
-
-        subgraph CascadeEngine ["🔒 Two-Tier PII Cascade Engine"]
-            Tier1["Tier 1: Compiled Regex"]:::piiSecurity
-            Tier2["Tier 2: Quantized ONNX NER"]:::piiSecurity
-            Tier1 --> Tier2
-        end
-
-        VaultStore[("🔑 Session Vault Store\n(Deterministic Tokens)")]:::vault
-        LookaheadBuffer["⏱️ Sliding-Window Lookahead Buffer\n(Prevent SSE Tag Leaks)"]:::proxyEngine
-        Rehydrator["🔄 Stream Re-hydrator\n(Token -> Original Value)"]:::proxyEngine
-    end
-
-    UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / vLLM)"]:::upstream
-
-    %% Inbound Flow (Prompt Sanitization)
-    UserApp -- "1. Inbound Raw Prompt Payload" --> FastAPIProxy
-    FastAPIProxy -- "2. Scan Payload" --> Tier1
-    Tier2 -- "3. Store Vault Keys" --> VaultStore
-    Tier2 -- "4. Redacted JSON Payload" --> UpstreamLLM
-
-    %% Outbound Flow (Streaming De-redaction)
-    UpstreamLLM -. "5. Raw SSE Stream Deltas" .-> LookaheadBuffer
-    LookaheadBuffer -- "6. Tag-Safe Assembly" --> Rehydrator
-    Rehydrator <--> VaultStore
-    Rehydrator -. "7. Sanitized Real-Time Stream" .-> UserApp
-
-    style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
-    style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
-```
+![LLM-Shield-Proxy Architecture](docs/architecture.png)
 
 ### How It Works (The Data Flow)
 
