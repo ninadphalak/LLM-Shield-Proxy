@@ -107,7 +107,7 @@ To achieve sub-millisecond execution without blowing up infrastructure costs:
 - **Tier 1 (Sub-millisecond Compiled Regex):** Scans structured secrets (SSNs, Credit Cards, Emails, Phone Numbers, IPv4/IPv6, API Keys) in **<0.03ms**.
 - **Tier 2 (Quantized Local ONNX NER):** Uses a tiny, quantized ONNX Named Entity Recognition (NER) model to catch unstructured person names in **~5–12ms**.
 
-By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
+By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars. This means you can run dozens of proxy containers side-by-side on cheap micro-instances (like AWS `t4g.nano` or Docker Swarm/Kubernetes pods) for virtually zero RAM cost.
 
 ### 3. Enterprise Security & State Management (Redis TTL)
 
