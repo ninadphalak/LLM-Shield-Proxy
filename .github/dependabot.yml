@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Maintain Python dependencies (FastAPI, Uvicorn, ONNX, etc.)
+  - package-ecosystem: "pip"
+    directory: "/" 
+    schedule:
+      interval: "weekly"
+
+  # Maintain Docker base images 
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Maintain GitHub Actions workflows (like CodeQL)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
