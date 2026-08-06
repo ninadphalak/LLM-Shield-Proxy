@@ -314,3 +314,11 @@ I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency 
 I am actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
 
 Email the core maintainer at ninadphalak@gmail.com to share your feedback, request a feature, or feature your team as a case study.
+
+---
+
+## 🛡️ License & Intellectual Property
+LLM-Shield-Proxy is open-source software released under the [Apache 2.0 License](LICENSE). 
+
+*Note: The core architecture—specifically the asynchronous multi-protocol sliding-window lookahead buffer and two-tier cascading inference engine—is protected under U.S. Patent Pending status (App. No. 64/126,730).*
+
