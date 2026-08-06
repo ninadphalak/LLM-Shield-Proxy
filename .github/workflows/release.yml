@@ -62,7 +62,7 @@ jobs:
           fi
 
       - name: Upload Release Assets & GPG Signature
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             llm-shield-proxy-source-${{ env.RELEASE_VERSION }}.zip
