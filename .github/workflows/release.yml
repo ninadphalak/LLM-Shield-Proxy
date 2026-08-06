@@ -28,7 +28,7 @@ jobs:
           git archive --format=zip --prefix=llm-shield-proxy-${RELEASE_VERSION}/ HEAD -o llm-shield-proxy-source-${RELEASE_VERSION}.zip
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Docker Image & Export Tar Archive
         run: |
