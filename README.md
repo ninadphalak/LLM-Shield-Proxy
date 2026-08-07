@@ -315,12 +315,6 @@ Email the core maintainer at ninadphalak@gmail.com to share your feedback, reque
 
 ---
 
-## 🛡️ License & Intellectual Property
-LLM-Shield-Proxy is open-source software released under the [Apache 2.0 License](LICENSE). 
-
-*Note: The core architecture, specifically the asynchronous multi-protocol sliding-window lookahead buffer and two-tier cascading inference engine is protected under U.S. Patent Pending status 
----
-
 ## 📄 Intellectual Property & Licensing
 
 **LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**. 
