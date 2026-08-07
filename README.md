@@ -11,8 +11,6 @@
 
 Designed to unblock enterprise privacy compliance (**SOC 2 / HIPAA**).
 
-Author & Core Maintainer: **Ninad Phalak** (`ninadphalak@gmail.com`)
-
 ---
 
 ## ⚡ 30-Second Quickstart & Deployment
@@ -320,5 +318,16 @@ Email the core maintainer at ninadphalak@gmail.com to share your feedback, reque
 ## 🛡️ License & Intellectual Property
 LLM-Shield-Proxy is open-source software released under the [Apache 2.0 License](LICENSE). 
 
-*Note: The core architecture, specifically the asynchronous multi-protocol sliding-window lookahead buffer and two-tier cascading inference engine is protected under U.S. Patent Pending status (App. No. 64/126,730).*
+*Note: The core architecture, specifically the asynchronous multi-protocol sliding-window lookahead buffer and two-tier cascading inference engine is protected under U.S. Patent Pending status 
+---
+
+## 📄 Intellectual Property & Licensing
+
+**LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**. 
+
+* **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
+* **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730).
+
+For enterprise licensing inquiries, custom compliance modules, or proprietary control-plane integration, contact the core maintainer directly at **ninadphalak@gmail.com**.
+
 
