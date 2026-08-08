@@ -9,7 +9,7 @@
 
 **LLM-Shield-Proxy** is an open-source, zero-egress middleware reverse proxy deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) before it leaves your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
 
-Designed to unblock enterprise privacy compliance (**SOC 2 / HIPAA**).
+Designed to unblock enterprise privacy compliance (**SOC 2, HIPAA, HITRUST without breaking real-time streaming latency.**).
 
 ---
 
@@ -114,7 +114,7 @@ By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shie
 
 ### 4. Audit Logging & Compliance (Vanta / Drata Compatible JSON Logs)
 
-Emits structured JSON audit events (`app/audit.py`) directly to `stdout` compatible with Datadog, Splunk, Elastic, Vanta, and Drata to prove compliance for **SOC 2 Type II** and **HIPAA** audits:
+Audit Logging & Compliance: Emits structured JSON audit events (app/audit.py) directly to stdout. Compatible with Datadog, Splunk, Elastic, Vanta, Drata etc. to prove compliance for SOC 2 Type II, HIPAA, and HITRUST audits.:
 
 ```json
 {
