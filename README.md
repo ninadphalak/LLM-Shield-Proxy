@@ -136,6 +136,7 @@ Audit Logging & Compliance: Emits structured JSON audit events (app/audit.py) di
 ## 🏗️ Architecture Diagram
 
 ```mermaid
+%%{init: {'themeVariables': {'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
     classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1,font-weight:bold;
     classDef proxyEngine fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold;
@@ -163,19 +164,21 @@ flowchart TD
     UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / vLLM)"]:::upstream
 
     %% Inbound Flow (Prompt Sanitization)
-    UserApp -- "1. Inbound Raw Prompt Payload" --> FastAPIProxy
-    FastAPIProxy -- "2. Scan Payload" --> Tier1
-    Tier2 -- "3. Store Vault Keys" --> VaultStore
-    Tier2 -- "4. Redacted JSON Payload" --> UpstreamLLM
+    UserApp -- "<b><span style='color:#000000;'>1. Inbound Raw Prompt Payload</span></b>" --> FastAPIProxy
+    FastAPIProxy -- "<b><span style='color:#000000;'>2. Scan Payload</span></b>" --> Tier1
+    Tier2 -- "<b><span style='color:#000000;'>3. Store Vault Keys</span></b>" --> VaultStore
+    Tier2 -- "<b><span style='color:#000000;'>4. Redacted JSON Payload</span></b>" --> UpstreamLLM
 
     %% Outbound Flow (Streaming De-redaction)
-    UpstreamLLM -. "5. Raw SSE Stream Deltas" .-> LookaheadBuffer
-    LookaheadBuffer -- "6. Tag-Safe Assembly" --> Rehydrator
+    UpstreamLLM -. "<b><span style='color:#000000;'>5. Raw SSE Stream Deltas</span></b>" .-> LookaheadBuffer
+    LookaheadBuffer -- "<b><span style='color:#000000;'>6. Tag-Safe Assembly</span></b>" --> Rehydrator
     Rehydrator <--> VaultStore
-    Rehydrator -. "7. Sanitized Real-Time Stream" .-> UserApp
+    Rehydrator -. "<b><span style='color:#000000;'>7. Sanitized Real-Time Stream</span></b>" .-> UserApp
 
     style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
-    style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px
+    style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#263238,font-weight:bold
+
+    linkStyle default stroke:#0f172a,stroke-width:2px;
 ```
 
 ### How It Works (The Data Flow)
