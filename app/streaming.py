@@ -1,4 +1,4 @@
-import json
+import orjson as json
 import asyncio
 from typing import AsyncGenerator, Optional
 from app.vault import Vault
@@ -84,7 +84,7 @@ async def rehydrate_sse_stream(
                                 rehydrated_content = buffer.process_delta_text(raw_content)
                                 delta["content"] = rehydrated_content
                                 data_obj["choices"][0]["delta"] = delta
-                                line = f"data: {json.dumps(data_obj)}"
+                                line = f"data: {json.dumps(data_obj).decode('utf-8')}"
                     except json.JSONDecodeError:
                         pass
                     
@@ -94,7 +94,7 @@ async def rehydrate_sse_stream(
                     remaining = buffer.process_delta_text("", is_final=True)
                     if remaining:
                         flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                        yield f"data: {json.dumps(flush_obj)}\n\n".encode("utf-8")
+                        yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode("utf-8")
                     yield (line + "\n").encode("utf-8")
                 else:
                     yield (line + "\n").encode("utf-8")
@@ -110,7 +110,7 @@ async def rehydrate_sse_stream(
                 flush_obj = {
                     "choices": [{"delta": {"content": remaining}}]
                 }
-                yield f"data: {json.dumps(flush_obj)}\n\n".encode("utf-8")
+                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode("utf-8")
 
             if line_accumulator:
                 yield line_accumulator.encode("utf-8")
