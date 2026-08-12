@@ -3,6 +3,13 @@ import hashlib
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from typing import Optional
+from functools import lru_cache
+
+@lru_cache(maxsize=1024)
+def get_virtual_key_id(client_auth: str) -> str:
+    # Use a computationally expensive Key Derivation Function (KDF) to satisfy CodeQL password-hashing rules
+    # Cached via LRU to ensure 0ms latency impact on proxy routing
+    return hashlib.pbkdf2_hmac('sha256', client_auth.encode(), b"llm_shield_salt", 100000).hex()[:12]
 
 import httpx
 from fastapi import FastAPI, Request, Response, Header
@@ -171,8 +178,7 @@ async def _proxy_catch_all_internal(
     if valid_keys:
         if client_auth in valid_keys:
             is_virtual_key = True
-            # Use a computationally expensive Key Derivation Function (KDF) to satisfy CodeQL password-hashing rules
-            virtual_key_id = hashlib.pbkdf2_hmac('sha256', client_auth.encode(), b"llm_shield_salt", 100000).hex()[:12]
+            virtual_key_id = get_virtual_key_id(client_auth)
         elif client_auth.startswith("sk-proj-") or client_auth.startswith("sk-ant-") or client_auth.startswith("AIza"):
             is_byok = True
         else:
