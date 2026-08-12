@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LLM-Shield Proxy",
     description="Enterprise Zero-Egress Privacy Redaction Middleware Proxy",
-    version="1.0.5",
+    version="1.0.6",
     lifespan=lifespan
 )
 
