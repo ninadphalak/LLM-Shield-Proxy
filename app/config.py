@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     TELEMETRY_API_KEY: Optional[str] = None
     
     METRICS_BEARER_TOKEN: Optional[str] = None
+    ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -280,6 +280,9 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 - `UPSTREAM_BASE_URL`: Base target URL (e.g. `https://api.openai.com` or internal `vLLM` server).
 - `OPENAI_API_KEY`: Upstream API key passed to target providers.
 - `REDIS_URL`: Optional Redis connection string for distributed multi-instance session caching.
+- `ALLOW_CLIENT_UPSTREAM_OVERRIDE`: (Boolean) Determines whether clients can dynamically route requests using the `X-Upstream-Base-Url` header. Defaults to `False` for strict SSRF protection.
+
+*Security Note:* To prevent Memory Exhaustion / OOM crashes, the proxy natively enforces a strict `10MB` streaming payload limit across all incoming requests.
 
 ### 3. 📈 Stateless & Horizontal Scaling
 LLM-Shield-Proxy runs completely stateless by default. For high-volume enterprise deployments, instances scale horizontally behind edge proxies (NGINX, Traefik, AWS ALB):

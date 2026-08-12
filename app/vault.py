@@ -54,17 +54,19 @@ class VaultStore:
     def __init__(self):
         self._sessions: Dict[str, Vault] = {}
 
-    def get_vault(self, session_id: Optional[str] = None) -> Vault:
+    def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
         if not session_id:
             return Vault()
         
-        if session_id not in self._sessions:
-            self._sessions[session_id] = Vault()
-        return self._sessions[session_id]
+        vault_key = f"{virtual_key_id}:{session_id}"
+        if vault_key not in self._sessions:
+            self._sessions[vault_key] = Vault()
+        return self._sessions[vault_key]
 
-    def clear_session(self, session_id: str):
-        if session_id in self._sessions:
-            del self._sessions[session_id]
+    def clear_session(self, session_id: str, virtual_key_id: str = "default"):
+        vault_key = f"{virtual_key_id}:{session_id}"
+        if vault_key in self._sessions:
+            del self._sessions[vault_key]
 
 
 vault_store = VaultStore()
