@@ -1,6 +1,8 @@
-# LLM-Shield-Proxy : Enterprise Privacy Redaction Engine
+# LLM-Shield-Proxy 🛡️
 
-![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-demo.gif)
+![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-demov2.gif)
+
+*Secure, fast, and drop-in PII redaction proxy for Large Language Models.*
 
 [![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
