@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-shield-proxy"
-version = "1.0.6"
-description = "Enterprise Zero-Egress Privacy Redaction Proxy Engine for LLMs"
+name = "llm_shield_proxy"
+version = "1.0.7"
+description = "High-performance enterprise PII redaction and context preservation proxy for Large Language Models"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"

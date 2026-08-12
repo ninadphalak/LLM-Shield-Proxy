@@ -1,4 +1,5 @@
 import json
+from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -41,7 +42,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LLM-Shield Proxy",
     description="Enterprise Zero-Egress Privacy Redaction Middleware Proxy",
-    version="1.0.6",
+    version="1.0.7",
     lifespan=lifespan
 )
 
@@ -61,6 +62,19 @@ def build_target_url(upstream_base: str, path: str) -> str:
         elif "generativelanguage" in base:
             p = p[3:]  # Gemini OpenAI API endpoint doesn't use v1/
     return f"{base}/{p}"
+
+
+async def read_body_with_limit(request: Request, limit: int = 10 * 1024 * 1024) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > limit:
+        raise ValueError("Payload Too Large")
+    
+    body_bytes = bytearray()
+    async for chunk in request.stream():
+        body_bytes.extend(chunk)
+        if len(body_bytes) > limit:
+            raise ValueError("Payload Too Large")
+    return bytes(body_bytes)
 
 
 @app.get("/health", tags=["Health"])
@@ -99,7 +113,15 @@ async def _proxy_catch_all_internal(
     x_session_id: Optional[str],
     x_upstream_base_url: Optional[str]
 ):
-    upstream_base = x_upstream_base_url or settings.UPSTREAM_BASE_URL
+    upstream_base = settings.UPSTREAM_BASE_URL
+    if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
+        if x_upstream_base_url.startswith("http://") or x_upstream_base_url.startswith("https://"):
+            parsed = urlparse(x_upstream_base_url)
+            hostname = parsed.hostname or ""
+            if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254"):
+                return JSONResponse(status_code=403, content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}})
+            upstream_base = x_upstream_base_url
+
     target_url = build_target_url(upstream_base, path)
 
     # Route Exemptions for Health Probes
@@ -196,13 +218,17 @@ async def _proxy_catch_all_internal(
     # Store virtual_key_id in request state for AuditLogger
     request.state.virtual_key_id = virtual_key_id
 
-    vault = vault_store.get_vault(x_session_id)
+    vault = vault_store.get_vault(x_session_id, virtual_key_id)
     http_client: httpx.AsyncClient = get_http_client(request)
 
     if request.method == "POST":
         try:
-            body_bytes = await request.body()
+            body_bytes = await read_body_with_limit(request)
             payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+        except ValueError as ve:
+            if str(ve) == "Payload Too Large":
+                return JSONResponse(status_code=413, content={"error": {"message": "Request payload exceeds maximum allowed limit of 10MB", "type": "invalid_request_error"}})
+            payload = {}
         except Exception:
             payload = {}
 
@@ -296,7 +322,13 @@ async def _proxy_catch_all_internal(
 
     # For non-POST or pass-through requests
     AuditLogger.log_proxy_event(x_session_id, path, request.method, request.state.virtual_key_id)
-    body_bytes = await request.body()
+    try:
+        body_bytes = await read_body_with_limit(request)
+    except ValueError as ve:
+        if str(ve) == "Payload Too Large":
+            return JSONResponse(status_code=413, content={"error": {"message": "Request payload exceeds maximum allowed limit of 10MB", "type": "invalid_request_error"}})
+        body_bytes = b""
+        
     upstream_res = await http_client.request(
         method=request.method,
         url=target_url,
