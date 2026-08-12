@@ -6,7 +6,8 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_proxy_non_streaming_chat_completion(httpx_mock):
+def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
+    monkeypatch.setattr("app.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
     # Mock upstream OpenAI response returning token [EMAIL_1]
     httpx_mock.add_response(
         method="POST",
@@ -47,7 +48,8 @@ def test_proxy_non_streaming_chat_completion(httpx_mock):
     assert "john@example.com" not in request.content.decode("utf-8")
 
 
-def test_proxy_streaming_chat_completion(httpx_mock):
+def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
+    monkeypatch.setattr("app.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
     # Mock upstream streaming SSE response returning token split across deltas
     httpx_mock.add_response(
         method="POST",
@@ -86,4 +88,91 @@ def test_health_and_livez_check_endpoints():
     res_livez = client.get("/livez")
     assert res_livez.status_code == 200
     assert res_livez.json()["status"] == "ok"
+
+    res_healthz = client.get("/healthz")
+    assert res_healthz.status_code == 200
+
+    res_metrics = client.get("/metrics")
+    assert res_metrics.status_code == 200
+
+
+def test_cors_preflight_options():
+    res = client.options("/v1/chat/completions")
+    assert res.status_code == 204
+    assert res.headers["access-control-allow-origin"] == "*"
+    assert "OPTIONS" in res.headers["access-control-allow-methods"]
+    assert "Authorization" in res.headers["access-control-allow-headers"]
+
+
+def test_inbound_auth_validation(monkeypatch):
+    monkeypatch.setattr("app.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-finance")
+    monkeypatch.setattr("app.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-finance"}))
+    
+    # Missing header
+    res_missing = client.post("/v1/chat/completions", json={"model": "gpt-4", "messages": []})
+    assert res_missing.status_code == 401
+    
+    # Invalid key
+    res_invalid = client.post("/v1/chat/completions", headers={"Authorization": "Bearer sk-proxy-hr"}, json={"model": "gpt-4", "messages": []})
+    assert res_invalid.status_code == 401
+
+
+def test_header_swapping_and_byok(monkeypatch, httpx_mock):
+    monkeypatch.setattr("app.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("app.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-dev")
+    monkeypatch.setattr("app.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-dev"}))
+    monkeypatch.setattr("app.config.settings.UPSTREAM_API_KEY", "central-gemini-key")
+    
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.openai.com/v1/chat/completions",
+        json={"id": "123", "choices": [{"message": {"content": "ok"}}]}
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.openai.com/v1/chat/completions",
+        json={"id": "124", "choices": [{"message": {"content": "ok"}}]}
+    )
+    
+    # Virtual Key Swapping
+    res1 = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proxy-dev"},
+        json={"model": "gpt-4", "messages": []}
+    )
+    assert res1.status_code == 200
+    req1 = httpx_mock.get_requests()[0]
+    assert req1.headers["authorization"] == "Bearer central-gemini-key"
+    
+    # BYOK Passthrough
+    res2 = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proj-user"},
+        json={"model": "gpt-4", "messages": []}
+    )
+    assert res2.status_code == 200
+    req2 = httpx_mock.get_requests()[1]
+    assert req2.headers["authorization"] == "Bearer sk-proj-user"
+
+
+def test_missing_upstream_key_returns_clean_error(monkeypatch, httpx_mock):
+    monkeypatch.setattr("app.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    import httpx
+    
+    def raise_500(*args, **kwargs):
+        resp = httpx.Response(500, request=httpx.Request("POST", "https://api.openai.com"))
+        raise httpx.HTTPStatusError("500 Server Error", request=resp.request, response=resp)
+
+    httpx_mock.add_callback(raise_500, url="https://api.openai.com/v1/chat/completions")
+
+    res = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proxy-test"},
+        json={"model": "gpt-4", "messages": []}
+    )
+    # The proxy translates HTTPStatusError to its status code (500)
+    assert res.status_code == 500
+    assert "error" in res.json()
+    assert res.json()["error"]["type"] == "upstream_error"
+
 

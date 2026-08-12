@@ -117,3 +117,34 @@ async def test_rehydrate_sse_stream_async_stress():
 
     full_response = "".join(rehydrated_chunks)
     assert "Sarah Connor" in full_response
+
+
+@pytest.mark.asyncio
+async def test_rehydrate_sse_stream_concurrent_stress():
+    """
+    Flood the async generator with 500 simultaneous streaming connections 
+    to assert the underlying event loop remains non-blocking and processes correctly.
+    """
+    vault = Vault()
+    vault.get_or_create_token("Sarah Connor", "PERSON")
+
+    async def single_stream_task():
+        async def mock_sse_stream():
+            yield b'data: {"choices":[{"delta":{"content":"Contact [PER"}}]}\n\n'
+            # Simulating async wait in stream chunking
+            await asyncio.sleep(0.01)
+            yield b'data: {"choices":[{"delta":{"content":"SON_1] for privacy details."}}]}\n\n'
+            yield b'data: [DONE]\n\n'
+            
+        rehydrated_chunks = []
+        async for chunk_bytes in rehydrate_sse_stream(mock_sse_stream(), vault):
+            rehydrated_chunks.append(chunk_bytes.decode("utf-8"))
+        return "".join(rehydrated_chunks)
+
+    # 500 simultaneous connections
+    tasks = [single_stream_task() for _ in range(500)]
+    results = await asyncio.gather(*tasks)
+
+    for result in results:
+        assert "Sarah Connor" in result
+

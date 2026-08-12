@@ -1,5 +1,7 @@
 # LLM-Shield-Proxy : Enterprise Privacy Redaction Engine
 
+![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-demo.gif)
+
 [![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
@@ -107,29 +109,45 @@ To achieve sub-millisecond execution without blowing up infrastructure costs:
 
 By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars. This means you can run dozens of proxy containers side-by-side on cheap micro-instances (like AWS `t4g.nano` or Docker Swarm/Kubernetes pods) for virtually zero RAM cost.
 
-### 3. Enterprise Security & State Management (Redis TTL)
+### 3. Enterprise Multi-Tenant Gateway & Security
 
+- **Stateless Multi-Tenant Virtual Keys:** Easily scope access using `VALID_VIRTUAL_KEYS` (e.g., `sk-proxy-finance`) allowing instant, team-level key revocation via environment variables without the overhead of a database.
+- **Smart BYOK Passthrough:** Automatic pass-through for provider keys (`sk-proj-...`, `AIza...`) with complete outbound proxy-header sanitization.
+- **Multi-Provider Header Support:** Full native support for inbound `Authorization: Bearer`, `x-api-key` (Anthropic), and `x-goog-api-key` (Gemini) headers.
+- **Upstream Resilience & Error Standardization:** Graceful handling of 502/503/429 upstream provider errors into clean, OpenAI-formatted JSON payloads, plus robust mid-stream buffer release guarantees.
 - **Zero-Egress Security:** 100% of PII scanning and re-hydration happens locally within your VPC. No prompt data or telemetry ever leaves your server.
 - **Stateless Privacy (Self-Destructing Redis TTL):** Real PII is mapped to session-bound tokens (e.g. `Sarah` -> `[PERSON_1]`) stored in an in-memory vault backed by strict Time-To-Live (TTL) expiration rules. When configured with Redis (`REDIS_URL`), vaults are shared across multi-replica clusters without building a permanent database of user PII.
 
-### 4. Audit Logging & Compliance (Vanta / Drata Compatible JSON Logs)
+### 4. 🛡️ Enterprise Governance & SIEM Audit Trail
 
-Audit Logging & Compliance: Emits structured JSON audit events (app/audit.py) directly to stdout. Compatible with Datadog, Splunk, Elastic, Vanta, Drata etc. to prove compliance for SOC 2 Type II, HIPAA, and HITRUST audits.:
+LLM-Shield-Proxy emits structured JSON audit logs directly to `stdout`, specifically tailored for enterprise log aggregators like **Splunk, Datadog, and Elastic**. 
+
+To meet stringent **SOC 2 Type II and HIPAA compliance**, every proxy and redaction event includes explicit attribution via the `virtual_key_id` or `BYOK` marker, providing a flawless audit trail of exactly which internal team or user generated the request:
 
 ```json
 {
-  "timestamp": "2026-08-04T01:48:00Z",
-  "event": "pii_redaction",
-  "session_id": "sess_8f179f3",
-  "path": "/v1/chat/completions",
-  "redactions_summary": {
+  "timestamp": "2026-08-12T00:38:17Z",
+  "event": "PII_REDACTION_EVENT",
+  "service": "LLM-Shield",
+  "virtual_key_id": "sk-proxy-finance",
+  "session_id": "ephemeral",
+  "path": "v1/chat/completions",
+  "status_code": 200,
+  "total_entities_redacted": 4,
+  "entity_breakdown": {
     "SSN": 1,
     "EMAIL": 2,
     "PERSON": 1
-  },
-  "compliance_status": "zero_egress_passed"
+  }
 }
 ```
+
+### 5. Tier-1 Enterprise Gateway Features
+
+- **Outbound Developer Secret DLP:** Don't just redact PII (names, SSNs). Intercept outbound developer secrets in prompts—such as leaked AWS Access Keys (`AKIA...`), GitHub Personal Access Tokens (`ghp_...`), Private SSH keys, and JWTs. Blocking secrets from leaking into cloud LLM training sets turns your proxy into an outbound DLP firewall.
+- **Cryptographic Log Tamper-Proofing (Hash-Chaining):** Standard stdout logs can theoretically be tampered with by a rogue admin. By appending a cryptographic SHA-256 hash chain to every `PII_REDACTION_EVENT` JSON log (`hash_n = SHA256(event + hash_{n-1})`), you create an immutable, WORM-compliant audit trail that satisfies strict SOC 2 Type II and HIPAA auditors.
+- **Zero-Storage Default Guarantee:** Explicitly guarantees that raw PII never touches disk, persistent volumes, or external SaaS vendors. Mappings live strictly in volatile, TTL-backed ephemeral memory (or local Redis).
+- **Adversarial Red-Team Defenses:** Battle-hardened against denial of service and memory exhaustion attacks. Built-in mitigation for ReDoS (catastrophic regex backtracking), TOCTOU race conditions during config hot-reloading, and strict `1MB` buffer size limits against Slowloris-style buffer poisoning from malicious upstream chunking.
 
 ---
 
@@ -238,14 +256,17 @@ py -m pytest tests/
 
 Designed for zero-friction adoption by DevOps, Site Reliability Engineers (SREs), and Network Administrators:
 
-### 1. 🏥 Health Check Endpoints (Kubernetes & Swarm Probes)
-Built-in liveness and readiness endpoints return `HTTP 200 OK` for Kubernetes, Docker Swarm, or AWS ECS health monitors:
-```bash
-curl http://localhost:8000/health
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.4"}
+### 1. 🏥 Health Probes & CORS Preflight Exemptions
+Built-in liveness and readiness endpoints explicitly bypass authentication to support enterprise orchestrators and browser integrations:
+- **Kubernetes / Swarm Probes:** Requests to `/healthz`, `/livez`, and `/metrics` return an immediate `HTTP 200 OK`, ensuring seamless integration with ECS, Kubernetes, and Docker Swarm health monitors.
+- **Frontend / Browser Integration:** Native support for CORS `OPTIONS` preflight requests, returning standard CORS headers and `HTTP 204 No Content` to unblock secure frontend applications without triggering auth failures.
 
-curl http://localhost:8000/livez
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.4"}
+```bash
+curl http://localhost:8000/healthz
+# Output: {"status":"ok","service":"llm-shield-proxy"}
+
+curl -X OPTIONS http://localhost:8000/v1/chat/completions
+# Returns 204 No Content with Access-Control-Allow-* headers
 ```
 
 ### 2. ⚙️ 12-Factor Environment Configuration
