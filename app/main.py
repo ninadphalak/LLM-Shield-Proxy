@@ -1,4 +1,5 @@
 import json
+import hashlib
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -170,7 +171,7 @@ async def _proxy_catch_all_internal(
     if valid_keys:
         if client_auth in valid_keys:
             is_virtual_key = True
-            virtual_key_id = client_auth
+            virtual_key_id = hashlib.sha256(client_auth.encode()).hexdigest()[:12]
         elif client_auth.startswith("sk-proj-") or client_auth.startswith("sk-ant-") or client_auth.startswith("AIza"):
             is_byok = True
         else:
@@ -190,13 +191,16 @@ async def _proxy_catch_all_internal(
     if is_virtual_key:
         # Dynamic Enterprise Key Routing (Centralized Keys)
         resolved_key = None
-        if "api.openai.com" in upstream_base and settings.OPENAI_API_KEY:
+        parsed_url = urlparse(upstream_base)
+        hostname = parsed_url.hostname or ""
+        
+        if hostname == "api.openai.com" and settings.OPENAI_API_KEY:
             resolved_key = settings.OPENAI_API_KEY
-        elif "generativelanguage" in upstream_base and settings.GEMINI_API_KEY:
+        elif hostname == "generativelanguage.googleapis.com" and settings.GEMINI_API_KEY:
             resolved_key = settings.GEMINI_API_KEY
-        elif "api.anthropic.com" in upstream_base and settings.ANTHROPIC_API_KEY:
+        elif hostname == "api.anthropic.com" and settings.ANTHROPIC_API_KEY:
             resolved_key = settings.ANTHROPIC_API_KEY
-        elif "deepseek.com" in upstream_base and settings.DEEPSEEK_API_KEY:
+        elif hostname == "api.deepseek.com" and settings.DEEPSEEK_API_KEY:
             resolved_key = settings.DEEPSEEK_API_KEY
         elif settings.UPSTREAM_API_KEY:
             resolved_key = settings.UPSTREAM_API_KEY

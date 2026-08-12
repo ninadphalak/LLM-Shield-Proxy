@@ -4,6 +4,7 @@ from app.main import app
 from app.config import settings
 from app.vault import vault_store
 from unittest.mock import patch
+import hashlib
 
 client = TestClient(app)
 
@@ -50,7 +51,8 @@ def test_vault_tenant_isolation(mock_send, mock_request):
     client.post("/v1/chat/completions", headers=headers_a, json=payload_a)
     
     # Verify Tenant A's vault has the email mapped
-    vault_a = vault_store.get_vault("shared_sess_123", "sk-proxy-tenant-A")
+    hashed_key_a = hashlib.sha256(b"sk-proxy-tenant-A").hexdigest()[:12]
+    vault_a = vault_store.get_vault("shared_sess_123", hashed_key_a)
     assert "test@example.com" in vault_a.original_to_token
     token_id = vault_a.original_to_token["test@example.com"]
     
@@ -61,7 +63,8 @@ def test_vault_tenant_isolation(mock_send, mock_request):
     }
     # Send a request so the vault is initialized for Tenant B
     client.post("/v1/chat/completions", headers=headers_b, json={"messages": [{"role": "user", "content": "Hello"}]})
-    vault_b = vault_store.get_vault("shared_sess_123", "sk-proxy-tenant-B")
+    hashed_key_b = hashlib.sha256(b"sk-proxy-tenant-B").hexdigest()[:12]
+    vault_b = vault_store.get_vault("shared_sess_123", hashed_key_b)
     
     # Verify Tenant B's vault is isolated and does not contain the email
     assert "test@example.com" not in vault_b.original_to_token
@@ -86,6 +89,9 @@ def test_vault_tenant_isolation_unit():
     assert "secret@example.com" not in vault_b.original_to_token
 
 def test_body_size_limit_content_length():
+    original_keys = settings.valid_virtual_keys_set
+    settings.valid_virtual_keys_set = set()
+    
     # Send an 11MB payload spoofed via header
     headers = {
         "x-api-key": "sk-proxy-test",
@@ -94,3 +100,4 @@ def test_body_size_limit_content_length():
     response = client.post("/v1/chat/completions", headers=headers, json={"data": "fake"})
     assert response.status_code == 413
     assert "payload exceeds maximum allowed limit" in response.text
+    settings.valid_virtual_keys_set = original_keys
