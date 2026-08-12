@@ -225,6 +225,12 @@ LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweigh
 | **Total SSE Stream Overhead** | `0.0010 ms` | `0.0010 ms` (`0.97 µs`) | Added latency per SSE delta chunk |
 | **Process RAM Footprint** | - | - | `24.55 MB` Resident Set Size |
 
+### ⚡ Under the Hood: Speed Optimizations
+To achieve these microsecond latencies, LLM-Shield-Proxy implements three low-level systems optimizations:
+1. **Rust-Backed JSON Parsing:** Swapped standard Python `json` for `orjson`, processing streaming LLM chunks up to 10x faster.
+2. **Persistent TLS Connection Pooling:** The FastAPI lifespan manager maintains pre-warmed HTTP/2 secure tunnels (`httpx.AsyncClient`) to upstream providers, completely bypassing TLS handshake overhead on individual requests.
+3. **ONNX Thread Sandboxing:** ONNX Runtime's `intra_op_num_threads` is restricted to `1`, preventing it from stealing CPU cores from the asynchronous event loop during heavy concurrent traffic.
+
 To run the automated benchmark suite locally:
 
 ```bash
