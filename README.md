@@ -313,21 +313,10 @@ If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md]
 
 I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
 
-1. **ONNX Thread Tuning (Preventing CPU Contention)**
-   - *Problem:* By default, ONNX Runtime attempts to use every available CPU core. In FastAPI, this competes with the event loop handling thousands of concurrent connections.
-   - *The Fix:* Restrict ONNX by setting `sess_options.intra_op_num_threads = 1`. This forces ONNX execution onto a single thread, keeping CPU cores free for FastAPI's event loop to stream packets instantly.
-
-2. **Persistent Connection Pooling (The TLS Trick)**
-   - *Problem:* Opening a new TLS/SSL connection to OpenAI per request adds 50–100ms latency.
-   - *The Fix:* Maintain a persistent `httpx.AsyncClient` HTTP/2 connection pool on server startup. The proxy opens pre-warmed secure tunnels, routing requests instantly with zero TLS setup overhead.
-
-3. **Swap to `orjson` for Chunk Parsing**
-   - *Problem:* In an SSE stream, standard Python `json.loads` parses hundreds of delta chunks per second.
-   - *The Fix:* Swap built-in `json` for `orjson` (written in Rust). It parses streaming LLM chunks up to 10x faster, dropping proxy overhead to near zero.
-
-4. **Cythonize the Sliding-Window Buffer**
-   - *Problem:* The sliding-window buffer performs frequent string slicing and bracket matching.
-   - *The Fix:* Use Cython or `mypyc` to compile `streaming.py` directly into a C-extension binary module. Retains Python readability while executing string operations at native C speed.
+1. **Cythonize the Sliding-Window Buffer**
+   - **Status:** Intentionally Preserved in the Open-Source Roadmap.
+   - **Why this is strategic:** Instead of compiling `streaming.py` into a C-extension binary (which complicates Docker cross-platform builds and wheels), we hardened the pure-Python async generator with a 1MB line accumulator circuit breaker, explicit GeneratorExit teardowns, and a finally block buffer flush.
+   - **The EB-1A Advantage:** Leaving "Cythonize / mypyc the lookahead buffer" listed in the README.md under "Future Technical Roadmap" is strategic open-source bait. It invites low-level systems/C++ developers to open Pull Requests (PRs) on your repository, which helps build your public dependency and contributor footprint.
 
 ---
 
