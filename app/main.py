@@ -171,7 +171,8 @@ async def _proxy_catch_all_internal(
     if valid_keys:
         if client_auth in valid_keys:
             is_virtual_key = True
-            virtual_key_id = hashlib.sha256(client_auth.encode()).hexdigest()[:12]
+            # Use a computationally expensive Key Derivation Function (KDF) to satisfy CodeQL password-hashing rules
+            virtual_key_id = hashlib.pbkdf2_hmac('sha256', client_auth.encode(), b"llm_shield_salt", 100000).hex()[:12]
         elif client_auth.startswith("sk-proj-") or client_auth.startswith("sk-ant-") or client_auth.startswith("AIza"):
             is_byok = True
         else:
