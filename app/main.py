@@ -216,6 +216,7 @@ async def _proxy_catch_all_internal(
             headers["authorization"] = f"Bearer {resolved_key}"
             headers.pop("x-api-key", None)
             headers.pop("x-goog-api-key", None)
+            headers.pop("api-key", None)
         else:
             # Prevent leaking proxy keys upstream
             return JSONResponse(
