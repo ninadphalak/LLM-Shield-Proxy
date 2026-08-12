@@ -252,7 +252,7 @@ async def _proxy_catch_all_internal(
                     status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else 503
                     err_payload = {
                         "error": {
-                            "message": f"Upstream LLM Provider Error: {str(e)}",
+                            "message": "Failed to communicate with upstream provider.",
                             "type": "upstream_error",
                             "code": status_code
                         }
@@ -294,7 +294,7 @@ async def _proxy_catch_all_internal(
                     status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else 503
                     err_payload = {
                         "error": {
-                            "message": f"Upstream LLM Provider Error: {str(e)}",
+                            "message": "Failed to communicate with upstream provider.",
                             "type": "upstream_error",
                             "code": status_code
                         }
