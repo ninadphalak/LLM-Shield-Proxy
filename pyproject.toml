@@ -57,3 +57,6 @@ dev = [
 Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 "Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
