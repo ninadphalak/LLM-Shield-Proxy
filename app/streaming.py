@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import AsyncGenerator, Optional
 from app.vault import Vault
 
@@ -56,42 +57,60 @@ async def rehydrate_sse_stream(
     """
     buffer = SSERehydrationBuffer(vault)
     line_accumulator = ""
+    client_disconnected = False
+    MAX_LINE_LENGTH = 1048576  # 1MB limit to prevent Slowloris buffer poisoning
 
-    async for chunk in raw_stream:
-        chunk_text = chunk.decode("utf-8", errors="replace")
-        line_accumulator += chunk_text
+    try:
+        async for chunk in raw_stream:
+            chunk_text = chunk.decode("utf-8", errors="replace")
+            line_accumulator += chunk_text
 
-        while "\n" in line_accumulator:
-            line, line_accumulator = line_accumulator.split("\n", 1)
-            stripped = line.strip()
+            if len(line_accumulator) > MAX_LINE_LENGTH:
+                raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
 
-            if stripped.startswith("data: ") and stripped != "data: [DONE]":
-                raw_json = stripped[6:]
-                try:
-                    data_obj = json.loads(raw_json)
-                    choices = data_obj.get("choices", [])
-                    if choices and isinstance(choices, list):
-                        delta = choices[0].get("delta", {})
-                        if "content" in delta and isinstance(delta["content"], str):
-                            raw_content = delta["content"]
-                            rehydrated_content = buffer.process_delta_text(raw_content)
-                            delta["content"] = rehydrated_content
-                            data_obj["choices"][0]["delta"] = delta
-                            line = f"data: {json.dumps(data_obj)}"
-                except json.JSONDecodeError:
-                    # If line is not valid JSON, fallback to buffer text processing
-                    pass
+            while "\n" in line_accumulator:
+                line, line_accumulator = line_accumulator.split("\n", 1)
+                stripped = line.strip()
 
-            yield (line + "\n").encode("utf-8")
+                if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                    raw_json = stripped[6:]
+                    try:
+                        data_obj = json.loads(raw_json)
+                        choices = data_obj.get("choices", [])
+                        if choices and isinstance(choices, list):
+                            delta = choices[0].get("delta", {})
+                            if "content" in delta and isinstance(delta["content"], str):
+                                raw_content = delta["content"]
+                                rehydrated_content = buffer.process_delta_text(raw_content)
+                                delta["content"] = rehydrated_content
+                                data_obj["choices"][0]["delta"] = delta
+                                line = f"data: {json.dumps(data_obj)}"
+                    except json.JSONDecodeError:
+                        pass
+                    
+                    yield (line + "\n").encode("utf-8")
+                elif stripped == "data: [DONE]":
+                    # Flush the buffer BEFORE yielding the DONE signal
+                    remaining = buffer.process_delta_text("", is_final=True)
+                    if remaining:
+                        flush_obj = {"choices": [{"delta": {"content": remaining}}]}
+                        yield f"data: {json.dumps(flush_obj)}\n\n".encode("utf-8")
+                    yield (line + "\n").encode("utf-8")
+                else:
+                    yield (line + "\n").encode("utf-8")
+    except (GeneratorExit, asyncio.CancelledError):
+        client_disconnected = True
+        raise
+    finally:
+        if not client_disconnected:
+            # Flush remaining buffer at stream end or stream abort
+            remaining = buffer.process_delta_text("", is_final=True)
+            if remaining:
+                # Emit remaining flushed text if any left
+                flush_obj = {
+                    "choices": [{"delta": {"content": remaining}}]
+                }
+                yield f"data: {json.dumps(flush_obj)}\n\n".encode("utf-8")
 
-    # Flush remaining buffer at stream end
-    remaining = buffer.process_delta_text("", is_final=True)
-    if remaining:
-        # Emit remaining flushed text if any left
-        flush_obj = {
-            "choices": [{"delta": {"content": remaining}}]
-        }
-        yield f"data: {json.dumps(flush_obj)}\n\n".encode("utf-8")
-
-    if line_accumulator:
-        yield line_accumulator.encode("utf-8")
+            if line_accumulator:
+                yield line_accumulator.encode("utf-8")

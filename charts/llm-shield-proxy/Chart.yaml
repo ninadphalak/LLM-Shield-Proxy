@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llm-shield-proxy
+description: A Helm chart for LLM-Shield-Proxy Enterprise Zero-Egress Privacy Middleware
+type: application
+version: 0.1.0
+appVersion: "1.0.4"

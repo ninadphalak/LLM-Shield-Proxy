@@ -20,7 +20,7 @@ def test_pii_tier1_structured_redaction():
     assert "[PHONE_1]" in redacted
     assert "[CREDIT_CARD_1]" in redacted
     assert "[IP_ADDRESS_1]" in redacted
-    assert "[API_KEY_1]" in redacted
+    assert "[AWS_API_KEY_1]" in redacted
 
     assert "john.doe@acme.org" not in redacted
     assert "123-45-6789" not in redacted
@@ -59,3 +59,32 @@ def test_pii_payload_redaction():
 
     assert redacted_payload["messages"][0]["content"] == "My email is [EMAIL_1]"
     assert vault.token_to_original["[EMAIL_1]"] == "alice@example.com"
+
+
+def test_dlp_redos_base64_obfuscation():
+    """
+    Simulate a Red Team attack attempting to cause ReDoS (Regex Denial of Service)
+    by passing massive Base64-encoded strings (obfuscated AWS/GitHub keys or JSON payloads)
+    to ensure the engine doesn't hang.
+    """
+    import base64
+    import time
+    engine = PIIEngine(enable_tier2=False)
+    vault = Vault()
+    
+    # Create a massive obfuscated payload simulating an attempt to hide secrets
+    base_secret = "AKIAIOSFODNN7EXAMPLE" * 1000  # Repeat a mock AWS key
+    encoded_secret = base64.b64encode(base_secret.encode("utf-8")).decode("utf-8")
+    
+    malicious_prompt = f"Please analyze this dataset: {encoded_secret}" * 10
+    
+    start_time = time.time()
+    redacted = engine.redact_text(malicious_prompt, vault)
+    end_time = time.time()
+    
+    # It should not hang (e.g. process under 50ms)
+    assert (end_time - start_time) < 0.1, f"ReDoS detected! Took {end_time - start_time} seconds"
+    
+    # Our regex is currently NOT designed to decode base64, so it shouldn't crash, 
+    # but the test validates that the runtime remains tightly bounded (no ReDoS).
+    assert encoded_secret in redacted

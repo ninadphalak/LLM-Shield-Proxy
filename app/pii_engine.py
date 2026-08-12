@@ -10,12 +10,16 @@ TIER1_PATTERNS = [
 
     ("CREDIT_CARD", re.compile(r'\b(?:\d[ -]*?){13,16}\b')),
     ("IP_ADDRESS", re.compile(r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b')),
-    ("API_KEY", re.compile(r'\b(?:sk-[a-zA-Z0-9]{32,48}|AKIA[0-9A-Z]{16})\b')),
+    ("AWS_API_KEY", re.compile(r'\b(?:sk-[a-zA-Z0-9]{32,48}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b')),
+    ("GITHUB_PAT", re.compile(r'\b(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]+)\b')),
+    ("SSH_PRIVATE_KEY", re.compile(r'-----BEGIN.*?PRIVATE KEY-----', re.DOTALL)),
+    ("JWT_TOKEN", re.compile(r'\bey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]*\b')),
+    ("MRN", re.compile(r'\b\d{3}-\d{2}-\d{2}[A-Za-z0-9]\b')),
 ]
 
 # Tier 2 NER Pattern Rules (Names, Titles, Locations)
 TIER2_PATTERNS = [
-    ("PERSON", re.compile(r'\b(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)?\s*[A-Z][a-z]+\s+[A-Z][a-z]+\b')),
+    ("PERSON", re.compile(r'\b(?:(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s+(?:[A-Z][a-z]+\s*){1,4})|\b(?!(?:Patient|Check|The|A|An|In|On|At|And|Or|But|If|Hey|Can|You|Help|Please|Identify)\b)(?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+\b')),
 ]
 
 
