@@ -9,9 +9,9 @@ import os
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from app.pii_engine import PIIEngine, TIER1_PATTERNS, TIER2_PATTERNS
-from app.vault import Vault
-from app.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.pii_engine import PIIEngine, TIER1_PATTERNS, TIER2_PATTERNS
+from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 
 
 def benchmark_tier1_regex(iterations: int = 1000):

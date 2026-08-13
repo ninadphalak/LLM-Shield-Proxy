@@ -1,7 +1,7 @@
 import orjson as json
 import asyncio
 from typing import AsyncGenerator, Optional
-from app.vault import Vault
+from llm_shield_proxy.vault import Vault
 
 
 class SSERehydrationBuffer:

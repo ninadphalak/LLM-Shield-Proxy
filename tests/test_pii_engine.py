@@ -1,6 +1,6 @@
 import pytest
-from app.vault import Vault
-from app.pii_engine import PIIEngine
+from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.pii_engine import PIIEngine
 
 
 def test_pii_tier1_structured_redaction():

@@ -88,7 +88,7 @@ class AuditLogger:
         audit_logger.info(json.dumps(log_entry))
         
         try:
-            from app.metrics import llm_shield_pii_redacted_total
+            from llm_shield_proxy.metrics import llm_shield_pii_redacted_total
             for entity_type, count in entity_counts.items():
                 llm_shield_pii_redacted_total.labels(entity_type=entity_type).inc(count)
         except ImportError:

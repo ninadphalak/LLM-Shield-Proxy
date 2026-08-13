@@ -2,8 +2,8 @@ import pytest
 import asyncio
 import os
 import psutil
-from app.vault import Vault
-from app.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 
 
 def test_extreme_split_tag_across_chunks():

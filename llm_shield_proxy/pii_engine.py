@@ -1,6 +1,6 @@
 import re
 from typing import List, Tuple, Optional
-from app.vault import Vault
+from llm_shield_proxy.vault import Vault
 
 # Tier 1 Compiled Regex Patterns
 TIER1_PATTERNS = [
