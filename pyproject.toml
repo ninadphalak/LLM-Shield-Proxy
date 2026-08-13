@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_shield_proxy"
-version = "1.0.10"
+version = "1.0.11"
 description = "High-performance enterprise PII redaction and context preservation proxy for Large Language Models"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -40,7 +40,9 @@ dependencies = [
     "httpx>=0.24.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
-    "orjson>=3.9.0"
+    "orjson>=3.9.0",
+    "prometheus-client>=0.17.0",
+    "watchdog>=3.0.0"
 ]
 
 [project.optional-dependencies]
@@ -51,7 +53,8 @@ dev = [
     "pytest-mock>=3.10.0",
     "openai>=1.0.0",
     "build",
-    "twine"
+    "twine",
+    "psutil>=5.0.0"
 ]
 
 [project.urls]
@@ -59,5 +62,8 @@ Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 "Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
 
+[project.scripts]
+llm-shield-proxy = "llm_shield_proxy.cli:main"
+
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["llm_shield_proxy*"]

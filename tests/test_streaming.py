@@ -1,6 +1,6 @@
 import pytest
-from app.vault import Vault
-from app.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 
 
 def test_sse_buffer_split_tag_handling():

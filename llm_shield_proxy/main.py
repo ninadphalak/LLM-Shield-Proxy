@@ -15,13 +15,13 @@ import httpx
 from fastapi import FastAPI, Request, Response, Header
 from fastapi.responses import StreamingResponse, JSONResponse
 
-from app.config import settings
-from app.vault import vault_store
-from app.pii_engine import pii_engine
-from app.streaming import rehydrate_sse_stream
-from app.audit import AuditLogger
+from llm_shield_proxy.config import settings
+from llm_shield_proxy.vault import vault_store
+from llm_shield_proxy.pii_engine import pii_engine
+from llm_shield_proxy.streaming import rehydrate_sse_stream
+from llm_shield_proxy.audit import AuditLogger
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from app.metrics import (
+from llm_shield_proxy.metrics import (
     llm_shield_requests_total,
     llm_shield_pii_redacted_total,
     llm_shield_sse_active_streams,

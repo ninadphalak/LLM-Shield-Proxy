@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
-from app.config import settings
-from app.vault import vault_store
+from llm_shield_proxy.main import app
+from llm_shield_proxy.config import settings
+from llm_shield_proxy.vault import vault_store
 from unittest.mock import patch
 import hashlib
 

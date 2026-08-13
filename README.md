@@ -22,6 +22,9 @@ Designed to unblock enterprise privacy compliance (**SOC 2, HIPAA, HITRUST witho
 ### 1. Install via PyPI
 ```bash
 pip install llm-shield-proxy "uvicorn[standard]"
+
+# Start the proxy server on port 8000
+llm-shield-proxy --port 8000
 ```
 
 ### 2. Run via Docker
@@ -255,6 +258,7 @@ Transparency is critical for security tooling. Please be aware of the following 
 Run the full automated test suite:
 
 ```bash
+pip install -r requirements.txt
 py -m pytest tests/
 ```
 
