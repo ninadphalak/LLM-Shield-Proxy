@@ -334,7 +334,7 @@ I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency 
 
 ---
 
-🏢 Using LLM-Shield in Production?
+## 🏢 Using LLM-Shield in Production?
 
 If your organization is evaluating, benchmarking, or deploying LLM-Shield to unblock LLM streaming and meet strict compliance requirements (like SOC 2/HIPAA), I would love to hear from you.
 
