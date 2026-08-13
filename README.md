@@ -329,9 +329,8 @@ If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md]
 I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
 
 1. **Cythonize the Sliding-Window Buffer**
-   - **Status:** Intentionally Preserved in the Open-Source Roadmap.
+   - **Status:** Preserved in the Open-Source Roadmap.
    - **Why this is strategic:** Instead of compiling `streaming.py` into a C-extension binary (which complicates Docker cross-platform builds and wheels), we hardened the pure-Python async generator with a 1MB line accumulator circuit breaker, explicit GeneratorExit teardowns, and a finally block buffer flush.
-   - **Community Strategy:** Leaving "Cythonize / mypyc the lookahead buffer" listed in the README.md under "Future Technical Roadmap" is strategic open-source bait. It invites low-level systems/C++ developers to open Pull Requests (PRs) on your repository, which helps build your public dependency and contributor footprint.
 
 ---
 
