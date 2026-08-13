@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LLM-Shield Proxy",
     description="Enterprise Zero-Egress Privacy Redaction Middleware Proxy",
-    version="1.0.13",
+    version="1.0.14",
     lifespan=lifespan
 )
 
@@ -70,6 +70,10 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"error": {"message": "Internal Server Error", "type": "server_error"}}
     )
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
     if not hasattr(request.app.state, "http_client") or request.app.state.http_client is None:
