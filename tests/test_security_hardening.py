@@ -94,7 +94,7 @@ def test_body_size_limit_content_length():
     
     # Send an 11MB payload spoofed via header
     headers = {
-        "x-api-key": "sk-proxy-test",
+        "x-api-key": "sk-proj-test",
         "Content-Length": str(11 * 1024 * 1024 + 1)
     }
     response = client.post("/v1/chat/completions", headers=headers, json={"data": "fake"})

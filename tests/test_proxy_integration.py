@@ -28,6 +28,7 @@ def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
 
     response = client.post(
         "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proj-mock"},
         json={
             "model": "gpt-4",
             "messages": [
@@ -50,6 +51,7 @@ def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
 
 def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
     monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset())
     # Mock upstream streaming SSE response returning token split across deltas
     httpx_mock.add_response(
         method="POST",
@@ -64,6 +66,7 @@ def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
 
     response = client.post(
         "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proj-mock"},
         json={
             "model": "gpt-4",
             "stream": True,
@@ -157,6 +160,7 @@ def test_header_swapping_and_byok(monkeypatch, httpx_mock):
 
 def test_missing_upstream_key_returns_clean_error(monkeypatch, httpx_mock):
     monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
     import httpx
     
     def raise_500(*args, **kwargs):

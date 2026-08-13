@@ -8,7 +8,7 @@ TIER1_PATTERNS = [
     ("SSN", re.compile(r'\b\d{3}-\d{2}-\d{4}\b')),
     ("PHONE", re.compile(r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?(?:\d{3}[-.\s]?)?\d{4}\b')),
 
-    ("CREDIT_CARD", re.compile(r'\b(?:\d[ -]*?){13,16}\b')),
+    ("CREDIT_CARD", re.compile(r'\b(?:\d[ -]?){13,16}\b')),
     ("IP_ADDRESS", re.compile(r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b')),
     ("AWS_API_KEY", re.compile(r'\b(?:sk-[a-zA-Z0-9]{32,48}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b')),
     ("GITHUB_PAT", re.compile(r'\b(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]+)\b')),
