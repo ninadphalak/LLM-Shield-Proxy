@@ -305,7 +305,7 @@ Every published release includes automated SHA-256 checksums (`checksums.txt`) a
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
-Get-FileHash llm-shield-proxy-source-v1.0.4.zip -Algorithm SHA256
+Get-FileHash llm-shield-proxy-source-v1.0.11.zip -Algorithm SHA256
 
 # 2. Verify Cryptographic GPG Signature:
 gpg --verify checksums.txt.asc checksums.txt
@@ -329,9 +329,8 @@ If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md]
 I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
 
 1. **Cythonize the Sliding-Window Buffer**
-   - **Status:** Intentionally Preserved in the Open-Source Roadmap.
-   - **Why this is strategic:** Instead of compiling `streaming.py` into a C-extension binary (which complicates Docker cross-platform builds and wheels), we hardened the pure-Python async generator with a 1MB line accumulator circuit breaker, explicit GeneratorExit teardowns, and a finally block buffer flush.
-   - **The EB-1A Advantage:** Leaving "Cythonize / mypyc the lookahead buffer" listed in the README.md under "Future Technical Roadmap" is strategic open-source bait. It invites low-level systems/C++ developers to open Pull Requests (PRs) on your repository, which helps build your public dependency and contributor footprint.
+   - **Status:** Planned for future releases.
+   - **Why this is strategic:** Instead of compiling `streaming.py` into a C-extension binary (which complicates Docker cross-platform builds and wheels), we currently hardened the pure-Python async generator with a 1MB line accumulator circuit breaker, explicit GeneratorExit teardowns, and a finally block buffer flush. Future optimizations will explore Cython or mypyc for further microsecond latency reductions.
 
 ---
 
