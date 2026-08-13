@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from typing import Optional
 from functools import lru_cache
+import ipaddress
+import socket
 
 @lru_cache(maxsize=1024)
 def get_virtual_key_id(client_auth: str) -> str:
@@ -50,7 +52,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LLM-Shield Proxy",
     description="Enterprise Zero-Egress Privacy Redaction Middleware Proxy",
-    version="1.0.9",
+    version="1.0.12",
     lifespan=lifespan
 )
 
@@ -126,9 +128,14 @@ async def _proxy_catch_all_internal(
         if x_upstream_base_url.startswith("http://") or x_upstream_base_url.startswith("https://"):
             parsed = urlparse(x_upstream_base_url)
             hostname = parsed.hostname or ""
-            if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254"):
-                return JSONResponse(status_code=403, content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}})
-            upstream_base = x_upstream_base_url
+            try:
+                ip = socket.gethostbyname(hostname)
+                ip_obj = ipaddress.ip_address(ip)
+                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
+                    return JSONResponse(status_code=403, content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}})
+                upstream_base = x_upstream_base_url
+            except socket.gaierror:
+                return JSONResponse(status_code=400, content={"error": {"message": "Unresolvable upstream hostname", "type": "security_error"}})
 
     target_url = build_target_url(upstream_base, path)
 
@@ -175,25 +182,17 @@ async def _proxy_catch_all_internal(
     virtual_key_id = "BYOK"
 
     valid_keys = settings.valid_virtual_keys_set
-    if valid_keys:
-        if client_auth in valid_keys:
-            is_virtual_key = True
-            virtual_key_id = get_virtual_key_id(client_auth)
-        elif client_auth.startswith("sk-proj-") or client_auth.startswith("sk-ant-") or client_auth.startswith("AIza"):
-            is_byok = True
-        else:
-            # Missing or Invalid Key
-            return JSONResponse(
-                status_code=401,
-                content={"error": {"message": "Invalid Proxy API Key", "type": "authentication_error"}}
-            )
+    if valid_keys and client_auth in valid_keys:
+        is_virtual_key = True
+        virtual_key_id = get_virtual_key_id(client_auth)
+    elif client_auth.startswith("sk-proj-") or client_auth.startswith("sk-ant-") or client_auth.startswith("AIza"):
+        is_byok = True
     else:
-        # Dev Fallback Mode
-        if client_auth.startswith("sk-proxy-") or "dummy" in client_auth.lower() or "local" in client_auth.lower():
-            is_virtual_key = True
-            virtual_key_id = "dev-fallback"
-        else:
-            is_byok = True
+        # Require a valid Virtual Key or a known Provider Key format
+        return JSONResponse(
+            status_code=401,
+            content={"error": {"message": "Invalid Proxy API Key", "type": "authentication_error"}}
+        )
 
     if is_virtual_key:
         # Dynamic Enterprise Key Routing (Centralized Keys)

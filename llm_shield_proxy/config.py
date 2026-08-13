@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     
     REDIS_URL: Optional[str] = None
     SESSION_TTL_SECONDS: int = 3600
+    MAX_SESSION_VAULTS: int = 10000
 
     # Telemetry: Strictly Opt-In (Bring Your Own Database)
     TELEMETRY_ENABLED: bool = False

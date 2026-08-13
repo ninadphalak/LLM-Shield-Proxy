@@ -1,5 +1,7 @@
 import re
 from typing import Dict, Optional
+from collections import OrderedDict
+from llm_shield_proxy.config import settings
 
 
 class Vault:
@@ -48,20 +50,29 @@ class Vault:
 class VaultStore:
     """
     Store holding session-scoped vaults.
-    If session_id is provided, vault persists across requests for that session_id.
-    Otherwise, an ephemeral Vault is returned for a single request.
+    Uses an OrderedDict to enforce a maximum capacity (LRU eviction) to prevent OOM memory leaks.
     """
     def __init__(self):
-        self._sessions: Dict[str, Vault] = {}
+        self._sessions: OrderedDict[str, Vault] = OrderedDict()
+        self.max_capacity = settings.MAX_SESSION_VAULTS
 
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
         if not session_id:
             return Vault()
         
         vault_key = f"{virtual_key_id}:{session_id}"
-        if vault_key not in self._sessions:
-            self._sessions[vault_key] = Vault()
-        return self._sessions[vault_key]
+        
+        if vault_key in self._sessions:
+            self._sessions.move_to_end(vault_key)
+            return self._sessions[vault_key]
+        
+        # Evict oldest if at capacity
+        if len(self._sessions) >= self.max_capacity:
+            self._sessions.popitem(last=False)
+            
+        new_vault = Vault()
+        self._sessions[vault_key] = new_vault
+        return new_vault
 
     def clear_session(self, session_id: str, virtual_key_id: str = "default"):
         vault_key = f"{virtual_key_id}:{session_id}"
