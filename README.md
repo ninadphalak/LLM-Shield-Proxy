@@ -334,11 +334,17 @@ I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency 
 
 ---
 
-## 🏢 Using LLM-Shield-Proxy in Production?
+🏢 Using LLM-Shield in Production?
 
-I am actively working with enterprise security teams to map out advanced compliance features. If your startup or organization is using LLM-Shield-Proxy to unblock LLM streaming or pass SOC 2/HIPAA audits, I would love to hear from you.
+If your organization is evaluating, benchmarking, or deploying LLM-Shield to unblock LLM streaming and meet strict compliance requirements (like SOC 2/HIPAA), I would love to hear from you.
 
-Email the core maintainer at ninadphalak@gmail.com to share your feedback, request a feature, or feature your team as a case study.
+I am actively gathering feedback from security and engineering leaders to map out advanced compliance features and shape the open-source roadmap.
+
+Architecture Discussions: Open a GitHub Discussion to share your feedback on high-throughput deployments, custom proxy pipelines, or benchmark results.
+
+Enterprise Case Studies: If your startup or enterprise is using the proxy in production, let us know! We would love to highlight your architecture and feature your team in our community benchmarks.
+
+Reach out directly at ninadphalak@gmail.com to share your use case, request a feature, or discuss how you are using LLM-Shield in your stack.
 
 ---
 
@@ -349,6 +355,5 @@ Email the core maintainer at ninadphalak@gmail.com to share your feedback, reque
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
 * **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730).
 
-For enterprise licensing inquiries, custom compliance modules, or proprietary control-plane integration, contact the core maintainer directly at **ninadphalak@gmail.com**.
 
 
