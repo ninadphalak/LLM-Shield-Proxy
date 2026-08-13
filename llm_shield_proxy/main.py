@@ -52,10 +52,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LLM-Shield Proxy",
     description="Enterprise Zero-Egress Privacy Redaction Middleware Proxy",
-    version="1.0.12",
+    version="1.0.13",
     lifespan=lifespan
 )
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"message": "Internal Server Error", "type": "server_error"}}
+    )
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
     if not hasattr(request.app.state, "http_client") or request.app.state.http_client is None:
@@ -285,6 +299,7 @@ async def _proxy_catch_all_internal(
                             yield chunk
                     finally:
                         llm_shield_sse_active_streams.dec()
+                        await upstream_res.aclose()
 
                 return StreamingResponse(
                     wrapped_stream(),
