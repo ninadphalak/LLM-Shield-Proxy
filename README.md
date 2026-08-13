@@ -305,7 +305,7 @@ Every published release includes automated SHA-256 checksums (`checksums.txt`) a
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
-Get-FileHash llm-shield-proxy-source-v1.0.12.zip -Algorithm SHA256
+Get-FileHash llm-shield-proxy-source-v1.0.13.zip -Algorithm SHA256
 
 # 2. Verify Cryptographic GPG Signature:
 gpg --verify checksums.txt.asc checksums.txt

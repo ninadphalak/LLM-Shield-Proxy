@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_shield_proxy"
-version = "1.0.12"
+version = "1.0.13"
 description = "High-performance enterprise PII redaction and context preservation proxy for Large Language Models"
 readme = "README.md"
 requires-python = ">=3.9"

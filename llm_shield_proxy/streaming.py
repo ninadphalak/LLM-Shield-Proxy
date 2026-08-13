@@ -1,5 +1,6 @@
 import orjson as json
 import asyncio
+import codecs
 from typing import AsyncGenerator, Optional
 from llm_shield_proxy.vault import Vault
 
@@ -59,10 +60,11 @@ async def rehydrate_sse_stream(
     line_accumulator = ""
     client_disconnected = False
     MAX_LINE_LENGTH = 1048576  # 1MB limit to prevent Slowloris buffer poisoning
+    decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
 
     try:
         async for chunk in raw_stream:
-            chunk_text = chunk.decode("utf-8", errors="replace")
+            chunk_text = decoder.decode(chunk, final=False)
             line_accumulator += chunk_text
 
             if len(line_accumulator) > MAX_LINE_LENGTH:
@@ -103,7 +105,11 @@ async def rehydrate_sse_stream(
         raise
     finally:
         if not client_disconnected:
-            # Flush remaining buffer at stream end or stream abort
+            # Decode any trailing bytes and process remaining buffer
+            trailing_text = decoder.decode(b"", final=True)
+            if trailing_text:
+                line_accumulator += trailing_text
+
             remaining = buffer.process_delta_text("", is_final=True)
             if remaining:
                 # Emit remaining flushed text if any left
