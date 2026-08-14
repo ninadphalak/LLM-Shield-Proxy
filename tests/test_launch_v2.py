@@ -48,11 +48,11 @@ else:
 def get_cli_args():
     parser = argparse.ArgumentParser(description="Test LLM-Shield-Proxy V2 Synthetic Swapping")
     parser.add_argument("--model", type=str, default=default_test_model, help="Upstream model to test")
-    parser.add_argument("--stream-speed", type=float, default=0.03, help="Delay between streaming tokens for GIF recording")
+    parser.add_argument("--stream-speed", type=float, default=0.015, help="Delay between streaming tokens for GIF recording (default: 0.015s)")
     return parser.parse_known_args()[0]
 
 TARGET_MODEL = default_test_model
-STREAM_SPEED = 0.03
+STREAM_SPEED = 0.015
 
 # Automatically resolve a valid key from .env so no manual env setting is required:
 valid_keys_env = os.environ.get("VALID_VIRTUAL_KEYS", "")

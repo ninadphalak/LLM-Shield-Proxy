@@ -38,9 +38,11 @@ else:
 def get_cli_args():
     parser = argparse.ArgumentParser(description="Test LLM-Shield-Proxy")
     parser.add_argument("--model", type=str, default=default_test_model, help="Upstream model to test against")
+    parser.add_argument("--stream-speed", type=float, default=0.015, help="Artificial typewriter delay per chunk (default: 0.015s)")
     return parser.parse_known_args()[0]
 
 TARGET_MODEL = default_test_model
+STREAM_SPEED = 0.015
 
 # Automatically resolve a valid key from .env so no manual env setting is required:
 valid_keys_env = os.environ.get("VALID_VIRTUAL_KEYS", "")
@@ -58,7 +60,7 @@ client = OpenAI(
     base_url="http://localhost:8000/v1"
 )
 
-def run_example(title, prompt, model=TARGET_MODEL):
+def run_example(title, prompt, model=TARGET_MODEL, stream_speed=STREAM_SPEED):
     # Clear screen for a clean GIF recording frame
     os.system('cls' if os.name == 'nt' else 'clear')
     
@@ -87,19 +89,20 @@ def run_example(title, prompt, model=TARGET_MODEL):
     try:
         print("\n\n[3] Streaming Re-hydrated Response (Proxy -> User):\n")
         
-        import threading
-        import itertools
-        
         stop_event = threading.Event()
         
         def animate_wait():
             spinner = itertools.cycle([".  ", ".. ", "..."])
             while not stop_event.is_set():
-                sys.stdout.write(f"\r    \033[3m(waiting for upstream LLM to process{next(spinner)})\033[0m")
+                sys.stdout.write(f"\r    (waiting for upstream LLM to process{next(spinner)})")
                 sys.stdout.flush()
-                time.sleep(0.3)
-                
+                time.sleep(0.15)
+            # Clear the loading text cleanly
+            sys.stdout.write("\r" + " " * 60 + "\r    ")
+            sys.stdout.flush()
+
         t = threading.Thread(target=animate_wait)
+        t.daemon = True
         t.start()
         
         try:
@@ -145,8 +148,8 @@ def run_example(title, prompt, model=TARGET_MODEL):
                     sys.stdout.write(line)
                 sys.stdout.flush()
                 
-                # Tiny sleep masks erratic network jitter for a perfectly smooth GIF
-                time.sleep(0.03)
+                # Fast, smooth typing pace for crisp GIF recording
+                time.sleep(stream_speed)
 
         process_chunk(first_chunk)
         for chunk in chunk_iter:
@@ -168,14 +171,15 @@ prompts = [
      "Patient John Smith (DOB: 10/14/1981, SSN: 555-44-3333, MRN: #982341, Phone: 555-019-9537, Email: jsmith81@email.com, Insurance ID: HIX-9928310, IP: 192.168.1.45) was admitted to Mayo Clinic by Dr. House for acute bronchitis and high blood pressure. Check his Azithromycin dose and list what else could cause his cough."),
     
     ("TEST 2: SOC 2 Compliance (Core Banking & KYC)", 
-     "Hey, can you help me reconcile the ledger discrepancies for John Smith (DOB: 10/14/1981, SSN: 555-44-3333, Acct #982341, Phone: 555-019-9537, Email: jsmith@bankcorp.com, IP: 192.168.1.45) across our Core Banking system and identify if these unauthorized adjustments breach our risk framework?")
+     "Please verify the KYC account onboarding records for John Smith (DOB: 10/14/1981, SSN: 555-44-3333, Acct #982341, Phone: 555-019-9537, Email: jsmith@bankcorp.com, IP: 192.168.1.45) across our Core Banking system and summarize his account status.")
 ]
 
 if __name__ == "__main__":
     cli_args = get_cli_args()
     TARGET_MODEL = cli_args.model
+    STREAM_SPEED = cli_args.stream_speed
     for i, (title, prompt) in enumerate(prompts):
-        run_example(title, prompt, model=TARGET_MODEL)
+        run_example(title, prompt, model=TARGET_MODEL, stream_speed=STREAM_SPEED)
         
         # Subtle animated countdown so the terminal doesn't look hung between tests/loops
         for remaining in range(12, 0, -1):
