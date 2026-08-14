@@ -414,11 +414,10 @@ Reach out directly at ninadphalak@gmail.com to share your use case, request a fe
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
 * **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730).
 
-For enterprise licensing inquiries, custom compliance modules, or proprietary control-plane integration, contact the core maintainer directly at **ninadphalak@gmail.com**.
-
 ---
 
 ## 🏛️ Looking for the Original Implementation?
 
 The original bracket-based structural tag streaming proxy (V1) is permanently archived and available in [Release 14 (v1.0.14)](https://github.com/ninadphalak/LLM-Shield-Proxy/releases/tag/v1.0.14).
+
 
