@@ -1,33 +1,153 @@
+"""Enterprise Configuration Module for LLM-Shield-Proxy.
+
+Centralizes, validates, and manages all environment variables, connection pools,
+security thresholds, and runtime settings using Pydantic Settings.
+"""
+
+from __future__ import annotations
+
 import os
-from typing import Optional
+import threading
+from typing import Optional, Set
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_config_reload_lock: threading.Lock = threading.Lock()
 
 
 class Settings(BaseSettings):
-    UPSTREAM_BASE_URL: str = "https://api.openai.com"
-    UPSTREAM_API_KEY: Optional[str] = None
-    
-    # Enterprise Multi-Provider Support
-    OPENAI_API_KEY: Optional[str] = None
-    GEMINI_API_KEY: Optional[str] = None
-    ANTHROPIC_API_KEY: Optional[str] = None
-    DEEPSEEK_API_KEY: Optional[str] = None
-    
-    # Virtual Key Scoping
-    VALID_VIRTUAL_KEYS: str = ""
-    valid_virtual_keys_set: frozenset = frozenset()
-    
-    REDIS_URL: Optional[str] = None
-    SESSION_TTL_SECONDS: int = 3600
-    MAX_SESSION_VAULTS: int = 10000
+    """Centralized, validated runtime configuration schema for LLM-Shield-Proxy."""
 
-    # Telemetry: Strictly Opt-In (Bring Your Own Database)
-    TELEMETRY_ENABLED: bool = False
-    TELEMETRY_ENDPOINT_URL: Optional[str] = None
-    TELEMETRY_API_KEY: Optional[str] = None
-    
-    METRICS_BEARER_TOKEN: Optional[str] = None
-    ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = False
+    # Server Configuration
+    HOST: str = Field(default="0.0.0.0", description="Proxy listen host")
+    PORT: int = Field(default=8000, description="Proxy listen port")
+    WORKERS: int = Field(default=1, description="Number of uvicorn worker processes")
+    LOG_LEVEL: str = Field(default="INFO", description="Standard logging level")
+
+    # Upstream Provider Configuration
+    UPSTREAM_BASE_URL: str = Field(
+        default="https://api.openai.com",
+        description="Default upstream LLM provider base URL"
+    )
+    UPSTREAM_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Fallback upstream API key"
+    )
+    OPENAI_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Centralized OpenAI API key"
+    )
+    GEMINI_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Centralized Google Gemini API key"
+    )
+    ANTHROPIC_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Centralized Anthropic API key"
+    )
+    DEEPSEEK_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Centralized DeepSeek API key"
+    )
+
+    # Virtual Key Scoping & Multi-Tenancy
+    VALID_VIRTUAL_KEYS: str = Field(
+        default="",
+        description="Comma-separated list of authorized virtual API keys"
+    )
+    ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = Field(
+        default=False,
+        description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
+    )
+
+    # Vault & Session Storage Configuration
+    REDIS_URL: Optional[str] = Field(
+        default=None,
+        description="Redis connection URL for distributed vault state (e.g., redis://localhost:6379/0)"
+    )
+    SESSION_TTL_SECONDS: int = Field(
+        default=3600,
+        description="Time-to-live in seconds for session vault states"
+    )
+    MAX_SESSION_VAULTS: int = Field(
+        default=10000,
+        description="Maximum capacity of in-memory LRU session vault cache"
+    )
+
+    # Redaction & Detection Cascade Settings
+    ENABLE_SYNTHETIC_SWAPPING: bool = Field(
+        default=False,
+        description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
+    )
+    ENABLE_TIER2_ENTROPY: bool = Field(
+        default=True,
+        description="Enable Tier 2 Shannon Entropy detection for unformatted high-entropy secrets"
+    )
+    SHANNON_ENTROPY_THRESHOLD: float = Field(
+        default=4.5,
+        description="Entropy threshold in bits/symbol (tau_H >= 4.5) for flagging raw secrets"
+    )
+    SHANNON_MIN_LENGTH: int = Field(
+        default=16,
+        description="Minimum token length to apply Shannon entropy analysis"
+    )
+    ENABLE_TIER3_ONNX_NER: bool = Field(
+        default=False,
+        description="Enable Tier 3 ONNX Runtime contextual Named Entity Recognition"
+    )
+    ONNX_MODEL_PATH: Optional[str] = Field(
+        default=None,
+        description="Filesystem path to quantized ONNX BERT-NER model weights"
+    )
+
+    # HTTP Client & Connection Pooling
+    HTTP_TIMEOUT_SECONDS: float = Field(
+        default=120.0,
+        description="Total HTTP request timeout for upstream communication in seconds"
+    )
+    HTTP_CONNECT_TIMEOUT_SECONDS: float = Field(
+        default=10.0,
+        description="HTTP connection establishment timeout in seconds"
+    )
+    HTTP_MAX_KEEPALIVE_CONNECTIONS: int = Field(
+        default=100,
+        description="Maximum keep-alive connections in httpx client pool"
+    )
+    HTTP_MAX_CONNECTIONS: int = Field(
+        default=500,
+        description="Maximum total concurrent connections in httpx client pool"
+    )
+
+    # Security & Buffer Bounds
+    MAX_PAYLOAD_SIZE_BYTES: int = Field(
+        default=10 * 1024 * 1024,
+        description="Maximum allowed request payload size in bytes (10MB default)"
+    )
+    MAX_SSE_LINE_LENGTH: int = Field(
+        default=1024 * 1024,
+        description="Maximum allowed SSE line length in bytes to prevent Slowloris buffer poisoning (1MB default)"
+    )
+
+    # Telemetry & Metrics (Strictly Opt-In)
+    TELEMETRY_ENABLED: bool = Field(
+        default=False,
+        description="Enable external audit telemetry event forwarding"
+    )
+    TELEMETRY_ENDPOINT_URL: Optional[str] = Field(
+        default=None,
+        description="Target webhook endpoint URL for audit telemetry"
+    )
+    TELEMETRY_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Authorization header for telemetry endpoint"
+    )
+    METRICS_BEARER_TOKEN: Optional[str] = Field(
+        default=None,
+        description="Optional Bearer token protecting the /metrics Prometheus endpoint"
+    )
+
+    # Internal dynamic cache
+    _valid_virtual_keys_set: frozenset[str] = frozenset()
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -35,32 +155,49 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    def reload(self):
-        import yaml
-        import os
-        config_path = "config.yaml"
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    yaml_config = yaml.safe_load(f)
-                    if yaml_config:
-                        for k, v in yaml_config.items():
-                            if hasattr(self, k.upper()):
-                                setattr(self, k.upper(), v)
-            except Exception as e:
-                pass
-        else:
-            from dotenv import dotenv_values
-            env_vals = dotenv_values(".env")
-            for k, v in env_vals.items():
-                if hasattr(self, k.upper()) and v is not None:
-                    setattr(self, k.upper(), v)
-        
-        # Atomically update the set reference
-        if self.VALID_VIRTUAL_KEYS:
-            self.valid_virtual_keys_set = frozenset([k.strip() for k in self.VALID_VIRTUAL_KEYS.split(",") if k.strip()])
-        else:
-            self.valid_virtual_keys_set = frozenset()
+    @property
+    def valid_virtual_keys_set(self) -> frozenset[str]:
+        """Returns the pre-computed, immutable set of valid virtual keys."""
+        return self._valid_virtual_keys_set
+
+    @valid_virtual_keys_set.setter
+    def valid_virtual_keys_set(self, keys: Set[str] | frozenset[str]) -> None:
+        """Allows direct mutation of valid virtual keys set for testing/dynamic configuration."""
+        self._valid_virtual_keys_set = frozenset(keys)
+
+    def reload(self) -> None:
+        """Reload configuration from disk (config.yaml or .env) safely."""
+        with _config_reload_lock:
+            config_path = "config.yaml"
+            if os.path.exists(config_path):
+                try:
+                    import yaml
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        yaml_config = yaml.safe_load(f)
+                        if isinstance(yaml_config, dict):
+                            for k, v in yaml_config.items():
+                                attr_name = k.upper()
+                                if hasattr(self, attr_name) and v is not None:
+                                    setattr(self, attr_name, v)
+                except Exception:
+                    pass
+            else:
+                try:
+                    from dotenv import dotenv_values
+                    env_vals = dotenv_values(".env")
+                    for k, v in env_vals.items():
+                        attr_name = k.upper()
+                        if hasattr(self, attr_name) and v is not None:
+                            setattr(self, attr_name, v)
+                except Exception:
+                    pass
+
+            if self.VALID_VIRTUAL_KEYS:
+                keys = [k.strip() for k in self.VALID_VIRTUAL_KEYS.split(",") if k.strip()]
+                self._valid_virtual_keys_set = frozenset(keys)
+            else:
+                self._valid_virtual_keys_set = frozenset()
+
 
 settings = Settings()
 settings.reload()
