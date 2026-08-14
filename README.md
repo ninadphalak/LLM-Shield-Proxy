@@ -123,13 +123,13 @@ If unbuffered, `[PER` leaks to the user's screen as raw un-hydrated text.
 
 **Fixing the "Bracket Trap":** Legacy buffers assumed entities were enclosed in brackets `[` ... `]`. When synthetic swapping is active, entities are realistic natural words (e.g. `Maya`, `Sarah`). 
 
-**The Engineering Solution:** An asynchronous `SSERehydrationBuffer` dynamically tracks the longest suffix-to-prefix overlap of active vault tokens, retaining only the necessary trailing characters bounded by $L = \max(0, \text{max\_token\_length} - 1)$ during intermediate chunks. When `data: [DONE]` or EOF arrives, the buffer executes an immediate complete flush with $L = 0$, guaranteeing zero token leakage and zero UI jitter.
+**The Engineering Solution:** An asynchronous `SSERehydrationBuffer` dynamically tracks the longest suffix-to-prefix overlap of active vault tokens, retaining only the necessary trailing characters bounded by `L = max(0, max_token_length - 1)` during intermediate chunks. When `data: [DONE]` or EOF arrives, the buffer executes an immediate complete flush with `L = 0`, guaranteeing zero token leakage and zero UI jitter.
 
 ### 2. The 3-Tier Cascade Engine (<24MB RAM Footprint)
 
 To achieve sub-millisecond execution without blowing up infrastructure costs:
 - **Tier 1 (Sub-millisecond Pre-compiled DFA Regex):** Scans structured identifiers (SSNs, Credit Cards, Emails, Phone Numbers, IPv4/IPv6, API Keys, SSH Keys, JWTs) in **<0.03ms**.
-- **Tier 2 (Shannon Entropy Filter):** Computes Shannon entropy $H(S) = -\sum p(c)\log_2 p(c)$ on candidate tokens ($\ge 16$ characters) to flag raw unformatted credentials ($\tau_H \ge 4.5\text{ bits/symbol}$) in **<6 µs**.
+- **Tier 2 (Shannon Entropy Filter):** Computes Shannon entropy $H(S) = -\sum p(c)\log_2 p(c)$ on candidate tokens ($\ge 16$ characters) to flag raw unformatted credentials ($\tau_H \ge 4.5$ bits/symbol) in **<6 µs**.
 - **Tier 3 (Contextual ONNX NER Pipeline):** Uses rule heuristics and an optional lazy-loaded quantized ONNX Named Entity Recognition (NER) model to catch unstructured person/org names in **~5–12ms**.
 
 By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **24MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
@@ -239,7 +239,7 @@ flowchart TD
 
 #### 📤 Outbound (Streaming De-redaction)
 1. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE).
-2. **Prefix-Aware Buffer:** Because tokens can be split across SSE chunks, the sliding-window buffer retains trailing prefix overlap up to $L = \max(0, \text{max\_token\_length} - 1)$.
+2. **Prefix-Aware Buffer:** Because tokens can be split across SSE chunks, the sliding-window buffer retains trailing prefix overlap up to `L = max(0, max_token_length - 1)`.
 3. **Re-hydration:** Once a tag or synthetic word is fully assembled, the proxy swaps the real data back from the local vault and streams the un-redacted text to the user's application in real-time.
 
 ---
@@ -337,7 +337,7 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 | **`MAX_SESSION_VAULTS`** | `int` | `10000` | Maximum in-memory LRU session vault capacity |
 | **`ENABLE_SYNTHETIC_SWAPPING`**| `bool` | `False` | Enables realistic synthetic entity replacement instead of tags |
 | **`ENABLE_TIER2_ENTROPY`** | `bool` | `True` | Enables Tier 2 Shannon Entropy detection for unformatted raw secrets |
-| **`SHANNON_ENTROPY_THRESHOLD`** | `float` | `4.5` | Shannon entropy threshold ($\tau_H \ge 4.5\text{ bits/symbol}$) for secret flagging |
+| **`SHANNON_ENTROPY_THRESHOLD`** | `float` | `4.5` | Shannon entropy threshold (`tau_H >= 4.5 bits/symbol`) for secret flagging |
 | **`SHANNON_MIN_LENGTH`** | `int` | `16` | Minimum token length to analyze for Shannon entropy |
 | **`ENABLE_TIER3_ONNX_NER`** | `bool` | `False` | Enables Tier 3 ONNX Runtime contextual NER pipeline |
 | **`ONNX_MODEL_PATH`** | `str` | `None` | Path to quantized ONNX BERT-NER model weights |
