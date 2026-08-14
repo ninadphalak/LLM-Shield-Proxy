@@ -52,7 +52,7 @@ TIER3_NER_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     (
         "PERSON",
         re.compile(
-            r"\b(?:(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s+(?:[A-Z][a-z]+\s*){1,4})|"
+            r"\b(?:(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})|"
             r"\b(?!(?:Patient|Check|The|A|An|In|On|At|And|Or|But|If|Hey|Can|You|Help|Please|Identify)\b)"
             r"(?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+\b"
         ),

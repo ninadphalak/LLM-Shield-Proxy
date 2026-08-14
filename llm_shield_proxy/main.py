@@ -35,7 +35,7 @@ from llm_shield_proxy.pii_engine import pii_engine
 from llm_shield_proxy.streaming import rehydrate_sse_stream
 from llm_shield_proxy.vault import RedisVaultStore, vault_store
 
-APP_VERSION = "1.0.15"
+APP_VERSION = "1.0.16"
 
 
 @lru_cache(maxsize=1024)
