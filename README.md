@@ -420,6 +420,7 @@ Reach out directly at ninadphalak@gmail.com to share your use case, request a fe
 
 ## 🏛️ Looking for the Original Implementation?
 
-The original bracket-based structural tag streaming proxy (V1) is permanently archived and available in [Release 14 (v1.0.14)](https://github.com/ninadphalak/LLM-Shield-Proxy/releases/tag/v1.0.14).
+The original bracket-based structural tag streaming proxy (V1) is permanently archived and available in [Release 14.1 (v1.0.14.1)](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/release/v1.0-legacy).
+
 
 
