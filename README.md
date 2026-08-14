@@ -1,6 +1,6 @@
 # LLM-Shield-Proxy 🛡️
 
-![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-demov2.gif)
+![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-ieee-v2.gif)
 
 *Secure, fast, and drop-in PII redaction and context preservation reverse proxy for Large Language Models.*
 
@@ -106,6 +106,28 @@ for chunk in response:
 | **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <24MB RAM:** Runs on a microsecond compiled regex + quantized ONNX NER engine. |
 | **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage:** Self-destructing TTL session vault built for zero data liability. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
+
+---
+
+## 🛡️ Redaction Modes
+
+LLM-Shield-Proxy supports two configurable tokenization strategies out of the box:
+
+| Mode | Configuration | Description | Best For |
+| :--- | :--- | :--- | :--- |
+| **Synthetic Swapping (Default)** | `ENABLE_SYNTHETIC_SWAPPING=true` | Deterministically substitutes PII with realistic, unbracketed entities (e.g., `Maya`, `Springfield`) to eliminate Byte-Pair Encoding (BPE) token bloat and preserve LLM attention weight distributions. | Modern LLMs, cost & latency optimization |
+| **Structural Tagging** | `ENABLE_SYNTHETIC_SWAPPING=false` | Substitutes PII with explicit bracketed type tags (e.g., `[PERSON_1]`, `[EMAIL_1]`). | Legacy compliance pipelines, deterministic regex auditing |
+
+<details>
+<summary><b>▶ Click to view Structural Tagging Demo (Bracketed Tag Stream)</b></summary>
+
+<br>
+
+![Structural Tagging Demo](docs/LLM-Shield-Proxy-patent-v1.gif)
+
+*Demonstration of microsecond streaming rehydration using explicit bracketed tags (`[PERSON_1]`, `[EMAIL_1]`).*
+
+</details>
 
 ---
 
@@ -308,10 +330,10 @@ Built-in liveness, readiness, and metrics endpoints explicitly support enterpris
 
 ```bash
 curl http://localhost:8000/healthz
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.15"}
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.16"}
 
 curl http://localhost:8000/readyz
-# Output: {"status":"ready","service":"llm-shield-proxy","version":"1.0.15","redis_connected":false}
+# Output: {"status":"ready","service":"llm-shield-proxy","version":"1.0.16","redis_connected":false}
 
 curl -X OPTIONS http://localhost:8000/v1/chat/completions
 # Returns 204 No Content with Access-Control-Allow-* headers
@@ -366,7 +388,7 @@ Every published release includes automated SHA-256 checksums (`checksums.txt`) a
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
-Get-FileHash llm-shield-proxy-source-v1.0.15.zip -Algorithm SHA256
+Get-FileHash llm-shield-proxy-source-v1.0.16.zip -Algorithm SHA256
 
 # 2. Verify Cryptographic GPG Signature:
 gpg --verify checksums.txt.asc checksums.txt
@@ -415,12 +437,6 @@ Reach out directly at ninadphalak@gmail.com to share your use case, request a fe
 
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
 * **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730).
-
----
-
-## 🏛️ Looking for the Original Implementation?
-
-The original bracket-based structural tag streaming proxy (V1) is permanently archived and available in [Release 14.1 (v1.0.14.1)](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/release/v1.0-legacy).
 
 
 

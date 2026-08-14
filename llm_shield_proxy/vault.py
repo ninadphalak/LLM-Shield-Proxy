@@ -75,12 +75,18 @@ class Vault:
             if self.synthetic:
                 seed = int(hashlib.md5(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
                 Faker.seed(seed)
-                if "PERSON" in entity_type:
+                if "PERSON" in entity_type or "NAME" in entity_type:
                     token = fake.first_name()
                 elif "EMAIL" in entity_type:
                     token = fake.email()
                 elif "SSN" in entity_type:
                     token = fake.ssn()
+                elif "PHONE" in entity_type:
+                    token = fake.phone_number()
+                elif "IP" in entity_type:
+                    token = fake.ipv4()
+                elif "CREDIT_CARD" in entity_type:
+                    token = fake.credit_card_number()
                 elif "GPE" in entity_type or "LOC" in entity_type:
                     token = fake.city()
                 else:
