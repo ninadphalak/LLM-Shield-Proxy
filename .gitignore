@@ -45,3 +45,8 @@ private_key.asc
 .idea/
 .vscode/
 *.swp
+
+# Local Demonstration / GIF Recording Scripts
+tests/test_launch*.py
+test_launch*.py
+
