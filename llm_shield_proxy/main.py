@@ -327,14 +327,23 @@ async def _proxy_catch_all_internal(
     is_virtual_key = False
     virtual_key_id = "BYOK"
 
+    parsed_url = urlparse(upstream_base)
+    hostname = parsed_url.hostname or ""
+    resolved_key = resolve_upstream_key(hostname)
+
     if valid_keys and client_auth in valid_keys:
         is_virtual_key = True
         virtual_key_id = get_virtual_key_id(client_auth)
-    elif client_auth.startswith(("sk-proj-", "sk-ant-", "AIza", "sk-")):
+    elif client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
+        # Direct genuine BYOK provider key
         is_virtual_key = False
     elif not valid_keys:
-        # Dev Fallback Mode
-        is_virtual_key = False
+        # Dev / Local Mode: if proxy has a configured upstream key, automatically inject it
+        if resolved_key:
+            is_virtual_key = True
+            virtual_key_id = "LOCAL_DEV"
+        else:
+            is_virtual_key = False
     else:
         return JSONResponse(
             status_code=401,
@@ -343,10 +352,6 @@ async def _proxy_catch_all_internal(
 
     # Centralized Virtual Key Swapping
     if is_virtual_key:
-        parsed_url = urlparse(upstream_base)
-        hostname = parsed_url.hostname or ""
-        resolved_key = resolve_upstream_key(hostname)
-
         if resolved_key:
             headers["authorization"] = f"Bearer {resolved_key}"
             headers.pop("x-api-key", None)
