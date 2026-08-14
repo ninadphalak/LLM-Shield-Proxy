@@ -136,8 +136,10 @@ By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shie
 
 ### 3. Enterprise Multi-Tenant Gateway & Security
 
-- **Stateless Multi-Tenant Virtual Keys:** Easily scope access using `VALID_VIRTUAL_KEYS` (e.g., `sk-proxy-finance`) allowing instant, team-level key revocation via environment variables without the overhead of a database.
-- **Smart BYOK Passthrough:** Automatic pass-through for provider keys (`sk-proj-...`, `AIza...`) with complete outbound proxy-header sanitization.
+- **Strict Zero-Trust Authentication & Anti-Open-Relay Defense:** To prevent "open relay" vulnerabilities where unauthorized callers could exhaust your upstream API budget, the proxy strictly validates every request:
+  - **Virtual Key Authorization (Centralized Billing):** Define authorized tenant keys in `VALID_VIRTUAL_KEYS` (e.g. `VALID_VIRTUAL_KEYS="sk-proxy-finance,sk-local-test-key"`). When an authorized key is supplied, the proxy securely swaps in your centralized upstream provider key (`OPENAI_API_KEY`, etc.) and tags the tenant in SIEM audit logs.
+  - **BYOK Passthrough (Direct User Billing):** Genuine provider keys (`sk-proj-...`, `sk-ant-...`, `AIza...`) are forwarded directly to upstream providers with outbound header sanitization.
+  - **Unauthorized Key Rejection:** Any unlisted virtual key or unrecognized token is immediately rejected with `401 Unauthorized`.
 - **Multi-Provider Header Support:** Full native support for inbound `Authorization: Bearer`, `x-api-key` (Anthropic), and `x-goog-api-key` (Gemini) headers.
 - **Upstream Resilience & Error Standardization:** Graceful handling of 502/503/429 upstream provider errors into clean, OpenAI-formatted JSON payloads, plus robust mid-stream buffer release guarantees.
 - **Zero-Egress Security:** 100% of PII scanning and re-hydration happens locally within your VPC. No prompt data or telemetry ever leaves your server.
@@ -330,7 +332,7 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 | **`ANTHROPIC_API_KEY`** | `str` | `None` | Centralized Anthropic API key |
 | **`DEEPSEEK_API_KEY`** | `str` | `None` | Centralized DeepSeek API key |
 | **`UPSTREAM_API_KEY`** | `str` | `None` | Fallback upstream API key |
-| **`VALID_VIRTUAL_KEYS`** | `str` | `""` | Comma-separated list of authorized virtual keys (e.g. `sk-proxy-dev,sk-proxy-prod`) |
+| **`VALID_VIRTUAL_KEYS`** | `str` | `""` | Comma-separated list of authorized client virtual keys (e.g. `sk-proxy-finance,sk-local-test-key`) |
 | **`ALLOW_CLIENT_UPSTREAM_OVERRIDE`** | `bool` | `False` | Allow clients to override upstream URL via `X-Upstream-Base-Url` (SSRF protected) |
 | **`REDIS_URL`** | `str` | `None` | Redis connection URL for distributed vault state (e.g. `redis://localhost:6379/0`) |
 | **`SESSION_TTL_SECONDS`** | `int` | `3600` | Rolling TTL in seconds for session vault states |
