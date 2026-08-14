@@ -22,7 +22,7 @@ def test_shannon_entropy_calculation():
 def test_pii_tier1_structured_redaction():
     """Tests Tier 1 DFA regex extraction for structured patterns."""
     engine = PIIEngine(enable_tier2=False, enable_tier3=False)
-    vault = Vault()
+    vault = Vault(synthetic=False)
 
     sample_text = (
         "User info: email john.doe@acme.org, SSN 123-45-6789, "
@@ -49,7 +49,7 @@ def test_pii_tier1_structured_redaction():
 def test_pii_tier2_shannon_entropy_redaction():
     """Tests Tier 2 Shannon entropy detection for raw unformatted high-entropy secrets."""
     engine = PIIEngine(enable_tier2=True, enable_tier3=False, entropy_threshold=4.5)
-    vault = Vault()
+    vault = Vault(synthetic=False)
 
     # Highly random 32-character secret key with high entropy (>= 4.5 bits)
     raw_high_entropy_secret = "9fK7w2mP8xL1qA4zD6eR0tY3uI5oN8vB"
@@ -66,7 +66,7 @@ def test_pii_tier2_shannon_entropy_redaction():
 def test_pii_tier3_ner_redaction():
     """Tests Tier 3 contextual Named Entity Recognition for person names."""
     engine = PIIEngine(enable_tier2=False, enable_tier3=True)
-    vault = Vault()
+    vault = Vault(synthetic=False)
 
     sample_text = "Please reach out to Dr. Sarah Connor for further details."
     redacted = engine.redact_text(sample_text, vault)
@@ -81,7 +81,7 @@ def test_pii_tier3_ner_redaction():
 def test_pii_payload_redaction():
     """Tests deep recursive payload redaction across OpenAI message schemas."""
     engine = PIIEngine(enable_tier2=True, enable_tier3=True)
-    vault = Vault()
+    vault = Vault(synthetic=False)
 
     payload = {
         "model": "gpt-4",
@@ -97,10 +97,27 @@ def test_pii_payload_redaction():
     assert vault.token_to_original["[EMAIL_1]"] == "alice@example.com"
 
 
+def test_pii_synthetic_swapping():
+    """Tests realistic unbracketed synthetic entity swapping (Method B)."""
+    engine = PIIEngine(enable_tier2=True, enable_tier3=True)
+    vault = Vault(synthetic=True)
+
+    sample_text = "Patient John Doe visited our Boston clinic. Contact john.doe@example.com"
+    redacted = engine.redact_text(sample_text, vault)
+
+    # Asserts no bracket placeholders are present
+    assert "[" not in redacted and "]" not in redacted
+    assert "John Doe" not in redacted
+    assert "john.doe@example.com" not in redacted
+
+    rehydrated = vault.rehydrate(redacted)
+    assert rehydrated == sample_text
+
+
 def test_dlp_redos_base64_obfuscation():
     """Simulate attack passing massive Base64 strings to assert strict bounded execution."""
     engine = PIIEngine(enable_tier2=False, enable_tier3=False)
-    vault = Vault()
+    vault = Vault(synthetic=False)
 
     base_secret = "AKIAIOSFODNN7EXAMPLE" * 1000
     encoded_secret = base64.b64encode(base_secret.encode("utf-8")).decode("utf-8")

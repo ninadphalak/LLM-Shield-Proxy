@@ -3,7 +3,7 @@ from llm_shield_proxy.vault import Vault, VaultStore
 
 
 def test_vault_deterministic_mapping():
-    vault = Vault()
+    vault = Vault(synthetic=False)
     t1 = vault.get_or_create_token("sarah@example.com", "EMAIL")
     assert t1 == "[EMAIL_1]"
 
@@ -17,7 +17,7 @@ def test_vault_deterministic_mapping():
 
 
 def test_vault_rehydration():
-    vault = Vault()
+    vault = Vault(synthetic=False)
     t_person = vault.get_or_create_token("Sarah Connor", "PERSON")
     t_email = vault.get_or_create_token("sarah@skynet.com", "EMAIL")
 
@@ -26,9 +26,22 @@ def test_vault_rehydration():
     assert rehydrated == "Contact Sarah Connor at sarah@skynet.com for assistance."
 
 
+def test_vault_synthetic_swapping_deterministic():
+    vault = Vault(synthetic=True)
+    t_person = vault.get_or_create_token("Sarah Connor", "PERSON")
+    assert "[" not in t_person and "]" not in t_person
+    # Determinism: same value returns same synthetic token
+    t_person2 = vault.get_or_create_token("Sarah Connor", "PERSON")
+    assert t_person == t_person2
+
+    text = f"Patient {t_person} attended appointment."
+    assert vault.rehydrate(text) == "Patient Sarah Connor attended appointment."
+
+
 def test_vault_store_session_persistence():
     store = VaultStore()
     v1 = store.get_vault("session-123")
+    v1.synthetic = False
     token_a = v1.get_or_create_token("555-0199", "PHONE")
 
     v2 = store.get_vault("session-123")

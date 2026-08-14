@@ -335,7 +335,7 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 | **`REDIS_URL`** | `str` | `None` | Redis connection URL for distributed vault state (e.g. `redis://localhost:6379/0`) |
 | **`SESSION_TTL_SECONDS`** | `int` | `3600` | Rolling TTL in seconds for session vault states |
 | **`MAX_SESSION_VAULTS`** | `int` | `10000` | Maximum in-memory LRU session vault capacity |
-| **`ENABLE_SYNTHETIC_SWAPPING`**| `bool` | `False` | Enables realistic synthetic entity replacement instead of tags |
+| **`ENABLE_SYNTHETIC_SWAPPING`**| `bool` | `True` | Enables realistic synthetic entity replacement instead of tags |
 | **`ENABLE_TIER2_ENTROPY`** | `bool` | `True` | Enables Tier 2 Shannon Entropy detection for unformatted raw secrets |
 | **`SHANNON_ENTROPY_THRESHOLD`** | `float` | `4.5` | Shannon entropy threshold (`tau_H >= 4.5 bits/symbol`) for secret flagging |
 | **`SHANNON_MIN_LENGTH`** | `int` | `16` | Minimum token length to analyze for Shannon entropy |

@@ -12,7 +12,7 @@ def test_extreme_split_tag_across_chunks():
     ['Hello ', '[', 'PE', 'RSON', '_1', ']', '! Welcome.']
     Verifies that the buffer holds partial brackets and only re-hydrates once the closing ']' tag arrives.
     """
-    vault = Vault()
+    vault = Vault(synthetic=False)
     token = vault.get_or_create_token("John Doe", "PERSON")
     assert token == "[PERSON_1]"
 
@@ -49,7 +49,7 @@ def test_massive_streaming_response_memory_bounds():
     Simulates a 10,000-token SSE streaming response to ensure the sliding-window buffer
     flushes continuously chunk-by-chunk and does not accumulate memory or cause a RAM spike.
     """
-    vault = Vault()
+    vault = Vault(synthetic=False)
     vault.get_or_create_token("John Doe", "PERSON")
     buffer = SSERehydrationBuffer(vault)
 
@@ -78,7 +78,7 @@ def test_markdown_code_brackets_no_lockup():
     (e.g., Python lists `my_list = [1, 2, 3]` or long unclosed bracket text)
     to ensure the buffer releases content once MAX_TAG_LENGTH is exceeded.
     """
-    vault = Vault()
+    vault = Vault(synthetic=False)
     buffer = SSERehydrationBuffer(vault)
 
     # Natural Python list bracket
@@ -103,7 +103,7 @@ async def test_rehydrate_sse_stream_async_stress():
     """
     Tests async SSE stream rehydration generator under stream stress.
     """
-    vault = Vault()
+    vault = Vault(synthetic=False)
     vault.get_or_create_token("Sarah Connor", "PERSON")
 
     async def mock_sse_stream():
@@ -125,7 +125,7 @@ async def test_rehydrate_sse_stream_concurrent_stress():
     Flood the async generator with 500 simultaneous streaming connections 
     to assert the underlying event loop remains non-blocking and processes correctly.
     """
-    vault = Vault()
+    vault = Vault(synthetic=False)
     vault.get_or_create_token("Sarah Connor", "PERSON")
 
     async def single_stream_task():

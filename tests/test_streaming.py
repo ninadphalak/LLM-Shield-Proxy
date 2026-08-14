@@ -7,7 +7,7 @@ from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_strea
 
 def test_sse_buffer_split_tag_handling():
     """Tests that placeholder tags split across SSE chunk boundaries are retained and flushed cleanly."""
-    vault = Vault()
+    vault = Vault(synthetic=False)
     t_email = vault.get_or_create_token("sarah@skynet.com", "EMAIL")
     assert t_email == "[EMAIL_1]"
 
@@ -28,7 +28,7 @@ def test_sse_buffer_split_tag_handling():
 
 def test_sse_buffer_synthetic_unbracketed_word_fragmentation():
     """Tests fragmented SSE chunks for synthetic unbracketed entities (e.g., 'Maya' or 'Sarah')."""
-    vault = Vault()
+    vault = Vault(synthetic=True)
     # Register synthetic mapping manually into the vault
     vault.token_to_original["Maya"] = "OriginalSensitiveName"
     vault.original_to_token["OriginalSensitiveName"] = "Maya"
@@ -61,7 +61,7 @@ def test_sse_buffer_synthetic_unbracketed_word_fragmentation():
 @pytest.mark.asyncio
 async def test_rehydrate_sse_stream_generator():
     """Tests async generator rehydrating SSE stream with split tokens across JSON deltas."""
-    vault = Vault()
+    vault = Vault(synthetic=False)
     vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
 
     async def mock_upstream_stream():
