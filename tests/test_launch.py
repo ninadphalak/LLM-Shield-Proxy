@@ -22,8 +22,9 @@ C_YELLOW = '\033[93m'
 C_CYAN = '\033[96m'
 C_RESET = '\033[0m'
 
-from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_REPO_ROOT / ".env")
 
 upstream_url = os.environ.get("UPSTREAM_BASE_URL", "api.openai.com").lower()
 if "generativelanguage" in upstream_url:

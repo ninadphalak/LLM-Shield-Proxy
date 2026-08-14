@@ -18,13 +18,15 @@ import argparse
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
 from llm_shield_proxy.pii_engine import pii_engine
 from llm_shield_proxy.vault import Vault
 
-load_dotenv()
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_REPO_ROOT / ".env")
 
 # ANSI Colors for rich terminal presentation
 C_GREEN = "\033[92m"

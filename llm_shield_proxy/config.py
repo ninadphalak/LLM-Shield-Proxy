@@ -15,6 +15,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _config_reload_lock: threading.Lock = threading.Lock()
 
 
+from pathlib import Path
+
+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent
+_ENV_FILE_PATH: str = str(_REPO_ROOT / ".env")
+
+
 class Settings(BaseSettings):
     """Centralized, validated runtime configuration schema for LLM-Shield-Proxy."""
 
@@ -150,7 +156,7 @@ class Settings(BaseSettings):
     _valid_virtual_keys_set: frozenset[str] = frozenset()
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_ENV_FILE_PATH, ".env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )
@@ -183,12 +189,14 @@ class Settings(BaseSettings):
                     pass
             else:
                 try:
-                    from dotenv import dotenv_values
-                    env_vals = dotenv_values(".env")
-                    for k, v in env_vals.items():
-                        attr_name = k.upper()
-                        if hasattr(self, attr_name) and v is not None:
-                            setattr(self, attr_name, v)
+                    from dotenv import dotenv_values, find_dotenv
+                    env_path = find_dotenv(usecwd=True) or _ENV_FILE_PATH
+                    if os.path.exists(env_path):
+                        env_vals = dotenv_values(env_path)
+                        for k, v in env_vals.items():
+                            attr_name = k.upper()
+                            if hasattr(self, attr_name) and v is not None:
+                                setattr(self, attr_name, v)
                 except Exception:
                     pass
 
