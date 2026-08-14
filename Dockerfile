@@ -5,7 +5,8 @@ FROM python:3.12-slim AS builder
 WORKDIR /build
 
 COPY requirements.txt pyproject.toml README.md ./
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY ./llm_shield_proxy ./llm_shield_proxy
+RUN pip install --no-cache-dir --user -r requirements.txt .
 
 # Stage 2: Production Distroless-style Non-Root Runtime
 FROM python:3.12-slim AS runner
