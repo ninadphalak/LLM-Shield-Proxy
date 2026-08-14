@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import threading
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional
@@ -28,42 +29,32 @@ class Vault:
     """Session-scoped bidirectional PII token mapping vault.
 
     Maintains deterministic bijective mappings between raw PII text values
-    and either structured placeholder tokens (e.g., '[EMAIL_1]') or realistic
-    synthetic entities (e.g., 'sarah.connor@example.com').
+    and temporary session tokens. Supports both bracketed structural tagging
+    ([PERSON_1], [EMAIL_1]) and unbracketed synthetic entity swapping.
 
-    Attributes:
-        original_to_token: Map of raw PII string to assigned token.
-        token_to_original: Map of token string to original raw PII.
-        type_counters: Occurrence count per PII entity type.
-        max_token_length: Maximum length among all tokens in this vault.
-        save_callback: Optional callable executed when new tokens are added.
+    Thread-safe and supports multi-tenant namespace isolation.
     """
 
-    def __init__(
-        self,
-        synthetic: Optional[bool] = None,
-        save_callback: Optional[Callable[[Vault], Any]] = None,
-    ) -> None:
+    def __init__(self, tenant_id: str = "default", session_id: str = "default", synthetic: Optional[bool] = None) -> None:
+        self.tenant_id: str = tenant_id
+        self.session_id: str = session_id
+        self.synthetic: bool = synthetic if synthetic is not None else settings.ENABLE_SYNTHETIC_SWAPPING
         self.original_to_token: Dict[str, str] = {}
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
         self.max_token_length: int = 0
-        self.synthetic: bool = settings.ENABLE_SYNTHETIC_SWAPPING if synthetic is None else synthetic
-        self.save_callback: Optional[Callable[[Vault], Any]] = save_callback
         self._lock: threading.Lock = threading.Lock()
+        self.save_callback: Optional[Callable[[Vault], None]] = None
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
-        """Returns existing token or creates and persists a deterministic token.
-
-        Time Complexity: O(1) average lookup and insertion.
-        Space Complexity: O(K) where K is the length of original_val and token.
+        """Retrieves an existing token or generates a deterministic replacement.
 
         Args:
-            original_val: The raw sensitive PII string to redact.
-            entity_type: The categorized PII entity type (e.g. 'EMAIL', 'PERSON').
+            original_val: The raw sensitive string (e.g. 'Jane Doe', '555-0199').
+            entity_type: The detected entity classifier (e.g. 'PERSON', 'SSN').
 
         Returns:
-            The deterministic token or synthetic string.
+            A deterministic session-unique token or synthetic word string.
         """
         with self._lock:
             if original_val in self.original_to_token:
@@ -87,6 +78,8 @@ class Vault:
                     token = fake.ipv4()
                 elif "CREDIT_CARD" in entity_type:
                     token = fake.credit_card_number()
+                elif "KEY" in entity_type or "SECRET" in entity_type or "TOKEN" in entity_type or "PAT" in entity_type:
+                    token = f"AKIA{''.join(random.Random(seed).choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=16))}"
                 elif "GPE" in entity_type or "LOC" in entity_type:
                     token = fake.city()
                 else:
