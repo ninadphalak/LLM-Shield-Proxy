@@ -25,7 +25,7 @@ Choose your installation tier:
 
 | Installation Mode | Command | Capabilities Included |
 | :--- | :--- | :--- |
-| **Standard Installation** *(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** - Ultra-lightweight `<68MB` RAM footprint. |
+| **Standard Installation** *(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** - Ultra-lightweight `<70MB` RAM footprint. |
 | **Full NLP Installation** *(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** for deep contextual entity extraction. |
 
 > **Enabling Tier 3 ONNX NER:** When installed with `[ner]`, enable deep neural entity extraction by setting `ENABLE_TIER3_ONNX_NER=true` in your `.env` or environment variables (and optionally point `ONNX_MODEL_PATH` to custom model weights). If disabled or not installed, the engine automatically and gracefully bypasses Tier 3 with zero startup overhead.
@@ -103,7 +103,7 @@ for chunk in response:
 | Existing Legacy Proxies | LLM-Shield-Proxy |
 | :--- | :--- |
 | **Destroys Real-Time SSE Streaming:** Buffers entire responses before scanning, causing multi-second UI latency stalls. | **Ultra-Low Latency Streaming:** Redacts and re-hydrates delta-by-delta as SSE packets stream. |
-| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <68MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
+| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <70MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
 | **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage:** Self-destructing TTL session vault built for zero data liability. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
@@ -147,14 +147,14 @@ If unbuffered, `[PER` leaks to the user's screen as raw un-hydrated text.
 
 **The Engineering Solution:** An asynchronous `SSERehydrationBuffer` dynamically tracks the longest suffix-to-prefix overlap of active vault tokens, retaining only the necessary trailing characters bounded by `L = max(0, max_token_length - 1)` during intermediate chunks. When `data: [DONE]` or EOF arrives, the buffer executes an immediate complete flush with `L = 0`, guaranteeing zero token leakage and zero UI jitter.
 
-### 2. The 3-Tier Cascade Engine (<68MB RAM Footprint)
+### 2. The 3-Tier Cascade Engine (<70MB RAM Footprint)
 
 To achieve sub-millisecond execution without blowing up infrastructure costs:
 - **Tier 1 (Sub-millisecond Pre-compiled DFA Regex):** Scans structured identifiers (SSNs, Credit Cards, Emails, Phone Numbers, IPv4/IPv6, API Keys, SSH Keys, JWTs) in **<0.03ms**.
 - **Tier 2 (Shannon Entropy Filter):** Computes Shannon entropy $H(S) = -\sum p(c)\log_2 p(c)$ on candidate tokens ($\ge 16$ characters) to flag raw unformatted credentials ($\tau_H \ge 4.5$ bits/symbol) in **<6 µs**.
 - **Tier 3 (Contextual ONNX NER Pipeline):** Uses rule heuristics and an optional lazy-loaded quantized ONNX Named Entity Recognition (NER) model to catch unstructured person/org names in **~5–12ms**.
 
-By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **<68MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
+By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **<70MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
 
 ### 3. Enterprise Multi-Tenant Gateway & Security
 
