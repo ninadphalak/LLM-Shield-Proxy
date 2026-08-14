@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llm_shield_proxy"
 version = "1.0.14"
-description = "High-performance enterprise PII redaction and context preservation proxy for Large Language Models"
+description = "Enterprise Zero-Egress PII Redaction and Context Preservation Proxy for Large Language Models"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "Apache-2.0"
+license = {text = "Apache-2.0"}
 authors = [
     {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
 ]
@@ -26,6 +26,7 @@ keywords = [
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -37,24 +38,37 @@ classifiers = [
 dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
-    "httpx>=0.24.0",
+    "httpx[http2]>=0.24.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
     "orjson>=3.9.0",
+    "faker>=18.0.0",
     "prometheus-client>=0.17.0",
     "watchdog>=3.0.0"
 ]
 
 [project.optional-dependencies]
+redis = [
+    "redis>=5.0.0"
+]
+ner = [
+    "onnxruntime>=1.17.0"
+]
+onnx = [
+    "onnxruntime>=1.17.0"
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-httpx>=0.24.0",
     "pytest-mock>=3.10.0",
     "openai>=1.0.0",
+    "psutil>=5.0.0",
+    "redis>=5.0.0",
     "build",
-    "twine",
-    "psutil>=5.0.0"
+    "twine"
 ]
 
 [project.urls]

@@ -1,4 +1,8 @@
-# Byte-compiled / optimized / cache files
+# Git & VCS
+.git/
+.gitignore
+
+# Byte-compiled / cache files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -15,20 +19,18 @@ dist/
 .eggs/
 
 # Testing & Coverage
+tests/
+benchmarks/
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
-nosetests.xml
-coverage.xml
-*.cover
 
 # Environment Variables & Config
 .env
 .env.*
 !.env.example
 config.yaml
-!config.example.yaml
 
 # Local Redis / Data stores
 dump.rdb
@@ -40,8 +42,9 @@ dump.rdb
 *.gpg
 private_key.asc
 
-# IDE / OS files
-.DS_Store
+# Documentation & IDE
+docs/
 .idea/
 .vscode/
-*.swp
+.DS_Store
+README.md

@@ -1,94 +1,140 @@
-import re
+"""Enterprise Session-Scoped Vault Management Module.
+
+Provides bidirectional deterministic mapping between sensitive original PII values
+and session-bound tokens (or realistic synthetic values), enforcing isolation across tenants.
+"""
+
+from __future__ import annotations
+
 import hashlib
 import json
-from typing import Dict, Optional
+import threading
 from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Optional
 from faker import Faker
 from llm_shield_proxy.config import settings
 
 try:
+    import redis.asyncio as aioredis
     import redis
 except ImportError:
-    redis = None
+    aioredis = None  # type: ignore
+    redis = None  # type: ignore
 
 fake = Faker()
 
+
 class Vault:
+    """Session-scoped bidirectional PII token mapping vault.
+
+    Maintains deterministic bijective mappings between raw PII text values
+    and either structured placeholder tokens (e.g., '[EMAIL_1]') or realistic
+    synthetic entities (e.g., 'sarah.connor@example.com').
+
+    Attributes:
+        original_to_token: Map of raw PII string to assigned token.
+        token_to_original: Map of token string to original raw PII.
+        type_counters: Occurrence count per PII entity type.
+        max_token_length: Maximum length among all tokens in this vault.
+        save_callback: Optional callable executed when new tokens are added.
     """
-    Vault manages bidirectional deterministic mappings between original PII values
-    and session-bound tokens (e.g., "sarah@example.com" <-> "[EMAIL_1]").
-    """
-    def __init__(self, save_callback=None):
+
+    def __init__(self, save_callback: Optional[Callable[[Vault], Any]] = None) -> None:
         self.original_to_token: Dict[str, str] = {}
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
         self.max_token_length: int = 0
-        self.save_callback = save_callback
+        self.save_callback: Optional[Callable[[Vault], Any]] = save_callback
+        self._lock: threading.Lock = threading.Lock()
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
-        """
-        Returns an existing token if original_val has already been registered,
-        otherwise generates a deterministic token.
-        """
-        if original_val in self.original_to_token:
-            return self.original_to_token[original_val]
+        """Returns existing token or creates and persists a deterministic token.
 
-        current_count = self.type_counters.get(entity_type, 0) + 1
-        self.type_counters[entity_type] = current_count
+        Time Complexity: O(1) average lookup and insertion.
+        Space Complexity: O(K) where K is the length of original_val and token.
 
-        if settings.ENABLE_SYNTHETIC_SWAPPING:
-            # Deterministic seed based on original value
-            seed = int(hashlib.md5(original_val.encode()).hexdigest(), 16) % (2**32)
-            Faker.seed(seed)
-            if "PERSON" in entity_type:
-                token = fake.first_name()
-            elif "EMAIL" in entity_type:
-                token = fake.email()
-            elif "SSN" in entity_type:
-                token = fake.ssn()
-            elif "GPE" in entity_type or "LOC" in entity_type:
-                token = fake.city()
+        Args:
+            original_val: The raw sensitive PII string to redact.
+            entity_type: The categorized PII entity type (e.g. 'EMAIL', 'PERSON').
+
+        Returns:
+            The deterministic token or synthetic string.
+        """
+        with self._lock:
+            if original_val in self.original_to_token:
+                return self.original_to_token[original_val]
+
+            current_count = self.type_counters.get(entity_type, 0) + 1
+            self.type_counters[entity_type] = current_count
+
+            if settings.ENABLE_SYNTHETIC_SWAPPING:
+                seed = int(hashlib.md5(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
+                Faker.seed(seed)
+                if "PERSON" in entity_type:
+                    token = fake.first_name()
+                elif "EMAIL" in entity_type:
+                    token = fake.email()
+                elif "SSN" in entity_type:
+                    token = fake.ssn()
+                elif "GPE" in entity_type or "LOC" in entity_type:
+                    token = fake.city()
+                else:
+                    token = fake.word()
             else:
-                token = fake.word()
-        else:
-            token = f"[{entity_type}_{current_count}]"
+                token = f"[{entity_type}_{current_count}]"
 
-        self.original_to_token[original_val] = token
-        self.token_to_original[token] = original_val
-        self.max_token_length = max(self.max_token_length, len(token))
-        
-        if self.save_callback:
-            self.save_callback(self)
-            
-        return token
+            self.original_to_token[original_val] = token
+            self.token_to_original[token] = original_val
+            self.max_token_length = max(self.max_token_length, len(token))
+
+            if self.save_callback:
+                try:
+                    self.save_callback(self)
+                except Exception:
+                    pass
+
+            return token
 
     def rehydrate(self, text: str, retention_length: int = 0) -> str:
-        """
-        Replaces all tokens in the text with their corresponding original PII values.
-        Respects a retention boundary: substitutions that intersect the last 
-        `retention_length` characters are deferred to prevent Prefix-Free vulnerabilities.
+        """Replaces all registered tokens in the text with original raw PII.
+
+        Respects retention boundary: any token occurrences whose replacement would
+        cross or touch the trailing `retention_length` characters are deferred
+        to prevent partial-token or prefix-free leakage across stream chunks.
+
+        Time Complexity: O(N * M) where N is text length and M is total token count.
+        Space Complexity: O(N) string allocation.
+
+        Args:
+            text: Input string containing redacted tokens or synthetic words.
+            retention_length: Number of trailing characters at buffer boundary to protect.
+
+        Returns:
+            Rehydrated text with tokens restored to original values.
         """
         if not text or not self.token_to_original:
             return text
 
-        # Sort tokens by length descending to prevent partial token replacements
+        # Sort tokens by length descending to prevent partial token prefix collisions
         sorted_tokens = sorted(self.token_to_original.keys(), key=len, reverse=True)
         result = text
+
         for token in sorted_tokens:
             original = self.token_to_original[token]
             if retention_length > 0:
-                idx = 0
-                while True:
-                    idx = result.find(token, idx)
+                pos = 0
+                while pos < len(result):
+                    idx = result.find(token, pos)
                     if idx == -1:
                         break
-                    
+
+                    # Check if token crosses into the trailing retention window
                     if idx + len(token) > len(result) - retention_length:
-                        # Touches boundary, defer this and subsequent matches
+                        # Defer replacement of this and subsequent overlapping matches
                         break
-                        
-                    result = result[:idx] + original + result[idx+len(token):]
-                    idx += len(original)
+
+                    result = result[:idx] + original + result[idx + len(token):]
+                    pos = idx + len(original)
             else:
                 result = result.replace(token, original)
 
@@ -96,63 +142,102 @@ class Vault:
 
 
 class VaultStore:
+    """Thread-safe in-memory session vault store with LRU eviction.
+
+    Attributes:
+        max_capacity: Maximum number of active tenant session vaults.
     """
-    Store holding session-scoped vaults.
-    Uses an OrderedDict to enforce a maximum capacity (LRU eviction) to prevent OOM memory leaks.
-    """
-    def __init__(self):
+
+    def __init__(self, max_capacity: Optional[int] = None) -> None:
         self._sessions: OrderedDict[str, Vault] = OrderedDict()
-        self.max_capacity = settings.MAX_SESSION_VAULTS
+        self.max_capacity: int = max_capacity or settings.MAX_SESSION_VAULTS
+        self._lock: threading.Lock = threading.Lock()
 
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
+        """Retrieves or creates an in-memory session vault.
+
+        Args:
+            session_id: Unique client session identifier.
+            virtual_key_id: Tenant or virtual key identifier for namespace isolation.
+
+        Returns:
+            The session-bound Vault instance.
+        """
         if not session_id:
             return Vault()
-        
-        vault_key = f"{virtual_key_id}:{session_id}"
-        
-        if vault_key in self._sessions:
-            self._sessions.move_to_end(vault_key)
-            return self._sessions[vault_key]
-        
-        # Evict oldest if at capacity
-        if len(self._sessions) >= self.max_capacity:
-            self._sessions.popitem(last=False)
-            
-        new_vault = Vault()
-        self._sessions[vault_key] = new_vault
-        return new_vault
 
-    def clear_session(self, session_id: str, virtual_key_id: str = "default"):
         vault_key = f"{virtual_key_id}:{session_id}"
-        if vault_key in self._sessions:
-            del self._sessions[vault_key]
+        with self._lock:
+            if vault_key in self._sessions:
+                self._sessions.move_to_end(vault_key)
+                return self._sessions[vault_key]
+
+            # Evict oldest LRU vault if at capacity
+            if len(self._sessions) >= self.max_capacity:
+                self._sessions.popitem(last=False)
+
+            new_vault = Vault()
+            self._sessions[vault_key] = new_vault
+            return new_vault
+
+    async def get_vault_async(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
+        """Async-compatible interface for retrieving in-memory vault."""
+        return self.get_vault(session_id, virtual_key_id)
+
+    def clear_session(self, session_id: str, virtual_key_id: str = "default") -> None:
+        """Removes a session vault from the in-memory cache."""
+        vault_key = f"{virtual_key_id}:{session_id}"
+        with self._lock:
+            self._sessions.pop(vault_key, None)
 
 
 class RedisVaultStore:
+    """Distributed Redis-backed session vault store with rolling TTLs.
+
+    Supports horizontal multi-instance scaling using async and sync Redis pools.
     """
-    Store holding session-scoped vaults in Redis for horizontal multi-instance scaling.
-    Uses rolling TTL expirations.
-    """
-    def __init__(self, redis_url: str):
-        self.client = redis.from_url(redis_url, decode_responses=True)
-        self.ttl = settings.SESSION_TTL_SECONDS
+
+    def __init__(self, redis_url: str) -> None:
+        self.redis_url: str = redis_url
+        self.ttl: int = settings.SESSION_TTL_SECONDS
+        self._sync_client: Optional[redis.Redis] = None
+        self._async_client: Optional[aioredis.Redis] = None
+
+    @property
+    def sync_client(self) -> redis.Redis:
+        """Lazy-loaded synchronous Redis client."""
+        if self._sync_client is None:
+            if not redis:
+                raise ImportError("redis package required for RedisVaultStore. Run `pip install redis`.")
+            self._sync_client = redis.from_url(self.redis_url, decode_responses=True)
+        return self._sync_client
+
+    @property
+    def async_client(self) -> aioredis.Redis:
+        """Lazy-loaded asynchronous Redis client with connection pooling."""
+        if self._async_client is None:
+            if not aioredis:
+                raise ImportError("redis.asyncio required for async Redis vault. Run `pip install redis`.")
+            self._async_client = aioredis.from_url(self.redis_url, decode_responses=True)
+        return self._async_client
 
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
+        """Synchronous vault retrieval for backward compatibility and sync tests."""
         if not session_id:
             return Vault()
-        
+
         vault_key = f"{virtual_key_id}:{session_id}"
-        data = self.client.get(vault_key)
-        
-        def save_callback(vault: Vault):
+        data = self.sync_client.get(vault_key)
+
+        def save_callback(v: Vault) -> None:
             payload = {
-                "original_to_token": vault.original_to_token,
-                "token_to_original": vault.token_to_original,
-                "type_counters": vault.type_counters,
-                "max_token_length": vault.max_token_length
+                "original_to_token": v.original_to_token,
+                "token_to_original": v.token_to_original,
+                "type_counters": v.type_counters,
+                "max_token_length": v.max_token_length,
             }
-            self.client.setex(vault_key, self.ttl, json.dumps(payload))
-            
+            self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
+
         vault = Vault(save_callback=save_callback)
         if data:
             try:
@@ -161,21 +246,68 @@ class RedisVaultStore:
                 vault.token_to_original = parsed.get("token_to_original", {})
                 vault.type_counters = parsed.get("type_counters", {})
                 vault.max_token_length = parsed.get("max_token_length", 0)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 pass
-                
-        # Rolling TTL on access
-        self.client.expire(vault_key, self.ttl)
+
+        self.sync_client.expire(vault_key, self.ttl)
         return vault
 
-    def clear_session(self, session_id: str, virtual_key_id: str = "default"):
+    async def get_vault_async(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
+        """Non-blocking async Redis vault retrieval using redis.asyncio."""
+        if not session_id:
+            return Vault()
+
         vault_key = f"{virtual_key_id}:{session_id}"
-        self.client.delete(vault_key)
+        data = await self.async_client.get(vault_key)
+
+        def save_callback(v: Vault) -> None:
+            payload = {
+                "original_to_token": v.original_to_token,
+                "token_to_original": v.token_to_original,
+                "type_counters": v.type_counters,
+                "max_token_length": v.max_token_length,
+            }
+            self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
+
+        vault = Vault(save_callback=save_callback)
+        if data:
+            try:
+                parsed = json.loads(data)
+                vault.original_to_token = parsed.get("original_to_token", {})
+                vault.token_to_original = parsed.get("token_to_original", {})
+                vault.type_counters = parsed.get("type_counters", {})
+                vault.max_token_length = parsed.get("max_token_length", 0)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        await self.async_client.expire(vault_key, self.ttl)
+        return vault
+
+    def clear_session(self, session_id: str, virtual_key_id: str = "default") -> None:
+        """Deletes session key from Redis."""
+        vault_key = f"{virtual_key_id}:{session_id}"
+        self.sync_client.delete(vault_key)
+
+    async def clear_session_async(self, session_id: str, virtual_key_id: str = "default") -> None:
+        """Asynchronously deletes session key from Redis."""
+        vault_key = f"{virtual_key_id}:{session_id}"
+        await self.async_client.delete(vault_key)
+
+    async def ping_async(self) -> bool:
+        """Checks connectivity to the Redis instance."""
+        try:
+            return bool(await self.async_client.ping())
+        except Exception:
+            return False
 
 
-if settings.REDIS_URL:
-    if not redis:
-        raise ImportError("Redis is required when REDIS_URL is set. Run `pip install redis`.")
-    vault_store = RedisVaultStore(settings.REDIS_URL)
-else:
-    vault_store = VaultStore()
+def create_vault_store() -> VaultStore | RedisVaultStore:
+    """Factory creating configured vault store."""
+    if settings.REDIS_URL:
+        if not redis:
+            raise ImportError("Redis is required when REDIS_URL is set. Run `pip install redis`.")
+        return RedisVaultStore(settings.REDIS_URL)
+    return VaultStore()
+
+
+vault_store = create_vault_store()

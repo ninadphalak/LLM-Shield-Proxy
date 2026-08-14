@@ -9,7 +9,7 @@ import os
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from llm_shield_proxy.pii_engine import PIIEngine, TIER1_PATTERNS, TIER2_PATTERNS
+from llm_shield_proxy.pii_engine import PIIEngine, TIER1_PATTERNS, TIER3_NER_PATTERNS
 from llm_shield_proxy.vault import Vault
 from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 
@@ -41,7 +41,7 @@ def benchmark_tier2_ner(iterations: int = 1000):
 
     for _ in range(iterations):
         t0 = time.perf_counter()
-        for _, pattern in TIER2_PATTERNS:
+        for _, pattern in TIER3_NER_PATTERNS:
             list(pattern.finditer(text_sample))
         t1 = time.perf_counter()
         timings.append((t1 - t0) * 1000.0)  # Convert to ms

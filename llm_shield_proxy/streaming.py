@@ -1,73 +1,142 @@
-import orjson as json
+"""Enterprise Zero-Leakage Streaming & SSE Rehydration Engine.
+
+Implements prefix-free sliding-window buffering for Server-Sent Events (SSE) streams,
+guaranteeing zero partial-token leakage across chunk boundaries for both bracketed
+and realistic synthetic unbracketed entities.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import codecs
 from typing import AsyncGenerator, Optional
+import orjson as json
+
+from llm_shield_proxy.config import settings
 from llm_shield_proxy.vault import Vault
 
 
 class SSERehydrationBuffer:
-    """
-    Sliding window buffer that prevents partial tag leakage across SSE chunks.
-    Holds back partial token tags (e.g. '[PER' ... 'SON_1]') until completed across deltas.
-    """
-    MAX_TAG_LENGTH = 64  # Maximum expected length for tokens like [PERSON_999]
+    """Sliding-window buffer preventing partial entity token leakage across SSE stream chunks.
 
-    def __init__(self, vault: Vault):
-        self.vault = vault
-        self.content_buffer = ""
+    Calculates the exact suffix-to-prefix overlap against active vault tokens,
+    holding back incomplete token fragments and flushing upon token completion or stream end.
+
+    Attributes:
+        vault: Session-scoped Vault containing active token mappings.
+        content_buffer: String accumulator for buffered delta text.
+    """
+
+    MAX_TAG_LENGTH: int = 64
+
+    def __init__(self, vault: Vault) -> None:
+        self.vault: Vault = vault
+        self.content_buffer: str = ""
+
+    def _calculate_retention_length(self, text: str) -> int:
+        """Calculates the minimum trailing retention boundary needed for text.
+
+        Identifies the longest suffix of `text` that forms a strict prefix of
+        any token registered in the vault (up to max_token_length - 1).
+
+        Time Complexity: O(T * L) where T is token count and L is max token length.
+        Space Complexity: O(1).
+
+        Args:
+            text: Current accumulated buffer text.
+
+        Returns:
+            Number of trailing characters to retain in the buffer.
+        """
+        if not text or not self.vault.token_to_original:
+            return 0
+
+        max_k = 0
+        for token in self.vault.token_to_original:
+            # Check prefix lengths up to min(len(text), len(token) - 1)
+            limit = min(len(text), len(token) - 1)
+            for k in range(limit, max_k, -1):
+                if text.endswith(token[:k]):
+                    max_k = k
+                    break
+
+        return max_k
 
     def process_delta_text(self, delta_text: str, is_final: bool = False) -> str:
-        """
-        Appends incoming delta_text to buffer, checks for unclosed tag brackets '[' near the tail,
-        re-hydrates the safe portion, and returns the text ready to emit.
+        """Processes incoming delta text chunk and emits safe, rehydrated content.
+
+        Time Complexity: O(N * M) for string rehydration and prefix matching.
+        Space Complexity: O(N) where N is the length of the buffer.
+
+        Args:
+            delta_text: Incoming incremental text delta from upstream LLM.
+            is_final: Flag indicating end of stream or flush signal.
+
+        Returns:
+            Safe text slice ready for downstream client consumption.
         """
         self.content_buffer += delta_text
 
-        if is_final or not self.content_buffer:
-            res = self.vault.rehydrate(self.content_buffer)
+        if is_final or not self.vault.token_to_original:
+            rehydrated = self.vault.rehydrate(self.content_buffer, retention_length=0)
             self.content_buffer = ""
-            return res
+            return rehydrated
 
-        last_bracket_idx = self.content_buffer.rfind('[')
-        if last_bracket_idx != -1:
-            # Check if matching closing bracket exists after the last open bracket
-            matching_close = self.content_buffer.find(']', last_bracket_idx)
-            if matching_close == -1:
-                # Unclosed bracket at tail. Verify length threshold.
-                tail_length = len(self.content_buffer) - last_bracket_idx
-                if tail_length <= self.MAX_TAG_LENGTH:
-                    # Hold tail from last_bracket_idx onward
-                    safe_part = self.content_buffer[:last_bracket_idx]
-                    self.content_buffer = self.content_buffer[last_bracket_idx:]
-                    return self.vault.rehydrate(safe_part) if safe_part else ""
+        # Calculate dynamic prefix retention bound
+        retention_length = self._calculate_retention_length(self.content_buffer)
 
-        # Buffer is safe
-        safe_part = self.content_buffer
-        self.content_buffer = ""
-        return self.vault.rehydrate(safe_part)
+        # Apply boundary-aware rehydration up to the retention boundary
+        self.content_buffer = self.vault.rehydrate(
+            self.content_buffer,
+            retention_length=retention_length
+        )
+
+        # Recalculate retention in case replacements modified the tail
+        retention_length = self._calculate_retention_length(self.content_buffer)
+
+        if retention_length == 0 or len(self.content_buffer) <= retention_length:
+            if retention_length == 0:
+                emitted = self.content_buffer
+                self.content_buffer = ""
+                return emitted
+            return ""
+
+        emitted = self.content_buffer[:-retention_length]
+        self.content_buffer = self.content_buffer[-retention_length:]
+        return emitted
 
 
 async def rehydrate_sse_stream(
     raw_stream: AsyncGenerator[bytes, None],
-    vault: Vault
+    vault: Vault,
 ) -> AsyncGenerator[bytes, None]:
-    """
-    Async generator that processes raw SSE stream bytes from upstream LLM,
-    parses SSE data lines, re-hydrates content deltas through SSERehydrationBuffer,
-    and yields transformed SSE bytes.
+    """Asynchronous generator consuming raw SSE bytes and yielding rehydrated SSE chunks.
+
+    Handles fragmented JSON chunks, decodes UTF-8 incrementally, protects against
+    Slowloris buffer poisoning, and ensures buffer is flushed before [DONE].
+
+    Time Complexity: O(C) amortized per SSE chunk.
+    Space Complexity: O(B) bounded by MAX_SSE_LINE_LENGTH.
+
+    Args:
+        raw_stream: Upstream raw byte generator from httpx streaming response.
+        vault: Session-scoped Vault for entity rehydration.
+
+    Yields:
+        Rehydrated, UTF-8 encoded Server-Sent Events bytes.
     """
     buffer = SSERehydrationBuffer(vault)
     line_accumulator = ""
     client_disconnected = False
-    MAX_LINE_LENGTH = 1048576  # 1MB limit to prevent Slowloris buffer poisoning
-    decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+    max_line_length = settings.MAX_SSE_LINE_LENGTH
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     try:
         async for chunk in raw_stream:
             chunk_text = decoder.decode(chunk, final=False)
             line_accumulator += chunk_text
 
-            if len(line_accumulator) > MAX_LINE_LENGTH:
+            if len(line_accumulator) > max_line_length:
                 raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
 
             while "\n" in line_accumulator:
@@ -87,12 +156,12 @@ async def rehydrate_sse_stream(
                                 delta["content"] = rehydrated_content
                                 data_obj["choices"][0]["delta"] = delta
                                 line = f"data: {json.dumps(data_obj).decode('utf-8')}"
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, TypeError, KeyError):
                         pass
-                    
+
                     yield (line + "\n").encode("utf-8")
                 elif stripped == "data: [DONE]":
-                    # Flush the buffer BEFORE yielding the DONE signal
+                    # Flush the buffer completely BEFORE yielding the [DONE] signal
                     remaining = buffer.process_delta_text("", is_final=True)
                     if remaining:
                         flush_obj = {"choices": [{"delta": {"content": remaining}}]}
@@ -100,22 +169,19 @@ async def rehydrate_sse_stream(
                     yield (line + "\n").encode("utf-8")
                 else:
                     yield (line + "\n").encode("utf-8")
+
     except (GeneratorExit, asyncio.CancelledError):
         client_disconnected = True
         raise
     finally:
         if not client_disconnected:
-            # Decode any trailing bytes and process remaining buffer
             trailing_text = decoder.decode(b"", final=True)
             if trailing_text:
                 line_accumulator += trailing_text
 
             remaining = buffer.process_delta_text("", is_final=True)
             if remaining:
-                # Emit remaining flushed text if any left
-                flush_obj = {
-                    "choices": [{"delta": {"content": remaining}}]
-                }
+                flush_obj = {"choices": [{"delta": {"content": remaining}}]}
                 yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode("utf-8")
 
             if line_accumulator:

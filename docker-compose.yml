@@ -1,11 +1,21 @@
-version: '3.8'
-
 services:
   llm-shield-proxy:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-shield-proxy:latest
+    container_name: llm-shield-proxy
     ports:
       - "8000:8000"
     environment:
+      - HOST=0.0.0.0
+      - PORT=8000
       - UPSTREAM_BASE_URL=https://api.openai.com
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-mock-key}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

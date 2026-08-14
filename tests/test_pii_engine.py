@@ -1,10 +1,27 @@
+"""Unit tests for 3-Tier PII & Secret Detection Engine."""
+
+import base64
+import time
 import pytest
 from llm_shield_proxy.vault import Vault
-from llm_shield_proxy.pii_engine import PIIEngine
+from llm_shield_proxy.pii_engine import PIIEngine, calculate_shannon_entropy
+
+
+def test_shannon_entropy_calculation():
+    """Validates mathematical computation of Shannon entropy."""
+    # Low entropy (repetitive characters)
+    low_entropy = calculate_shannon_entropy("aaaaaaaaaaaaaaaa")
+    assert low_entropy == 0.0
+
+    # High entropy (random alphanumeric secret key)
+    high_entropy_key = "aB3$9zK!7wQ#2mP*5xL@"
+    entropy_val = calculate_shannon_entropy(high_entropy_key)
+    assert entropy_val >= 4.0
 
 
 def test_pii_tier1_structured_redaction():
-    engine = PIIEngine(enable_tier2=False)
+    """Tests Tier 1 DFA regex extraction for structured patterns."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
     vault = Vault()
 
     sample_text = (
@@ -29,8 +46,26 @@ def test_pii_tier1_structured_redaction():
     assert rehydrated == sample_text
 
 
-def test_pii_tier2_ner_redaction():
-    engine = PIIEngine(enable_tier2=True)
+def test_pii_tier2_shannon_entropy_redaction():
+    """Tests Tier 2 Shannon entropy detection for raw unformatted high-entropy secrets."""
+    engine = PIIEngine(enable_tier2=True, enable_tier3=False, entropy_threshold=4.5)
+    vault = Vault()
+
+    # Highly random 32-character secret key with high entropy (>= 4.5 bits)
+    raw_high_entropy_secret = "9fK7w2mP8xL1qA4zD6eR0tY3uI5oN8vB"
+    sample_text = f"Here is the database secret key: {raw_high_entropy_secret}"
+
+    redacted = engine.redact_text(sample_text, vault)
+    assert "[SECRET_KEY_1]" in redacted
+    assert raw_high_entropy_secret not in redacted
+
+    rehydrated = vault.rehydrate(redacted)
+    assert rehydrated == sample_text
+
+
+def test_pii_tier3_ner_redaction():
+    """Tests Tier 3 contextual Named Entity Recognition for person names."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=True)
     vault = Vault()
 
     sample_text = "Please reach out to Dr. Sarah Connor for further details."
@@ -44,7 +79,8 @@ def test_pii_tier2_ner_redaction():
 
 
 def test_pii_payload_redaction():
-    engine = PIIEngine(enable_tier2=True)
+    """Tests deep recursive payload redaction across OpenAI message schemas."""
+    engine = PIIEngine(enable_tier2=True, enable_tier3=True)
     vault = Vault()
 
     payload = {
@@ -62,29 +98,17 @@ def test_pii_payload_redaction():
 
 
 def test_dlp_redos_base64_obfuscation():
-    """
-    Simulate a Red Team attack attempting to cause ReDoS (Regex Denial of Service)
-    by passing massive Base64-encoded strings (obfuscated AWS/GitHub keys or JSON payloads)
-    to ensure the engine doesn't hang.
-    """
-    import base64
-    import time
-    engine = PIIEngine(enable_tier2=False)
+    """Simulate attack passing massive Base64 strings to assert strict bounded execution."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
     vault = Vault()
-    
-    # Create a massive obfuscated payload simulating an attempt to hide secrets
-    base_secret = "AKIAIOSFODNN7EXAMPLE" * 1000  # Repeat a mock AWS key
+
+    base_secret = "AKIAIOSFODNN7EXAMPLE" * 1000
     encoded_secret = base64.b64encode(base_secret.encode("utf-8")).decode("utf-8")
-    
     malicious_prompt = f"Please analyze this dataset: {encoded_secret}" * 10
-    
-    start_time = time.time()
+
+    start_time = time.perf_counter()
     redacted = engine.redact_text(malicious_prompt, vault)
-    end_time = time.time()
-    
-    # It should not hang (e.g. process under 50ms)
-    assert (end_time - start_time) < 0.1, f"ReDoS detected! Took {end_time - start_time} seconds"
-    
-    # Our regex is currently NOT designed to decode base64, so it shouldn't crash, 
-    # but the test validates that the runtime remains tightly bounded (no ReDoS).
+    duration = time.perf_counter() - start_time
+
+    assert duration < 0.1, f"ReDoS detected! Execution took {duration} seconds"
     assert encoded_secret in redacted

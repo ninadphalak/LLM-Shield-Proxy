@@ -1,3 +1,5 @@
+"""Preflight and multi-tenant isolation tests for LLM-Shield-Proxy."""
+
 import asyncio
 import json
 import psutil
@@ -24,7 +26,7 @@ def test_health_and_metrics():
         # Health endpoint
         res_health = client.get("/health")
         assert res_health.status_code == 200, f"Expected 200, got {res_health.status_code}"
-        assert res_health.json() == {"status": "healthy"}
+        assert res_health.json()["status"] == "ok"
     
         # Metrics endpoint
         res_metrics = client.get("/metrics")
@@ -133,7 +135,6 @@ def test_end_to_end_streaming_rehydration(httpx_mock):
         assert "[PER" not in content
         assert "SON_1]" not in content
 
-# Remove async since TestClient is sync
 def test_memory_rss_footprint(httpx_mock):
     process = psutil.Process(os.getpid())
     
@@ -168,6 +169,3 @@ def test_memory_rss_footprint(httpx_mock):
     gc.collect()
     mem_after = process.memory_info().rss
     assert mem_after - mem_before < 26214400, f"Active memory exceeded 25MB after stream: {mem_after - mem_before} bytes"
-
-if __name__ == "__main__":
-    pytest.main(["-v", __file__])

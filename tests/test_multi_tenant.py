@@ -1,34 +1,58 @@
-import os
-from openai import OpenAI
+"""Multi-tenant provider routing and dynamic upstream endpoint tests."""
 
-# 1. Test routing to OpenAI using X-Upstream-Base-Url
-# Since the proxy has OPENAI_API_KEY (if we set it) or since we don't, we will pass a dummy and it will fail with 401 if it hits OpenAI correctly.
-client = OpenAI(
-    api_key="sk-local-test-key", 
-    base_url="http://localhost:8000/v1",
-    default_headers={"X-Upstream-Base-Url": "https://api.openai.com"}
-)
-try:
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": "Hello"}],
+import pytest
+from fastapi.testclient import TestClient
+from llm_shield_proxy.main import app
+from llm_shield_proxy.config import settings
+
+client = TestClient(app)
+
+
+def test_multi_provider_routing_openai(monkeypatch, httpx_mock):
+    """Tests routing to OpenAI upstream with virtual key resolution."""
+    monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-a")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-a"]))
+    monkeypatch.setattr("llm_shield_proxy.config.settings.OPENAI_API_KEY", "sk-central-openai-key")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.openai.com/v1/chat/completions",
+        json={"id": "openai-1", "choices": [{"message": {"content": "Hello from OpenAI"}}]}
     )
-    print("OpenAI Success:", response)
-except Exception as e:
-    print("OpenAI Result:", e)
 
-
-# 2. Test routing to Gemini using X-Upstream-Base-Url
-client2 = OpenAI(
-    api_key="sk-local-test-key", 
-    base_url="http://localhost:8000/v1",
-    default_headers={"X-Upstream-Base-Url": "https://generativelanguage.googleapis.com/v1beta/openai/"}
-)
-try:
-    response = client2.chat.completions.create(
-        model="gemini-3.5-flash",
-        messages=[{"role": "user", "content": "Hello"}],
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proxy-tenant-a"},
+        json={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}
     )
-    print("Gemini Success:", response.choices[0].message.content)
-except Exception as e:
-    print("Gemini Result:", e)
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "Hello from OpenAI"
+    request = httpx_mock.get_request()
+    assert request.headers["authorization"] == "Bearer sk-central-openai-key"
+
+
+def test_multi_provider_routing_gemini(monkeypatch, httpx_mock):
+    """Tests routing to Gemini OpenAI-compatible upstream endpoint."""
+    monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-b")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-b"]))
+    monkeypatch.setattr("llm_shield_proxy.config.settings.GEMINI_API_KEY", "AIza-central-gemini-key")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+
+    httpx_mock.add_response(
+        method="POST",
+        url="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        json={"id": "gemini-1", "choices": [{"message": {"content": "Hello from Gemini"}}]}
+    )
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proxy-tenant-b"},
+        json={"model": "gemini-1.5-flash", "messages": [{"role": "user", "content": "Hello"}]}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "Hello from Gemini"
+    request = httpx_mock.get_request()
+    assert request.headers["authorization"] == "Bearer AIza-central-gemini-key"

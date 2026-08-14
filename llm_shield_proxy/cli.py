@@ -1,24 +1,62 @@
-import argparse
-import uvicorn
-import os
+"""CLI Entrypoint for LLM-Shield-Proxy."""
 
-def main():
-    parser = argparse.ArgumentParser(description="LLM-Shield-Proxy: Secure PII Redaction Proxy")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Bind socket to this host")
-    parser.add_argument("--port", type=int, default=8000, help="Bind socket to this port")
-    parser.add_argument("--workers", type=int, default=1, help="Number of worker processes")
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-    
-    args = parser.parse_args()
-    
-    # We must run uvicorn programmatically to boot the FastAPI app
-    uvicorn.run(
-        "llm_shield_proxy.main:app", 
-        host=args.host, 
-        port=args.port, 
-        workers=args.workers,
-        reload=args.reload
+from __future__ import annotations
+
+import argparse
+import sys
+import uvicorn
+
+from llm_shield_proxy.config import settings
+
+
+def main() -> None:
+    """Parses command-line arguments and launches the Uvicorn server."""
+    parser = argparse.ArgumentParser(
+        prog="llm-shield-proxy",
+        description="LLM-Shield-Proxy: Enterprise Zero-Egress Privacy Redaction Proxy",
     )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=settings.HOST,
+        help=f"Socket host to bind (default: {settings.HOST})",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=settings.PORT,
+        help=f"Socket port to bind (default: {settings.PORT})",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=settings.WORKERS,
+        help=f"Number of worker processes (default: {settings.WORKERS})",
+    )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload for development",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=settings.LOG_LEVEL.lower(),
+        choices=["critical", "error", "warning", "info", "debug", "trace"],
+        help=f"Logging level (default: {settings.LOG_LEVEL.lower()})",
+    )
+
+    args = parser.parse_args()
+
+    uvicorn.run(
+        "llm_shield_proxy.main:app",
+        host=args.host,
+        port=args.port,
+        workers=args.workers,
+        reload=args.reload,
+        log_level=args.log_level,
+    )
+
 
 if __name__ == "__main__":
     main()
