@@ -6,7 +6,7 @@ from llm_shield_proxy.pii_engine import PIIEngine, pii_engine
 from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 from llm_shield_proxy.audit import AuditLogger
 
-__version__ = "1.0.14"
+__version__ = "1.0.15"
 
 __all__ = [
     "settings",

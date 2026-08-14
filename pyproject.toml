@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_shield_proxy"
-version = "1.0.14"
+version = "1.0.15"
 description = "Enterprise Zero-Egress PII Redaction and Context Preservation Proxy for Large Language Models"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 authors = [
     {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
 ]
