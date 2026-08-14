@@ -39,11 +39,16 @@ class Vault:
         save_callback: Optional callable executed when new tokens are added.
     """
 
-    def __init__(self, save_callback: Optional[Callable[[Vault], Any]] = None) -> None:
+    def __init__(
+        self,
+        synthetic: Optional[bool] = None,
+        save_callback: Optional[Callable[[Vault], Any]] = None,
+    ) -> None:
         self.original_to_token: Dict[str, str] = {}
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
         self.max_token_length: int = 0
+        self.synthetic: bool = settings.ENABLE_SYNTHETIC_SWAPPING if synthetic is None else synthetic
         self.save_callback: Optional[Callable[[Vault], Any]] = save_callback
         self._lock: threading.Lock = threading.Lock()
 
@@ -67,7 +72,7 @@ class Vault:
             current_count = self.type_counters.get(entity_type, 0) + 1
             self.type_counters[entity_type] = current_count
 
-            if settings.ENABLE_SYNTHETIC_SWAPPING:
+            if self.synthetic:
                 seed = int(hashlib.md5(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
                 Faker.seed(seed)
                 if "PERSON" in entity_type:

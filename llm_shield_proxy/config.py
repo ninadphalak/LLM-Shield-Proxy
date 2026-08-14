@@ -76,7 +76,7 @@ class Settings(BaseSettings):
 
     # Redaction & Detection Cascade Settings
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
-        default=False,
+        default=True,
         description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
     )
     ENABLE_TIER2_ENTROPY: bool = Field(
