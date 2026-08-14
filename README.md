@@ -1,6 +1,6 @@
 # LLM-Shield-Proxy 🛡️
 
-![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-ieee-v2.gif)
+![LLM-Shield-Proxy Demo](docs/LLM-Shield-Proxy-patent-v1.gif)
 
 *Secure, fast, and drop-in PII redaction and context preservation reverse proxy for Large Language Models.*
 
