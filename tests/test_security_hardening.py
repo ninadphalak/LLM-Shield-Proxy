@@ -37,38 +37,45 @@ def test_vault_tenant_isolation(mock_send, mock_request):
     )
     mock_request.return_value = mock_response
 
-    # Inject valid virtual keys for the test
+    # Inject valid virtual keys and mock upstream key for the test
     original_keys = settings.valid_virtual_keys_set
-    settings.valid_virtual_keys_set = {"sk-proxy-tenant-A", "sk-proxy-tenant-B"}
+    original_openai_key = settings.OPENAI_API_KEY
+    try:
+        settings.valid_virtual_keys_set = {"sk-proxy-tenant-A", "sk-proxy-tenant-B"}
+        settings.OPENAI_API_KEY = "mock_key"
 
-    # Generate PII as Tenant A
-    headers_a = {"X-Session-ID": "shared_sess_123", "x-api-key": "sk-proxy-tenant-A"}
-    payload_a = {"model": "gpt-4", "messages": [{"role": "user", "content": "My email is test@example.com"}]}
-    client.post("/v1/chat/completions", headers=headers_a, json=payload_a)
+        # Generate PII as Tenant A
+        headers_a = {"X-Session-ID": "shared_sess_123", "x-api-key": "sk-proxy-tenant-A"}
+        payload_a = {"model": "gpt-4", "messages": [{"role": "user", "content": "My email is test@example.com"}]}
+        res_a = client.post("/v1/chat/completions", headers=headers_a, json=payload_a)
+        assert res_a.status_code == 200
 
-    # Verify Tenant A's vault has the email mapped
-    hashed_key_a = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-A", b"llm_shield_salt", 100000).hex()[:12]
-    vault_a = vault_store.get_vault("shared_sess_123", hashed_key_a)
-    assert "test@example.com" in vault_a.original_to_token
-    token_id = vault_a.original_to_token["test@example.com"]
+        # Verify Tenant A's vault has the email mapped
+        hashed_key_a = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-A", b"llm_shield_salt", 100000).hex()[:12]
+        vault_a = vault_store.get_vault("shared_sess_123", hashed_key_a)
+        assert "test@example.com" in vault_a.original_to_token
+        token_id = vault_a.original_to_token["test@example.com"]
 
-    # Query as Tenant B with the same session ID
-    headers_b = {"X-Session-ID": "shared_sess_123", "x-api-key": "sk-proxy-tenant-B"}
-    # Send a request so the vault is initialized for Tenant B
-    client.post("/v1/chat/completions", headers=headers_b, json={"messages": [{"role": "user", "content": "Hello"}]})
-    hashed_key_b = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-B", b"llm_shield_salt", 100000).hex()[:12]
-    vault_b = vault_store.get_vault("shared_sess_123", hashed_key_b)
+        # Query as Tenant B with the same session ID
+        headers_b = {"X-Session-ID": "shared_sess_123", "x-api-key": "sk-proxy-tenant-B"}
+        # Send a request so the vault is initialized for Tenant B
+        client.post(
+            "/v1/chat/completions", headers=headers_b, json={"messages": [{"role": "user", "content": "Hello"}]}
+        )
+        hashed_key_b = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-B", b"llm_shield_salt", 100000).hex()[:12]
+        vault_b = vault_store.get_vault("shared_sess_123", hashed_key_b)
 
-    # Verify Tenant B's vault is isolated and does not contain the email
-    assert "test@example.com" not in vault_b.original_to_token
+        # Verify Tenant B's vault is isolated and does not contain the email
+        assert "test@example.com" not in vault_b.original_to_token
 
-    # Tenant B attempts to rehydrate Tenant A's token
-    rehydrated = vault_b.rehydrate(token_id)
-    # It should fail and return the token verbatim, NOT the email
-    assert rehydrated == token_id
-    assert "test@example.com" not in rehydrated
-
-    settings.valid_virtual_keys_set = original_keys
+        # Tenant B attempts to rehydrate Tenant A's token
+        rehydrated = vault_b.rehydrate(token_id)
+        # It should fail and return the token verbatim, NOT the email
+        assert rehydrated == token_id
+        assert "test@example.com" not in rehydrated
+    finally:
+        settings.valid_virtual_keys_set = original_keys
+        settings.OPENAI_API_KEY = original_openai_key
 
 
 def test_vault_tenant_isolation_unit():
