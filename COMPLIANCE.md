@@ -34,7 +34,7 @@ We take the security of this open-source infrastructure seriously.
 
 *   **Zero External Dependencies for Inference:** The proxy does not pull heavy, unaudited weights at runtime. The compiled Regex and quantized ONNX engines execute entirely within the containerized boundary.
 *   **Automated Vulnerability Scanning:** This repository utilizes GitHub-native dependency scanning (Dependabot) to ensure underlying Python libraries (like `fastapi` and `uvicorn`) are actively patched against CVEs.
-*   **Reproducible Builds:** Provided Dockerfiles lock in specific base images (`python:3.12-slim`), ensuring predictable, bloat-free deployments with a `<70MB` resident RAM footprint.
+*   **Reproducible Builds:** Provided Dockerfiles lock in specific base images (`python:3.12-slim`), ensuring predictable, bloat-free deployments with a `<60MB` resident RAM footprint.
 *   **Cryptographic Integrity:** Release commits and tags are GPG-signed by the core maintainer to prevent supply-chain spoofing.
 
 > **Disclaimer:** *LLM-Shield-Proxy provides technical safeguards to assist with compliance, but it is not a substitute for legal counsel. Organizations are responsible for configuring their own environments and conducting their own independent audits.*

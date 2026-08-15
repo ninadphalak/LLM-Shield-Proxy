@@ -140,7 +140,7 @@ def main():
     rss_mb = get_process_memory()
     print("3. RESIDENT MEMORY BASELINE:")
     print("-" * 65)
-    print(f"   • Active RSS Footprint: {rss_mb:.2f} MB (<70 MB Target: {rss_mb < 70.0})\n")
+    print(f"   • Active RSS Footprint: {rss_mb:.2f} MB (<60 MB Target: {rss_mb < 60.0})\n")
     print("=" * 65)
     print("ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED")
     print("=" * 65)
