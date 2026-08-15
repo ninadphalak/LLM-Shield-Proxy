@@ -137,10 +137,10 @@ LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through six
 
 ### 1. Dual-Mode Shannon Entropy Secret Scanner (<6 µs Execution)
 Evaluating regex patterns alone fails against unstructured, patternless secrets (e.g. random 64-char API keys, proprietary tokens, raw hex secrets).
-- **Shannon Entropy Calculation:** $H(S) = -\sum_{i=1}^n p(c_i)\log_2 p(c_i)$ measures information density and character randomness.
+- **Shannon Entropy Calculation:** `H(S) = -Σ p(c) log2 p(c)` measures information density and character randomness.
 - **Alphabet-Calibrated Dual Thresholds:**
-  - **Base64 / Alphanumeric Tokens ($\ge 16$ chars):** Flagged when information entropy $H(S) \ge 4.5$ bits/char.
-  - **Hexadecimal Credentials ($\ge 24$ chars):** Max theoretical entropy for hex (`0-9a-f`) is $\log_2(16) = 4.0$; flagged when $H(S) \ge 3.4$ bits/char.
+  - **Base64 / Alphanumeric Tokens (≥ 16 characters):** Flagged when information entropy `H(S) ≥ 4.5 bits/char`.
+  - **Hexadecimal Credentials (≥ 24 characters):** Max theoretical entropy for hex (`0-9a-f`) is `log2(16) = 4.0`; flagged when `H(S) ≥ 3.4 bits/char`.
 - **Execution Speed:** Vectorized frequency counting computes entropy in **<2.6 µs**, instantly catching raw credentials before outbound egress.
 
 ### 2. Script-Aware Non-Latin & CJK Rehydration Engine
@@ -152,7 +152,7 @@ Standard regex word boundaries (`\b`) rely on ASCII whitespace and punctuation. 
 Server-Sent Events (SSE) stream LLM responses in arbitrary, fragmented token chunks. A sensitive placeholder tag or synthetic word might arrive split across consecutive packets:
 - **Chunk N:** `Hello [PER`
 - **Chunk N+1:** `SON_1]! How can I help you today?`
-- **Dynamic Prefix Retention:** The async `SSERehydrationBuffer` retains trailing characters bounded by $L = \max(0, \text{max\_token\_length} - 1)$ during intermediate chunks and flushes cleanly on `data: [DONE]`.
+- **Dynamic Prefix Retention:** The async `SSERehydrationBuffer` retains trailing characters bounded by `L = max(0, max_token_length - 1)` during intermediate chunks and flushes cleanly on `data: [DONE]`.
 - **Backpressure & Slowloris Protection:** Bounded by a strict `64KB` sliding-window memory threshold and `1MB` maximum SSE line accumulator, halting malicious buffer ballooning from slow clients or corrupted upstream streams.
 
 ### 4. Adversarial Desmuggling & Normalization Pipeline
@@ -160,7 +160,7 @@ Attackers frequently use invisible Unicode characters and encoding tricks to byp
 - **Zero-Width Character Stripping:** Filters zero-width spaces (`\u200B`), zero-width joiners (`\u200D`), byte order marks (`\uFEFF`), and soft hyphens (`\u00AD`).
 - **BiDi / RTL Override Neutralization:** Strips Right-to-Left Override (`\u202E`, `\u202D`) and directional formatting characters (`\u2060-\u2069`) that visually flip character orders to humans while evading byte scanners.
 - **NFKC Unicode Normalization:** Converts full-width, circled, and decomposed glyphs to canonical equivalents prior to pattern matching.
-- **Base64 Candidate Inspection:** Recursively extracts and inspects Base64 candidate strings ($\ge 20$ chars) to neutralize obfuscated PII payloads.
+- **Base64 Candidate Inspection:** Recursively extracts and inspects Base64 candidate strings (≥ 20 characters) to neutralize obfuscated PII payloads.
 
 ### 5. Universal Multi-Modal & Recursive Tool-Call Scanner
 Modern LLMs operate over multi-turn agentic workflows, embeddings, and vision inputs:
