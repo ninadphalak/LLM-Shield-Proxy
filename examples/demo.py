@@ -8,7 +8,7 @@ from openai import OpenAI
 
 # Initialize client pointing to local LLM-Shield-Proxy gateway
 client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY", "sk-mock-key"),
+    api_key=os.getenv("OPENAI_API_KEY") or "sk-proj-demo-key",
     base_url="http://localhost:8000/v1",
 )
 
