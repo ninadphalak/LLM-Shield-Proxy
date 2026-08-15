@@ -4,8 +4,10 @@
 
 *Secure, fast, and drop-in PII redaction and context preservation reverse proxy for Large Language Models.*
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21955770.svg)](https://doi.org/10.5281/zenodo.21955770)
 [![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Docker Pulls](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
 
@@ -14,6 +16,11 @@
 **LLM-Shield-Proxy** is an open-source, zero-egress middleware reverse proxy deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
 
 Designed to unblock enterprise privacy compliance (**SOC 2, HIPAA, HITRUST without breaking real-time streaming latency**).
+
+### Upstream Integration & Context
+This repository provides the reference proxy architecture and benchmark suite for resolving SSE stream fragmentation in enterprise sandboxes, as proposed in:
+* **Upstream Proposal:** [NVIDIA/OpenShell #2763](https://github.com/NVIDIA/OpenShell/issues/2763)
+* **Preprint Publication:** [DOI: 10.5281/zenodo.21955770](https://doi.org/10.5281/zenodo.21955770)
 
 ---
 
@@ -448,6 +455,26 @@ Reach out directly at ninadphalak@gmail.com to share your use case, request a fe
 
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
 * **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730).
+
+---
+
+## Citation
+
+If you reference this architecture, benchmark methodology, or sliding-window buffer implementation, please cite:
+
+Phalak, N. (2026). Quantifying Latency and Token Overhead in Real-Time LLM Stream Sanitization: A Tiered Detection Approach (Version 1.0.0). Zenodo. https://doi.org/10.5281/zenodo.21955770
+
+```bibtex
+@misc{phalak2026quantifying,
+  author       = {Phalak, Ninad},
+  title        = {Quantifying Latency and Token Overhead in Real-Time LLM Stream Sanitization: A Tiered Detection Approach},
+  month        = aug,
+  year         = 2026,
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.21955770},
+  url          = {https://doi.org/10.5281/zenodo.21955770}
+}
+```
 
 
 
