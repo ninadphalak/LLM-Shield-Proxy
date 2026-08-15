@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
+
 import orjson as json
 
 from llm_shield_proxy.config import settings
@@ -89,10 +90,7 @@ class SSERehydrationBuffer:
         retention_length = self._calculate_retention_length(self.content_buffer)
 
         # Apply boundary-aware rehydration up to the retention boundary
-        self.content_buffer = self.vault.rehydrate(
-            self.content_buffer,
-            retention_length=retention_length
-        )
+        self.content_buffer = self.vault.rehydrate(self.content_buffer, retention_length=retention_length)
 
         # Recalculate retention in case replacements modified the tail
         retention_length = self._calculate_retention_length(self.content_buffer)
@@ -187,7 +185,7 @@ async def rehydrate_sse_stream(
                     remaining = buffer.process_delta_text("", is_final=True)
                     if remaining:
                         flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                        yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode("utf-8")
+                        yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
                     yield (line + "\n").encode("utf-8")
                 else:
                     yield (line + "\n").encode("utf-8")
@@ -204,7 +202,7 @@ async def rehydrate_sse_stream(
             remaining = buffer.process_delta_text("", is_final=True)
             if remaining:
                 flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode("utf-8")
+                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
 
             if line_accumulator:
                 yield line_accumulator.encode("utf-8")

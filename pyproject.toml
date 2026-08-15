@@ -81,3 +81,18 @@ llm-shield-proxy = "llm_shield_proxy.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["llm_shield_proxy*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+]
+ignore = [
+    "E501", # line length handled by formatter
+]

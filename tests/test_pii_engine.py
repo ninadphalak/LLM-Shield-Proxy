@@ -2,9 +2,9 @@
 
 import base64
 import time
-import pytest
-from llm_shield_proxy.vault import Vault
+
 from llm_shield_proxy.pii_engine import PIIEngine, calculate_shannon_entropy
+from llm_shield_proxy.vault import Vault
 
 
 def test_shannon_entropy_calculation():
@@ -85,10 +85,8 @@ def test_pii_payload_redaction():
 
     payload = {
         "model": "gpt-4",
-        "messages": [
-            {"role": "user", "content": "My email is alice@example.com"}
-        ],
-        "temperature": 0.7
+        "messages": [{"role": "user", "content": "My email is alice@example.com"}],
+        "temperature": 0.7,
     }
 
     redacted_payload = engine.redact_payload(payload, vault)

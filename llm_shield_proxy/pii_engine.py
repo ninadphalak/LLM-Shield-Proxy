@@ -9,6 +9,7 @@ Implements a high-throughput multi-tier detection cascade:
 from __future__ import annotations
 
 import base64
+import logging
 import math
 import re
 import unicodedata
@@ -18,15 +19,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from llm_shield_proxy.config import settings
 from llm_shield_proxy.vault import Vault
 
+logger = logging.getLogger(__name__)
+
 # Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
-INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
-    r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]"
-)
+INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
 
 # Candidate base64 patterns for obfuscated PII smuggling
-BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(
-    r"\b[A-Za-z0-9+/]{20,}={0,2}\b"
-)
+BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9+/]{20,}={0,2}\b")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
@@ -41,9 +40,7 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     ("CREDIT_CARD", re.compile(r"\b(?:\d[ -]?){13,16}\b")),
     (
         "IP_ADDRESS",
-        re.compile(
-            r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
-        ),
+        re.compile(r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"),
     ),
     (
         "AWS_API_KEY",
@@ -77,9 +74,7 @@ TIER3_NER_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
 ]
 
 # Candidate pattern for Shannon Entropy evaluation
-CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
-    r"\b[A-Za-z0-9_\-+=]{16,}\b"
-)
+CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9_\-+=]{16,}\b")
 
 
 def normalize_and_desmuggle(text: str) -> str:
@@ -134,9 +129,7 @@ class PIIEngine:
         self.enable_tier2: bool = enable_tier2
         self.enable_tier3: bool = enable_tier3
         self.entropy_threshold: float = (
-            entropy_threshold
-            if entropy_threshold is not None
-            else settings.SHANNON_ENTROPY_THRESHOLD
+            entropy_threshold if entropy_threshold is not None else settings.SHANNON_ENTROPY_THRESHOLD
         )
         self._onnx_session: Optional[Any] = None
         self._init_onnx_model()
@@ -200,8 +193,8 @@ class PIIEngine:
                         if pattern.search(decoded_text):
                             raw_spans.append((match.start(), match.end(), "BASE64_OBFUSCATED_PII", token))
                             break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Base64 candidate decode failed: %s", exc)
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org)
         if self.enable_tier3:
@@ -291,9 +284,7 @@ class PIIEngine:
             for msg in new_payload["messages"]:
                 if isinstance(msg, dict):
                     if "messages" in msg:
-                        redacted_messages.append(
-                            self.redact_payload(msg, vault, depth=depth + 1, max_depth=max_depth)
-                        )
+                        redacted_messages.append(self.redact_payload(msg, vault, depth=depth + 1, max_depth=max_depth))
                         continue
 
                     msg_copy = msg.copy()
@@ -369,8 +360,7 @@ class PIIEngine:
                 new_payload["prompt"] = self.redact_text(new_payload["prompt"], vault)
             elif isinstance(new_payload["prompt"], list):
                 new_payload["prompt"] = [
-                    self.redact_text(p, vault) if isinstance(p, str) else p
-                    for p in new_payload["prompt"]
+                    self.redact_text(p, vault) if isinstance(p, str) else p for p in new_payload["prompt"]
                 ]
 
         # Redact system prompt if separated at top level
@@ -383,8 +373,7 @@ class PIIEngine:
                 new_payload["input"] = self.redact_text(new_payload["input"], vault)
             elif isinstance(new_payload["input"], list):
                 new_payload["input"] = [
-                    self.redact_text(item, vault) if isinstance(item, str) else item
-                    for item in new_payload["input"]
+                    self.redact_text(item, vault) if isinstance(item, str) else item for item in new_payload["input"]
                 ]
 
         return new_payload

@@ -1,4 +1,3 @@
-import pytest
 from llm_shield_proxy.vault import Vault, VaultStore
 
 

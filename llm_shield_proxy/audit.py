@@ -94,10 +94,11 @@ class AuditLogger:
 
         try:
             from llm_shield_proxy.metrics import llm_shield_pii_redacted_total
+
             for entity_type, count in entity_counts.items():
                 llm_shield_pii_redacted_total.labels(entity_type=entity_type).inc(count)
-        except Exception:
-            pass
+        except Exception as exc:
+            audit_logger.debug("Metrics recording exception: %s", exc)
 
     @staticmethod
     def log_proxy_event(
