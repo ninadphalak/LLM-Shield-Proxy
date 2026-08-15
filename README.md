@@ -355,10 +355,10 @@ Built-in liveness, readiness, and metrics endpoints explicitly support enterpris
 
 ```bash
 curl http://localhost:8000/healthz
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.16"}
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.0.17"}
 
 curl http://localhost:8000/readyz
-# Output: {"status":"ready","service":"llm-shield-proxy","version":"1.0.16","redis_connected":false}
+# Output: {"status":"ready","service":"llm-shield-proxy","version":"1.0.17","redis_connected":false}
 
 curl -X OPTIONS http://localhost:8000/v1/chat/completions
 # Returns 204 No Content with Access-Control-Allow-* headers
@@ -413,7 +413,7 @@ Every published release includes automated SHA-256 checksums (`checksums.txt`) a
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
-Get-FileHash llm-shield-proxy-source-v1.0.16.zip -Algorithm SHA256
+Get-FileHash llm-shield-proxy-source-v1.0.17.zip -Algorithm SHA256
 
 # 2. Verify Cryptographic GPG Signature:
 gpg --verify checksums.txt.asc checksums.txt
