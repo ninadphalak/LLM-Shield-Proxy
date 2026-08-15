@@ -25,7 +25,7 @@ Choose your installation tier:
 
 | Installation Mode | Command | Capabilities Included |
 | :--- | :--- | :--- |
-| **Standard Installation** *(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** - Ultra-lightweight `<70MB` RAM footprint. |
+| **Standard Installation** *(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** - Ultra-lightweight `<60MB` RAM footprint. |
 | **Full NLP Installation** *(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** for deep contextual entity extraction. |
 
 > **Enabling Tier 3 ONNX NER:** When installed with `[ner]`, enable deep neural entity extraction by setting `ENABLE_TIER3_ONNX_NER=true` in your `.env` or environment variables (and optionally point `ONNX_MODEL_PATH` to custom model weights). If disabled or not installed, the engine automatically and gracefully bypasses Tier 3 with zero startup overhead.
@@ -103,7 +103,7 @@ for chunk in response:
 | Existing Legacy Proxies | LLM-Shield-Proxy |
 | :--- | :--- |
 | **Destroys Real-Time SSE Streaming:** Buffers entire responses before scanning, causing multi-second UI latency stalls. | **Ultra-Low Latency Streaming:** Redacts and re-hydrates delta-by-delta as SSE packets stream. |
-| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <70MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
+| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <60MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
 | **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage:** Self-destructing TTL session vault built for zero data liability. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
@@ -270,7 +270,7 @@ LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweigh
 | **Tier 1 Regex Overhead** | `0.0379 ms` | `0.0366 ms` (`36.60 µs`) | Microsecond pattern scan |
 | **Tier 2 Entropy & Local NER Overhead** | `0.0034 ms` | `0.0030 ms` (`3.00 µs`) | Quantized local scan |
 | **Total SSE Stream Overhead** | `0.0043 ms` | `0.0042 ms` (`4.23 µs`) | Added latency per SSE delta chunk |
-| **Process RAM Footprint** | - | - | `<70 MB` Resident Set Size |
+| **Process RAM Footprint** | - | - | `<60 MB` Resident Set Size |
 
 ### ⚡ Under the Hood: Speed Optimizations
 To achieve these microsecond latencies, LLM-Shield-Proxy implements three low-level systems optimizations:
