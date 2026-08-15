@@ -17,9 +17,25 @@ Designed to unblock enterprise privacy compliance (**SOC 2, HIPAA, HITRUST witho
 
 ---
 
-## ⚡ 30-Second Quickstart & Deployment
+## ⚡ 60-Second Quickstart & Deployment
 
-### 1. Install & Run via CLI
+### 🚀 Quick Start (Docker) — 3 Lines of Bash
+Spin up the zero-egress proxy and run the live streaming PII demo in 3 lines:
+
+```bash
+# 1. Spin up the proxy container in background
+docker compose up -d
+
+# 2. Verify health probe
+curl http://localhost:8000/healthz
+
+# 3. Run the live demo script
+python examples/demo.py
+```
+
+---
+
+### 📦 Installation Options
 
 Choose your installation tier:
 
@@ -35,7 +51,7 @@ Choose your installation tier:
 llm-shield-proxy --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-### 2. Run via Docker
+### 🐳 Run via Docker Directly
 ```bash
 docker run -d -p 8000:8000 \
   -e OPENAI_API_KEY="sk-your-openai-api-key" \
@@ -45,35 +61,7 @@ docker run -d -p 8000:8000 \
   ghcr.io/ninadphalak/llm-shield-proxy:latest
 ```
 
-### 3. Deploy with Docker Compose (Proxy + Redis Vault)
-```yaml
-version: "3.8"
-
-services:
-  llm-shield-proxy:
-    image: ghcr.io/ninadphalak/llm-shield-proxy:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - OPENAI_API_KEY=sk-your-openai-key-here
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
-```
-
-Spin up the cluster:
-```bash
-docker compose up -d
-```
-
-### 4. Update your Application (1-Line SDK Change)
+### 1-Line SDK Change
 Point your existing OpenAI SDK `base_url` to your local LLM-Shield-Proxy instance:
 
 ```python
@@ -208,37 +196,37 @@ flowchart TD
     classDef vault fill:#fffbebe,stroke:#f59e0b,stroke-width:2px,color:#92400e,font-weight:bold;
     classDef upstream fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#6b21a8,font-weight:bold;
 
-    UserApp["👤 User Application\n(OpenAI / LangChain SDK)"]:::client
+    UserApp["👤 Client Application\n(OpenAI / LangChain SDK)"]:::client
 
-    subgraph SecurityMoat ["🛡️ Zero-Egress Local Environment (Apache 2.0 Licensed)"]
+    subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy VPC Security Gateway"]
         direction TD
-        FastAPIProxy["⚡ FastAPI Catch-All Gateway\n(/{path:path} + SSRF Defense)"]:::proxyEngine
+        InboundAuth["🔑 Inbound Auth & Virtual Key Swapping\n(Constant-Time Verification)"]:::proxyEngine
 
-        subgraph CascadeEngine ["🔒 3-Tier PII Detection Cascade"]
-            Tier1["Tier 1: Pre-compiled DFA Regex"]:::piiSecurity
-            Tier2["Tier 2: Shannon Entropy Filter (tau_H >= 4.5)"]:::piiSecurity
-            Tier3["Tier 3: Contextual ONNX NER Pipeline"]:::piiSecurity
+        subgraph CascadeEngine ["🔒 3-Tier Multi-Modal & CJK Redaction Engine"]
+            Tier1["Tier 1: Pre-compiled DFA Regex\n(<0.03ms Pattern Matching)"]:::piiSecurity
+            Tier2["Tier 2: Shannon Entropy Secret Filter\n(Base64 >= 4.5, Hex >= 3.4 bits/char)"]:::piiSecurity
+            Tier3["Tier 3: Contextual ONNX NER Pipeline\n(Script-Aware CJK & Multi-Modal Unwrapping)"]:::piiSecurity
             Tier1 --> Tier2 --> Tier3
         end
 
-        VaultStore[("🔑 Session Vault Store\n(LRU In-Memory / Async Redis Pool)")]:::vault
-        LookaheadBuffer["⏱️ Prefix-Aware Sliding-Window Buffer\n(L = max(0, max_token_len - 1))"]:::proxyEngine
-        Rehydrator["🔄 Stream Re-hydrator\n(Token -> Original Value)"]:::proxyEngine
+        VaultStore[("🔐 AES-256-GCM Vault Store\n(Session-Scoped TTL Eviction)")]:::vault
+        LookaheadBuffer["⏱️ Sliding-Window Streaming Buffer\n(Chunk-Split & Slowloris Protection)"]:::proxyEngine
+        Rehydrator["🔄 Real-Time SSE Re-hydrator\n(Synthetic Entity / Tag De-masking)"]:::proxyEngine
     end
 
-    UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Gemini / Anthropic / vLLM)"]:::upstream
+    UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / Gemini / vLLM)"]:::upstream
 
-    %% Inbound Flow (Prompt Sanitization)
-    UserApp -- "<b><span style='color:#000000;'>1. Inbound Raw Prompt Payload</span></b>" --> FastAPIProxy
-    FastAPIProxy -- "<b><span style='color:#000000;'>2. Redact Payload</span></b>" --> Tier1
-    Tier3 -- "<b><span style='color:#000000;'>3. Store Vault Mappings</span></b>" --> VaultStore
-    Tier3 -- "<b><span style='color:#000000;'>4. Redacted JSON Payload</span></b>" --> UpstreamLLM
+    %% Inbound Request Flow
+    UserApp -- "<b>1. Inbound Request (Raw PII / Secrets)</b>" --> InboundAuth
+    InboundAuth -- "<b>2. Authenticated Payload</b>" --> Tier1
+    Tier3 -- "<b>3. Encrypt & Store Token Mappings</b>" --> VaultStore
+    Tier3 -- "<b>4. Sanitized Zero-PII Payload</b>" --> UpstreamLLM
 
-    %% Outbound Flow (Streaming De-redaction)
-    UpstreamLLM -. "<b><span style='color:#000000;'>5. Raw SSE Stream Deltas</span></b>" .-> LookaheadBuffer
-    LookaheadBuffer -- "<b><span style='color:#000000;'>6. Prefix-Safe Rehydration</span></b>" --> Rehydrator
+    %% Outbound Response Flow
+    UpstreamLLM -. "<b>5. Raw SSE Stream Deltas</b>" .-> LookaheadBuffer
+    LookaheadBuffer -- "<b>6. Prefix-Safe Rehydration</b>" --> Rehydrator
     Rehydrator <--> VaultStore
-    Rehydrator -. "<b><span style='color:#000000;'>7. Sanitized Real-Time Stream</span></b>" .-> UserApp
+    Rehydrator -. "<b>7. Sanitized Real-Time Stream</b>" .-> UserApp
 
     style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
     style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#263238,font-weight:bold
