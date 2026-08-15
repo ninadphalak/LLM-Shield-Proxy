@@ -114,3 +114,80 @@ async def test_extreme_chunk_splitting_sse_evasion():
     full = "".join(emitted)
     assert "sarah@corp.com" in full
     assert "[EMAIL_1]" not in full
+
+
+def test_json_bomb_recursion_limit():
+    """Adversarial Test: Nested JSON bomb (500 levels) attempting stack overflow."""
+    vault = Vault(synthetic=False)
+    
+    nested_payload = {"content": "Base prompt with ssn 555-44-3333"}
+    for _ in range(50):
+        nested_payload = {"messages": [nested_payload]}
+
+    # Assert raises ValueError due to depth exceeding safety threshold
+    with pytest.raises(ValueError, match="Maximum payload nesting depth exceeded"):
+        pii_engine.redact_payload(nested_payload, vault, depth=0, max_depth=20)
+
+
+def test_bidi_rtl_override_smuggling():
+    """Adversarial Test: Using BiDi right-to-left override characters (\u202E, \u202D) to evade regex."""
+    vault = Vault(synthetic=False)
+
+    # Injected with Right-to-Left Override (\u202E) and Left-to-Right Embedding (\u202A)
+    bidi_payload = "Contact \u202Eemail\u202C is \u202Ajohn.doe@hospital.org\u202C recorded."
+    redacted = pii_engine.redact_text(bidi_payload, vault)
+
+    assert "john.doe@hospital.org" not in redacted
+    assert "[EMAIL_1]" in redacted
+
+
+def test_cjk_multilingual_boundary_safety():
+    """Adversarial Test: Validates entity rehydration in non-Latin scripts (Chinese/Japanese) without whitespace."""
+    vault = Vault(synthetic=True)
+    # Register synthetic name
+    vault.token_to_original["Maya"] = "Alice Walker"
+    vault.original_to_token["Alice Walker"] = "Maya"
+    vault.max_token_length = 4
+
+    # Sentence with zero spaces in Chinese: '我的名字是Maya。'
+    cjk_text = "我的名字是Maya。"
+    rehydrated = vault.rehydrate(cjk_text)
+
+    assert "我的名字是Alice Walker。" in rehydrated
+    assert "Maya" not in rehydrated
+
+
+def test_multimodal_content_array_redaction():
+    """Adversarial Test: Multi-part vision content blocks with mixed text and base64 image_url."""
+    vault = Vault(synthetic=False)
+
+    multimodal_payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Analyze patient record for SSN: 555-44-3333"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo..."}},
+                ],
+            }
+        ]
+    }
+
+    redacted = pii_engine.redact_payload(multimodal_payload, vault)
+    text_block = redacted["messages"][0]["content"][0]
+    img_block = redacted["messages"][0]["content"][1]
+
+    assert "555-44-3333" not in text_block["text"]
+    assert "[SSN_1]" in text_block["text"]
+    assert img_block["image_url"]["url"] == "data:image/png;base64,iVBORw0KGgo..."
+
+
+def test_slowloris_buffer_backpressure_limit():
+    """Adversarial Test: Slowloris attack attempting to balloon memory by sending massive non-terminating streams."""
+    vault = Vault(synthetic=False)
+    buffer = SSERehydrationBuffer(vault)
+
+    # Feed 70KB delta without flushing
+    massive_chunk = "A" * (70 * 1024)
+    with pytest.raises(ValueError, match="backpressure protection"):
+        buffer.process_delta_text(massive_chunk)

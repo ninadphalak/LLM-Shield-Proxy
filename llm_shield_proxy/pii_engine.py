@@ -18,9 +18,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from llm_shield_proxy.config import settings
 from llm_shield_proxy.vault import Vault
 
-# Zero-Width and Invisible Unicode format characters used for smuggling
+# Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
 INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
-    r"[\u200B-\u200D\uFEFF\u00AD\u2060\u180E]"
+    r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]"
 )
 
 # Candidate base64 patterns for obfuscated PII smuggling
@@ -256,19 +256,30 @@ class PIIEngine:
 
         return "".join(result)
 
-    def redact_payload(self, payload: Dict[str, Any], vault: Vault) -> Dict[str, Any]:
+    def redact_payload(
+        self,
+        payload: Dict[str, Any],
+        vault: Vault,
+        depth: int = 0,
+        max_depth: int = 20,
+    ) -> Dict[str, Any]:
         """Recursively traverses LLM payload dictionary and redacts string content.
 
         Supports standard OpenAI/Anthropic/Gemini payload structures (messages array, prompt, system, input, tool_calls).
-        Protects against indirect prompt injection in tool responses.
+        Protects against indirect prompt injection in tool responses and JSON recursion bombs.
 
         Args:
             payload: Request JSON dictionary.
             vault: Session-scoped Vault.
+            depth: Current traversal recursion depth.
+            max_depth: Maximum permitted JSON nesting depth before raising ValueError.
 
         Returns:
             A deep-redacted copy of the request payload.
         """
+        if depth > max_depth:
+            raise ValueError("Maximum payload nesting depth exceeded")
+
         if not isinstance(payload, dict):
             return payload
 
@@ -279,6 +290,12 @@ class PIIEngine:
             redacted_messages = []
             for msg in new_payload["messages"]:
                 if isinstance(msg, dict):
+                    if "messages" in msg:
+                        redacted_messages.append(
+                            self.redact_payload(msg, vault, depth=depth + 1, max_depth=max_depth)
+                        )
+                        continue
+
                     msg_copy = msg.copy()
                     role = msg_copy.get("role", "")
 

@@ -100,15 +100,21 @@ class Vault:
 
             return token
 
+    def _is_ascii_word_char(self, c: str) -> bool:
+        """Determines if character is an ASCII alphanumeric word character."""
+        return ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or (c == "_")
+
     def _is_boundary_safe(self, text: str, start: int, end: int, token: str) -> bool:
-        """Ensures token match occurs at word boundaries to prevent sub-word collisions."""
-        if token[0].isalnum() and start > 0:
-            prev_char = text[start - 1]
-            if prev_char.isalnum() or prev_char == "_":
+        """Ensures token match occurs at word boundaries to prevent sub-word collisions.
+
+        Supports multi-lingual and CJK (Chinese, Japanese, Korean) contexts without
+        falsely requiring whitespace between logographic characters.
+        """
+        if self._is_ascii_word_char(token[0]) and start > 0:
+            if self._is_ascii_word_char(text[start - 1]):
                 return False
-        if token[-1].isalnum() and end < len(text):
-            next_char = text[end]
-            if next_char.isalnum() or next_char == "_":
+        if self._is_ascii_word_char(token[-1]) and end < len(text):
+            if self._is_ascii_word_char(text[end]):
                 return False
         return True
 
