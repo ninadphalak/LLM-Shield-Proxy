@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 import threading
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional
@@ -158,6 +159,20 @@ class Vault:
 
                 result = result[:idx] + original + result[end_idx:]
                 pos = idx + len(original)
+
+        # Neutralize Markdown Image Exfiltration payloads
+        if retention_length == 0 and "![" in result:
+            result = re.sub(
+                r"!\[(.*?)\]\((https?://[^\s)]+)\)",
+                lambda m: f"![{m.group(1)}]([IMAGE_EXFILTRATION_BLOCKED])"
+                if (
+                    "?" in m.group(2)
+                    or "leak" in m.group(2).lower()
+                    or any(orig in m.group(2) for orig in self.original_to_token.values() if len(orig) >= 4)
+                )
+                else m.group(0),
+                result,
+            )
 
         return result
 
