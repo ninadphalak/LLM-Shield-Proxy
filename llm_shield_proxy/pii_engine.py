@@ -157,10 +157,11 @@ class PIIEngine:
         if self.enable_tier2 and settings.ENABLE_TIER2_ENTROPY:
             for match in CANDIDATE_SECRET_PATTERN.finditer(text):
                 token = match.group(0)
-                # Skip if already identified by Tier 1 pattern or too uniform
                 if len(token) >= settings.SHANNON_MIN_LENGTH:
                     entropy = calculate_shannon_entropy(token)
-                    if entropy >= self.entropy_threshold:
+                    is_hex = all(c in "0123456789abcdefABCDEF" for c in token)
+                    # Standard Base64/alphanumeric secrets (>= 4.5 bits) or high-entropy Hex tokens (>= 3.4 bits on >= 24 chars)
+                    if entropy >= self.entropy_threshold or (is_hex and len(token) >= 24 and entropy >= 3.4):
                         raw_spans.append((match.start(), match.end(), "SECRET_KEY", token))
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org)
@@ -213,7 +214,7 @@ class PIIEngine:
     def redact_payload(self, payload: Dict[str, Any], vault: Vault) -> Dict[str, Any]:
         """Recursively traverses LLM payload dictionary and redacts string content.
 
-        Supports standard OpenAI/Anthropic/Gemini payload structures (messages array, prompt, system).
+        Supports standard OpenAI/Anthropic/Gemini payload structures (messages array, prompt, system, input, tool_calls).
 
         Args:
             payload: Request JSON dictionary.
@@ -233,10 +234,11 @@ class PIIEngine:
             for msg in new_payload["messages"]:
                 if isinstance(msg, dict):
                     msg_copy = msg.copy()
+
+                    # 1. Redact message content (string or multi-part content blocks)
                     if "content" in msg_copy and isinstance(msg_copy["content"], str):
                         msg_copy["content"] = self.redact_text(msg_copy["content"], vault)
                     elif "content" in msg_copy and isinstance(msg_copy["content"], list):
-                        # Multi-part content blocks (e.g. OpenAI Vision / Anthropic content blocks)
                         new_content_blocks = []
                         for block in msg_copy["content"]:
                             if isinstance(block, dict):
@@ -247,6 +249,40 @@ class PIIEngine:
                             else:
                                 new_content_blocks.append(block)
                         msg_copy["content"] = new_content_blocks
+
+                    # 2. Redact message participant name if present
+                    if "name" in msg_copy and isinstance(msg_copy["name"], str):
+                        raw_name = msg_copy["name"]
+                        spaced_name = raw_name.replace("_", " ")
+                        redacted_spaced = self.redact_text(spaced_name, vault)
+                        if redacted_spaced != spaced_name:
+                            msg_copy["name"] = redacted_spaced.replace(" ", "_")
+                        elif raw_name and raw_name[0].isupper():
+                            msg_copy["name"] = vault.get_or_create_token(raw_name, "PERSON").replace(" ", "_")
+
+                    # 3. Redact OpenAI tool_calls function arguments in multi-turn agent history
+                    if "tool_calls" in msg_copy and isinstance(msg_copy["tool_calls"], list):
+                        new_tool_calls = []
+                        for tc in msg_copy["tool_calls"]:
+                            if isinstance(tc, dict):
+                                tc_copy = tc.copy()
+                                if "function" in tc_copy and isinstance(tc_copy["function"], dict):
+                                    fn_copy = tc_copy["function"].copy()
+                                    if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
+                                        fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault)
+                                    tc_copy["function"] = fn_copy
+                                new_tool_calls.append(tc_copy)
+                            else:
+                                new_tool_calls.append(tc)
+                        msg_copy["tool_calls"] = new_tool_calls
+
+                    # 4. Redact legacy OpenAI function_call
+                    if "function_call" in msg_copy and isinstance(msg_copy["function_call"], dict):
+                        fn_copy = msg_copy["function_call"].copy()
+                        if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
+                            fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault)
+                        msg_copy["function_call"] = fn_copy
+
                     redacted_messages.append(msg_copy)
                 else:
                     redacted_messages.append(msg)
@@ -265,6 +301,16 @@ class PIIEngine:
         # Redact system prompt if separated at top level
         if "system" in new_payload and isinstance(new_payload["system"], str):
             new_payload["system"] = self.redact_text(new_payload["system"], vault)
+
+        # Redact embeddings / moderation / responses input field
+        if "input" in new_payload:
+            if isinstance(new_payload["input"], str):
+                new_payload["input"] = self.redact_text(new_payload["input"], vault)
+            elif isinstance(new_payload["input"], list):
+                new_payload["input"] = [
+                    self.redact_text(item, vault) if isinstance(item, str) else item
+                    for item in new_payload["input"]
+                ]
 
         return new_payload
 

@@ -129,3 +129,62 @@ def test_dlp_redos_base64_obfuscation():
 
     assert duration < 0.1, f"ReDoS detected! Execution took {duration} seconds"
     assert encoded_secret in redacted
+
+
+def test_tool_calls_and_embeddings_redaction():
+    """Tests redaction inside agentic tool_calls and vector embeddings input fields."""
+    engine = PIIEngine(enable_tier2=True, enable_tier3=True)
+    vault = Vault(synthetic=False)
+
+    # 1. Tool calls
+    tool_payload = {
+        "model": "gpt-4o",
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {
+                            "name": "lookup_patient",
+                            "arguments": '{"ssn": "555-44-3333", "email": "alice@example.com"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "user", "name": "John_Smith", "content": "Review patient data"},
+        ],
+    }
+
+    redacted_tool = engine.redact_payload(tool_payload, vault)
+    args_str = redacted_tool["messages"][0]["tool_calls"][0]["function"]["arguments"]
+    assert "555-44-3333" not in args_str
+    assert "alice@example.com" not in args_str
+    assert "[SSN_1]" in args_str
+    assert "[EMAIL_1]" in args_str
+    assert "John_Smith" not in redacted_tool["messages"][1]["name"]
+
+    # 2. Embeddings payload
+    embed_payload = {
+        "input": ["Patient John Smith SSN 555-44-3333", "Record for Bob 123-45-6789"],
+        "model": "text-embedding-3-small",
+    }
+    redacted_embed = engine.redact_payload(embed_payload, vault)
+    assert "555-44-3333" not in redacted_embed["input"][0]
+    assert "123-45-6789" not in redacted_embed["input"][1]
+
+
+def test_subword_boundary_safe_rehydration():
+    """Ensures synthetic words like 'May' do not corrupt legitimate words like 'Maybe'."""
+    vault = Vault(synthetic=True)
+    vault.token_to_original["May"] = "Sarah"
+    vault.max_token_length = 3
+
+    text = "Maybe we should check with May tomorrow."
+    rehydrated = vault.rehydrate(text)
+
+    # 'Maybe' should remain 'Maybe', while standalone 'May' should be rehydrated to 'Sarah'
+    assert "Maybe" in rehydrated
+    assert "Sarahbe" not in rehydrated
+    assert "check with Sarah tomorrow" in rehydrated
