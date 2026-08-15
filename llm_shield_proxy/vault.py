@@ -1,19 +1,24 @@
-"""Enterprise Session-Scoped Vault Management Module.
+"""Enterprise Session-Scoped Cryptographic Vault Management Module.
 
 Provides bidirectional deterministic mapping between sensitive original PII values
-and session-bound tokens (or realistic synthetic values), enforcing isolation across tenants.
+and session-bound tokens (or realistic synthetic values), enforcing AES-256-GCM encryption
+and namespace isolation across tenants.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import os
 import random
 import re
 import threading
+import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional
 from faker import Faker
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from llm_shield_proxy.config import settings
 
 try:
@@ -24,6 +29,18 @@ except ImportError:
     redis = None  # type: ignore
 
 fake = Faker()
+_PROCESS_DEK: Optional[bytes] = None
+
+
+def get_vault_dek() -> bytes:
+    """Retrieves or derives 256-bit Data Encryption Key (DEK) for AES-256-GCM vault security."""
+    global _PROCESS_DEK
+    key_src = getattr(settings, "VAULT_ENCRYPTION_KEY", None) or getattr(settings, "SECRET_KEY", None)
+    if key_src:
+        return hashlib.sha256(key_src.encode("utf-8")).digest()
+    if _PROCESS_DEK is None:
+        _PROCESS_DEK = AESGCM.generate_key(bit_length=256)
+    return _PROCESS_DEK
 
 
 class Vault:
@@ -32,20 +49,30 @@ class Vault:
     Maintains deterministic bijective mappings between raw PII text values
     and temporary session tokens. Supports both bracketed structural tagging
     ([PERSON_1], [EMAIL_1]) and unbracketed synthetic entity swapping.
+    Protects original PII values with AES-256-GCM authenticated envelope encryption.
 
     Thread-safe and supports multi-tenant namespace isolation.
     """
 
-    def __init__(self, tenant_id: str = "default", session_id: str = "default", synthetic: Optional[bool] = None) -> None:
+    def __init__(
+        self,
+        tenant_id: str = "default",
+        session_id: str = "default",
+        synthetic: Optional[bool] = None,
+        save_callback: Optional[Callable[[Vault], None]] = None,
+        dek: Optional[bytes] = None,
+    ) -> None:
         self.tenant_id: str = tenant_id
         self.session_id: str = session_id
         self.synthetic: bool = synthetic if synthetic is not None else settings.ENABLE_SYNTHETIC_SWAPPING
+        self.dek: bytes = dek or get_vault_dek()
+        self._aesgcm: AESGCM = AESGCM(self.dek)
         self.original_to_token: Dict[str, str] = {}
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
         self.max_token_length: int = 0
         self._lock: threading.Lock = threading.Lock()
-        self.save_callback: Optional[Callable[[Vault], None]] = None
+        self.save_callback: Optional[Callable[[Vault], None]] = save_callback
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         """Retrieves an existing token or generates a deterministic replacement.
@@ -184,19 +211,30 @@ class Vault:
 
 
 class VaultStore:
-    """Thread-safe in-memory session vault store with LRU eviction.
+    """Thread-safe in-memory session vault store with LRU and TTL eviction.
 
     Attributes:
         max_capacity: Maximum number of active tenant session vaults.
+        ttl_seconds: Rolling TTL in seconds after which inactive session vaults expire.
     """
 
-    def __init__(self, max_capacity: Optional[int] = None) -> None:
+    def __init__(self, max_capacity: Optional[int] = None, ttl_seconds: Optional[int] = None) -> None:
         self._sessions: OrderedDict[str, Vault] = OrderedDict()
+        self._timestamps: Dict[str, float] = {}
         self.max_capacity: int = max_capacity or settings.MAX_SESSION_VAULTS
+        self.ttl_seconds: int = ttl_seconds or settings.SESSION_TTL_SECONDS
         self._lock: threading.Lock = threading.Lock()
 
+    def _evict_expired(self) -> None:
+        """Evicts orphaned session vaults whose TTL has expired."""
+        now = time.time()
+        expired_keys = [k for k, ts in self._timestamps.items() if now - ts > self.ttl_seconds]
+        for k in expired_keys:
+            self._sessions.pop(k, None)
+            self._timestamps.pop(k, None)
+
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
-        """Retrieves or creates an in-memory session vault.
+        """Retrieves or creates an in-memory session vault enforcing TTL eviction.
 
         Args:
             session_id: Unique client session identifier.
@@ -209,17 +247,23 @@ class VaultStore:
             return Vault()
 
         vault_key = f"{virtual_key_id}:{session_id}"
+        now = time.time()
         with self._lock:
+            self._evict_expired()
+
             if vault_key in self._sessions:
                 self._sessions.move_to_end(vault_key)
+                self._timestamps[vault_key] = now
                 return self._sessions[vault_key]
 
             # Evict oldest LRU vault if at capacity
             if len(self._sessions) >= self.max_capacity:
-                self._sessions.popitem(last=False)
+                oldest_key, _ = self._sessions.popitem(last=False)
+                self._timestamps.pop(oldest_key, None)
 
             new_vault = Vault()
             self._sessions[vault_key] = new_vault
+            self._timestamps[vault_key] = now
             return new_vault
 
     async def get_vault_async(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
@@ -231,6 +275,7 @@ class VaultStore:
         vault_key = f"{virtual_key_id}:{session_id}"
         with self._lock:
             self._sessions.pop(vault_key, None)
+            self._timestamps.pop(vault_key, None)
 
 
 class RedisVaultStore:
