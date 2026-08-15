@@ -151,7 +151,7 @@ If unbuffered, `[PER` leaks to the user's screen as raw un-hydrated text.
 
 To achieve sub-millisecond execution without blowing up infrastructure costs:
 - **Tier 1 (Sub-millisecond Pre-compiled DFA Regex):** Scans structured identifiers (SSNs, Credit Cards, Emails, Phone Numbers, IPv4/IPv6, API Keys, SSH Keys, JWTs) in **<0.03ms**.
-- **Tier 2 (Shannon Entropy Filter):** Computes Shannon entropy $H(S) = -\sum p(c)\log_2 p(c)$ on candidate tokens ($\ge 16$ characters) to flag raw unformatted credentials ($\tau_H \ge 4.5$ bits/symbol) in **<6 µs**.
+- **Tier 2 (Shannon Entropy Secret Scanner):** Evaluates character randomness on long candidate tokens (≥16 characters) to instantly catch patternless, unstructured credentials (like random hex/base64 passwords or proprietary API tokens) in **<6 µs** when information entropy exceeds 4.5 bits/character ($H(S) = -\sum p(c)\log_2 p(c) \ge 4.5$).
 - **Tier 3 (Contextual ONNX NER Pipeline):** Uses rule heuristics and an optional lazy-loaded quantized ONNX Named Entity Recognition (NER) model to catch unstructured person/org names in **~5–12ms**.
 
 By avoiding heavy NLP libraries like spaCy or HuggingFace transformers, LLM-Shield-Proxy runs inside a **<70MB RAM process footprint** — making it fast, deterministic, and ideal for microservice sidecars.
@@ -361,7 +361,7 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 | **`MAX_SESSION_VAULTS`** | `int` | `10000` | Maximum in-memory LRU session vault capacity |
 | **`ENABLE_SYNTHETIC_SWAPPING`**| `bool` | `True` | Enables realistic synthetic entity replacement instead of tags |
 | **`ENABLE_TIER2_ENTROPY`** | `bool` | `True` | Enables Tier 2 Shannon Entropy detection for unformatted raw secrets |
-| **`SHANNON_ENTROPY_THRESHOLD`** | `float` | `4.5` | Shannon entropy threshold (`tau_H >= 4.5 bits/symbol`) for secret flagging |
+| **`SHANNON_ENTROPY_THRESHOLD`** | `float` | `4.5` | Minimum information entropy threshold (4.5 bits/char) to flag unformatted secrets |
 | **`SHANNON_MIN_LENGTH`** | `int` | `16` | Minimum token length to analyze for Shannon entropy |
 | **`ENABLE_TIER3_ONNX_NER`** | `bool` | `False` | Enables Tier 3 ONNX Runtime contextual NER pipeline |
 | **`ONNX_MODEL_PATH`** | `str` | `None` | Path to quantized ONNX BERT-NER model weights |
