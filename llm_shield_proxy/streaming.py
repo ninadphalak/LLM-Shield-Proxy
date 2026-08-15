@@ -147,6 +147,7 @@ async def rehydrate_sse_stream(
                     raw_json = stripped[6:]
                     try:
                         data_obj = json.loads(raw_json)
+                        # 1. OpenAI Chat Completion Delta
                         choices = data_obj.get("choices", [])
                         if choices and isinstance(choices, list):
                             delta = choices[0].get("delta", {})
@@ -155,6 +156,24 @@ async def rehydrate_sse_stream(
                                 rehydrated_content = buffer.process_delta_text(raw_content)
                                 delta["content"] = rehydrated_content
                                 data_obj["choices"][0]["delta"] = delta
+                                line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                        # 2. Anthropic Content Block Delta
+                        elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
+                            delta = data_obj["delta"]
+                            if "text" in delta and isinstance(delta["text"], str):
+                                raw_content = delta["text"]
+                                rehydrated_content = buffer.process_delta_text(raw_content)
+                                delta["text"] = rehydrated_content
+                                data_obj["delta"] = delta
+                                line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                        # 3. Anthropic Content Block Start / Generic text delta
+                        elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
+                            cb = data_obj["content_block"]
+                            if "text" in cb and isinstance(cb["text"], str):
+                                raw_content = cb["text"]
+                                rehydrated_content = buffer.process_delta_text(raw_content)
+                                cb["text"] = rehydrated_content
+                                data_obj["content_block"] = cb
                                 line = f"data: {json.dumps(data_obj).decode('utf-8')}"
                     except (json.JSONDecodeError, TypeError, KeyError):
                         pass

@@ -76,3 +76,23 @@ async def test_rehydrate_sse_stream_generator():
     full_output = "".join(output_bytes)
     assert "sarah@skynet.com" in full_output
     assert "[EMAIL_1]" not in full_output
+
+
+@pytest.mark.asyncio
+async def test_anthropic_claude_sse_stream_generator():
+    """Tests async generator rehydrating Anthropic Claude SSE delta formats (delta.text)."""
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_anthropic_stream():
+        yield b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"User email is [EM"}}\n\n'
+        yield b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"AIL_1] recorded."}}\n\n'
+        yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    output_bytes = []
+    async for chunk in rehydrate_sse_stream(mock_anthropic_stream(), vault):
+        output_bytes.append(chunk.decode("utf-8"))
+
+    full_output = "".join(output_bytes)
+    assert "sarah@skynet.com" in full_output
+    assert "[EMAIL_1]" not in full_output

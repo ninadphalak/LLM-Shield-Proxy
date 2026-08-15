@@ -99,12 +99,25 @@ class Vault:
 
             return token
 
+    def _is_boundary_safe(self, text: str, start: int, end: int, token: str) -> bool:
+        """Ensures token match occurs at word boundaries to prevent sub-word collisions."""
+        if token[0].isalnum() and start > 0:
+            prev_char = text[start - 1]
+            if prev_char.isalnum() or prev_char == "_":
+                return False
+        if token[-1].isalnum() and end < len(text):
+            next_char = text[end]
+            if next_char.isalnum() or next_char == "_":
+                return False
+        return True
+
     def rehydrate(self, text: str, retention_length: int = 0) -> str:
         """Replaces all registered tokens in the text with original raw PII.
 
         Respects retention boundary: any token occurrences whose replacement would
         cross or touch the trailing `retention_length` characters are deferred
         to prevent partial-token or prefix-free leakage across stream chunks.
+        Applies word-boundary isolation to prevent sub-word corruptions (e.g. 'May' in 'Maybe').
 
         Time Complexity: O(N * M) where N is text length and M is total token count.
         Space Complexity: O(N) string allocation.
@@ -125,22 +138,26 @@ class Vault:
 
         for token in sorted_tokens:
             original = self.token_to_original[token]
-            if retention_length > 0:
-                pos = 0
-                while pos < len(result):
-                    idx = result.find(token, pos)
-                    if idx == -1:
-                        break
+            pos = 0
+            while pos < len(result):
+                idx = result.find(token, pos)
+                if idx == -1:
+                    break
 
-                    # Check if token crosses into the trailing retention window
-                    if idx + len(token) > len(result) - retention_length:
-                        # Defer replacement of this and subsequent overlapping matches
-                        break
+                end_idx = idx + len(token)
 
-                    result = result[:idx] + original + result[idx + len(token):]
-                    pos = idx + len(original)
-            else:
-                result = result.replace(token, original)
+                # Verify word boundary to avoid substring collisions
+                if not self._is_boundary_safe(result, idx, end_idx, token):
+                    pos = idx + 1
+                    continue
+
+                # Check if token crosses into the trailing retention window
+                if retention_length > 0 and end_idx > len(result) - retention_length:
+                    # Defer replacement of this and subsequent overlapping matches
+                    break
+
+                result = result[:idx] + original + result[end_idx:]
+                pos = idx + len(original)
 
         return result
 
