@@ -1,14 +1,16 @@
-"""Preflight and multi-tenant isolation tests for LLM-Shield-Proxy."""
-
 import json
 import os
 
-import psutil
 import pytest
 from fastapi.testclient import TestClient
 
 from llm_shield_proxy.config import settings
 from llm_shield_proxy.main import app
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 
 @pytest.fixture(autouse=True)
@@ -125,6 +127,12 @@ def test_end_to_end_streaming_rehydration(httpx_mock):
 
 
 def test_memory_rss_footprint(httpx_mock):
+    """Verifies that the proxy memory footprint stays tightly bounded during massive streaming."""
+    if psutil is None:
+        pytest.skip("psutil not available")
+
+    import gc
+
     process = psutil.Process(os.getpid())
 
     # Create 1000 chunks
@@ -139,8 +147,6 @@ def test_memory_rss_footprint(httpx_mock):
         content=b"".join(chunks),
         headers={"content-type": "text/event-stream"},
     )
-
-    import gc
 
     gc.collect()
     mem_before = process.memory_info().rss
