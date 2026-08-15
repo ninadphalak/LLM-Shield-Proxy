@@ -8,13 +8,30 @@ Implements a high-throughput multi-tier detection cascade:
 
 from __future__ import annotations
 
+import base64
 import math
 import re
+import unicodedata
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from llm_shield_proxy.config import settings
 from llm_shield_proxy.vault import Vault
+
+# Zero-Width and Invisible Unicode format characters used for smuggling
+INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
+    r"[\u200B-\u200D\uFEFF\u00AD\u2060\u180E]"
+)
+
+# Candidate base64 patterns for obfuscated PII smuggling
+BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(
+    r"\b[A-Za-z0-9+/]{20,}={0,2}\b"
+)
+
+# Indirect prompt injection override patterns in tool / retrieval contexts
+INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
+    r"(?i)\b(?:system\s+override|ignore\s+all\s+previous\s+instructions|<\|im_start\|>system|<\|im_end\|>)\b"
+)
 
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
@@ -65,6 +82,14 @@ CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
 )
 
 
+def normalize_and_desmuggle(text: str) -> str:
+    """Normalizes Unicode NFKC and strips zero-width/invisible characters used for smuggling."""
+    if not text:
+        return text
+    normalized = unicodedata.normalize("NFKC", text)
+    return INVISIBLE_CHARS_PATTERN.sub("", normalized)
+
+
 def calculate_shannon_entropy(text: str) -> float:
     """Calculates Shannon entropy in bits per character.
 
@@ -74,7 +99,7 @@ def calculate_shannon_entropy(text: str) -> float:
     Space Complexity: O(U) where U is the number of unique characters.
 
     Args:
-        text: Input string to evaluate.
+        text: Input string token.
 
     Returns:
         Shannon entropy in bits per character.
@@ -164,6 +189,20 @@ class PIIEngine:
                     if entropy >= self.entropy_threshold or (is_hex and len(token) >= 24 and entropy >= 3.4):
                         raw_spans.append((match.start(), match.end(), "SECRET_KEY", token))
 
+        # Obfuscated Base64 Candidate Inspection
+        for match in BASE64_CANDIDATE_PATTERN.finditer(text):
+            token = match.group(0)
+            try:
+                decoded_bytes = base64.b64decode(token, validate=True)
+                decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
+                if decoded_text and len(decoded_text) >= 6:
+                    for entity_type, pattern in TIER1_PATTERNS:
+                        if pattern.search(decoded_text):
+                            raw_spans.append((match.start(), match.end(), "BASE64_OBFUSCATED_PII", token))
+                            break
+            except Exception:
+                pass
+
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org)
         if self.enable_tier3:
             for entity_type, pattern in TIER3_NER_PATTERNS:
@@ -186,6 +225,9 @@ class PIIEngine:
     def redact_text(self, text: str, vault: Vault) -> str:
         """Redacts PII spans in text and registers deterministic mappings in the Vault.
 
+        Applies Unicode de-smuggling (stripping zero-width and invisible format characters)
+        and obfuscated Base64 detection to prevent adversarial filter evasion.
+
         Time Complexity: O(N + K) where N is text length and K is number of matches.
         Space Complexity: O(N) for reconstructed redacted text.
 
@@ -199,12 +241,15 @@ class PIIEngine:
         if not text:
             return text
 
-        spans = self.detect_spans(text)
+        # De-smuggle zero-width Unicode characters and normalize NFKC
+        working_text = normalize_and_desmuggle(text)
+
+        spans = self.detect_spans(working_text)
         if not spans:
-            return text
+            return working_text
 
         # Replace spans from right to left to preserve preceding string indices
-        result = list(text)
+        result = list(working_text)
         for start, end, entity_type, matched_text in reversed(spans):
             token = vault.get_or_create_token(matched_text, entity_type)
             result[start:end] = list(token)
@@ -215,6 +260,7 @@ class PIIEngine:
         """Recursively traverses LLM payload dictionary and redacts string content.
 
         Supports standard OpenAI/Anthropic/Gemini payload structures (messages array, prompt, system, input, tool_calls).
+        Protects against indirect prompt injection in tool responses.
 
         Args:
             payload: Request JSON dictionary.
@@ -234,17 +280,29 @@ class PIIEngine:
             for msg in new_payload["messages"]:
                 if isinstance(msg, dict):
                     msg_copy = msg.copy()
+                    role = msg_copy.get("role", "")
 
                     # 1. Redact message content (string or multi-part content blocks)
                     if "content" in msg_copy and isinstance(msg_copy["content"], str):
-                        msg_copy["content"] = self.redact_text(msg_copy["content"], vault)
+                        content_str = msg_copy["content"]
+                        # Indirect Prompt Injection Defense in tool responses
+                        if role in ("tool", "function"):
+                            content_str = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
+                                "[SYSTEM_OVERRIDE_BLOCKED]", content_str
+                            )
+                        msg_copy["content"] = self.redact_text(content_str, vault)
                     elif "content" in msg_copy and isinstance(msg_copy["content"], list):
                         new_content_blocks = []
                         for block in msg_copy["content"]:
                             if isinstance(block, dict):
                                 block_copy = block.copy()
                                 if "text" in block_copy and isinstance(block_copy["text"], str):
-                                    block_copy["text"] = self.redact_text(block_copy["text"], vault)
+                                    text_val = block_copy["text"]
+                                    if role in ("tool", "function"):
+                                        text_val = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
+                                            "[SYSTEM_OVERRIDE_BLOCKED]", text_val
+                                        )
+                                    block_copy["text"] = self.redact_text(text_val, vault)
                                 new_content_blocks.append(block_copy)
                             else:
                                 new_content_blocks.append(block)
