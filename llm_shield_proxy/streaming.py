@@ -77,6 +77,9 @@ class SSERehydrationBuffer:
         """
         self.content_buffer += delta_text
 
+        if len(self.content_buffer) > 64 * 1024:
+            raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+
         if is_final or not self.vault.token_to_original:
             rehydrated = self.vault.rehydrate(self.content_buffer, retention_length=0)
             self.content_buffer = ""

@@ -7,6 +7,7 @@ session-isolated token vaults, and prefix-free SSE stream rehydration.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import ipaddress
 import json
 import socket
@@ -327,9 +328,16 @@ async def _proxy_catch_all_internal(
     is_virtual_key = False
     virtual_key_id = "BYOK"
 
-    if valid_keys and client_auth in valid_keys:
+    matched_key = None
+    if valid_keys:
+        for vk in valid_keys:
+            if hmac.compare_digest(client_auth, vk):
+                matched_key = vk
+                break
+
+    if matched_key:
         is_virtual_key = True
-        virtual_key_id = get_virtual_key_id(client_auth)
+        virtual_key_id = get_virtual_key_id(matched_key)
     elif client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
         # Direct genuine BYOK provider key passthrough
         is_virtual_key = False
@@ -397,8 +405,21 @@ async def _proxy_catch_all_internal(
 
         if isinstance(payload, dict):
             is_streaming = bool(payload.get("stream", False))
-            redacted_payload = pii_engine.redact_payload(payload, vault)
-            redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
+            try:
+                redacted_payload = pii_engine.redact_payload(payload, vault)
+                redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
+            except ValueError as ve:
+                if str(ve) == "Maximum payload nesting depth exceeded":
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": {
+                                "message": "Payload nesting depth exceeded maximum limit (JSON bomb protection)",
+                                "type": "invalid_request_error",
+                            }
+                        },
+                    )
+                raise ve
 
             if is_streaming:
                 req = http_client.build_request(
