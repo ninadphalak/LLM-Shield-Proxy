@@ -1,8 +1,9 @@
 """Unit tests for Server-Sent Events (SSE) streaming rehydration and buffer boundaries."""
 
 import pytest
-from llm_shield_proxy.vault import Vault
+
 from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.vault import Vault
 
 
 def test_sse_buffer_split_tag_handling():
@@ -67,7 +68,7 @@ async def test_rehydrate_sse_stream_generator():
     async def mock_upstream_stream():
         yield b'data: {"choices":[{"delta":{"content":"User email is [EM"}}]}\n'
         yield b'data: {"choices":[{"delta":{"content":"AIL_1] recorded."}}]}\n'
-        yield b'data: [DONE]\n'
+        yield b"data: [DONE]\n"
 
     output_bytes = []
     async for chunk in rehydrate_sse_stream(mock_upstream_stream(), vault):

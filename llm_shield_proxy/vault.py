@@ -7,23 +7,26 @@ and namespace isolation across tenants.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
-import os
+import logging
 import random
 import re
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional
-from faker import Faker
+from typing import Callable, Dict, Optional
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from faker import Faker
+
 from llm_shield_proxy.config import settings
 
+logger = logging.getLogger(__name__)
+
 try:
-    import redis.asyncio as aioredis
     import redis
+    import redis.asyncio as aioredis
 except ImportError:
     aioredis = None  # type: ignore
     redis = None  # type: ignore
@@ -92,7 +95,7 @@ class Vault:
             self.type_counters[entity_type] = current_count
 
             if self.synthetic:
-                seed = int(hashlib.md5(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
+                seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
                 Faker.seed(seed)
                 if "PERSON" in entity_type or "NAME" in entity_type:
                     token = fake.first_name()
@@ -122,8 +125,8 @@ class Vault:
             if self.save_callback:
                 try:
                     self.save_callback(self)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Vault save_callback execution failed: %s", exc)
 
             return token
 
@@ -197,13 +200,15 @@ class Vault:
         if retention_length == 0 and "![" in result:
             result = re.sub(
                 r"!\[(.*?)\]\((https?://[^\s)]+)\)",
-                lambda m: f"![{m.group(1)}]([IMAGE_EXFILTRATION_BLOCKED])"
-                if (
-                    "?" in m.group(2)
-                    or "leak" in m.group(2).lower()
-                    or any(orig in m.group(2) for orig in self.original_to_token.values() if len(orig) >= 4)
-                )
-                else m.group(0),
+                lambda m: (
+                    f"![{m.group(1)}]([IMAGE_EXFILTRATION_BLOCKED])"
+                    if (
+                        "?" in m.group(2)
+                        or "leak" in m.group(2).lower()
+                        or any(orig in m.group(2) for orig in self.original_to_token.values() if len(orig) >= 4)
+                    )
+                    else m.group(0)
+                ),
                 result,
             )
 

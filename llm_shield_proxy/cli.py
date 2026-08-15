@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import sys
+
 import uvicorn
 
 from llm_shield_proxy.config import settings

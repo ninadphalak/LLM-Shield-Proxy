@@ -13,24 +13,41 @@ import random
 import statistics
 import sys
 import time
+
 import psutil
 
 # Ensure UTF-8 console output
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from llm_shield_proxy.pii_engine import pii_engine, calculate_shannon_entropy
+from llm_shield_proxy.pii_engine import calculate_shannon_entropy, pii_engine
 from llm_shield_proxy.vault import Vault
-from llm_shield_proxy.streaming import SSERehydrationBuffer
 
 
 def generate_adversarial_corpus(word_count: int = 10000, secret_count: int = 50) -> str:
     """Generates a large-scale corpus with scattered adversarial PII vectors."""
     base_words = [
-        "patient", "medical", "record", "transaction", "invoice", "database",
-        "system", "diagnostic", "consultation", "procedure", "hospital",
-        "authorization", "compliance", "telemetry", "endpoint", "infrastructure",
-        "authentication", "authorization", "protocol", "statement", "summary"
+        "patient",
+        "medical",
+        "record",
+        "transaction",
+        "invoice",
+        "database",
+        "system",
+        "diagnostic",
+        "consultation",
+        "procedure",
+        "hospital",
+        "authorization",
+        "compliance",
+        "telemetry",
+        "endpoint",
+        "infrastructure",
+        "authentication",
+        "authorization",
+        "protocol",
+        "statement",
+        "summary",
     ]
     tokens = [random.choice(base_words) for _ in range(word_count)]
 
@@ -41,8 +58,8 @@ def generate_adversarial_corpus(word_count: int = 10000, secret_count: int = 50)
         base64.b64encode(b"Patient SSN 000-12-3456").decode("utf-8"),
         "4f3b89a1c0d2e4f6a7b8c9d0e1f2a3b4",
         "我的名字是张伟",
-        "j\u200Bohn.doe\uFEFF@hos\u00ADpital.org",
-        "\u202E3333-44-555\u202C",
+        "j\u200bohn.doe\ufeff@hos\u00adpital.org",
+        "\u202e3333-44-555\u202c",
         "4532-1111-2222-3333",
         "192.168.1.105",
     ]
@@ -65,7 +82,7 @@ def benchmark_payload_redaction(iterations: int = 1000) -> dict:
         payload = {
             "messages": [
                 {"role": "system", "content": "You are a clinical compliance AI assistant."},
-                {"role": "user", "content": corpus}
+                {"role": "user", "content": corpus},
             ]
         }
         t0 = time.perf_counter()

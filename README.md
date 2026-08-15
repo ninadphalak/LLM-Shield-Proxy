@@ -69,15 +69,13 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="your-openai-api-key",
-    base_url="http://localhost:8000/v1"  # Point to LLM-Shield-Proxy
+    base_url="http://localhost:8000/v1",  # Point to LLM-Shield-Proxy
 )
 
 response = client.chat.completions.create(
     model="gpt-4o-mini",
-    messages=[
-        {"role": "user", "content": "Contact Sarah Connor at sarah@example.com or 555-0199."}
-    ],
-    stream=True
+    messages=[{"role": "user", "content": "Contact Sarah Connor at sarah@example.com or 555-0199."}],
+    stream=True,
 )
 
 for chunk in response:

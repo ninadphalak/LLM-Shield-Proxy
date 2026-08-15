@@ -1,8 +1,9 @@
 """Integration tests for LLM-Shield-Proxy."""
 
 import json
-import pytest
+
 from fastapi.testclient import TestClient
+
 from llm_shield_proxy.main import app
 
 client = TestClient(app)
@@ -17,26 +18,14 @@ def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
         json={
             "id": "chatcmpl-123",
             "object": "chat.completion",
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "I have received your email [EMAIL_1]."
-                    }
-                }
-            ]
-        }
+            "choices": [{"message": {"role": "assistant", "content": "I have received your email [EMAIL_1]."}}],
+        },
     )
 
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proj-mock"},
-        json={
-            "model": "gpt-4",
-            "messages": [
-                {"role": "user", "content": "My contact is john@example.com"}
-            ]
-        }
+        json={"model": "gpt-4", "messages": [{"role": "user", "content": "My contact is john@example.com"}]},
     )
 
     assert response.status_code == 200
@@ -59,9 +48,9 @@ def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
         content=(
             b'data: {"choices":[{"delta":{"content":"Hello [EM"}}]}\n'
             b'data: {"choices":[{"delta":{"content":"AIL_1]!"}}]}\n'
-            b'data: [DONE]\n'
+            b"data: [DONE]\n"
         ),
-        headers={"content-type": "text/event-stream"}
+        headers={"content-type": "text/event-stream"},
     )
 
     response = client.post(
@@ -70,10 +59,8 @@ def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
         json={
             "model": "gpt-4",
             "stream": True,
-            "messages": [
-                {"role": "user", "content": "Email me at alice@domain.com"}
-            ]
-        }
+            "messages": [{"role": "user", "content": "Email me at alice@domain.com"}],
+        },
     )
 
     assert response.status_code == 200
@@ -114,13 +101,15 @@ def test_cors_preflight_options():
 def test_inbound_auth_validation(monkeypatch):
     monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-finance")
     monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-finance"}))
-    
+
     # Missing header
     res_missing = client.post("/v1/chat/completions", json={"model": "gpt-4", "messages": []})
     assert res_missing.status_code == 401
-    
+
     # Invalid key
-    res_invalid = client.post("/v1/chat/completions", headers={"Authorization": "Bearer sk-proxy-hr"}, json={"model": "gpt-4", "messages": []})
+    res_invalid = client.post(
+        "/v1/chat/completions", headers={"Authorization": "Bearer sk-proxy-hr"}, json={"model": "gpt-4", "messages": []}
+    )
     assert res_invalid.status_code == 401
 
 
@@ -129,33 +118,33 @@ def test_header_swapping_and_byok(monkeypatch, httpx_mock):
     monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-dev")
     monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-dev"}))
     monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_API_KEY", "central-gemini-key")
-    
+
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",
-        json={"id": "123", "choices": [{"message": {"content": "ok"}}]}
+        json={"id": "123", "choices": [{"message": {"content": "ok"}}]},
     )
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",
-        json={"id": "124", "choices": [{"message": {"content": "ok"}}]}
+        json={"id": "124", "choices": [{"message": {"content": "ok"}}]},
     )
-    
+
     # Virtual Key Swapping
     res1 = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proxy-dev"},
-        json={"model": "gpt-4", "messages": []}
+        json={"model": "gpt-4", "messages": []},
     )
     assert res1.status_code == 200
     req1 = httpx_mock.get_requests()[0]
     assert req1.headers["authorization"] == "Bearer central-gemini-key"
-    
+
     # BYOK Passthrough
     res2 = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proj-user"},
-        json={"model": "gpt-4", "messages": []}
+        json={"model": "gpt-4", "messages": []},
     )
     assert res2.status_code == 200
     req2 = httpx_mock.get_requests()[1]
@@ -166,7 +155,7 @@ def test_missing_upstream_key_returns_clean_error(monkeypatch, httpx_mock):
     monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
     monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
     import httpx
-    
+
     def raise_500(*args, **kwargs):
         resp = httpx.Response(500, request=httpx.Request("POST", "https://api.openai.com"))
         raise httpx.HTTPStatusError("500 Server Error", request=resp.request, response=resp)
@@ -176,7 +165,7 @@ def test_missing_upstream_key_returns_clean_error(monkeypatch, httpx_mock):
     res = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proxy-test"},
-        json={"model": "gpt-4", "messages": []}
+        json={"model": "gpt-4", "messages": []},
     )
     assert res.status_code == 500
     assert "error" in res.json()

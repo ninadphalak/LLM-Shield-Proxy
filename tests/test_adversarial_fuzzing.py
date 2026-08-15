@@ -10,18 +10,20 @@ Tests advanced LLM proxy attack vectors:
 """
 
 import base64
+
 import pytest
-from llm_shield_proxy.pii_engine import pii_engine, normalize_and_desmuggle
-from llm_shield_proxy.vault import Vault
+
+from llm_shield_proxy.pii_engine import pii_engine
 from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.vault import Vault
 
 
 def test_unicode_zero_width_smuggling():
-    """Adversarial Test: Attackers inject zero-width spaces (\u200B, \uFEFF, \u00AD) to evade regex."""
+    """Adversarial Test: Attackers inject zero-width spaces (\u200b, \ufeff, \u00ad) to evade regex."""
     vault = Vault(synthetic=False)
-    
+
     # Smuggled email and SSN with zero-width spaces and soft hyphens
-    smuggled_payload = "Patient contact is j\u200Bohn.doe\uFEFF@hos\u00ADpital.org and SSN is 555\u200B-44-3333."
+    smuggled_payload = "Patient contact is j\u200bohn.doe\ufeff@hos\u00adpital.org and SSN is 555\u200b-44-3333."
     redacted = pii_engine.redact_text(smuggled_payload, vault)
 
     assert "john.doe@hospital.org" not in redacted
@@ -36,7 +38,7 @@ def test_base64_obfuscated_pii_injection():
 
     raw_secret_data = "Secret patient SSN is 000-12-3456"
     encoded_b64 = base64.b64encode(raw_secret_data.encode("utf-8")).decode("utf-8")
-    
+
     prompt = f"Please decode and analyze this record: {encoded_b64}"
     redacted = pii_engine.redact_text(prompt, vault)
 
@@ -100,7 +102,7 @@ async def test_extreme_chunk_splitting_sse_evasion():
         b'data: {"choices":[{"delta":{"content":"_"}}]}\n',
         b'data: {"choices":[{"delta":{"content":"1"}}]}\n',
         b'data: {"choices":[{"delta":{"content":"]"}}]}\n',
-        b'data: [DONE]\n',
+        b"data: [DONE]\n",
     ]
 
     async def mock_stream():
@@ -119,7 +121,7 @@ async def test_extreme_chunk_splitting_sse_evasion():
 def test_json_bomb_recursion_limit():
     """Adversarial Test: Nested JSON bomb (500 levels) attempting stack overflow."""
     vault = Vault(synthetic=False)
-    
+
     nested_payload = {"content": "Base prompt with ssn 555-44-3333"}
     for _ in range(50):
         nested_payload = {"messages": [nested_payload]}
@@ -130,11 +132,11 @@ def test_json_bomb_recursion_limit():
 
 
 def test_bidi_rtl_override_smuggling():
-    """Adversarial Test: Using BiDi right-to-left override characters (\u202E, \u202D) to evade regex."""
+    """Adversarial Test: Using BiDi right-to-left override characters (\u202e, \u202d) to evade regex."""
     vault = Vault(synthetic=False)
 
     # Injected with Right-to-Left Override (\u202E) and Left-to-Right Embedding (\u202A)
-    bidi_payload = "Contact \u202Eemail\u202C is \u202Ajohn.doe@hospital.org\u202C recorded."
+    bidi_payload = "Contact \u202eemail\u202c is \u202ajohn.doe@hospital.org\u202c recorded."
     redacted = pii_engine.redact_text(bidi_payload, vault)
 
     assert "john.doe@hospital.org" not in redacted

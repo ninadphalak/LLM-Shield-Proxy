@@ -1,9 +1,11 @@
-import pytest
 import asyncio
 import os
+
 import psutil
-from llm_shield_proxy.vault import Vault
+import pytest
+
 from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.vault import Vault
 
 
 def test_extreme_split_tag_across_chunks():
@@ -59,10 +61,10 @@ def test_massive_streaming_response_memory_bounds():
     total_chunks = 10000
     for i in range(total_chunks):
         chunk_text = f"Token_{i} [PERSON_1] chunk content. "
-        emitted = buffer.process_delta_text(chunk_text)
+        buffer.process_delta_text(chunk_text)
         assert len(buffer.content_buffer) <= buffer.MAX_TAG_LENGTH
 
-    final_flush = buffer.process_delta_text("", is_final=True)
+    buffer.process_delta_text("", is_final=True)
     assert buffer.content_buffer == ""
 
     final_rss = process.memory_info().rss
@@ -109,7 +111,7 @@ async def test_rehydrate_sse_stream_async_stress():
     async def mock_sse_stream():
         yield b'data: {"choices":[{"delta":{"content":"Contact [PER"}}]}\n\n'
         yield b'data: {"choices":[{"delta":{"content":"SON_1] for privacy details."}}]}\n\n'
-        yield b'data: [DONE]\n\n'
+        yield b"data: [DONE]\n\n"
 
     rehydrated_chunks = []
     async for chunk_bytes in rehydrate_sse_stream(mock_sse_stream(), vault):
@@ -122,7 +124,7 @@ async def test_rehydrate_sse_stream_async_stress():
 @pytest.mark.asyncio
 async def test_rehydrate_sse_stream_concurrent_stress():
     """
-    Flood the async generator with 500 simultaneous streaming connections 
+    Flood the async generator with 500 simultaneous streaming connections
     to assert the underlying event loop remains non-blocking and processes correctly.
     """
     vault = Vault(synthetic=False)
@@ -134,8 +136,8 @@ async def test_rehydrate_sse_stream_concurrent_stress():
             # Simulating async wait in stream chunking
             await asyncio.sleep(0.01)
             yield b'data: {"choices":[{"delta":{"content":"SON_1] for privacy details."}}]}\n\n'
-            yield b'data: [DONE]\n\n'
-            
+            yield b"data: [DONE]\n\n"
+
         rehydrated_chunks = []
         async for chunk_bytes in rehydrate_sse_stream(mock_sse_stream(), vault):
             rehydrated_chunks.append(chunk_bytes.decode("utf-8"))
@@ -147,4 +149,3 @@ async def test_rehydrate_sse_stream_concurrent_stress():
 
     for result in results:
         assert "Sarah Connor" in result
-

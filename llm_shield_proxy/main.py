@@ -13,9 +13,10 @@ import json
 import socket
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -45,9 +46,7 @@ def get_virtual_key_id(client_auth: str) -> str:
 
     Cached via LRU to guarantee 0ms latency impact during proxy routing.
     """
-    return hashlib.pbkdf2_hmac(
-        "sha256", client_auth.encode("utf-8"), b"llm_shield_salt", 100000
-    ).hex()[:12]
+    return hashlib.pbkdf2_hmac("sha256", client_auth.encode("utf-8"), b"llm_shield_salt", 100000).hex()[:12]
 
 
 class ConfigHandler(FileSystemEventHandler):
@@ -168,6 +167,7 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
 # -----------------------------------------------------------------------------
 # Health & Observability Endpoints
 # -----------------------------------------------------------------------------
+
 
 @app.get("/health", tags=["Health"])
 @app.get("/healthz", tags=["Health"])
@@ -388,7 +388,7 @@ async def _proxy_catch_all_internal(
                     status_code=413,
                     content={
                         "error": {
-                            "message": f"Request payload exceeds maximum allowed limit of {settings.MAX_PAYLOAD_SIZE_BYTES // (1024*1024)}MB",
+                            "message": f"Request payload exceeds maximum allowed limit of {settings.MAX_PAYLOAD_SIZE_BYTES // (1024 * 1024)}MB",
                             "type": "invalid_request_error",
                         }
                     },
@@ -542,9 +542,7 @@ async def _proxy_catch_all_internal(
                     )
 
     # Pass-through for non-POST requests
-    AuditLogger.log_proxy_event(
-        x_session_id, path, request.method, virtual_key_id, 200, request_id
-    )
+    AuditLogger.log_proxy_event(x_session_id, path, request.method, virtual_key_id, 200, request_id)
     try:
         body_bytes = await read_body_with_limit(request)
     except ValueError as ve:
@@ -553,7 +551,7 @@ async def _proxy_catch_all_internal(
                 status_code=413,
                 content={
                     "error": {
-                        "message": f"Request payload exceeds maximum allowed limit of {settings.MAX_PAYLOAD_SIZE_BYTES // (1024*1024)}MB",
+                        "message": f"Request payload exceeds maximum allowed limit of {settings.MAX_PAYLOAD_SIZE_BYTES // (1024 * 1024)}MB",
                         "type": "invalid_request_error",
                     }
                 },

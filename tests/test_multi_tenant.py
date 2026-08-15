@@ -1,9 +1,8 @@
 """Multi-tenant provider routing and dynamic upstream endpoint tests."""
 
-import pytest
 from fastapi.testclient import TestClient
+
 from llm_shield_proxy.main import app
-from llm_shield_proxy.config import settings
 
 client = TestClient(app)
 
@@ -18,13 +17,13 @@ def test_multi_provider_routing_openai(monkeypatch, httpx_mock):
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",
-        json={"id": "openai-1", "choices": [{"message": {"content": "Hello from OpenAI"}}]}
+        json={"id": "openai-1", "choices": [{"message": {"content": "Hello from OpenAI"}}]},
     )
 
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proxy-tenant-a"},
-        json={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}
+        json={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]},
     )
 
     assert response.status_code == 200
@@ -38,18 +37,20 @@ def test_multi_provider_routing_gemini(monkeypatch, httpx_mock):
     monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-b")
     monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-b"]))
     monkeypatch.setattr("llm_shield_proxy.config.settings.GEMINI_API_KEY", "AIza-central-gemini-key")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+    monkeypatch.setattr(
+        "llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
 
     httpx_mock.add_response(
         method="POST",
         url="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        json={"id": "gemini-1", "choices": [{"message": {"content": "Hello from Gemini"}}]}
+        json={"id": "gemini-1", "choices": [{"message": {"content": "Hello from Gemini"}}]},
     )
 
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proxy-tenant-b"},
-        json={"model": "gemini-1.5-flash", "messages": [{"role": "user", "content": "Hello"}]}
+        json={"model": "gemini-1.5-flash", "messages": [{"role": "user", "content": "Hello"}]},
     )
 
     assert response.status_code == 200

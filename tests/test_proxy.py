@@ -1,11 +1,11 @@
 """End-to-end integration tests for LLM-Shield-Proxy streaming and non-streaming workflows."""
 
 import json
-import pytest
+
 from fastapi.testclient import TestClient
-from llm_shield_proxy.main import app
+
 from llm_shield_proxy.config import settings
-from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.main import app
 
 client = TestClient(app)
 
@@ -21,23 +21,15 @@ def test_proxy_chat_completion_with_pii(monkeypatch, httpx_mock):
         json={
             "id": "chatcmpl-test",
             "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": "Hello [PERSON_1], I have noted your contact [PHONE_1]."
-                    }
-                }
-            ]
-        }
+                {"message": {"role": "assistant", "content": "Hello [PERSON_1], I have noted your contact [PHONE_1]."}}
+            ],
+        },
     )
 
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proj-mock-key"},
-        json={
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": test_prompt}]
-        }
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": test_prompt}]},
     )
 
     assert response.status_code == 200
@@ -61,20 +53,18 @@ def test_proxy_synthetic_swapping_e2e(monkeypatch, httpx_mock):
             status_code=200,
             json={
                 "id": "chatcmpl-synth",
-                "choices": [{"message": {"role": "assistant", "content": f"Acknowledged {sent_content}"}}]
-            }
+                "choices": [{"message": {"role": "assistant", "content": f"Acknowledged {sent_content}"}}],
+            },
         )
 
     import httpx
+
     httpx_mock.add_callback(response_callback)
 
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proj-mock-key"},
-        json={
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": test_prompt}]
-        }
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": test_prompt}]},
     )
 
     assert response.status_code == 200
@@ -97,19 +87,15 @@ def test_proxy_streaming_realtime_rehydration(monkeypatch, httpx_mock):
             b'data: {"choices":[{"delta":{"content":"[PER"}}]}\n'
             b'data: {"choices":[{"delta":{"content":"SON_1]! Your phone is [PHO"}}]}\n'
             b'data: {"choices":[{"delta":{"content":"NE_1]."}}]}\n'
-            b'data: [DONE]\n'
+            b"data: [DONE]\n"
         ),
-        headers={"content-type": "text/event-stream"}
+        headers={"content-type": "text/event-stream"},
     )
 
     response = client.post(
         "/v1/chat/completions",
         headers={"Authorization": "Bearer sk-proj-mock-key"},
-        json={
-            "model": "gpt-4o-mini",
-            "stream": True,
-            "messages": [{"role": "user", "content": test_prompt}]
-        }
+        json={"model": "gpt-4o-mini", "stream": True, "messages": [{"role": "user", "content": test_prompt}]},
     )
 
     assert response.status_code == 200

@@ -4,6 +4,7 @@ Demonstrates drop-in streaming chat completion with automatic PII masking and re
 """
 
 import os
+
 from openai import OpenAI
 
 # Initialize client pointing to local LLM-Shield-Proxy gateway
