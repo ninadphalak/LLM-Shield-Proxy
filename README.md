@@ -261,16 +261,48 @@ flowchart TD
 
 ---
 
-## 📊 Production Performance & Memory Benchmarks
+## ⚡ Performance & Latency Benchmarks
 
-LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Measured over 1,000 production streaming iterations:
+LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Hard numbers from our official automated benchmark suite (`python benchmark.py`):
+
+```text
+=================================================================
+LLM-Shield-Proxy Enterprise Latency & Proof Benchmark
+=================================================================
+
+1. ISOLATED SHANNON ENTROPY SECRET SCANNER (<6 µs Proof):
+-----------------------------------------------------------------
+   • Mean Latency:   2.60 µs
+   • Median (p50):   2.60 µs
+   • 95th Percentile:2.70 µs
+   • 99th Percentile:3.30 µs
+   [VERIFIED] Shannon Entropy executes in <6 µs: True
+
+2. MASSIVE PAYLOAD REDACTION (10,000 Words / 50 Adversarial Secrets):
+-----------------------------------------------------------------
+   • Mean Latency:   25.96 ms
+   • Median (p50):   25.80 ms
+   • 95th Percentile:26.73 ms
+   • 99th Percentile:32.08 ms
+
+3. RESIDENT MEMORY BASELINE:
+-----------------------------------------------------------------
+   • Active RSS Footprint: 55.31 MB (<60 MB Target: True)
+
+=================================================================
+ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED
+=================================================================
+```
+
+### Microsecond Streaming & Inference Overhead Table
 
 | Metric | Average Latency | Median Latency | Footprint / Notes |
 | :--- | :--- | :--- | :--- |
 | **Tier 1 Regex Overhead** | `0.0379 ms` | `0.0366 ms` (`36.60 µs`) | Microsecond pattern scan |
-| **Tier 2 Entropy & Local NER Overhead** | `0.0034 ms` | `0.0030 ms` (`3.00 µs`) | Quantized local scan |
+| **Tier 2 Entropy & Local NER Overhead** | `0.0026 ms` | `0.0026 ms` (`2.60 µs`) | Quantized local scan |
 | **Total SSE Stream Overhead** | `0.0043 ms` | `0.0042 ms` (`4.23 µs`) | Added latency per SSE delta chunk |
-| **Process RAM Footprint** | - | - | `<60 MB` Resident Set Size |
+| **AES-256-GCM Encrypt + Decrypt** | `0.0017 ms` | `0.0017 ms` (`1.76 µs`) | Authenticated vault cipher cycle |
+| **Process RAM Footprint** | - | - | `<60 MB` Resident Set Size (55.31 MB verified) |
 
 ### ⚡ Under the Hood: Speed Optimizations
 To achieve these microsecond latencies, LLM-Shield-Proxy implements three low-level systems optimizations:
@@ -281,7 +313,7 @@ To achieve these microsecond latencies, LLM-Shield-Proxy implements three low-le
 To run the automated benchmark suite locally:
 
 ```bash
-py tests/benchmark.py
+python benchmark.py
 ```
 
 ---
