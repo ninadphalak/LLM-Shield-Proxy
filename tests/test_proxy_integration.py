@@ -151,16 +151,11 @@ def test_header_swapping_and_byok(monkeypatch, httpx_mock):
     assert req2.headers["authorization"] == "Bearer sk-proj-user"
 
 
-def test_missing_upstream_key_returns_clean_error(monkeypatch, httpx_mock):
+def test_missing_upstream_key_returns_clean_error(monkeypatch):
     monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
     monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
-    import httpx
-
-    def raise_500(*args, **kwargs):
-        resp = httpx.Response(500, request=httpx.Request("POST", "https://api.openai.com"))
-        raise httpx.HTTPStatusError("500 Server Error", request=resp.request, response=resp)
-
-    httpx_mock.add_callback(raise_500, url="https://api.openai.com/v1/chat/completions")
+    monkeypatch.setattr("llm_shield_proxy.config.settings.OPENAI_API_KEY", None)
+    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_API_KEY", None)
 
     res = client.post(
         "/v1/chat/completions",
@@ -169,4 +164,5 @@ def test_missing_upstream_key_returns_clean_error(monkeypatch, httpx_mock):
     )
     assert res.status_code == 500
     assert "error" in res.json()
-    assert res.json()["error"]["type"] == "upstream_error"
+    assert res.json()["error"]["type"] == "proxy_misconfiguration"
+    assert "Upstream provider API Key is missing in proxy configuration" in res.json()["error"]["message"]
