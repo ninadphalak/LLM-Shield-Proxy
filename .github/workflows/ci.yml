@@ -1,0 +1,45 @@
+name: CI & Security Automation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-lint:
+    name: Lint, Security Scan & Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff bandit pytest pytest-asyncio pytest-mock faker httpx
+          pip install -e .
+
+      - name: Run Ruff Linting & Formatting Check
+        run: |
+          ruff check .
+
+      - name: Run Bandit Security Vulnerability Scanner
+        run: |
+          bandit -r llm_shield_proxy/ -s B101,B104,B311
+
+      - name: Run Full Test Suite (52+ Unit, Integration & Adversarial Tests)
+        run: |
+          pytest -v

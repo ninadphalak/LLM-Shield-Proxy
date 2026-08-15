@@ -3,7 +3,7 @@
 Validates microsecond latency and throughput metrics:
 1. Massive 10,000-word payload containing 50 scattered multi-modal/adversarial secrets
    (SSNs, Base64 strings, CJK names, BiDi-smuggled emails, AWS keys, Hex tokens).
-2. Calculates Mean, p50 (Median), p95, and p99 redaction latencies across requests.
+2. Calculates Mean, p50 (Median), p95, and p99 redaction latencies across 1,000 requests.
 3. Isolates and benchmarks Shannon Entropy function to verify <6 µs execution.
 """
 
@@ -54,13 +54,13 @@ def generate_adversarial_corpus(word_count: int = 10000, secret_count: int = 50)
     return " ".join(tokens)
 
 
-def benchmark_payload_redaction(iterations: int = 100) -> dict:
-    """Measures end-to-end payload redaction latency."""
+def benchmark_payload_redaction(iterations: int = 1000) -> dict:
+    """Measures end-to-end payload redaction latency across 1,000 iterations."""
     corpus = generate_adversarial_corpus(word_count=10000, secret_count=50)
     latencies_ms = []
 
     print(f"Executing {iterations:,} iterations over 10,000-word adversarial payloads...")
-    for _ in range(iterations):
+    for i in range(iterations):
         vault = Vault(synthetic=True)
         payload = {
             "messages": [
