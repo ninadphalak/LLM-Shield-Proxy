@@ -308,7 +308,8 @@ ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED
 | Metric | Average Latency | Median Latency | Footprint / Notes |
 | :--- | :--- | :--- | :--- |
 | **Tier 1 Regex Overhead** | `0.0379 ms` | `0.0366 ms` (`36.60 µs`) | Microsecond pattern scan |
-| **Tier 2 Entropy & Local NER Overhead** | `0.0026 ms` | `0.0026 ms` (`2.60 µs`) | Quantized local scan |
+| **Tier 2 (Shannon Entropy) Overhead** | `0.0026 ms` | `0.0026 ms` (`2.60 µs`) | Math-bound loop execution |
+| **Tier 3 (ONNX NER) Overhead** | `~12.50 ms` | `~11.80 ms` | Inference on 50-token chunk (Optional NLP Mode) |
 | **Total SSE Stream Overhead** | `0.0043 ms` | `0.0042 ms` (`4.23 µs`) | Added latency per SSE delta chunk |
 | **AES-256-GCM Encrypt + Decrypt** | `0.0017 ms` | `0.0017 ms` (`1.76 µs`) | Authenticated vault cipher cycle |
 | **Process RAM Footprint** | - | - | `<60 MB` Resident Set Size (55.31 MB verified) |
