@@ -6,7 +6,9 @@ from llm_shield_proxy.pii_engine import PIIEngine, pii_engine
 from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 from llm_shield_proxy.vault import Vault, VaultStore, vault_store
 
-__version__ = "1.0.19"
+__author__ = "Ninad Phalak"
+__version__ = "1.0.20"
+__license__ = "Apache-2.0"
 
 __all__ = [
     "AuditLogger",

@@ -132,22 +132,35 @@ class PIIEngine:
             entropy_threshold if entropy_threshold is not None else settings.SHANNON_ENTROPY_THRESHOLD
         )
         self._onnx_session: Optional[Any] = None
+        self._tokenizer: Optional[Any] = None
         self._init_onnx_model()
 
     def _init_onnx_model(self) -> None:
-        """Lazy-loads ONNX runtime session if configured and available."""
+        """Lazy-loads ONNX runtime session and Tokenizer if configured and available."""
         if not (self.enable_tier3 and settings.ENABLE_TIER3_ONNX_NER and settings.ONNX_MODEL_PATH):
             return
 
         try:
+            import os
             import onnxruntime as ort  # type: ignore
+            from tokenizers import Tokenizer  # type: ignore
 
             self._onnx_session = ort.InferenceSession(
                 settings.ONNX_MODEL_PATH,
                 providers=["CPUExecutionProvider"],
             )
-        except Exception:
+            
+            model_dir = os.path.dirname(settings.ONNX_MODEL_PATH)
+            tokenizer_path = os.path.join(model_dir, "tokenizer.json")
+            if os.path.exists(tokenizer_path):
+                self._tokenizer = Tokenizer.from_file(tokenizer_path)
+            else:
+                logger.warning("ONNX tokenizer.json not found in model directory. Tier 3 will fallback to regex.")
+                self._tokenizer = None
+        except Exception as exc:
+            logger.error("Failed to initialize ONNX NER pipeline: %s", exc)
             self._onnx_session = None
+            self._tokenizer = None
 
     def detect_spans(self, text: str) -> List[Tuple[int, int, str, str]]:
         """Detects all PII and secret entity spans across the 3-Tier cascade.
@@ -198,9 +211,48 @@ class PIIEngine:
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org)
         if self.enable_tier3:
-            for entity_type, pattern in TIER3_NER_PATTERNS:
-                for match in pattern.finditer(text):
-                    raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+            if self._onnx_session and self._tokenizer:
+                try:
+                    import numpy as np  # type: ignore
+                    encoded = self._tokenizer.encode(text)
+                    input_ids = np.array([encoded.ids], dtype=np.int64)
+                    attention_mask = np.array([encoded.attention_mask], dtype=np.int64)
+                    
+                    ort_inputs = {
+                        self._onnx_session.get_inputs()[0].name: input_ids,
+                        self._onnx_session.get_inputs()[1].name: attention_mask,
+                    }
+                    logits = self._onnx_session.run(None, ort_inputs)[0]
+                    predictions = np.argmax(logits, axis=2)[0]
+                    
+                    current_entity = None
+                    current_start = -1
+                    
+                    for idx, pred_id in enumerate(predictions):
+                        # Simplified label parsing (assuming id > 0 means a named entity for now)
+                        if pred_id > 0:
+                            if current_entity is None:
+                                current_entity = "PERSON"
+                                current_start = idx
+                        else:
+                            if current_entity is not None:
+                                offsets = encoded.offsets
+                                if current_start < len(offsets) and idx - 1 < len(offsets):
+                                    start_char = offsets[current_start][0]
+                                    end_char = offsets[idx - 1][1]
+                                    if start_char < end_char:
+                                        match_text = text[start_char:end_char]
+                                        raw_spans.append((start_char, end_char, current_entity, match_text))
+                                current_entity = None
+                except Exception as exc:
+                    logger.debug("ONNX inference failed, falling back to regex: %s", exc)
+                    for entity_type, pattern in TIER3_NER_PATTERNS:
+                        for match in pattern.finditer(text):
+                            raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+            else:
+                for entity_type, pattern in TIER3_NER_PATTERNS:
+                    for match in pattern.finditer(text):
+                        raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
 
         # Deduplicate and resolve overlapping spans (prioritize earliest start, then longest span)
         raw_spans.sort(key=lambda s: (s[0], -(s[1] - s[0])))

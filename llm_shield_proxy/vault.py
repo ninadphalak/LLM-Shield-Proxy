@@ -170,7 +170,8 @@ class Vault:
             return text
 
         # Sort tokens by length descending to prevent partial token prefix collisions
-        sorted_tokens = sorted(self.token_to_original.keys(), key=len, reverse=True)
+        with self._lock:
+            sorted_tokens = sorted(list(self.token_to_original.keys()), key=len, reverse=True)
         result = text
 
         for token in sorted_tokens:
@@ -205,7 +206,7 @@ class Vault:
                     if (
                         "?" in m.group(2)
                         or "leak" in m.group(2).lower()
-                        or any(orig in m.group(2) for orig in self.original_to_token.values() if len(orig) >= 4)
+                        or any(orig in m.group(2) for orig in self.original_to_token.keys() if len(orig) >= 4)
                     )
                     else m.group(0)
                 ),
@@ -328,7 +329,12 @@ class RedisVaultStore:
                 "type_counters": v.type_counters,
                 "max_token_length": v.max_token_length,
             }
-            self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, self.sync_client.setex, vault_key, self.ttl, json.dumps(payload))
+            except RuntimeError:
+                self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
 
         vault = Vault(save_callback=save_callback)
         if data:
@@ -359,7 +365,13 @@ class RedisVaultStore:
                 "type_counters": v.type_counters,
                 "max_token_length": v.max_token_length,
             }
-            self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, self.sync_client.setex, vault_key, self.ttl, json.dumps(payload))
+            except RuntimeError:
+                # Fallback to sync if not running in an async event loop
+                self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
 
         vault = Vault(save_callback=save_callback)
         if data:
