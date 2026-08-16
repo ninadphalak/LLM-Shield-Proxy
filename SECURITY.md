@@ -4,12 +4,14 @@
 LLM-Shield-Proxy is engineered for extreme zero-egress data privacy and enterprise compliance (SOC 2 / HIPAA). Security and confidentiality are core to the architecture.
 
 ## Supported Versions
-Only the latest release version on `main` is actively supported with security updates.
+As an open-source project, **only the absolute latest release version** is actively supported with security updates. 
+
+We do not backport security patches to older versions. If a vulnerability is found and patched (e.g., in `1.0.20`), users on older versions (e.g., `1.0.14`) are expected to upgrade to the latest release to secure their environment. The onus is entirely on the user to ensure they are pulling the latest Docker image or PyPI package.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| Latest  | :white_check_mark: |
+| Older Versions | :x:         |
 
 ## Reporting a Vulnerability
 
