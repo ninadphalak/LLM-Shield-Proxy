@@ -331,6 +331,7 @@ class RedisVaultStore:
             }
             try:
                 import asyncio
+
                 loop = asyncio.get_running_loop()
                 loop.run_in_executor(None, self.sync_client.setex, vault_key, self.ttl, json.dumps(payload))
             except RuntimeError:
@@ -367,6 +368,7 @@ class RedisVaultStore:
             }
             try:
                 import asyncio
+
                 loop = asyncio.get_running_loop()
                 loop.run_in_executor(None, self.sync_client.setex, vault_key, self.ttl, json.dumps(payload))
             except RuntimeError:

@@ -577,6 +577,7 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
         return res_json
 
     import copy
+
     res_copy = copy.deepcopy(res_json)
 
     # 1. OpenAI Chat Completion choices
