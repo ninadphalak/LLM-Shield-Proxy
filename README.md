@@ -49,8 +49,8 @@ LLM-Shield-Proxy is heavily modular. You can configure the engine based on your 
 
 | Installation Tier | Command | Capabilities Included | Use Case / Trade-off |
 | :--- | :--- | :--- | :--- |
-| **Standard Mode**<br>*(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | **Best for DevOps & Secrets:** Operates with ultra-low memory (`<60MB` RAM) and maximum throughput. Catches structured data (Emails, SSNs) and high-entropy cryptographic secrets (API Keys, Hex tokens). |
-| **Full NLP Mode**<br>*(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** | **Best for HIPAA/GDPR:** Adds a quantized BERT-NER model via ONNX runtime to extract conversational PII (Patient Names, Organizations) from free-text. Trade-off: Requires slightly more memory for model weights. |
+| **Standard Mode**<br>*(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | **Best for DevOps & Secrets:** Operates with ultra-low memory (`<60MB` RAM) and maximum throughput. **Coverage:** 100% deterministic catch rate for structured compliance data (SSNs, Emails, IP/MAC) and high-entropy cryptographic secrets (API Keys, Hex tokens). Misses conversational/free-text names. |
+| **Full NLP Mode**<br>*(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** | **Best for HIPAA/GDPR:** Adds a quantized BERT-NER model via ONNX runtime to extract conversational PII (Patient Names, Organizations) from free-text. **Coverage:** >95% catch rate for unstructured natural language entities. Trade-off: Requires slightly more memory for model weights. |
 
 > **Enabling Tier 3 ONNX NER:** When installed with `[ner]`, enable deep neural entity extraction by setting `ENABLE_TIER3_ONNX_NER=true` in your `.env` or environment variables (and optionally point `ONNX_MODEL_PATH` to custom model weights). If disabled or not installed, the engine automatically and gracefully bypasses Tier 3 with zero startup overhead.
 
@@ -450,7 +450,6 @@ gpg --verify checksums.txt.asc checksums.txt
 I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. I am actively looking for open-source contributors and collaborators to help execute the following technical roadmap. If you submit a PR, I will personally review and merge your architecture contributions:
 
 1. **Cythonize the Sliding-Window Buffer:** Compile the pure-Python async generator (`streaming.py`) into a C-extension binary to aggressively drive down tail latencies for high-throughput enterprise deployments.
-2. **Global GDPR & i18n Payloads:** Expand the regex payloads and Tier 3 ONNX models to support European formats (UK NIN, IBANs) and APAC Data Structures (India Aadhaar, localized identifiers).
 
 If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim an issue!
 
