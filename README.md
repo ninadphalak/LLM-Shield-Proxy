@@ -5,6 +5,7 @@
 *Secure, fast, and drop-in PII redaction and context preservation reverse proxy for Large Language Models.*
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21955770.svg)](https://doi.org/10.5281/zenodo.21955770)
+[![Build Status](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/llm-shield-proxy.svg)](https://pypi.org/project/llm-shield-proxy/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
