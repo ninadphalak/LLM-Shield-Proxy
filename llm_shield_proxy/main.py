@@ -37,7 +37,7 @@ from llm_shield_proxy.pii_engine import pii_engine
 from llm_shield_proxy.streaming import rehydrate_sse_stream
 from llm_shield_proxy.vault import RedisVaultStore, vault_store
 
-APP_VERSION = "1.0.19"
+APP_VERSION = "1.0.20"
 
 
 @lru_cache(maxsize=1024)
@@ -576,7 +576,8 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     if not isinstance(res_json, dict):
         return res_json
 
-    res_copy = res_json.copy()
+    import copy
+    res_copy = copy.deepcopy(res_json)
 
     # 1. OpenAI Chat Completion choices
     if "choices" in res_copy and isinstance(res_copy["choices"], list):
