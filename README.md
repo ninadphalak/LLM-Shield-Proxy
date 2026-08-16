@@ -97,7 +97,7 @@ for chunk in response:
 | :--- | :--- |
 | **Destroys Real-Time SSE Streaming:** Buffers entire responses before scanning, causing multi-second UI latency stalls. | **Ultra-Low Latency Streaming:** Redacts and re-hydrates delta-by-delta as SSE packets stream. |
 | **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <60MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
-| **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage:** Self-destructing TTL session vault built for zero data liability. |
+| **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage (Zero-Data Mode):** Self-destructing TTL session vault built for zero data liability. Operates in strict "Zero-Data Mode"—no prompts, PII, or context windows are ever written to persistent disk or external storage. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
 ---
