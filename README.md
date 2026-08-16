@@ -42,14 +42,14 @@ python examples/demo.py
 
 ---
 
-### 📦 Installation Options
+### 📦 Installation Options & Configuration Strategy
 
-Choose your installation tier:
+LLM-Shield-Proxy is heavily modular. You can configure the engine based on your specific compliance ROI and memory constraints:
 
-| Installation Mode | Command | Capabilities Included |
-| :--- | :--- | :--- |
-| **Standard Installation** *(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** - Ultra-lightweight `<60MB` RAM footprint. |
-| **Full NLP Installation** *(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** for deep contextual entity extraction. |
+| Installation Tier | Command | Capabilities Included | Use Case / Trade-off |
+| :--- | :--- | :--- | :--- |
+| **Standard Mode**<br>*(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | **Best for DevOps & Secrets:** Operates with ultra-low memory (`<60MB` RAM) and maximum throughput. Catches structured data (Emails, SSNs) and high-entropy cryptographic secrets (API Keys, Hex tokens). |
+| **Full NLP Mode**<br>*(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** | **Best for HIPAA/GDPR:** Adds a quantized BERT-NER model via ONNX runtime to extract conversational PII (Patient Names, Organizations) from free-text. Trade-off: Requires slightly more memory for model weights. |
 
 > **Enabling Tier 3 ONNX NER:** When installed with `[ner]`, enable deep neural entity extraction by setting `ENABLE_TIER3_ONNX_NER=true` in your `.env` or environment variables (and optionally point `ONNX_MODEL_PATH` to custom model weights). If disabled or not installed, the engine automatically and gracefully bypasses Tier 3 with zero startup overhead.
 
@@ -101,9 +101,9 @@ for chunk in response:
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
 ### 🤝 Built for Trust & Transparency
-Designed specifically for Healthcare Providers, Startups, and Educational Institutions. 
-1. **It keeps your data in your building:** We do not send your data to a third-party security company. The shield runs 100% inside your own servers.
-2. **Zero-Data Storage:** We do not save or log your sensitive prompts. The system uses a "self-destructing" memory vault that erases the mappings automatically.
+Designed specifically for highly regulated enterprise environments, Zero-Trust network architectures, and security-first engineering teams. 
+1. **It keeps your data in your building:** I do not send your data to a third-party security company. The shield runs 100% inside your own servers.
+2. **Zero-Data Storage:** I do not save or log your sensitive prompts. The system uses a "self-destructing" memory vault that erases the mappings automatically.
 3. **Continuous Stability:** The system has been aggressively tested under heavy, simulated usage (thousands of concurrent users) for hours on end to ensure it never crashes or slows down your AI tools.
 4. **Transparent Design:** The system doesn't rely on hidden "black box" AI to detect sensitive data. It uses mathematically proven, transparent rules to detect patterns like Credit Cards, SSNs, and Medical Record Numbers.
 
@@ -146,7 +146,7 @@ Evaluating regex patterns alone fails against unstructured, patternless secrets 
 ### 2. Script-Aware Non-Latin & CJK Rehydration Engine
 Standard regex word boundaries (`\b`) rely on ASCII whitespace and punctuation. In logographic and syllabic scripts like **Chinese, Japanese, and Korean (CJK)**, words are written continuously without spaces (`我的名字是张伟`).
 - **The "Sub-Word Collision" Bug:** Naive substring matching replaces prefixes inside standard words (e.g. synthetic token `May` corrupting `Maybe` into `Sarahbe`). Naive `\b` word boundaries completely break on CJK text.
-- **Script-Aware Boundary Isolation:** Our rehydration engine isolates Latin alphanumeric boundaries (`_is_ascii_word_char`) from CJK ideographs (`\u4e00-\u9fff`, `\u3040-\u30ff`, `\uac00-\ud7af`), preventing sub-word corruption in English while enabling zero-whitespace entity replacements in Asian languages.
+- **Script-Aware Boundary Isolation:** My rehydration engine isolates Latin alphanumeric boundaries (`_is_ascii_word_char`) from CJK ideographs (`\u4e00-\u9fff`, `\u3040-\u30ff`, `\uac00-\ud7af`), preventing sub-word corruption in English while enabling zero-whitespace entity replacements in Asian languages.
 
 ### 3. Resilient SSE Sliding-Window Buffer with Backpressure Bounds
 Server-Sent Events (SSE) stream LLM responses in arbitrary, fragmented token chunks. A sensitive placeholder tag or synthetic word might arrive split across consecutive packets:
@@ -263,7 +263,7 @@ flowchart TD
 
 ## ⚡ Performance & Latency Benchmarks
 
-LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Hard numbers from our official automated benchmark suite (`python benchmark.py`):
+LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Hard numbers from my official automated benchmark suite (`python benchmark.py`):
 
 ```text
 =================================================================
@@ -304,11 +304,15 @@ ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED
 | **AES-256-GCM Encrypt + Decrypt** | `0.0017 ms` | `0.0017 ms` (`1.76 µs`) | Authenticated vault cipher cycle |
 | **Process RAM Footprint** | - | - | `<60 MB` Resident Set Size (55.31 MB verified) |
 
-### ⚡ Under the Hood: Speed Optimizations
-To achieve these microsecond latencies, LLM-Shield-Proxy implements three low-level systems optimizations:
-1. **Rust-Backed JSON Parsing:** Powered by `orjson`, processing streaming LLM chunks up to 10x faster.
-2. **Persistent TLS Connection Pooling:** The FastAPI lifespan manager maintains pre-warmed HTTP/2 secure connection pools (`httpx.AsyncClient`) with keep-alive limits, completely bypassing TLS handshake overhead on individual requests.
-3. **Constant-Time LRU Auth Caching:** Cryptographic PBKDF2 HMAC hashes for virtual keys are cached in-memory via `@lru_cache`, preventing heavy CPU-bound hashing overhead on every request and guaranteeing 0ms latency impact during proxy routing.
+### ⚡ Under the Hood: Architectural Speed Optimizations
+To achieve microsecond latencies, LLM-Shield-Proxy bypasses heavy legacy NLP frameworks in favor of aggressive low-level algorithmic optimizations:
+
+1. **O(N) Vectorized Shannon Entropy:** Tier 2 evaluates raw unformatted secrets (API keys, Hex) using a highly optimized frequency `Counter` and math-bound loop, avoiding heavy regex backtracking. It executes in `<6 µs`.
+2. **DFA Pre-compiled Regex Caching:** Tier 1 identifiers are compiled into deterministic finite automatons (DFA) at startup, ensuring constant-time structural matching.
+3. **Rust-Backed JSON Parsing:** The asynchronous Server-Sent Events (SSE) rehydration buffer is powered by `orjson`, processing high-throughput LLM streaming chunks up to 10x faster than standard libraries.
+4. **Lazy-Loaded ONNX Neural Pipeline:** The Tier 3 Named Entity Recognition (NER) pipeline is strictly lazy-loaded. If disabled, it gracefully bypasses neural inference with zero startup overhead or memory bloat.
+5. **Bounded Recursion (JSON Bomb Defense):** Traversal of nested payloads and `tool_calls` is hard-capped at `max_depth = 20`, preventing adversarial stack-overflow latency attacks in `<1ms`.
+6. **Persistent TLS Connection Pooling & LRU Caching:** The proxy maintains pre-warmed HTTP/2 connection pools and caches cryptographic PBKDF2 HMAC hashes via `@lru_cache`, guaranteeing 0ms latency impact during proxy routing.
 
 To run the automated benchmark suite locally:
 
@@ -421,38 +425,26 @@ gpg --verify checksums.txt.asc checksums.txt
 
 ---
 
-## 🌍 Internationalization (i18n) & GDPR Roadmap
+## 🌍 Open Source Roadmap & Contributions
 
-Currently, LLM-Shield-Proxy's Tier 1 Regex engine is optimized for North American PII (US SSNs, Phone Formats). To support global GDPR compliance, I am actively looking for contributors to help expand regex payloads and Tier 3 ONNX models for:
-- **European Formats:** UK NIN, EU Phone Numbers, IBANs.
-- **APAC Data Structures:** India Aadhaar, APAC localized identifiers.
-- **Multilingual NER ONNX Models:** Multilingual entity recognition models.
+I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. I am actively looking for open-source contributors and collaborators to help execute the following technical roadmap. If you submit a PR, I will personally review and merge your architecture contributions:
 
-If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim a locale!
+1. **Cythonize the Sliding-Window Buffer:** Compile the pure-Python async generator (`streaming.py`) into a C-extension binary to aggressively drive down tail latencies for high-throughput enterprise deployments.
+2. **Global GDPR & i18n Payloads:** Expand the regex payloads and Tier 3 ONNX models to support European formats (UK NIN, IBANs) and APAC Data Structures (India Aadhaar, localized identifiers).
 
----
-
-## 🗺️ Future Technical Roadmap (Performance & Scale)
-
-I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. Here are the core architectural optimizations planned for upcoming releases — contributions and PRs are warmly welcomed:
-
-1. **Cythonize the Sliding-Window Buffer**
-   - **Status:** Preserved in the Open-Source Roadmap.
-   - **Why this is strategic:** Instead of compiling `streaming.py` into a C-extension binary (which complicates Docker cross-platform builds and wheels), we hardened the pure-Python async generator with a 1MB line accumulator circuit breaker, explicit GeneratorExit teardowns, and a finally block buffer flush.
+If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim an issue!
 
 ---
 
-## 🏢 Using LLM-Shield in Production?
+## 🏢 Enterprise Support & Community
 
-If your organization is evaluating, benchmarking, or deploying LLM-Shield to unblock LLM streaming and meet strict compliance requirements (like SOC 2/HIPAA), I would love to hear from you.
+If your organization is evaluating, benchmarking, or deploying LLM-Shield-Proxy to unblock LLM streaming and meet strict compliance requirements (like SOC 2/HIPAA), I encourage you to engage with the community:
 
-I am actively gathering feedback from security and engineering leaders to map out advanced compliance features and shape the open-source roadmap.
+* **Architecture Discussions:** Open a GitHub Discussion to share your feedback on high-throughput deployments, custom proxy pipelines, or benchmark results.
+* **Enterprise Case Studies:** If your startup or enterprise is using the proxy in production, let me know! I highlight production architectures and feature enterprise teams in my community benchmarks.
+* **Bug Reports & Features:** Submit technical issues or feature requests via the GitHub Issue tracker.
 
-Architecture Discussions: Open a GitHub Discussion to share your feedback on high-throughput deployments, custom proxy pipelines, or benchmark results.
-
-Enterprise Case Studies: If your startup or enterprise is using the proxy in production, let us know! We would love to highlight your architecture and feature your team in our community benchmarks.
-
-Reach out directly at ninadphalak@gmail.com to share your use case, request a feature, or discuss how you are using LLM-Shield in your stack.
+LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, and Cybersecurity professionals to shape the open-source compliance roadmap.
 
 ---
 
