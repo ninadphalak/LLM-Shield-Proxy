@@ -35,10 +35,10 @@ from langchain_core.messages import HumanMessage
 
 # Point LangChain to your local LLM-Shield-Proxy container
 chat = ChatOpenAI(
-    base_url="http://localhost:8000", # The Proxy URL
+    base_url="http://localhost:8000",  # The Proxy URL
     api_key="sk-proxy-local",
     model="gpt-4o",
-    streaming=True
+    streaming=True,
 )
 
 # Send a prompt containing PII

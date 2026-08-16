@@ -142,6 +142,7 @@ class PIIEngine:
 
         try:
             import os
+
             import onnxruntime as ort  # type: ignore
             from tokenizers import Tokenizer  # type: ignore
 
@@ -149,7 +150,7 @@ class PIIEngine:
                 settings.ONNX_MODEL_PATH,
                 providers=["CPUExecutionProvider"],
             )
-            
+
             model_dir = os.path.dirname(settings.ONNX_MODEL_PATH)
             tokenizer_path = os.path.join(model_dir, "tokenizer.json")
             if os.path.exists(tokenizer_path):
@@ -214,20 +215,21 @@ class PIIEngine:
             if self._onnx_session and self._tokenizer:
                 try:
                     import numpy as np  # type: ignore
+
                     encoded = self._tokenizer.encode(text)
                     input_ids = np.array([encoded.ids], dtype=np.int64)
                     attention_mask = np.array([encoded.attention_mask], dtype=np.int64)
-                    
+
                     ort_inputs = {
                         self._onnx_session.get_inputs()[0].name: input_ids,
                         self._onnx_session.get_inputs()[1].name: attention_mask,
                     }
                     logits = self._onnx_session.run(None, ort_inputs)[0]
                     predictions = np.argmax(logits, axis=2)[0]
-                    
+
                     current_entity = None
                     current_start = -1
-                    
+
                     for idx, pred_id in enumerate(predictions):
                         # Simplified label parsing (assuming id > 0 means a named entity for now)
                         if pred_id > 0:
