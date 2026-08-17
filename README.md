@@ -165,8 +165,8 @@ Standard regex word boundaries (`\b`) rely on ASCII whitespace and punctuation. 
 
 ### 3. Resilient SSE Sliding-Window Buffer with Backpressure Bounds
 Server-Sent Events (SSE) stream LLM responses in arbitrary, fragmented token chunks. A sensitive placeholder tag or synthetic word might arrive split across consecutive packets:
-- **Chunk N:** `Hello [PER`
-- **Chunk N+1:** `SON_1]! How can I help you today?`
+- **Chunk N:** `Your token is AKIA`
+- **Chunk N+1:** `IOSFODNN7EXAMPLE`
 - **Dynamic Prefix Retention:** The async `SSERehydrationBuffer` retains trailing characters bounded by `L = max(0, max_token_length - 1)` during intermediate chunks and flushes cleanly on `data: [DONE]`.
 - **Backpressure & Slowloris Protection:** Bounded by a strict `64KB` sliding-window memory threshold and `1MB` maximum SSE line accumulator, halting malicious buffer ballooning from slow clients or corrupted upstream streams.
 
@@ -350,7 +350,7 @@ locust -f load_test.py --headless -u 500 -r 50 --run-time 10m --host http://loca
 
 ## ⚖️ Engineering Philosophy & Architecture Trade-offs
 
-Building a microsecond-latency reverse proxy requires ruthless optimization. Here is why I made specific architectural decisions that deviate from standard Python backend practices:
+Building a microsecond-latency reverse proxy requires an **extreme low-latency architecture**. Here is why I made specific architectural decisions that deviate from standard Python backend practices:
 
 1. **Custom SSE Sliding-Window vs. Off-the-Shelf Parsers:** Standard HTTP/SSE libraries buffer data line-by-line, which is fatal for LLM token streams where a sensitive entity (like an SSN) might be split across two separate `data:` chunks. I wrote a custom async generator buffer to retain a mathematical prefix overlap (`L = max_token_length - 1`), guaranteeing 100% interception of fragmented packets without breaking the live stream.
 2. **ONNX Runtime vs. PyTorch:** NLP pipelines usually default to heavy ML frameworks like PyTorch or spaCy, which consume 1GB+ of RAM and require massive startup times. I explicitly rejected them. By quantizing the Tier 3 BERT-NER model and executing it directly via the C++ ONNX Runtime, the proxy maintains a `<60MB` footprint, avoids dependency bloat, and starts instantly.
@@ -363,7 +363,7 @@ Building a microsecond-latency reverse proxy requires ruthless optimization. Her
 
 Transparency is critical for security tooling. Please be aware of the following current limitations:
 - **Text Only:** The proxy does not currently scan or redact text embedded inside base64 image payloads (e.g., OpenAI Vision models).
-- **Supported Languages:** The Tier-3 ONNX NER model is currently optimized for English-language entities. 
+- **Supported Languages:** Multilingual support requires providing your own ONNX model via BYOM (`ONNX_MODEL_PATH`). By default, the proxy falls back to an English-optimized NLP model.
 - **Non-Standard Streaming:** Designed for standard Server-Sent Events (SSE). Custom or proprietary streaming protocols may bypass the sliding-window buffer.
 
 ---
@@ -442,6 +442,7 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 ### 3. 📈 Stateless & Horizontal Scaling
 LLM-Shield-Proxy runs completely stateless by default. For high-volume enterprise deployments, instances scale horizontally behind edge proxies (NGINX, Traefik, AWS ALB):
 ```bash
+# Spin up 5 load-balanced instances of the proxy
 docker compose up -d --scale llm-shield-proxy=5
 ```
 When configured with `REDIS_URL`, session vaults are shared across all proxy replicas via `redis.asyncio`, ensuring seamless session isolation across multi-instance clusters.
@@ -468,7 +469,7 @@ I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency 
 
 1. **Cythonize the Sliding-Window Buffer:** Compile the pure-Python async generator (`streaming.py`) into a C-extension binary to aggressively drive down tail latencies for high-throughput enterprise deployments.
 
-If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim an issue!
+If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim an issue (e.g., [Help Cythonize the proxy! #15](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/15))!
 
 ---
 
