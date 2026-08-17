@@ -79,7 +79,7 @@ docker run -d -p 8000:8000 \
 LLM-Shield-Proxy is heavily modular. It is designed to replace slow, memory-heavy legacy PII scanners (like Microsoft Presidio) while stacking perfectly with your existing AI routing infrastructure. It requires no code changes and is 100% compatible out-of-the-box with:
 
 * **Orchestration Frameworks:** LangChain, LlamaIndex, Semantic Kernel, AutoGen, CrewAI.
-* **AI Gateways & Routers:** LiteLLM, Cloudflare AI Gateway, Kong AI Gateway, Portkey. *(Note: You can seamlessly stack LLM-Shield in front of LiteLLM to achieve both multi-model cost routing and military-grade PII compliance).*
+* **AI Gateways & Routers:** LiteLLM, Cloudflare AI Gateway, Kong AI Gateway, Portkey. *(Note: You can seamlessly stack LLM-Shield-Proxy in front of LiteLLM to achieve both multi-model cost routing and military-grade PII compliance).*
 * **Local & Open-Source Inference:** vLLM, Ollama, NVIDIA NIM, Hugging Face TGI.
 * **Upstream Providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral.
 
