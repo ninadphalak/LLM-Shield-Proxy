@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
+import asyncio
+
+if sys.platform == 'win32':
+    asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
 
 import uvicorn
 
