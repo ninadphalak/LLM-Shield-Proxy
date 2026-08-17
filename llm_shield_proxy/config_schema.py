@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 class CustomRegexPattern(BaseModel):
     name: str = Field(..., description="Name of the custom entity (e.g., INTERNAL_ID)")

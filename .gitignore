@@ -44,5 +44,5 @@ private_key.asc
 .DS_Store
 .idea/
 .vscode/
-*.swp
-
+.swp
+.agents/
