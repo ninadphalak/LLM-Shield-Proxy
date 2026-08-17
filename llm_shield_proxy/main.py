@@ -6,6 +6,12 @@ session-isolated token vaults, and prefix-free SSE stream rehydration.
 
 from __future__ import annotations
 
+import sys
+import asyncio
+
+if sys.platform == 'win32':
+    asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
+
 import hashlib
 import hmac
 import ipaddress

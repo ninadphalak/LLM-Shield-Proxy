@@ -82,10 +82,10 @@ class Settings(BaseSettings):
         default=10.0, description="HTTP connection establishment timeout in seconds"
     )
     HTTP_MAX_KEEPALIVE_CONNECTIONS: int = Field(
-        default=100, description="Maximum keep-alive connections in httpx client pool"
+        default=10000, description="Maximum keep-alive connections in httpx client pool"
     )
     HTTP_MAX_CONNECTIONS: int = Field(
-        default=500, description="Maximum total concurrent connections in httpx client pool"
+        default=30000, description="Maximum total concurrent connections in httpx client pool"
     )
 
     # Security & Buffer Bounds

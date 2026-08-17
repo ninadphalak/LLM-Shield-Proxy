@@ -1,4 +1,9 @@
 import asyncio
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 import json
 
 from fastapi import FastAPI, Request
@@ -56,4 +61,4 @@ async def chat_completions(request: Request):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("mock_upstream:app", host="127.0.0.1", port=8001, workers=4)
+    uvicorn.run("mock_upstream:app", host="127.0.0.1", port=8001, workers=20)
