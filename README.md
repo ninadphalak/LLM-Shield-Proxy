@@ -300,6 +300,7 @@ Based on extreme stress testing, the Proxy scales highly efficiently across mult
 *   **Rule of Thumb:** Provision 1 CPU core for every **1,800** expected peak concurrent users.
 *   **Mid-Tier (16 Cores)**: ~28,800 Concurrent Users. *(Recommended: AWS c6i.4xlarge, GCP c2-standard-16, or Azure Standard_F16s_v2)*
 *   **High-Tier (32 Cores)**: ~57,600 Concurrent Users. *(Recommended: AWS c6i.8xlarge, GCP c2-standard-32, or Azure Standard_F32s_v2)*
+*   **Memory (RAM) Footprint:** The proxy is strictly **CPU-bound**. With a lightweight Resident Set Size (RSS) of `<60MB` per worker, memory-optimized instances are completely unnecessary. Standard compute-optimized instances provide vastly more RAM than the proxy will ever consume.
 
 > [!WARNING]
 > **Windows Bottleneck (`SO_REUSEPORT`):** While the proxy runs flawlessly on Windows, extreme high-concurrency scaling (multi-worker) is heavily bottlenecked by the Windows TCP stack. Windows lacks native support for the `SO_REUSEPORT` socket option. Under massive load, the OS will fail to route connections efficiently to multiple Uvicorn workers, resulting in `ConnectionRefusedError(10061)` dropped packets. Always deploy on Linux for production scale.
