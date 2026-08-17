@@ -5,6 +5,11 @@ import time
 
 from llm_shield_proxy.pii_engine import PIIEngine, calculate_shannon_entropy
 from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.config import settings
+
+import tempfile
+import os
+import yaml
 
 
 def test_shannon_entropy_calculation():
@@ -17,6 +22,43 @@ def test_shannon_entropy_calculation():
     high_entropy_key = "aB3$9zK!7wQ#2mP*5xL@"
     entropy_val = calculate_shannon_entropy(high_entropy_key)
     assert entropy_val >= 4.0
+
+
+def test_pii_custom_regex_byor():
+    """Tests Tier 1.5 BYOR custom regex injection from YAML config."""
+    custom_yaml = {
+        "custom_patterns": [
+            {
+                "name": "INTERNAL_EMPLOYEE_ID",
+                "pattern": r"(?i)EMP-[A-Z]{3}-\d{5}",
+                "description": "Matches internal Acme Corp employee IDs"
+            }
+        ]
+    }
+    
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as tmp:
+        yaml.dump(custom_yaml, tmp)
+        tmp_path = tmp.name
+
+    try:
+        # Override settings for the duration of the test
+        original_path = settings.CUSTOM_REGEX_PATH
+        settings.CUSTOM_REGEX_PATH = tmp_path
+        
+        # Initialize engine (should load custom regex from tmp_path)
+        engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+        vault = Vault(synthetic=False)
+
+        sample_text = "The new sysadmin is EMP-ABC-12345."
+        redacted = engine.redact_text(sample_text, vault)
+
+        # Assuming google-re2 is installed or fallback re works.
+        assert "[INTERNAL_EMPLOYEE_ID_1]" in redacted
+        assert "EMP-ABC-12345" not in redacted
+    finally:
+        settings.CUSTOM_REGEX_PATH = original_path
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def test_pii_tier1_structured_redaction():
