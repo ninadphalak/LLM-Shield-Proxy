@@ -11,17 +11,18 @@ from __future__ import annotations
 import base64
 import logging
 import math
+import os
 import re
 import unicodedata
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
-from llm_shield_proxy.config import settings
-from llm_shield_proxy.vault import Vault
-from llm_shield_proxy.config_schema import CustomRegexConfig
-
-import os
 import yaml
+
+from llm_shield_proxy.config import settings
+from llm_shield_proxy.config_schema import CustomRegexConfig
+from llm_shield_proxy.vault import Vault
+
 try:
     import re2
 except ImportError:
@@ -185,14 +186,14 @@ class PIIEngine:
         try:
             with open(settings.CUSTOM_REGEX_PATH, "r", encoding="utf-8") as f:
                 yaml_data = yaml.safe_load(f) or {}
-            
+
             config = CustomRegexConfig(**yaml_data)
-            
+
             for custom_pattern in config.custom_patterns:
                 # Compile using re2 to guarantee O(N) execution and ReDoS immunity
                 compiled = re2.compile(custom_pattern.pattern)
                 self._custom_patterns.append((custom_pattern.name, compiled))
-                
+
             logger.info("Successfully loaded %d custom regex patterns from %s", len(self._custom_patterns), settings.CUSTOM_REGEX_PATH)
         except Exception as exc:
             logger.error("Failed to load custom regex configuration: %s", exc)

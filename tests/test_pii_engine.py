@@ -1,15 +1,15 @@
 """Unit tests for 3-Tier PII & Secret Detection Engine."""
 
 import base64
+import os
+import tempfile
 import time
 
+import yaml
+
+from llm_shield_proxy.config import settings
 from llm_shield_proxy.pii_engine import PIIEngine, calculate_shannon_entropy
 from llm_shield_proxy.vault import Vault
-from llm_shield_proxy.config import settings
-
-import tempfile
-import os
-import yaml
 
 
 def test_shannon_entropy_calculation():
@@ -35,7 +35,7 @@ def test_pii_custom_regex_byor():
             }
         ]
     }
-    
+
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as tmp:
         yaml.dump(custom_yaml, tmp)
         tmp_path = tmp.name
@@ -44,7 +44,7 @@ def test_pii_custom_regex_byor():
         # Override settings for the duration of the test
         original_path = settings.CUSTOM_REGEX_PATH
         settings.CUSTOM_REGEX_PATH = tmp_path
-        
+
         # Initialize engine (should load custom regex from tmp_path)
         engine = PIIEngine(enable_tier2=False, enable_tier3=False)
         vault = Vault(synthetic=False)
