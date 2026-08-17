@@ -66,7 +66,7 @@ Enterprise compliance often requires scanning for proprietary internal formats (
 To inject custom regexes, mount a `custom_regex.yaml` file into the proxy and point `CUSTOM_REGEX_PATH` to it.
 
 **Security & ReDoS Immunity:**
-Naive reverse proxies crash when evaluated against poorly written backtracking regexes `(a+)+$`. LLM-Shield-Proxy explicitly rejects Python's standard `re` module for BYOR. It parses your YAML via **Pydantic** during the FastAPI `lifespan` startup event, and compiles all patterns using the **`google-re2` C++ engine**, mathematically guaranteeing $O(N)$ execution time regardless of how complex your regex or how adversarial the streaming payload is.
+Naive reverse proxies can crash when evaluated against poorly written backtracking regexes like `(a+)+$`. To prevent this, LLM-Shield-Proxy leverages the **`google-re2` C++ engine** for all BYOR custom patterns. It parses your YAML configuration via **Pydantic** during the FastAPI `lifespan` startup event, and compiles all patterns using `re2`, mathematically guaranteeing $O(N)$ execution time regardless of how complex your regex or how adversarial the streaming payload is. This ensures complete immunity against ReDoS attacks without sacrificing the microsecond latency overhead.
 
 ```yaml
 # custom_regex.yaml
