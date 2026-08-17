@@ -249,17 +249,6 @@ flowchart TD
             Tier1["Tier 1: Pre-compiled DFA Regex\n(<0.03ms Pattern Matching)"]:::piiSecurity
             Tier2["Tier 2: Shannon Entropy Secret Filter\n(Base64 >= 4.5, Hex >= 3.4 bits/char)"]:::piiSecurity
             Tier3["Tier 3: Contextual ONNX NER Pipeline\n(Script-Aware CJK & Multi-Modal Unwrapping)"]:::piiSecurity
-        ```json
-        {"email": "test@example.com"}
-        ```
-
-## Enterprise Hardware Sizing Guide
-
-Based on extreme stress testing, the Proxy scales highly efficiently across multi-core architectures.
-
-*   **Maximum Safe Concurrent Users (Untuned Windows Loopback)**: 10,000
-*   **Concurrency-Per-Core Ratio**: ~625 concurrent users per logical core.
-*   **Resiliency**: Successfully handles 10,000+ sustained concurrent streaming connections without memory leaks or crashes, bounded primarily by OS socket limits and upstream API latency.end
             Tier1 --> Tier2 --> Tier3
         end
 
@@ -300,6 +289,16 @@ Based on extreme stress testing, the Proxy scales highly efficiently across mult
 1. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE).
 2. **Prefix-Aware Buffer:** Because tokens can be split across SSE chunks, the sliding-window buffer retains trailing prefix overlap up to `L = max(0, max_token_length - 1)`.
 3. **Re-hydration:** Once a tag or synthetic word is fully assembled, the proxy swaps the real data back from the local vault and streams the un-redacted text to the user's application in real-time.
+
+---
+
+## 🏢 Enterprise Hardware Sizing Guide
+
+Based on extreme stress testing, the Proxy scales highly efficiently across multi-core architectures. *Note: You can extrapolate these base metrics to estimate required capacity on multi-core Linux systems, where the Concurrency-Per-Core ratio is generally higher due to `epoll` efficiency.*
+
+*   **Maximum Safe Concurrent Users (Untuned Windows Loopback)**: 10,000
+*   **Concurrency-Per-Core Ratio (Windows Baseline)**: ~625 concurrent users per logical core.
+*   **Resiliency**: Successfully handles sustained concurrent streaming connections without memory leaks or crashes, bounded primarily by OS socket limits and upstream API latency.
 
 ---
 
