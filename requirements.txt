@@ -11,3 +11,4 @@ prometheus-client>=0.17.0
 watchdog>=3.0.0
 redis>=5.0.0
 cryptography>=41.0.0
+google-re2>=1.1.20231101

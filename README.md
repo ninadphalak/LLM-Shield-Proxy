@@ -60,6 +60,22 @@ LLM-Shield-Proxy is not locked into a single NER model. Enterprise architectures
 * **Legal Tech & Finance:** Load **Legal-BERT** or **FinBERT** for specialized contracts, NDAs, and financial audit trails.
 * **Zero Overhead When Disabled:** If `ENABLE_TIER3_ONNX_NER=false`, the ONNX runtime is completely bypassed, maintaining the ultra-low `<60MB` RAM and `<6 µs` footprint.
 
+### 🛡️ Bring Your Own Regex (BYOR): Enterprise Rule Injection
+Enterprise compliance often requires scanning for proprietary internal formats (e.g., custom employee IDs, internal project codenames, or proprietary billing tokens). LLM-Shield-Proxy allows you to inject custom regex rules that are evaluated alongside Tier 1 without risking catastrophic ReDoS (Regular Expression Denial of Service).
+
+To inject custom regexes, mount a `custom_regex.yaml` file into the proxy and point `CUSTOM_REGEX_PATH` to it.
+
+**Security & ReDoS Immunity:**
+Naive reverse proxies crash when evaluated against poorly written backtracking regexes `(a+)+$`. LLM-Shield-Proxy explicitly rejects Python's standard `re` module for BYOR. It parses your YAML via **Pydantic** during the FastAPI `lifespan` startup event, and compiles all patterns using the **`google-re2` C++ engine**, mathematically guaranteeing $O(N)$ execution time regardless of how complex your regex or how adversarial the streaming payload is.
+
+```yaml
+# custom_regex.yaml
+custom_patterns:
+  - name: INTERNAL_EMPLOYEE_ID
+    pattern: "(?i)EMP-[A-Z]{3}-\\d{5}"
+    description: "Matches internal Acme Corp employee IDs"
+```
+
 ```bash
 # Start the proxy server locally on port 8000
 llm-shield-proxy --host 0.0.0.0 --port 8000 --workers 1

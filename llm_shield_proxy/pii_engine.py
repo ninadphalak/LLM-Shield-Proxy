@@ -18,6 +18,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from llm_shield_proxy.config import settings
 from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.config_schema import CustomRegexConfig
+
+import os
+import yaml
+try:
+    import re2
+except ImportError:
+    re2 = None
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +141,9 @@ class PIIEngine:
         )
         self._onnx_session: Optional[Any] = None
         self._tokenizer: Optional[Any] = None
+        self._custom_patterns: List[Tuple[str, Any]] = []
         self._init_onnx_model()
+        self._init_custom_regex()
 
     def _init_onnx_model(self) -> None:
         """Lazy-loads ONNX runtime session and Tokenizer if configured and available."""
@@ -163,6 +173,30 @@ class PIIEngine:
             self._onnx_session = None
             self._tokenizer = None
 
+    def _init_custom_regex(self) -> None:
+        """Loads and compiles BYOR (Bring Your Own Regex) patterns via re2."""
+        if not settings.CUSTOM_REGEX_PATH or not os.path.exists(settings.CUSTOM_REGEX_PATH):
+            return
+
+        if re2 is None:
+            logger.error("google-re2 is required for BYOR custom regex to prevent ReDoS. Skipping custom regex load.")
+            return
+
+        try:
+            with open(settings.CUSTOM_REGEX_PATH, "r", encoding="utf-8") as f:
+                yaml_data = yaml.safe_load(f) or {}
+            
+            config = CustomRegexConfig(**yaml_data)
+            
+            for custom_pattern in config.custom_patterns:
+                # Compile using re2 to guarantee O(N) execution and ReDoS immunity
+                compiled = re2.compile(custom_pattern.pattern)
+                self._custom_patterns.append((custom_pattern.name, compiled))
+                
+            logger.info("Successfully loaded %d custom regex patterns from %s", len(self._custom_patterns), settings.CUSTOM_REGEX_PATH)
+        except Exception as exc:
+            logger.error("Failed to load custom regex configuration: %s", exc)
+
     def detect_spans(self, text: str) -> List[Tuple[int, int, str, str]]:
         """Detects all PII and secret entity spans across the 3-Tier cascade.
 
@@ -182,6 +216,11 @@ class PIIEngine:
 
         # Tier 1: Structured DFA Regex Scanning
         for entity_type, pattern in TIER1_PATTERNS:
+            for match in pattern.finditer(text):
+                raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+
+        # Tier 1.5: BYOR Custom Regex Scanning (O(N) re2 execution)
+        for entity_type, pattern in self._custom_patterns:
             for match in pattern.finditer(text):
                 raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
 

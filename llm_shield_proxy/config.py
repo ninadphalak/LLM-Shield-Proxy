@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     ONNX_MODEL_PATH: Optional[str] = Field(
         default=None, description="Filesystem path to quantized ONNX BERT-NER model weights"
     )
+    CUSTOM_REGEX_PATH: Optional[str] = Field(
+        default=None, description="Path to custom_regex.yaml containing BYOR rules"
+    )
 
     # HTTP Client & Connection Pooling
     HTTP_TIMEOUT_SECONDS: float = Field(
