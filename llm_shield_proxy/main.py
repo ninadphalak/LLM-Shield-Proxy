@@ -6,8 +6,8 @@ session-isolated token vaults, and prefix-free SSE stream rehydration.
 
 from __future__ import annotations
 
-import sys
 import asyncio
+import sys
 
 if sys.platform == 'win32':
     asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
