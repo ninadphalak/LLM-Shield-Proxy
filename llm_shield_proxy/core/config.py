@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Set
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,8 @@ class Settings(BaseSettings):
         default=1024 * 1024,
         description="Maximum allowed SSE line length in bytes to prevent Slowloris buffer poisoning (1MB default)",
     )
+    ENABLE_WATERMARKING: bool = Field(default=False, description="Enable dynamic canary watermarking")
+    SHIELD_WATERMARK_SECRET: Optional[str] = Field(default=None, description="Secret for HMAC-SHA256 watermarking")
 
     # Telemetry & Metrics (Strictly Opt-In)
     TELEMETRY_ENABLED: bool = Field(default=False, description="Enable external audit telemetry event forwarding")
@@ -125,6 +127,12 @@ class Settings(BaseSettings):
     _valid_virtual_keys_set: frozenset[str] = frozenset()
 
     model_config = SettingsConfigDict(env_file=(_ENV_FILE_PATH, ".env"), env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_watermark_secret(self) -> 'Settings':
+        if self.ENABLE_WATERMARKING and not self.SHIELD_WATERMARK_SECRET:
+            raise ValueError("SHIELD_WATERMARK_SECRET must be set if ENABLE_WATERMARKING is True.")
+        return self
 
     @property
     def valid_virtual_keys_set(self) -> frozenset[str]:

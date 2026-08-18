@@ -122,6 +122,7 @@ class SSERehydrationBuffer:
 async def rehydrate_sse_stream(
     raw_stream: AsyncGenerator[bytes, None],
     vault: Vault,
+    watermark_text: str = "",
 ) -> AsyncGenerator[bytes, None]:
     """Asynchronous generator consuming raw SSE bytes and yielding rehydrated SSE chunks.
 
@@ -144,6 +145,11 @@ async def rehydrate_sse_stream(
     max_line_length = settings.MAX_SSE_LINE_LENGTH
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
+    cached_id = "chatcmpl-watermark"
+    cached_object = "chat.completion.chunk"
+    cached_created = 0
+    cached_model = "unknown"
+
     try:
         async for chunk in raw_stream:
             chunk_text = decoder.decode(chunk, final=False)
@@ -160,6 +166,13 @@ async def rehydrate_sse_stream(
                     raw_json = stripped[6:]
                     try:
                         data_obj = json.loads(raw_json)
+                        
+                        if "id" in data_obj and cached_id == "chatcmpl-watermark":
+                            cached_id = data_obj.get("id", cached_id)
+                            cached_object = data_obj.get("object", cached_object)
+                            cached_created = data_obj.get("created", cached_created)
+                            cached_model = data_obj.get("model", cached_model)
+
                         # 1. OpenAI Chat Completion Delta
                         choices = data_obj.get("choices", [])
                         if choices and isinstance(choices, list):
@@ -198,6 +211,18 @@ async def rehydrate_sse_stream(
                     if remaining:
                         flush_obj = {"choices": [{"delta": {"content": remaining}}]}
                         yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                        
+                    if watermark_text:
+                        watermark_obj = {
+                            "id": cached_id,
+                            "object": cached_object,
+                            "created": cached_created,
+                            "model": cached_model,
+                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                        }
+                        yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                        watermark_text = "" # prevent double yield
+                        
                     yield (line + "\n").encode("utf-8")
                 else:
                     yield (line + "\n").encode("utf-8")
@@ -215,6 +240,17 @@ async def rehydrate_sse_stream(
             if remaining:
                 flush_obj = {"choices": [{"delta": {"content": remaining}}]}
                 yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+
+            if watermark_text:
+                watermark_obj = {
+                    "id": cached_id,
+                    "object": cached_object,
+                    "created": cached_created,
+                    "model": cached_model,
+                    "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                }
+                yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                watermark_text = ""
 
             if line_accumulator:
                 yield line_accumulator.encode("utf-8")
