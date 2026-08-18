@@ -13,9 +13,9 @@ import base64
 
 import pytest
 
-from llm_shield_proxy.pii_engine import pii_engine
-from llm_shield_proxy.streaming import SSERehydrationBuffer, rehydrate_sse_stream
-from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+from llm_shield_proxy.engines.vault import Vault
 
 
 def test_unicode_zero_width_smuggling():

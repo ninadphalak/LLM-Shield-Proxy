@@ -13,8 +13,8 @@ from collections.abc import AsyncGenerator
 
 import orjson as json
 
-from llm_shield_proxy.config import settings
-from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.engines.vault import Vault
 
 
 class SSERehydrationBuffer:

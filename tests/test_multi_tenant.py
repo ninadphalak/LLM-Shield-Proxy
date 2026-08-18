@@ -2,17 +2,17 @@
 
 from fastapi.testclient import TestClient
 
-from llm_shield_proxy.main import app
+from llm_shield_proxy.api.main import app
 
 client = TestClient(app)
 
 
 def test_multi_provider_routing_openai(monkeypatch, httpx_mock):
     """Tests routing to OpenAI upstream with virtual key resolution."""
-    monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-a")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-a"]))
-    monkeypatch.setattr("llm_shield_proxy.config.settings.OPENAI_API_KEY", "sk-central-openai-key")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-a")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-a"]))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.OPENAI_API_KEY", "sk-central-openai-key")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
 
     httpx_mock.add_response(
         method="POST",
@@ -34,11 +34,11 @@ def test_multi_provider_routing_openai(monkeypatch, httpx_mock):
 
 def test_multi_provider_routing_gemini(monkeypatch, httpx_mock):
     """Tests routing to Gemini OpenAI-compatible upstream endpoint."""
-    monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-b")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-b"]))
-    monkeypatch.setattr("llm_shield_proxy.config.settings.GEMINI_API_KEY", "AIza-central-gemini-key")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-tenant-b")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-tenant-b"]))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.GEMINI_API_KEY", "AIza-central-gemini-key")
     monkeypatch.setattr(
-        "llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"
+        "llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"
     )
 
     httpx_mock.add_response(

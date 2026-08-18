@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from llm_shield_proxy.config import settings
-from llm_shield_proxy.config_schema import CustomRegexConfig
-from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.core.config_schema import CustomRegexConfig
+from llm_shield_proxy.engines.vault import Vault
 
 try:
     import re2

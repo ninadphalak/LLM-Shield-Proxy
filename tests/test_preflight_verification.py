@@ -4,8 +4,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_shield_proxy.config import settings
-from llm_shield_proxy.main import app
+from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.api.main import app
 
 try:
     import psutil

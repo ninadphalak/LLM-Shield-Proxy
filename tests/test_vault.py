@@ -1,4 +1,4 @@
-from llm_shield_proxy.vault import Vault, VaultStore
+from llm_shield_proxy.engines.vault import Vault, VaultStore
 
 
 def test_vault_deterministic_mapping():
