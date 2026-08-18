@@ -134,6 +134,31 @@ class Settings(BaseSettings):
             raise ValueError("SHIELD_WATERMARK_SECRET must be set if ENABLE_WATERMARKING is True.")
         return self
 
+    @model_validator(mode="after")
+    def validate_stateless_crypto_key(self) -> 'Settings':
+        if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_CRYPTO":
+            key_src = self.SHIELD_ENCRYPTION_KEY
+            if not key_src:
+                raise ValueError("SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_CRYPTO.")
+            
+            import base64
+            key_bytes = None
+            try:
+                key_bytes = base64.b64decode(key_src)
+            except Exception:
+                pass
+                
+            if key_bytes is None or len(key_bytes) != 32:
+                try:
+                    key_bytes = bytes.fromhex(key_src)
+                except Exception:
+                    pass
+
+            if key_bytes is None or len(key_bytes) != 32:
+                raise ValueError("SHIELD_ENCRYPTION_KEY must be a valid 256-bit (32 bytes) base64 or hex string.")
+                
+        return self
+
     @property
     def valid_virtual_keys_set(self) -> frozenset[str]:
         """Returns the pre-computed, immutable set of valid virtual keys."""

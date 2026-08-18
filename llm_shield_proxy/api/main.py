@@ -444,7 +444,7 @@ async def _proxy_catch_all_internal(
                 bypass_breaker = str(x_shield_bypass_breaker).lower() in ("true", "1", "yes")
                 if not bypass_breaker:
                     try:
-                        check_circuit_breaker(x_session_id, payload)
+                        await check_circuit_breaker(x_session_id, payload)
                     except CircuitBreakerTrippedException as cbe:
                         return JSONResponse(
                             status_code=429,
@@ -598,6 +598,17 @@ async def _proxy_catch_all_internal(
                 try:
                     res_json = upstream_res.json()
                     rehydrated_res = _rehydrate_json_response(res_json, vault)
+
+                    if watermark_text:
+                        if "choices" in rehydrated_res and isinstance(rehydrated_res["choices"], list) and rehydrated_res["choices"]:
+                            msg = rehydrated_res["choices"][0].get("message", {})
+                            if isinstance(msg, dict) and "content" in msg and isinstance(msg["content"], str):
+                                msg["content"] += watermark_text
+                        elif "content" in rehydrated_res and isinstance(rehydrated_res["content"], list) and rehydrated_res["content"]:
+                            block = rehydrated_res["content"][0]
+                            if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
+                                block["text"] += watermark_text
+
                     return JSONResponse(
                         content=rehydrated_res,
                         status_code=upstream_res.status_code,

@@ -149,6 +149,7 @@ async def rehydrate_sse_stream(
     cached_object = "chat.completion.chunk"
     cached_created = 0
     cached_model = "unknown"
+    is_anthropic_stream = False
 
     try:
         async for chunk in raw_stream:
@@ -167,6 +168,9 @@ async def rehydrate_sse_stream(
                     try:
                         data_obj = json.loads(raw_json)
                         
+                        if isinstance(data_obj, dict) and data_obj.get("type") in ("message_start", "content_block_delta", "content_block_start"):
+                            is_anthropic_stream = True
+
                         if "id" in data_obj and cached_id == "chatcmpl-watermark":
                             cached_id = data_obj.get("id", cached_id)
                             cached_object = data_obj.get("object", cached_object)
@@ -213,14 +217,18 @@ async def rehydrate_sse_stream(
                         yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
                         
                     if watermark_text:
-                        watermark_obj = {
-                            "id": cached_id,
-                            "object": cached_object,
-                            "created": cached_created,
-                            "model": cached_model,
-                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
-                        }
-                        yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                        if is_anthropic_stream:
+                            anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
+                            yield anthropic_chunk.encode("utf-8")
+                        else:
+                            watermark_obj = {
+                                "id": cached_id,
+                                "object": cached_object,
+                                "created": cached_created,
+                                "model": cached_model,
+                                "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                            }
+                            yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
                         watermark_text = "" # prevent double yield
                         
                     yield (line + "\n").encode("utf-8")
@@ -242,14 +250,18 @@ async def rehydrate_sse_stream(
                 yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
 
             if watermark_text:
-                watermark_obj = {
-                    "id": cached_id,
-                    "object": cached_object,
-                    "created": cached_created,
-                    "model": cached_model,
-                    "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                if is_anthropic_stream:
+                    anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
+                    yield anthropic_chunk.encode("utf-8")
+                else:
+                    watermark_obj = {
+                        "id": cached_id,
+                        "object": cached_object,
+                        "created": cached_created,
+                        "model": cached_model,
+                        "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                    }
+                    yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
                 watermark_text = ""
 
             if line_accumulator:

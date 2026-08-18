@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 from cachetools import TTLCache
 
+from llm_shield_proxy.engines.vault import vault_store, RedisVaultStore
+
 from llm_shield_proxy.core.config import settings
 
 
@@ -77,7 +79,7 @@ def extract_tool_call_signature_hash(payload: dict) -> str:
     return hashlib.sha256(combined_signature.encode("utf-8")).hexdigest()[:16]
 
 
-def check_circuit_breaker(session_id: str, payload: dict) -> None:
+async def check_circuit_breaker(session_id: str, payload: dict) -> None:
     """
     Evaluates the payload against the session history to detect loops.
     Raises CircuitBreakerTrippedException if tripped.
@@ -85,10 +87,29 @@ def check_circuit_breaker(session_id: str, payload: dict) -> None:
     if not session_id:
         return
 
-    metrics = circuit_breaker_cache.get(session_id)
-    if not metrics:
-        metrics = SessionMetrics()
-        circuit_breaker_cache[session_id] = metrics
+    use_redis = isinstance(vault_store, RedisVaultStore)
+    redis_key = f"circuit_breaker:{session_id}"
+
+    if use_redis:
+        data = await vault_store.async_client.get(redis_key)
+        if data:
+            try:
+                metrics_dict = json.loads(data)
+                metrics = SessionMetrics(
+                    entropy_history=collections.deque(metrics_dict.get("entropy_history", []), maxlen=5),
+                    tool_call_hashes=collections.deque(metrics_dict.get("tool_call_hashes", []), maxlen=5),
+                    consecutive_duplicate_count=metrics_dict.get("consecutive_duplicate_count", 0)
+                )
+                setattr(metrics, "_last_bounded_payload", metrics_dict.get("_last_bounded_payload", ""))
+            except (json.JSONDecodeError, TypeError):
+                metrics = SessionMetrics()
+        else:
+            metrics = SessionMetrics()
+    else:
+        metrics = circuit_breaker_cache.get(session_id)
+        if not metrics:
+            metrics = SessionMetrics()
+            circuit_breaker_cache[session_id] = metrics
 
     # Serialize payload to string, bounded to 4096 chars to prevent O(N^2) CPU spikes
     try:
@@ -154,6 +175,17 @@ def check_circuit_breaker(session_id: str, payload: dict) -> None:
     if current_tool_hash:
         metrics.tool_call_hashes.append(current_tool_hash)
     setattr(metrics, "_last_bounded_payload", bounded_payload_str)
+
+    if use_redis:
+        metrics_dict = {
+            "entropy_history": list(metrics.entropy_history),
+            "tool_call_hashes": list(metrics.tool_call_hashes),
+            "consecutive_duplicate_count": metrics.consecutive_duplicate_count,
+            "_last_bounded_payload": getattr(metrics, "_last_bounded_payload", "")
+        }
+        async with vault_store.async_client.pipeline(transaction=False) as pipe:
+            pipe.setex(redis_key, 600, json.dumps(metrics_dict))
+            await pipe.execute()
 
     if metrics.consecutive_duplicate_count >= settings.AGENT_BREAKER_THRESHOLD:
         # Reset count so they can try again after being tripped once? 
