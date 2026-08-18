@@ -85,3 +85,14 @@ def test_anthropic_adapter_response_transform():
     assert openai_res["usage"]["prompt_tokens"] == 10
     assert openai_res["usage"]["completion_tokens"] == 20
     assert openai_res["usage"]["total_tokens"] == 30
+
+def test_anthropic_adapter_request_transform_stream():
+    openai_payload = {
+        "model": "gpt-4",
+        "stream": True,
+        "messages": [
+            {"role": "user", "content": "Hello"}
+        ]
+    }
+    anthropic_payload = AnthropicAdapter.transform_request(openai_payload)
+    assert anthropic_payload.get("stream") is True

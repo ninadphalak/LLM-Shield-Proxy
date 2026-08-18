@@ -44,7 +44,7 @@ async def test_vault_token_auth():
                 "UPSTREAM_API_KEY": "vault-key-123"
             }
         }
-    })
+    }, request=httpx.Request("GET", "http://localhost:8200"))
     
     with patch("httpx.AsyncClient.get", return_value=mock_response) as mock_get:
         await provider.fetch_secrets()
@@ -71,7 +71,7 @@ async def test_vault_approle_auth():
         "auth": {
             "client_token": "approle-token"
         }
-    })
+    }, request=httpx.Request("POST", "http://localhost:8200"))
     
     mock_get_response = httpx.Response(200, json={
         "data": {
@@ -79,7 +79,7 @@ async def test_vault_approle_auth():
                 "UPSTREAM_API_KEY": "approle-key-123"
             }
         }
-    })
+    }, request=httpx.Request("GET", "http://localhost:8200"))
     
     with patch("httpx.AsyncClient.post", return_value=mock_post_response) as mock_post, \
          patch("httpx.AsyncClient.get", return_value=mock_get_response) as mock_get:
@@ -127,7 +127,10 @@ async def test_http_client_mtls_config():
     mock_request = MagicMock(spec=Request)
     mock_request.app.state.http_client = None
     
-    client = get_http_client(mock_request)
+    with patch("ssl.create_default_context") as mock_ssl:
+        client = get_http_client(mock_request)
+        mock_ssl.assert_called_once()
+        
     # verify and cert are internal to httpx, we can check if it has the properties setup or just ensure it didn't crash
     assert client is not None
     await client.aclose()

@@ -219,7 +219,7 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
         client = httpx.AsyncClient(
             timeout=timeout,
             limits=limits,
-            http2=True,
+            http2=False,
             verify=verify,
             cert=cert,
         )
@@ -589,6 +589,7 @@ async def _proxy_catch_all_internal(
                 loop = asyncio.get_running_loop()
                 redacted_payload = await loop.run_in_executor(None, pii_engine.redact_payload, payload, vault, active_profile)
                 
+                # target_provider is refined with payload
                 target_provider = resolve_provider(dict(request.headers), redacted_payload)
                 if target_provider == "anthropic":
                     anthropic_payload = AnthropicAdapter.transform_request(redacted_payload)
@@ -693,6 +694,8 @@ async def _proxy_catch_all_internal(
                     )
                     upstream_res.raise_for_status()
                 except (httpx.RequestError, httpx.HTTPStatusError) as err:
+                    with open("exception_log.txt", "w") as f:
+                        f.write(repr(err))
                     status_code = err.response.status_code if isinstance(err, httpx.HTTPStatusError) else 503
                     AuditLogger.log_redaction_event(
                         x_session_id,

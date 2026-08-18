@@ -142,7 +142,8 @@ async def rehydrate_sse_stream(
         Rehydrated, UTF-8 encoded Server-Sent Events bytes.
     """
     from llm_shield_proxy.security.attestation import MerkleAttestationStream
-    attestation = MerkleAttestationStream(session_id=vault.session_id)
+    session_id = getattr(vault, "session_id", "stateless-session")
+    attestation = MerkleAttestationStream(session_id=session_id)
 
     async def _inner_stream() -> AsyncGenerator[bytes, None]:
         nonlocal watermark_text
@@ -169,110 +170,110 @@ async def rehydrate_sse_stream(
                     chunk_text = decoder.decode(chunk, final=False)
                     line_accumulator += chunk_text
 
-                if len(line_accumulator) > max_line_length:
-                    raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
+                    if len(line_accumulator) > max_line_length:
+                        raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
 
-                while "\n" in line_accumulator:
-                    line, line_accumulator = line_accumulator.split("\n", 1)
-                    stripped = line.strip()
+                    while "\n" in line_accumulator:
+                        line, line_accumulator = line_accumulator.split("\n", 1)
+                        stripped = line.strip()
 
-                    if stripped.startswith("event: "):
-                        continue
+                        if stripped.startswith("event: "):
+                            yield (line + "\n").encode("utf-8")
+                            continue
                     
-                    if stripped.startswith("data: ") and stripped != "data: [DONE]":
-                        raw_json = stripped[6:]
-                        try:
-                            data_obj = json.loads(raw_json)
+                        if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                            try:
+                                json_str = stripped[6:]
+                                data_obj = json.loads(json_str)
+
+                                if isinstance(data_obj, dict) and data_obj.get("type") in ("message_start", "content_block_delta", "content_block_start"):
+                                    is_anthropic_stream = True
+
+                                if "id" in data_obj and cached_id == "chatcmpl-watermark":
+                                    cached_id = data_obj.get("id", cached_id)
+                                    cached_object = data_obj.get("object", cached_object)
+                                    cached_created = data_obj.get("created", cached_created)
+                                    cached_model = data_obj.get("model", cached_model)
+
+                                # 1. OpenAI Chat Completion Delta
+                                choices = data_obj.get("choices", [])
+                                if choices and isinstance(choices, list):
+                                    delta = choices[0].get("delta", {})
+                                    if "content" in delta and isinstance(delta["content"], str):
+                                        raw_content = delta["content"]
+                                        rehydrated_content = buffer.process_delta_text(raw_content)
+                                        delta["content"] = rehydrated_content
+                                        data_obj["choices"][0]["delta"] = delta
+                                        line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                                # 2. Anthropic Content Block Delta
+                                elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
+                                    delta = data_obj["delta"]
+                                    if "text" in delta and isinstance(delta["text"], str):
+                                        raw_content = delta["text"]
+                                        rehydrated_content = buffer.process_delta_text(raw_content)
+                                        openai_chunk = {
+                                            "id": cached_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": cached_created,
+                                            "model": cached_model,
+                                            "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                        }
+                                        line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                    else:
+                                        pass # Skip non-text deltas
+                                # 3. Anthropic Content Block Start / Generic text delta
+                                elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
+                                    cb = data_obj["content_block"]
+                                    if "text" in cb and isinstance(cb["text"], str):
+                                        raw_content = cb["text"]
+                                        rehydrated_content = buffer.process_delta_text(raw_content)
+                                        openai_chunk = {
+                                            "id": cached_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": cached_created,
+                                            "model": cached_model,
+                                            "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                        }
+                                        line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                    else:
+                                        pass # Skip non-text start blocks
+                                elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
+                                    pass # We let [DONE] be handled at stream end
+                            except (json.JSONDecodeError, TypeError, KeyError):
+                                pass
+
+                            yield (line + "\n").encode("utf-8")
+                        elif stripped == "data: [DONE]":
+                            # Flush the buffer completely BEFORE yielding the [DONE] signal
+                            remaining = buffer.process_delta_text("", is_final=True)
+                            if remaining:
+                                flush_obj = {"choices": [{"delta": {"content": remaining}}]}
+                                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
                             
-                            if isinstance(data_obj, dict) and data_obj.get("type") in ("message_start", "content_block_delta", "content_block_start"):
-                                is_anthropic_stream = True
-
-                            if "id" in data_obj and cached_id == "chatcmpl-watermark":
-                                cached_id = data_obj.get("id", cached_id)
-                                cached_object = data_obj.get("object", cached_object)
-                                cached_created = data_obj.get("created", cached_created)
-                                cached_model = data_obj.get("model", cached_model)
-
-                            # 1. OpenAI Chat Completion Delta
-                            choices = data_obj.get("choices", [])
-                            if choices and isinstance(choices, list):
-                                delta = choices[0].get("delta", {})
-                                if "content" in delta and isinstance(delta["content"], str):
-                                    raw_content = delta["content"]
-                                    rehydrated_content = buffer.process_delta_text(raw_content)
-                                    delta["content"] = rehydrated_content
-                                    data_obj["choices"][0]["delta"] = delta
-                                    line = f"data: {json.dumps(data_obj).decode('utf-8')}"
-                            # 2. Anthropic Content Block Delta
-                            elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
-                                delta = data_obj["delta"]
-                                if "text" in delta and isinstance(delta["text"], str):
-                                    raw_content = delta["text"]
-                                    rehydrated_content = buffer.process_delta_text(raw_content)
-                                    openai_chunk = {
+                            if watermark_text:
+                                if is_anthropic_stream:
+                                    anthropic_chunk = {
                                         "id": cached_id,
                                         "object": "chat.completion.chunk",
                                         "created": cached_created,
                                         "model": cached_model,
-                                        "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                        "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
                                     }
-                                    line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                    yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
                                 else:
-                                    continue # Skip non-text deltas
-                            # 3. Anthropic Content Block Start / Generic text delta
-                            elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
-                                cb = data_obj["content_block"]
-                                if "text" in cb and isinstance(cb["text"], str):
-                                    raw_content = cb["text"]
-                                    rehydrated_content = buffer.process_delta_text(raw_content)
-                                    openai_chunk = {
+                                    watermark_obj = {
                                         "id": cached_id,
-                                        "object": "chat.completion.chunk",
+                                        "object": cached_object,
                                         "created": cached_created,
                                         "model": cached_model,
-                                        "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                        "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
                                     }
-                                    line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
-                                else:
-                                    continue # Skip non-text start blocks
-                            elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
-                                continue # We let [DONE] be handled at stream end
-                        except (json.JSONDecodeError, TypeError, KeyError):
-                            pass
-
-                        yield (line + "\n").encode("utf-8")
-                    elif stripped == "data: [DONE]":
-                        # Flush the buffer completely BEFORE yielding the [DONE] signal
-                        remaining = buffer.process_delta_text("", is_final=True)
-                        if remaining:
-                            flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                            yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                                    yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                                watermark_text = "" # prevent double yield
                             
-                        if watermark_text:
-                            if is_anthropic_stream:
-                                anthropic_chunk = {
-                                    "id": cached_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": cached_created,
-                                    "model": cached_model,
-                                    "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
-                                }
-                                yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
-                            else:
-                                watermark_obj = {
-                                    "id": cached_id,
-                                    "object": cached_object,
-                                    "created": cached_created,
-                                    "model": cached_model,
-                                    "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
-                                }
-                                yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
-                            watermark_text = "" # prevent double yield
-                            
-                        yield (line + "\n").encode("utf-8")
-                        yield (line + "\n").encode("utf-8")
-                    else:
-                        yield (line + "\n").encode("utf-8")
+                            yield (line + "\n").encode("utf-8")
+                        else:
+                            yield (line + "\n").encode("utf-8")
 
                 except Exception as e:
                     import logging
