@@ -45,6 +45,8 @@ from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.security.circuit_breaker import check_circuit_breaker, CircuitBreakerTrippedException
+from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -586,7 +588,17 @@ async def _proxy_catch_all_internal(
                 active_profile = pii_engine.get_profile(virtual_key_id)
                 loop = asyncio.get_running_loop()
                 redacted_payload = await loop.run_in_executor(None, pii_engine.redact_payload, payload, vault, active_profile)
-                redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
+                
+                target_provider = resolve_provider(dict(request.headers), redacted_payload)
+                if target_provider == "anthropic":
+                    anthropic_payload = AnthropicAdapter.transform_request(redacted_payload)
+                    redacted_bytes = json.dumps(anthropic_payload).encode("utf-8")
+                    target_url = "https://api.anthropic.com/v1/messages"
+                    headers["anthropic-version"] = settings.ANTHROPIC_API_VERSION
+                    headers["x-api-key"] = headers.get("authorization", "").replace("Bearer ", "").strip()
+                    headers.pop("authorization", None)
+                else:
+                    redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
             except ValueError as ve:
                 if str(ve) == "Maximum payload nesting depth exceeded":
                     return JSONResponse(
@@ -718,7 +730,12 @@ async def _proxy_catch_all_internal(
                 try:
                     res_json = upstream_res.json()
                     loop = asyncio.get_running_loop()
-                    rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                    
+                    if target_provider == "anthropic":
+                        rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                        rehydrated_res = AnthropicAdapter.transform_response(rehydrated_res)
+                    else:
+                        rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
 
                     if watermark_text:
                         if "choices" in rehydrated_res and isinstance(rehydrated_res["choices"], list) and rehydrated_res["choices"]:
