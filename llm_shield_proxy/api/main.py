@@ -68,6 +68,9 @@ class ConfigHandler(FileSystemEventHandler):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manages application lifecycle, shared HTTP connection pools, and background observers."""
+    import os
+    from llm_shield_proxy.api.grpc_service import serve_ext_proc
+    
     AuditLogger.log_startup_event()
 
     limits = httpx.Limits(
@@ -87,12 +90,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     observer = Observer()
     observer.schedule(ConfigHandler(), path=".", recursive=False)
     observer.start()
+    
+    # Start gRPC ext_proc server in background
+    sock_path = "/var/run/llm-shield/ext_proc.sock"
+    os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+        
+    grpc_server = await serve_ext_proc(sock_path)
+    os.chmod(sock_path, 0o666)  # Allow Envoy proxy to write to the socket
 
     yield
 
     observer.stop()
     observer.join()
     await app.state.http_client.aclose()
+    
+    # Cleanly close gRPC server
+    grpc_server.close()
+    await grpc_server.wait_closed()
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
 
 
 app = FastAPI(
