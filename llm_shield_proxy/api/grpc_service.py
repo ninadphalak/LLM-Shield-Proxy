@@ -126,8 +126,13 @@ class ExtProcService(ExternalProcessorBase):
 
 
 async def serve_ext_proc(sock_path: str = "/var/run/llm-shield/ext_proc.sock") -> grpclib.server.Server:
-    """Instantiates and starts the grpclib ext_proc server over UDS."""
+    """Instantiates and starts the grpclib ext_proc server over UDS or TCP."""
     server = grpclib.server.Server([ExtProcService()])
-    await server.start(path=sock_path)
-    logger.info(f"gRPC ext_proc server listening on {sock_path}")
+    import os
+    if os.name == "nt":
+        await server.start(host="127.0.0.1", port=50051)
+        logger.info("gRPC ext_proc server listening on 127.0.0.1:50051 (Windows)")
+    else:
+        await server.start(path=sock_path)
+        logger.info(f"gRPC ext_proc server listening on {sock_path}")
     return server
