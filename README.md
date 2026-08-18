@@ -302,14 +302,14 @@ Based on extreme stress testing, the Proxy scales highly efficiently across mult
 *   **High-Tier (32 Cores)**: ~57,600 Concurrent Users. *(Recommended: AWS c6i.8xlarge, GCP c2-standard-32, or Azure Standard_F32s_v2)*
 *   **Memory (RAM) Footprint:** The proxy is strictly **CPU-bound**. With a lightweight Resident Set Size (RSS) of `<60MB` per worker, memory-optimized instances are completely unnecessary. Standard compute-optimized instances provide vastly more RAM than the proxy will ever consume.
 
-> [!WARNING]
-> **Windows Bottleneck (`SO_REUSEPORT`):** While the proxy runs flawlessly on Windows, extreme high-concurrency scaling (multi-worker) is heavily bottlenecked by the Windows TCP stack. Windows lacks native support for the `SO_REUSEPORT` socket option. Under massive load, the OS will fail to route connections efficiently to multiple Uvicorn workers, resulting in `ConnectionRefusedError(10061)` dropped packets. Always deploy on Linux for production scale.
+> [!NOTE]
+> **Windows Deployment Note (`SO_REUSEPORT`):** While the proxy runs efficiently on Windows, scaling to extreme high-concurrency with multiple workers is constrained by the Windows TCP stack. Windows does not natively support the `SO_REUSEPORT` socket option. Under massive load, this can result in less efficient connection routing across Uvicorn workers. For maximum enterprise production scale, Linux deployments are generally recommended.
 
 ---
 
 ## ⚡ Performance & Latency Benchmarks
 
-LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Hard numbers from my official automated benchmark suite (`python benchmark.py`):
+LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Numbers from the automated benchmark suite (`python benchmark.py`):
 
 ```text
 =================================================================
@@ -390,9 +390,9 @@ Building a microsecond-latency reverse proxy requires an **extreme low-latency a
 
 ---
 
-## ⚠️ Known Limitations
+## 📝 Known Limitations
 
-Transparency is critical for security tooling. Please be aware of the following current limitations:
+Please be aware of the following current limitations:
 - **Text Only:** The proxy does not currently scan or redact text embedded inside base64 image payloads (e.g., OpenAI Vision models).
 - **Supported Languages:** Multilingual support requires providing your own ONNX model via BYOM (`ONNX_MODEL_PATH`). By default, the proxy falls back to an English-optimized NLP model.
 - **Non-Standard Streaming:** Designed for standard Server-Sent Events (SSE). Custom or proprietary streaming protocols may bypass the sliding-window buffer.
