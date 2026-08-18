@@ -171,3 +171,68 @@ def test_memory_rss_footprint(httpx_mock):
     assert mem_after - mem_before < 26214400, (
         f"Active memory exceeded 25MB after stream: {mem_after - mem_before} bytes"
     )
+
+
+def test_client_lifecycle_persistence(httpx_mock):
+    """Ensure httpx.AsyncClient is created once and reused across requests in production."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.openai.com/v1/chat/completions",
+        json={"choices": [{"message": {"content": "ok"}}]},
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.openai.com/v1/chat/completions",
+        json={"choices": [{"message": {"content": "ok"}}]},
+    )
+    with TestClient(app) as client:
+        client.post(
+            "/v1/chat/completions",
+            headers={"authorization": "Bearer sk-proxy-team-a"},
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "ping"}]},
+        )
+        first_client_id = id(app.state.http_client)
+        
+        client.post(
+            "/v1/chat/completions",
+            headers={"authorization": "Bearer sk-proxy-team-a"},
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "pong"}]},
+        )
+        second_client_id = id(app.state.http_client)
+        
+        assert first_client_id == second_client_id, "http_client should persist across requests"
+
+
+def test_anthropic_adapter_large_payload_memory():
+    """Verify AnthropicAdapter deepcopy and transformation stays within memory limits."""
+    from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
+    import gc
+    
+    if psutil is None:
+        pytest.skip("psutil not available")
+
+    process = psutil.Process(os.getpid())
+    gc.collect()
+    mem_before = process.memory_info().rss
+    
+    # 100k token equivalent payload
+    large_text = "word " * 100000 
+    payload = {
+        "model": "claude-3-sonnet-20240229",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": large_text}
+        ]
+    }
+    
+    adapter = AnthropicAdapter()
+    transformed = adapter.transform_request(payload)
+    
+    gc.collect()
+    mem_after = process.memory_info().rss
+    
+    assert transformed["messages"][0]["content"] == large_text
+    # 100k words is ~500KB. Deepcopy should not blow up memory.
+    assert mem_after - mem_before < 10 * 1024 * 1024, (
+        f"Deepcopy memory overhead exceeded bounds: {mem_after - mem_before} bytes"
+    )
