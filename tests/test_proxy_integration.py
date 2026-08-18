@@ -4,14 +4,14 @@ import json
 
 from fastapi.testclient import TestClient
 
-from llm_shield_proxy.main import app
+from llm_shield_proxy.api.main import app
 
 client = TestClient(app)
 
 
 def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.ENABLE_SYNTHETIC_SWAPPING", False)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.ENABLE_SYNTHETIC_SWAPPING", False)
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",
@@ -39,9 +39,9 @@ def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
 
 
 def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset())
-    monkeypatch.setattr("llm_shield_proxy.config.settings.ENABLE_SYNTHETIC_SWAPPING", False)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.valid_virtual_keys_set", frozenset())
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.ENABLE_SYNTHETIC_SWAPPING", False)
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",
@@ -99,8 +99,8 @@ def test_cors_preflight_options():
 
 
 def test_inbound_auth_validation(monkeypatch):
-    monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-finance")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-finance"}))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-finance")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-finance"}))
 
     # Missing header
     res_missing = client.post("/v1/chat/completions", json={"model": "gpt-4", "messages": []})
@@ -114,10 +114,10 @@ def test_inbound_auth_validation(monkeypatch):
 
 
 def test_header_swapping_and_byok(monkeypatch, httpx_mock):
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-dev")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-dev"}))
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_API_KEY", "central-gemini-key")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-dev")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.valid_virtual_keys_set", frozenset({"sk-proxy-dev"}))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_API_KEY", "central-gemini-key")
 
     httpx_mock.add_response(
         method="POST",
@@ -152,10 +152,10 @@ def test_header_swapping_and_byok(monkeypatch, httpx_mock):
 
 
 def test_missing_upstream_key_returns_clean_error(monkeypatch):
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
-    monkeypatch.setattr("llm_shield_proxy.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
-    monkeypatch.setattr("llm_shield_proxy.config.settings.OPENAI_API_KEY", None)
-    monkeypatch.setattr("llm_shield_proxy.config.settings.UPSTREAM_API_KEY", None)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.OPENAI_API_KEY", None)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_API_KEY", None)
 
     res = client.post(
         "/v1/chat/completions",

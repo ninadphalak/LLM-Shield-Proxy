@@ -7,9 +7,9 @@ import time
 
 import yaml
 
-from llm_shield_proxy.config import settings
-from llm_shield_proxy.pii_engine import PIIEngine, calculate_shannon_entropy
-from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.engines.pii_engine import PIIEngine, calculate_shannon_entropy
+from llm_shield_proxy.engines.vault import Vault
 
 
 def test_shannon_entropy_calculation():

@@ -32,16 +32,16 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from llm_shield_proxy.audit import AuditLogger
-from llm_shield_proxy.config import settings
-from llm_shield_proxy.metrics import (
+from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.observability.metrics import (
     llm_shield_latency_seconds_bucket,
     llm_shield_requests_total,
     llm_shield_sse_active_streams,
 )
-from llm_shield_proxy.pii_engine import pii_engine
-from llm_shield_proxy.streaming import rehydrate_sse_stream
-from llm_shield_proxy.vault import RedisVaultStore, vault_store
+from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
 
 APP_VERSION = "1.0.20"
 
@@ -382,8 +382,8 @@ async def _proxy_catch_all_internal(
     request.state.virtual_key_id = virtual_key_id
 
     # Vault resolution based on masking mode
-    from llm_shield_proxy.masking import MaskingMode, resolve_masking_mode
-    from llm_shield_proxy.crypto_vault import StatelessCryptoVault
+    from llm_shield_proxy.engines.masking import MaskingMode, resolve_masking_mode
+    from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
     
     masking_mode = resolve_masking_mode(x_shield_masking_mode)
     

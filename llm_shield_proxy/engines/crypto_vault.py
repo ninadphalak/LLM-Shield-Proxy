@@ -13,7 +13,7 @@ from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from llm_shield_proxy.config import settings
+from llm_shield_proxy.core.config import settings
 
 logger = logging.getLogger(__name__)
 

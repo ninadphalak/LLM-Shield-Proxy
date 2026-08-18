@@ -11,7 +11,7 @@ if sys.platform == 'win32':
 
 import uvicorn
 
-from llm_shield_proxy.config import settings
+from llm_shield_proxy.core.config import settings
 
 
 def main() -> None:
@@ -54,7 +54,7 @@ def main() -> None:
     args = parser.parse_args()
 
     uvicorn.run(
-        "llm_shield_proxy.main:app",
+        "llm_shield_proxy.api.main:app",
         host=args.host,
         port=args.port,
         workers=args.workers,

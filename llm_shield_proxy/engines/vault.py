@@ -20,7 +20,7 @@ from typing import Callable, Dict, Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from faker import Faker
 
-from llm_shield_proxy.config import settings
+from llm_shield_proxy.core.config import settings
 
 logger = logging.getLogger(__name__)
 

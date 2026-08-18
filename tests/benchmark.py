@@ -20,8 +20,8 @@ import psutil
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from llm_shield_proxy.pii_engine import calculate_shannon_entropy, pii_engine
-from llm_shield_proxy.vault import Vault
+from llm_shield_proxy.engines.pii_engine import calculate_shannon_entropy, pii_engine
+from llm_shield_proxy.engines.vault import Vault
 
 
 def generate_adversarial_corpus(word_count: int = 10000, secret_count: int = 50) -> str:

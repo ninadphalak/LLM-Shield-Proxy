@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-from llm_shield_proxy.crypto_vault import StatelessCryptoVault, decrypt_from_token, encrypt_to_token
-from llm_shield_proxy.masking import MaskingMode
-from llm_shield_proxy.streaming import SSERehydrationBuffer
+from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault, decrypt_from_token, encrypt_to_token
+from llm_shield_proxy.engines.masking import MaskingMode
+from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer
 
 @pytest.mark.asyncio
 async def test_stateless_crypto_encryption_decryption():
@@ -85,11 +85,11 @@ async def test_split_token_rehydration_buffer_with_surrounding_text():
 
 @pytest.mark.asyncio
 async def test_zero_redis_calls_in_stateless_crypto_mode():
-    from llm_shield_proxy.main import app
-    from llm_shield_proxy.vault import RedisVaultStore, VaultStore
+    from llm_shield_proxy.api.main import app
+    from llm_shield_proxy.engines.vault import RedisVaultStore, VaultStore
     
     # Mock vault_store.get_vault to raise an error if it's called
-    with patch('llm_shield_proxy.main.vault_store.get_vault', side_effect=RuntimeError("Redis should not be called")):
+    with patch('llm_shield_proxy.api.main.vault_store.get_vault', side_effect=RuntimeError("Redis should not be called")):
         # Mock httpx.AsyncClient.request to return a dummy response
         mock_response = MagicMock()
         mock_response.status_code = 200
