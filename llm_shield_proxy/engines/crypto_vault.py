@@ -45,12 +45,7 @@ def get_crypto_dek() -> bytes:
         except Exception:
             pass
             
-        logger.warning("SHIELD_ENCRYPTION_KEY provided but is not 32 bytes valid base64/hex.")
-
-    # Generate a random process-scoped key if none provided or invalid
-    logger.warning("Using ephemeral random AES-GCM key for STATELESS_CRYPTO.")
-    _DEK = AESGCM.generate_key(bit_length=256)
-    return _DEK
+    raise ValueError("Valid 256-bit SHIELD_ENCRYPTION_KEY not found or invalid.")
 
 def get_aesgcm() -> AESGCM:
     """Returns a cached AESGCM instance."""
