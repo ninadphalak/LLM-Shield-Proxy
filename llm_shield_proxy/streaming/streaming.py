@@ -176,6 +176,9 @@ async def rehydrate_sse_stream(
                     line, line_accumulator = line_accumulator.split("\n", 1)
                     stripped = line.strip()
 
+                    if stripped.startswith("event: "):
+                        continue
+                    
                     if stripped.startswith("data: ") and stripped != "data: [DONE]":
                         raw_json = stripped[6:]
                         try:
@@ -206,18 +209,34 @@ async def rehydrate_sse_stream(
                                 if "text" in delta and isinstance(delta["text"], str):
                                     raw_content = delta["text"]
                                     rehydrated_content = buffer.process_delta_text(raw_content)
-                                    delta["text"] = rehydrated_content
-                                    data_obj["delta"] = delta
-                                    line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                                    openai_chunk = {
+                                        "id": cached_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": cached_created,
+                                        "model": cached_model,
+                                        "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                    }
+                                    line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                else:
+                                    continue # Skip non-text deltas
                             # 3. Anthropic Content Block Start / Generic text delta
                             elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
                                 cb = data_obj["content_block"]
                                 if "text" in cb and isinstance(cb["text"], str):
                                     raw_content = cb["text"]
                                     rehydrated_content = buffer.process_delta_text(raw_content)
-                                    cb["text"] = rehydrated_content
-                                    data_obj["content_block"] = cb
-                                    line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                                    openai_chunk = {
+                                        "id": cached_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": cached_created,
+                                        "model": cached_model,
+                                        "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                    }
+                                    line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                else:
+                                    continue # Skip non-text start blocks
+                            elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
+                                continue # We let [DONE] be handled at stream end
                         except (json.JSONDecodeError, TypeError, KeyError):
                             pass
 
@@ -231,8 +250,14 @@ async def rehydrate_sse_stream(
                             
                         if watermark_text:
                             if is_anthropic_stream:
-                                anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
-                                yield anthropic_chunk.encode("utf-8")
+                                anthropic_chunk = {
+                                    "id": cached_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": cached_created,
+                                    "model": cached_model,
+                                    "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                                }
+                                yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
                             else:
                                 watermark_obj = {
                                     "id": cached_id,
@@ -278,8 +303,14 @@ async def rehydrate_sse_stream(
 
                 if watermark_text:
                     if is_anthropic_stream:
-                        anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
-                        yield anthropic_chunk.encode("utf-8")
+                        anthropic_chunk = {
+                            "id": cached_id,
+                            "object": "chat.completion.chunk",
+                            "created": cached_created,
+                            "model": cached_model,
+                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                        }
+                        yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
                     else:
                         watermark_obj = {
                             "id": cached_id,

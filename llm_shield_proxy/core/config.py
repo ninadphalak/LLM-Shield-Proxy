@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", description="Standard logging level")
 
     # Upstream Provider Configuration
+    DEFAULT_UPSTREAM_PROVIDER: Literal["openai", "azure", "anthropic", "bedrock"] = Field(
+        default="openai", description="Default upstream provider type"
+    )
+    ANTHROPIC_API_VERSION: str = Field(default="2023-06-01", description="Anthropic API version header")
+    AWS_REGION: str = Field(default="us-east-1", description="AWS Region for Bedrock")
     UPSTREAM_BASE_URL: str = Field(
         default="https://api.openai.com", description="Default upstream LLM provider base URL"
     )
