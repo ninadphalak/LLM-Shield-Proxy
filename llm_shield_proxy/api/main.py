@@ -45,8 +45,18 @@ from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.security.circuit_breaker import check_circuit_breaker, CircuitBreakerTrippedException
+import logging
+
+logger = logging.getLogger(__name__)
 
 APP_VERSION = "1.0.20"
+
+class AppState:
+    is_draining: bool = False
+    active_requests: int = 0
+    shutdown_event = asyncio.Event()
+
+app_state = AppState()
 
 
 @lru_cache(maxsize=1024)
@@ -110,6 +120,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    app_state.is_draining = True
+    if app_state.active_requests > 0:
+        try:
+            await asyncio.wait_for(app_state.shutdown_event.wait(), timeout=settings.DRAIN_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.error("Draining timeout reached. Forcefully shutting down.")
+
     observer.stop()
     observer.join()
     await app.state.http_client.aclose()
@@ -132,15 +149,24 @@ app = FastAPI(
 @app.middleware("http")
 async def security_and_tracing_middleware(request: Request, call_next: Any) -> Response:
     """Attaches correlation request IDs and enterprise HTTP security headers."""
-    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-    request.state.request_id = request_id
+    if app_state.is_draining:
+        return JSONResponse(status_code=503, content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}})
 
-    response: Response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    return response
+    app_state.active_requests += 1
+    try:
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request.state.request_id = request_id
+
+        response: Response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+    finally:
+        app_state.active_requests -= 1
+        if app_state.is_draining and app_state.active_requests == 0:
+            app_state.shutdown_event.set()
 
 
 @app.exception_handler(Exception)
@@ -411,10 +437,23 @@ async def _proxy_catch_all_internal(
                     }
                 },
             )
+    elif settings.OVERRIDE_CLIENT_AUTH and settings.UPSTREAM_API_KEY:
+        headers["authorization"] = f"Bearer {settings.UPSTREAM_API_KEY}"
+        headers.pop("x-api-key", None)
+        headers.pop("x-goog-api-key", None)
+        headers.pop("api-key", None)
 
     headers.pop("x-virtual-key-id", None)
     request_id = getattr(request.state, "request_id", None)
     request.state.virtual_key_id = virtual_key_id
+
+    from llm_shield_proxy.security.rate_limit import rate_limiter
+    if not await rate_limiter.acquire(virtual_key_id):
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}},
+            headers={"Retry-After": "1"}
+        )
 
     # Vault resolution based on masking mode
     from llm_shield_proxy.engines.masking import MaskingMode, resolve_masking_mode
@@ -522,6 +561,16 @@ async def _proxy_catch_all_internal(
                         },
                     )
                 raise ve
+            except Exception as e:
+                if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
+                    logger.error(f"PII Engine failure (FAIL_CLOSED): {e}")
+                    return JSONResponse(
+                        status_code=503,
+                        content={"error": {"message": "DLP Inspection Failure: Request blocked by security policy", "type": "dlp_failure"}},
+                    )
+                else:
+                    logger.error(f"PII Engine failure (FAIL_OPEN): {e}")
+                    redacted_bytes = body_bytes
 
             if is_streaming:
                 req = http_client.build_request(
@@ -680,6 +729,20 @@ async def _proxy_catch_all_internal(
         headers=headers,
         content=body_bytes,
     )
+    
+    if upstream_res.status_code >= 400:
+        # Prevent upstream auth key leakage
+        return JSONResponse(
+            status_code=upstream_res.status_code,
+            content={
+                "error": {
+                    "message": "Failed to communicate with upstream provider.",
+                    "type": "upstream_error",
+                    "code": upstream_res.status_code,
+                }
+            },
+        )
+        
     return Response(
         content=upstream_res.content,
         status_code=upstream_res.status_code,
