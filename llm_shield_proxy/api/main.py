@@ -39,6 +39,7 @@ from llm_shield_proxy.observability.metrics import (
     llm_shield_requests_total,
     llm_shield_sse_active_streams,
 )
+from llm_shield_proxy.observability.tracing import tracer, propagator
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
@@ -93,12 +94,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Start gRPC ext_proc server in background
     sock_path = "/var/run/llm-shield/ext_proc.sock"
-    os.makedirs(os.path.dirname(sock_path), exist_ok=True)
+    sock_dir = os.path.dirname(sock_path)
+    # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
+    os.makedirs(sock_dir, exist_ok=True)
+    os.chmod(sock_dir, 0o770)
+    
     if os.path.exists(sock_path):
         os.unlink(sock_path)
         
     grpc_server = await serve_ext_proc(sock_path)
-    os.chmod(sock_path, 0o666)  # Allow Envoy proxy to write to the socket
+    # SECURITY: Prevent local privilege escalation by restricting socket access
+    # to the proxy group (0o660) instead of world-writable (0o666).
+    # Envoy must be deployed with a shared GID (e.g., fsGroup).
+    os.chmod(sock_path, 0o660)
 
     yield
 
@@ -279,15 +287,17 @@ async def proxy_catch_all(
 ) -> Response:
     """Main reverse-proxy catch-all endpoint handling redaction and rehydration."""
     start_time = time.perf_counter()
-    try:
-        response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode, x_shield_bypass_breaker)
-        llm_shield_requests_total.labels(status_code=response.status_code).inc()
-        llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
-        return response
-    except Exception as exc:
-        llm_shield_requests_total.labels(status_code=500).inc()
-        llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
-        raise exc
+    ctx = propagator.extract(request.headers)
+    with tracer.start_as_current_span("proxy_catch_all", context=ctx):
+        try:
+            response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode, x_shield_bypass_breaker)
+            llm_shield_requests_total.labels(status_code=response.status_code).inc()
+            llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
+            return response
+        except Exception as exc:
+            llm_shield_requests_total.labels(status_code=500).inc()
+            llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
+            raise exc
 
 
 async def _proxy_catch_all_internal(
@@ -346,6 +356,9 @@ async def _proxy_catch_all_internal(
     headers.pop("host", None)
     headers.pop("content-length", None)
     headers.pop("accept-encoding", None)
+
+    # Inject trace context into upstream HTTP request headers
+    propagator.inject(headers)
 
     # Extract client authorization
     client_auth = headers.get("authorization", "").replace("Bearer ", "").strip()
@@ -422,10 +435,10 @@ async def _proxy_catch_all_internal(
                 return text
         vault = ScrubVault() # type: ignore
     elif masking_mode == MaskingMode.STRUCTURAL_TAG:
-        vault = vault_store.get_vault(x_session_id, virtual_key_id)
+        vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
         vault.synthetic = False
     else: # SYNTHETIC
-        vault = vault_store.get_vault(x_session_id, virtual_key_id)
+        vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
         vault.synthetic = True
         
     http_client = get_http_client(request)
@@ -493,7 +506,9 @@ async def _proxy_catch_all_internal(
 
             is_streaming = bool(payload.get("stream", False))
             try:
-                redacted_payload = pii_engine.redact_payload(payload, vault)
+                active_profile = pii_engine.get_profile(virtual_key_id)
+                loop = asyncio.get_running_loop()
+                redacted_payload = await loop.run_in_executor(None, pii_engine.redact_payload, payload, vault, active_profile)
                 redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
             except ValueError as ve:
                 if str(ve) == "Maximum payload nesting depth exceeded":
@@ -615,7 +630,8 @@ async def _proxy_catch_all_internal(
 
                 try:
                     res_json = upstream_res.json()
-                    rehydrated_res = _rehydrate_json_response(res_json, vault)
+                    loop = asyncio.get_running_loop()
+                    rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
 
                     if watermark_text:
                         if "choices" in rehydrated_res and isinstance(rehydrated_res["choices"], list) and rehydrated_res["choices"]:
@@ -633,8 +649,10 @@ async def _proxy_catch_all_internal(
                         headers=res_headers,
                     )
                 except Exception:
+                    loop = asyncio.get_running_loop()
+                    rehydrated_text = await loop.run_in_executor(None, vault.rehydrate, upstream_res.text)
                     return Response(
-                        content=vault.rehydrate(upstream_res.text),
+                        content=rehydrated_text,
                         status_code=upstream_res.status_code,
                         headers=res_headers,
                     )

@@ -15,13 +15,15 @@ import os
 import re
 import unicodedata
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass, field
 
 import yaml
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.core.config_schema import CustomRegexConfig
 from llm_shield_proxy.engines.vault import Vault
+from llm_shield_proxy.observability.tracing import tracer
 
 try:
     import re2
@@ -29,6 +31,12 @@ except ImportError:
     re2 = None
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class CompiledProfile:
+    name: str
+    tier1_patterns: List[Tuple[str, Any]] = field(default_factory=list)
+    tier3_ner_entities: Set[str] = field(default_factory=set)
 
 # Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
 INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
@@ -142,7 +150,10 @@ class PIIEngine:
         )
         self._onnx_session: Optional[Any] = None
         self._tokenizer: Optional[Any] = None
-        self._custom_patterns: List[Tuple[str, Any]] = []
+        self._compiled_profiles: Dict[str, CompiledProfile] = {}
+        self._tenant_mappings: Dict[str, str] = {}
+        self._global_strict_profile: CompiledProfile = CompiledProfile(name="global_strict")
+        
         self._init_onnx_model()
         self._init_custom_regex()
 
@@ -175,30 +186,58 @@ class PIIEngine:
             self._tokenizer = None
 
     def _init_custom_regex(self) -> None:
-        """Loads and compiles BYOR (Bring Your Own Regex) patterns via re2."""
-        if not settings.CUSTOM_REGEX_PATH or not os.path.exists(settings.CUSTOM_REGEX_PATH):
-            return
+        """Loads and compiles BYOR (Bring Your Own Regex) patterns via re2 and builds Policy Profiles."""
+        self._compiled_profiles.clear()
+        self._tenant_mappings.clear()
+        
+        all_tier1 = list(TIER1_PATTERNS)
+        all_tier3 = {entity_type for entity_type, _ in TIER3_NER_PATTERNS}
+        
+        if settings.CUSTOM_REGEX_PATH and os.path.exists(settings.CUSTOM_REGEX_PATH):
+            if re2 is None:
+                logger.error("google-re2 is required for BYOR custom regex to prevent ReDoS. Skipping custom regex load.")
+            else:
+                try:
+                    with open(settings.CUSTOM_REGEX_PATH, "r", encoding="utf-8") as f:
+                        yaml_data = yaml.safe_load(f) or {}
 
-        if re2 is None:
-            logger.error("google-re2 is required for BYOR custom regex to prevent ReDoS. Skipping custom regex load.")
-            return
+                    config = CustomRegexConfig(**yaml_data)
 
-        try:
-            with open(settings.CUSTOM_REGEX_PATH, "r", encoding="utf-8") as f:
-                yaml_data = yaml.safe_load(f) or {}
+                    for custom_pattern in config.custom_patterns:
+                        # Compile using re2 to guarantee O(N) execution and ReDoS immunity
+                        compiled = re2.compile(custom_pattern.pattern)
+                        all_tier1.append((custom_pattern.name, compiled))
+                    
+                    tier1_lookup = {name: pattern for name, pattern in all_tier1}
+                    
+                    for profile_config in config.profiles:
+                        profile = CompiledProfile(name=profile_config.name)
+                        for t1_name in profile_config.tier1_regex:
+                            if t1_name in tier1_lookup:
+                                profile.tier1_patterns.append((t1_name, tier1_lookup[t1_name]))
+                        profile.tier3_ner_entities = set(profile_config.tier2_ner)
+                        self._compiled_profiles[profile.name] = profile
+                        
+                    self._tenant_mappings = config.tenant_mappings
 
-            config = CustomRegexConfig(**yaml_data)
+                    logger.info("Successfully loaded custom regex patterns and %d profiles from %s", len(self._compiled_profiles), settings.CUSTOM_REGEX_PATH)
+                except Exception as exc:
+                    logger.error("Failed to load custom regex configuration: %s", exc)
 
-            for custom_pattern in config.custom_patterns:
-                # Compile using re2 to guarantee O(N) execution and ReDoS immunity
-                compiled = re2.compile(custom_pattern.pattern)
-                self._custom_patterns.append((custom_pattern.name, compiled))
+        self._global_strict_profile = CompiledProfile(
+            name="global_strict",
+            tier1_patterns=all_tier1,
+            tier3_ner_entities=all_tier3
+        )
 
-            logger.info("Successfully loaded %d custom regex patterns from %s", len(self._custom_patterns), settings.CUSTOM_REGEX_PATH)
-        except Exception as exc:
-            logger.error("Failed to load custom regex configuration: %s", exc)
+    def get_profile(self, virtual_key_id: str) -> CompiledProfile:
+        """Retrieves active profile for the given tenant virtual_key_id in O(1) time."""
+        profile_name = self._tenant_mappings.get(virtual_key_id)
+        if profile_name:
+            return self._compiled_profiles.get(profile_name, self._global_strict_profile)
+        return self._global_strict_profile
 
-    def detect_spans(self, text: str) -> List[Tuple[int, int, str, str]]:
+    def detect_spans(self, text: str, active_profile: Optional[CompiledProfile] = None) -> List[Tuple[int, int, str, str]]:
         """Detects all PII and secret entity spans across the 3-Tier cascade.
 
         Time Complexity: O(N * P) where N is text length and P is pattern count.
@@ -206,6 +245,7 @@ class PIIEngine:
 
         Args:
             text: Input raw string to analyze.
+            active_profile: The compiled policy profile for the current tenant.
 
         Returns:
             List of non-overlapping spans: (start_index, end_index, entity_type, matched_text)
@@ -214,16 +254,15 @@ class PIIEngine:
             return []
 
         raw_spans: List[Tuple[int, int, str, str]] = []
+        
+        if active_profile is None:
+            active_profile = self._global_strict_profile
 
-        # Tier 1: Structured DFA Regex Scanning
-        for entity_type, pattern in TIER1_PATTERNS:
-            for match in pattern.finditer(text):
-                raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
-
-        # Tier 1.5: BYOR Custom Regex Scanning (O(N) re2 execution)
-        for entity_type, pattern in self._custom_patterns:
-            for match in pattern.finditer(text):
-                raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+        # Tier 1: Structured DFA Regex Scanning (including Tier 1.5 Custom Patterns)
+        with tracer.start_as_current_span("regex_tier"):
+            for entity_type, pattern in active_profile.tier1_patterns:
+                for match in pattern.finditer(text):
+                    raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
 
         # Tier 2: Shannon Entropy Analysis (Detects unformatted API keys, hashes, secret tokens)
         if self.enable_tier2 and settings.ENABLE_TIER2_ENTROPY:
@@ -243,7 +282,7 @@ class PIIEngine:
                 decoded_bytes = base64.b64decode(token, validate=True)
                 decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
                 if decoded_text and len(decoded_text) >= 6:
-                    for entity_type, pattern in TIER1_PATTERNS:
+                    for entity_type, pattern in active_profile.tier1_patterns:
                         if pattern.search(decoded_text):
                             raw_spans.append((match.start(), match.end(), "BASE64_OBFUSCATED_PII", token))
                             break
@@ -252,49 +291,53 @@ class PIIEngine:
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org)
         if self.enable_tier3:
-            if self._onnx_session and self._tokenizer:
-                try:
-                    import numpy as np  # type: ignore
+            with tracer.start_as_current_span("onnx_tier"):
+                if self._onnx_session and self._tokenizer:
+                    try:
+                        import numpy as np  # type: ignore
 
-                    encoded = self._tokenizer.encode(text)
-                    input_ids = np.array([encoded.ids], dtype=np.int64)
-                    attention_mask = np.array([encoded.attention_mask], dtype=np.int64)
+                        encoded = self._tokenizer.encode(text)
+                        input_ids = np.array([encoded.ids], dtype=np.int64)
+                        attention_mask = np.array([encoded.attention_mask], dtype=np.int64)
 
-                    ort_inputs = {
-                        self._onnx_session.get_inputs()[0].name: input_ids,
-                        self._onnx_session.get_inputs()[1].name: attention_mask,
-                    }
-                    logits = self._onnx_session.run(None, ort_inputs)[0]
-                    predictions = np.argmax(logits, axis=2)[0]
+                        ort_inputs = {
+                            self._onnx_session.get_inputs()[0].name: input_ids,
+                            self._onnx_session.get_inputs()[1].name: attention_mask,
+                        }
+                        logits = self._onnx_session.run(None, ort_inputs)[0]
+                        predictions = np.argmax(logits, axis=2)[0]
 
-                    current_entity = None
-                    current_start = -1
+                        current_entity = None
+                        current_start = -1
 
-                    for idx, pred_id in enumerate(predictions):
-                        # Simplified label parsing (assuming id > 0 means a named entity for now)
-                        if pred_id > 0:
-                            if current_entity is None:
-                                current_entity = "PERSON"
-                                current_start = idx
-                        else:
-                            if current_entity is not None:
-                                offsets = encoded.offsets
-                                if current_start < len(offsets) and idx - 1 < len(offsets):
-                                    start_char = offsets[current_start][0]
-                                    end_char = offsets[idx - 1][1]
-                                    if start_char < end_char:
-                                        match_text = text[start_char:end_char]
-                                        raw_spans.append((start_char, end_char, current_entity, match_text))
-                                current_entity = None
-                except Exception as exc:
-                    logger.debug("ONNX inference failed, falling back to regex: %s", exc)
+                        for idx, pred_id in enumerate(predictions):
+                            # Simplified label parsing (assuming id > 0 means a named entity for now)
+                            if pred_id > 0:
+                                if current_entity is None:
+                                    current_entity = "PERSON"
+                                    current_start = idx
+                            else:
+                                if current_entity is not None:
+                                    offsets = encoded.offsets
+                                    if current_start < len(offsets) and idx - 1 < len(offsets):
+                                        start_char = offsets[current_start][0]
+                                        end_char = offsets[idx - 1][1]
+                                        if start_char < end_char:
+                                            match_text = text[start_char:end_char]
+                                            if current_entity in active_profile.tier3_ner_entities:
+                                                raw_spans.append((start_char, end_char, current_entity, match_text))
+                                    current_entity = None
+                    except Exception as exc:
+                        logger.debug("ONNX inference failed, falling back to regex: %s", exc)
+                        for entity_type, pattern in TIER3_NER_PATTERNS:
+                            if entity_type in active_profile.tier3_ner_entities:
+                                for match in pattern.finditer(text):
+                                    raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+                else:
                     for entity_type, pattern in TIER3_NER_PATTERNS:
-                        for match in pattern.finditer(text):
-                            raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
-            else:
-                for entity_type, pattern in TIER3_NER_PATTERNS:
-                    for match in pattern.finditer(text):
-                        raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+                        if entity_type in active_profile.tier3_ner_entities:
+                            for match in pattern.finditer(text):
+                                raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
 
         # Deduplicate and resolve overlapping spans (prioritize earliest start, then longest span)
         raw_spans.sort(key=lambda s: (s[0], -(s[1] - s[0])))
@@ -309,7 +352,7 @@ class PIIEngine:
 
         return non_overlapping
 
-    def redact_text(self, text: str, vault: Vault) -> str:
+    def redact_text(self, text: str, vault: Vault, active_profile: Optional[CompiledProfile] = None) -> str:
         """Redacts PII spans in text and registers deterministic mappings in the Vault.
 
         Applies Unicode de-smuggling (stripping zero-width and invisible format characters)
@@ -321,6 +364,7 @@ class PIIEngine:
         Args:
             text: Input string to redact.
             vault: Session-scoped Vault to store mappings.
+            active_profile: The compiled policy profile for the current tenant.
 
         Returns:
             Redacted text containing placeholders or synthetic replacements.
@@ -331,7 +375,7 @@ class PIIEngine:
         # De-smuggle zero-width Unicode characters and normalize NFKC
         working_text = normalize_and_desmuggle(text)
 
-        spans = self.detect_spans(working_text)
+        spans = self.detect_spans(working_text, active_profile)
         if not spans:
             return working_text
 
@@ -347,6 +391,7 @@ class PIIEngine:
         self,
         payload: Dict[str, Any],
         vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
         depth: int = 0,
         max_depth: int = 20,
     ) -> Dict[str, Any]:
@@ -358,6 +403,7 @@ class PIIEngine:
         Args:
             payload: Request JSON dictionary.
             vault: Session-scoped Vault.
+            active_profile: The compiled policy profile for the current tenant.
             depth: Current traversal recursion depth.
             max_depth: Maximum permitted JSON nesting depth before raising ValueError.
 
@@ -378,7 +424,7 @@ class PIIEngine:
             for msg in new_payload["messages"]:
                 if isinstance(msg, dict):
                     if "messages" in msg:
-                        redacted_messages.append(self.redact_payload(msg, vault, depth=depth + 1, max_depth=max_depth))
+                        redacted_messages.append(self.redact_payload(msg, vault, active_profile, depth=depth + 1, max_depth=max_depth))
                         continue
 
                     msg_copy = msg.copy()
@@ -392,7 +438,7 @@ class PIIEngine:
                             content_str = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
                                 "[SYSTEM_OVERRIDE_BLOCKED]", content_str
                             )
-                        msg_copy["content"] = self.redact_text(content_str, vault)
+                        msg_copy["content"] = self.redact_text(content_str, vault, active_profile)
                     elif "content" in msg_copy and isinstance(msg_copy["content"], list):
                         new_content_blocks = []
                         for block in msg_copy["content"]:
@@ -404,7 +450,7 @@ class PIIEngine:
                                         text_val = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
                                             "[SYSTEM_OVERRIDE_BLOCKED]", text_val
                                         )
-                                    block_copy["text"] = self.redact_text(text_val, vault)
+                                    block_copy["text"] = self.redact_text(text_val, vault, active_profile)
                                 new_content_blocks.append(block_copy)
                             else:
                                 new_content_blocks.append(block)
@@ -414,7 +460,7 @@ class PIIEngine:
                     if "name" in msg_copy and isinstance(msg_copy["name"], str):
                         raw_name = msg_copy["name"]
                         spaced_name = raw_name.replace("_", " ")
-                        redacted_spaced = self.redact_text(spaced_name, vault)
+                        redacted_spaced = self.redact_text(spaced_name, vault, active_profile)
                         if redacted_spaced != spaced_name:
                             msg_copy["name"] = redacted_spaced.replace(" ", "_")
                         elif raw_name and raw_name[0].isupper():
@@ -429,7 +475,7 @@ class PIIEngine:
                                 if "function" in tc_copy and isinstance(tc_copy["function"], dict):
                                     fn_copy = tc_copy["function"].copy()
                                     if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                                        fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault)
+                                        fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
                                     tc_copy["function"] = fn_copy
                                 new_tool_calls.append(tc_copy)
                             else:
@@ -440,7 +486,7 @@ class PIIEngine:
                     if "function_call" in msg_copy and isinstance(msg_copy["function_call"], dict):
                         fn_copy = msg_copy["function_call"].copy()
                         if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                            fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault)
+                            fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
                         msg_copy["function_call"] = fn_copy
 
                     redacted_messages.append(msg_copy)
@@ -451,23 +497,23 @@ class PIIEngine:
         # Redact legacy OpenAI prompt field
         if "prompt" in new_payload:
             if isinstance(new_payload["prompt"], str):
-                new_payload["prompt"] = self.redact_text(new_payload["prompt"], vault)
+                new_payload["prompt"] = self.redact_text(new_payload["prompt"], vault, active_profile)
             elif isinstance(new_payload["prompt"], list):
                 new_payload["prompt"] = [
-                    self.redact_text(p, vault) if isinstance(p, str) else p for p in new_payload["prompt"]
+                    self.redact_text(p, vault, active_profile) if isinstance(p, str) else p for p in new_payload["prompt"]
                 ]
 
         # Redact system prompt if separated at top level
         if "system" in new_payload and isinstance(new_payload["system"], str):
-            new_payload["system"] = self.redact_text(new_payload["system"], vault)
+            new_payload["system"] = self.redact_text(new_payload["system"], vault, active_profile)
 
         # Redact embeddings / moderation / responses input field
         if "input" in new_payload:
             if isinstance(new_payload["input"], str):
-                new_payload["input"] = self.redact_text(new_payload["input"], vault)
+                new_payload["input"] = self.redact_text(new_payload["input"], vault, active_profile)
             elif isinstance(new_payload["input"], list):
                 new_payload["input"] = [
-                    self.redact_text(item, vault) if isinstance(item, str) else item for item in new_payload["input"]
+                    self.redact_text(item, vault, active_profile) if isinstance(item, str) else item for item in new_payload["input"]
                 ]
 
         return new_payload
