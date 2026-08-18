@@ -129,3 +129,30 @@ async def test_circuit_breaker_bypass_header():
             response = await ac.post("/v1/chat/completions", json=payload, headers=headers)
             assert response.status_code != 429
 
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_pagination_trap():
+    """Assert pagination (e.g. OFFSET 100 to OFFSET 200) does not trip breaker."""
+    session_id = "test-session-pagination"
+    headers = {
+        "X-Session-ID": session_id,
+        "Authorization": "Bearer sk-proj-123",
+        "X-Upstream-Base-Url": "https://api.openai.com"
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        for offset in [100, 200, 300, 400, 500]:
+            # The payload needs to be > 50 chars to avoid the short ping trap
+            payload = {
+                "model": "gpt-4",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"Please execute the following query: SELECT * FROM users ORDER BY id DESC LIMIT 10 OFFSET {offset}"
+                    }
+                ]
+            }
+            response = await ac.post("/v1/chat/completions", json=payload, headers=headers)
+            assert response.status_code != 429
+
+

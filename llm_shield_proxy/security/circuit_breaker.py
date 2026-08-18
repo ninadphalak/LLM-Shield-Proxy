@@ -96,6 +96,9 @@ def check_circuit_breaker(session_id: str, payload: dict) -> None:
     except (TypeError, ValueError):
         payload_str = str(payload)
     
+    if len(payload_str) < 50:
+        return
+        
     bounded_payload_str = payload_str[:4096]
 
     current_entropy = calculate_shannon_entropy(bounded_payload_str)
@@ -125,7 +128,20 @@ def check_circuit_breaker(session_id: str, payload: dict) -> None:
                 matcher = difflib.SequenceMatcher(None, last_payload_str, bounded_payload_str)
                 similarity = matcher.quick_ratio()
                 if similarity > 0.95:
-                    is_duplicate = True
+                    is_purely_numeric_diff = True
+                    has_diff = False
+                    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+                        if tag in ('replace', 'insert', 'delete'):
+                            has_diff = True
+                            diff_chars1 = last_payload_str[i1:i2]
+                            diff_chars2 = bounded_payload_str[j1:j2]
+                            if (diff_chars1 and not diff_chars1.isdigit()) or \
+                               (diff_chars2 and not diff_chars2.isdigit()):
+                                is_purely_numeric_diff = False
+                                break
+                    
+                    if not (has_diff and is_purely_numeric_diff):
+                        is_duplicate = True
 
     if is_duplicate:
         metrics.consecutive_duplicate_count += 1
