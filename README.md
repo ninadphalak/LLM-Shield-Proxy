@@ -123,7 +123,7 @@ for chunk in response:
 | **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage (Zero-Data Mode):** Self-destructing TTL session vault built for zero data liability. Operates in strict "Zero-Data Mode"—no prompts, PII, or context windows are ever written to persistent disk or external storage. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
-### 🔒 Built for Trust & Transparency
+### 🏛️ Built for Trust & Transparency
 Designed specifically for highly regulated enterprise environments, Zero-Trust network architectures, and security-first engineering teams. 
 1. **It keeps your data in your building:** I do not send your data to a third-party security company. The shield runs 100% inside your own servers.
 2. **Zero-Data Storage:** I do not save or log your sensitive prompts. The system uses a "self-destructing" memory vault that erases the mappings automatically.
