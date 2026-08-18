@@ -91,14 +91,6 @@ docker run -d -p 8000:8000 \
   ghcr.io/ninadphalak/llm-shield-proxy:latest
 ```
 
-### 🔌 Ecosystem & Seamless Integrations (Drop-in Compatibility)
-LLM-Shield-Proxy is heavily modular. It is designed to replace slow, memory-heavy legacy PII scanners (like Microsoft Presidio) while stacking perfectly with your existing AI routing infrastructure. It requires no code changes and is 100% compatible out-of-the-box with:
-
-* **Orchestration Frameworks:** LangChain, LlamaIndex, Semantic Kernel, AutoGen, CrewAI.
-* **AI Gateways & Routers:** LiteLLM, Cloudflare AI Gateway, Kong AI Gateway, Portkey. *(Note: You can seamlessly stack LLM-Shield-Proxy in front of LiteLLM to achieve both multi-model cost routing and military-grade PII compliance).*
-* **Local & Open-Source Inference:** vLLM, Ollama, NVIDIA NIM, Hugging Face TGI.
-* **Upstream Providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral.
-
 ### 1-Line SDK Change
 Point your existing OpenAI SDK `base_url` to your local LLM-Shield-Proxy instance:
 
@@ -131,12 +123,33 @@ for chunk in response:
 | **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage (Zero-Data Mode):** Self-destructing TTL session vault built for zero data liability. Operates in strict "Zero-Data Mode"—no prompts, PII, or context windows are ever written to persistent disk or external storage. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
-### 🤝 Built for Trust & Transparency
+### 🔒 Built for Trust & Transparency
 Designed specifically for highly regulated enterprise environments, Zero-Trust network architectures, and security-first engineering teams. 
 1. **It keeps your data in your building:** I do not send your data to a third-party security company. The shield runs 100% inside your own servers.
 2. **Zero-Data Storage:** I do not save or log your sensitive prompts. The system uses a "self-destructing" memory vault that erases the mappings automatically.
 3. **Continuous Stability:** The system has been aggressively tested under heavy, simulated usage (thousands of concurrent users) for hours on end to ensure it never crashes or slows down your AI tools.
 4. **Transparent Design:** The system doesn't rely on hidden "black box" AI to detect sensitive data. It uses mathematically proven, transparent rules to detect patterns like Credit Cards, SSNs, and Medical Record Numbers.
+
+---
+
+## Why Not <s style="color: gray;">Microsoft Presidio</s> <sup>*any other proxy?*</sup>
+
+It's a crowded space. Here is exactly why you should deploy LLM-Shield-Proxy instead of the alternatives:
+
+* **Microsoft Presidio / spaCy:** Legacy libraries that consume 1GB+ of RAM and block your event loop with 50-150ms of latency per request. (Because nothing says "real-time AI" like pausing the universe for regex). LLM-Shield-Proxy uses a flat <60 MB footprint with <6 µs latency overhead.
+* **Cloud AI Safety APIs (Azure/AWS):** Checking for PII by sending raw data out of your VPC defeats the purpose. With LLM-Shield-Proxy, the data never leaves your infrastructure unredacted.
+* **Standard Regex Gateways:** They break on asynchronous Server-Sent Events (SSE). If a sensitive token is split across two streaming packets, standard gateways let it leak. LLM-Shield-Proxy uses a sliding-window lookahead buffer to seamlessly hold split tokens without breaking stream formatting.
+* **LiteLLM / LangChain:** LLM-Shield-Proxy is not a model router or orchestration framework. It works *alongside* them. Put LLM-Shield-Proxy in front of your orchestrator to guarantee data masking before routing.
+
+### 🤝 The Orchestrators (What we complement)
+LLM-Shield-Proxy is **not** a model router. It is designed to work in a "Reverse Proxy Sandwich" alongside industry-standard orchestration tools. It stacks perfectly with your existing AI routing infrastructure, requires no code changes, and is 100% compatible out-of-the-box with:
+
+* **Orchestration Frameworks:** LangChain, LlamaIndex, Semantic Kernel, AutoGen, CrewAI.
+* **AI Gateways & Routers:** LiteLLM, Cloudflare AI Gateway, Kong AI Gateway, Portkey. *(Note: You can seamlessly stack LLM-Shield-Proxy in front of LiteLLM to achieve both multi-model cost routing and military-grade PII compliance).*
+* **Local & Open-Source Inference:** vLLM, Ollama, NVIDIA NIM, Hugging Face TGI.
+* **Upstream Providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral.
+
+Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, SOC 2-compliant data masking before the payload ever reaches the orchestrator.
 
 ---
 
@@ -363,8 +376,7 @@ To achieve microsecond latencies, LLM-Shield-Proxy bypasses heavy legacy NLP fra
 
 ### 🚀 High-Concurrency & Enterprise Load Capacity
 Engineered on an asynchronous, non-blocking event loop with HTTP/2 persistent connection pooling, LLM-Shield-Proxy scales effortlessly under high enterprise load:
-* **Concurrent Streaming Capacity:** Verified stable under **500+ simultaneous persistent SSE streams** per container worker with zero packet desynchronization.
-* **Throughput & Saturation:** Sustains **10,000+ requests/minute** with 0 dropped frames or buffer stalls.
+* **Concurrent Streaming Capacity:** Verified stable under **1,800+ simultaneous persistent SSE streams** per container worker (core) with zero packet desynchronization.
 * **Leak-Free Memory Stability:** Resident Set Size (RSS) stays strictly capped (`<60MB`) under sustained multi-hour stress testing without garbage collection bloat.
 
 To run the automated benchmark and stress test suites locally:
