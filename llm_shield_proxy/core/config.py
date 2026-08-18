@@ -80,6 +80,14 @@ class Settings(BaseSettings):
         default=None, description="Path to custom_regex.yaml containing BYOR rules"
     )
 
+    # Agent Circuit Breaker Settings
+    ENABLE_AGENT_BREAKER: bool = Field(
+        default=True, description="Enable Composite Agent Loop Circuit Breaker"
+    )
+    AGENT_BREAKER_THRESHOLD: int = Field(
+        default=3, description="Consecutive duplicate turns before tripping"
+    )
+
     # HTTP Client & Connection Pooling
     HTTP_TIMEOUT_SECONDS: float = Field(
         default=120.0, description="Total HTTP request timeout for upstream communication in seconds"

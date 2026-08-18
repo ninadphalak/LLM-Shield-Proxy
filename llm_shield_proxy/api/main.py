@@ -42,6 +42,7 @@ from llm_shield_proxy.observability.metrics import (
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
+from llm_shield_proxy.security.circuit_breaker import check_circuit_breaker, CircuitBreakerTrippedException
 
 APP_VERSION = "1.0.20"
 
@@ -255,11 +256,12 @@ async def proxy_catch_all(
     x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
     x_upstream_base_url: Optional[str] = Header(None, alias="X-Upstream-Base-Url"),
     x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
+    x_shield_bypass_breaker: Optional[str] = Header(None, alias="X-Shield-Bypass-Breaker"),
 ) -> Response:
     """Main reverse-proxy catch-all endpoint handling redaction and rehydration."""
     start_time = time.perf_counter()
     try:
-        response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode)
+        response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode, x_shield_bypass_breaker)
         llm_shield_requests_total.labels(status_code=response.status_code).inc()
         llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
         return response
@@ -275,6 +277,7 @@ async def _proxy_catch_all_internal(
     x_session_id: Optional[str],
     x_upstream_base_url: Optional[str],
     x_shield_masking_mode: Optional[str] = None,
+    x_shield_bypass_breaker: Optional[str] = None,
 ) -> Response:
     # Route exemptions
     if path in ("health", "healthz", "livez"):
@@ -435,6 +438,26 @@ async def _proxy_catch_all_internal(
             )
 
         if isinstance(payload, dict):
+            # Circuit Breaker Logic
+            if settings.ENABLE_AGENT_BREAKER and x_session_id:
+                bypass_breaker = str(x_shield_bypass_breaker).lower() in ("true", "1", "yes")
+                if not bypass_breaker:
+                    try:
+                        check_circuit_breaker(x_session_id, payload)
+                    except CircuitBreakerTrippedException as cbe:
+                        return JSONResponse(
+                            status_code=429,
+                            content={
+                                "error": "circuit_breaker_tripped",
+                                "reason": "agent_loop_detected",
+                                "consecutive_turns": cbe.consecutive_turns
+                            },
+                            headers={
+                                "X-Shield-Circuit-Breaker": "TRIPPED",
+                                "Retry-After": "60"
+                            }
+                        )
+
             is_streaming = bool(payload.get("stream", False))
             try:
                 redacted_payload = pii_engine.redact_payload(payload, vault)
