@@ -122,19 +122,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Start gRPC ext_proc server in background
     sock_path = "/var/run/llm-shield/ext_proc.sock"
-    sock_dir = os.path.dirname(sock_path)
-    # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
-    os.makedirs(sock_dir, exist_ok=True)
-    os.chmod(sock_dir, 0o770)
     
-    if os.path.exists(sock_path):
-        os.unlink(sock_path)
-        
+    if os.name != "nt":
+        sock_dir = os.path.dirname(sock_path)
+        # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
+        os.makedirs(sock_dir, exist_ok=True)
+        os.chmod(sock_dir, 0o770)
+
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+
     grpc_server = await serve_ext_proc(sock_path)
     # SECURITY: Prevent local privilege escalation by restricting socket access
     # to the proxy group (0o660) instead of world-writable (0o666).
     # Envoy must be deployed with a shared GID (e.g., fsGroup).
-    os.chmod(sock_path, 0o660)
+    if os.name != "nt":
+        os.chmod(sock_path, 0o660)
 
     yield
 
@@ -396,6 +399,7 @@ async def _proxy_catch_all_internal(
     upstream_base = settings.UPSTREAM_BASE_URL
 
     # SSRF Protection on Dynamic Client Upstream Override
+    print(f"DEBUG: x_upstream_base_url={x_upstream_base_url}, override={settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE}")
     if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
         if x_upstream_base_url.startswith(("http://", "https://")):
             parsed = urlparse(x_upstream_base_url)
@@ -403,6 +407,7 @@ async def _proxy_catch_all_internal(
             try:
                 ip = socket.gethostbyname(hostname)
                 ip_obj = ipaddress.ip_address(ip)
+                print(f"DEBUG: ip={ip}, link_local={ip_obj.is_link_local}")
                 if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
                     return JSONResponse(
                         status_code=403,
@@ -449,6 +454,9 @@ async def _proxy_catch_all_internal(
         virtual_key_id = get_virtual_key_id(matched_key)
     elif client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
         # Direct genuine BYOK provider key passthrough
+        is_virtual_key = False
+    elif settings.OVERRIDE_CLIENT_AUTH:
+        # Bypass strict prefix checks if enterprise secret injection is active
         is_virtual_key = False
     else:
         return JSONResponse(

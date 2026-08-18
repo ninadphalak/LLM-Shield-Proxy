@@ -86,7 +86,7 @@ class ImmediateResponse(betterproto.Message):
     details: str = betterproto.string_field(5)
 
 
-class ExternalProcessorBase(grpclib.server.ServerBase):
+class ExternalProcessorBase:
     async def process(self, stream: "grpclib.server.Stream[ProcessingRequest, ProcessingResponse]") -> None:
         raise NotImplementedError()
 

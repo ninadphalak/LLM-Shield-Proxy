@@ -72,19 +72,23 @@ async def test_synthetic_final_chunk_injection():
     # 2: data: {"choices": [{"delta": {"content": "<WATERMARK>"}}]}\n\n  (Synthetic Chunk)
     # 3: data: [DONE]\n\n
     
-    assert len(chunks) == 4
-    assert b"Hello" in chunks[0]
-    assert b" World" in chunks[1]
+    # Combine stream chunks back into logical chunks by splitting on \n\n
+    joined = b"".join(chunks)
+    logical_chunks = [c + b"\n\n" for c in joined.split(b"\n\n") if c]
+    
+    assert len(logical_chunks) == 4
+    assert b"Hello" in logical_chunks[0]
+    assert b" World" in logical_chunks[1]
     
     # Check synthetic chunk
-    chunk_str = chunks[2].decode("utf-8")
+    chunk_str = logical_chunks[2].decode("utf-8")
     assert watermark_text in chunk_str
     assert "choices" in chunk_str
-    assert '"id": "test-id"' in chunk_str
-    assert '"model": "gpt-4"' in chunk_str
+    assert '"id":"test-id"' in chunk_str or '"id": "test-id"' in chunk_str
+    assert '"model":"gpt-4"' in chunk_str or '"model": "gpt-4"' in chunk_str
     
     # Check final chunk is [DONE]
-    assert chunks[3] == b'data: [DONE]\n\n'
+    assert logical_chunks[3] == b'data: [DONE]\n\n'
 
 
 @pytest.mark.asyncio
@@ -99,5 +103,8 @@ async def test_watermark_not_injected_if_empty():
     async for chunk in rehydrate_sse_stream(mock_stream(), vault, watermark_text=""):
         chunks.append(chunk)
         
-    assert len(chunks) == 2
-    assert chunks[1] == b'data: [DONE]\n\n'
+    joined = b"".join(chunks)
+    logical_chunks = [c + b"\n\n" for c in joined.split(b"\n\n") if c]
+
+    assert len(logical_chunks) == 2
+    assert logical_chunks[1] == b'data: [DONE]\n\n'

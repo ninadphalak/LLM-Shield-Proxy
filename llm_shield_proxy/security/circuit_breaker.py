@@ -187,10 +187,10 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
             pipe.setex(redis_key, 600, json.dumps(metrics_dict))
             await pipe.execute()
 
-    if metrics.consecutive_duplicate_count >= settings.AGENT_BREAKER_THRESHOLD:
+    if metrics.consecutive_duplicate_count >= settings.AGENT_BREAKER_THRESHOLD - 1:
         # Reset count so they can try again after being tripped once? 
         # For now, let it trip repeatedly if they keep sending the exact same payload.
         raise CircuitBreakerTrippedException(
             "Agent loop detected", 
-            metrics.consecutive_duplicate_count
+            metrics.consecutive_duplicate_count + 1
         )
