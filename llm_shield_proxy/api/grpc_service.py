@@ -1,9 +1,12 @@
 """Envoy ext_proc gRPC Service for zero-egress LLM shielding over UDS."""
 import asyncio
+import codecs
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 
+import grpclib
 import grpclib.server
 
 from llm_shield_proxy.api.ext_proc_pb import (
@@ -23,8 +26,9 @@ from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer
 logger = logging.getLogger(__name__)
 
 # Global threadpool for offloading CPU-bound tasks (Tier 1/2/3 cascade)
-# to avoid event loop starvation.
-thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ext_proc_pool")
+# Dynamically sized to prevent event loop starvation under high concurrency.
+MAX_WORKERS = os.cpu_count() or 4
+thread_pool = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="ext_proc_pool")
 
 
 class ExtProcService(ExternalProcessorBase):
@@ -42,6 +46,8 @@ class ExtProcService(ExternalProcessorBase):
         # Using StatelessCryptoVault by default for high-throughput UDS deployments
         vault = StatelessCryptoVault()
         sse_buffer = SSERehydrationBuffer(vault)
+        # Stateful decoder to prevent multibyte UTF-8 character splitting across chunk boundaries
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         try:
             async for request in stream:
@@ -63,9 +69,9 @@ class ExtProcService(ExternalProcessorBase):
                 
                 elif request.response_body.body:
                     # Response Body Phase (SSE Chunks)
-                    # Pass chunk through the sliding-window lookahead buffer
-                    chunk_text = request.response_body.body.decode("utf-8", errors="replace")
+                    # Use stateful decoder to prevent data corruption on chunked multibyte sequences
                     is_final = request.response_body.end_of_stream
+                    chunk_text = decoder.decode(request.response_body.body, final=is_final)
                     
                     rehydrated_text = sse_buffer.process_delta_text(chunk_text, is_final=is_final)
                     
@@ -109,9 +115,14 @@ class ExtProcService(ExternalProcessorBase):
             payload = json.loads(raw_body.decode("utf-8"))
             redacted_payload = pii_engine.redact_payload(payload, vault)
             return json.dumps(redacted_payload).encode("utf-8")
+        except json.JSONDecodeError as e:
+            logger.error(f"Malformed JSON payload blocked: {e}")
+            # CRITICAL: Do not fail open! Return safe sanitized error to prevent smuggling.
+            return json.dumps({"error": "Malformed JSON payload blocked by LLM-Shield"}).encode("utf-8")
         except Exception as e:
             logger.error(f"Failed to redact request payload: {e}")
-            return raw_body
+            # Failsafe drop
+            return b'{"error": "Internal Shield Processing Error"}'
 
 
 async def serve_ext_proc(sock_path: str = "/var/run/llm-shield/ext_proc.sock") -> grpclib.server.Server:

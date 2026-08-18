@@ -25,7 +25,12 @@ def get_crypto_dek() -> bytes:
     if _DEK is not None:
         return _DEK
 
-    key_src = settings.SHIELD_ENCRYPTION_KEY
+    key_src = None
+    if settings.ENABLE_VAULT_SECRETS:
+        from llm_shield_proxy.security.vault_client import vault_provider
+        key_src = vault_provider.get_secret("SHIELD_ENCRYPTION_KEY")
+    if not key_src:
+        key_src = settings.SHIELD_ENCRYPTION_KEY
     if key_src:
         try:
             # Try to decode base64

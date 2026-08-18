@@ -60,7 +60,24 @@ class Settings(BaseSettings):
         default=25, description="Max seconds to wait for connection draining on SIGTERM"
     )
 
-    # Vault & Session Storage Configuration
+    # mTLS & Custom CA Support
+    ENABLE_MTLS: bool = Field(default=False, description="Enable mutual TLS")
+    SSL_CA_BUNDLE_PATH: Optional[str] = Field(default=None, description="Path to custom CA bundle")
+    SSL_CLIENT_CERT_PATH: Optional[str] = Field(default=None, description="Path to mTLS client certificate")
+    SSL_CLIENT_KEY_PATH: Optional[str] = Field(default=None, description="Path to mTLS client key")
+
+    # HashiCorp Vault Integration
+    ENABLE_VAULT_SECRETS: bool = Field(default=False, description="Enable HashiCorp Vault dynamic secrets")
+    VAULT_ADDR: Optional[str] = Field(default=None, description="Vault server address")
+    VAULT_AUTH_METHOD: Literal["TOKEN", "KUBERNETES", "APPROLE"] = Field(default="TOKEN")
+    VAULT_TOKEN: Optional[str] = Field(default=None, description="Direct Vault Token")
+    VAULT_ROLE_ID: Optional[str] = Field(default=None, description="AppRole Role ID")
+    VAULT_SECRET_ID: Optional[str] = Field(default=None, description="AppRole Secret ID")
+    VAULT_K8S_ROLE: Optional[str] = Field(default=None, description="Kubernetes Auth Role")
+    VAULT_SECRET_PATH: Optional[str] = Field(default=None, description="KV secret path")
+    VAULT_REFRESH_INTERVAL_SECONDS: int = Field(default=300, description="Interval for async secret refresh")
+
+    # Session Storage Configuration
     REDIS_URL: Optional[str] = Field(
         default=None, description="Redis connection URL for distributed vault state (e.g., redis://localhost:6379/0)"
     )
