@@ -15,6 +15,7 @@ import orjson as json
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.vault import Vault
+from llm_shield_proxy.observability.tracing import tracer
 
 
 class SSERehydrationBuffer:
@@ -87,36 +88,37 @@ class SSERehydrationBuffer:
         Returns:
             Safe text slice ready for downstream client consumption.
         """
-        self.content_buffer += delta_text
+        with tracer.start_as_current_span("buffer_flush"):
+            self.content_buffer += delta_text
 
-        if len(self.content_buffer) > 64 * 1024:
-            raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+            if len(self.content_buffer) > 64 * 1024:
+                raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
 
-        token_to_original = getattr(self.vault, "token_to_original", None)
-        if is_final or (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
-            rehydrated = self.vault.rehydrate(self.content_buffer, retention_length=0)
-            self.content_buffer = ""
-            return rehydrated
-
-        # Calculate dynamic prefix retention bound
-        retention_length = self._calculate_retention_length(self.content_buffer)
-
-        # Apply boundary-aware rehydration up to the retention boundary
-        self.content_buffer = self.vault.rehydrate(self.content_buffer, retention_length=retention_length)
-
-        # Recalculate retention in case replacements modified the tail
-        retention_length = self._calculate_retention_length(self.content_buffer)
-
-        if retention_length == 0 or len(self.content_buffer) <= retention_length:
-            if retention_length == 0:
-                emitted = self.content_buffer
+            token_to_original = getattr(self.vault, "token_to_original", None)
+            if is_final or (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
+                rehydrated = self.vault.rehydrate(self.content_buffer, retention_length=0)
                 self.content_buffer = ""
-                return emitted
-            return ""
+                return rehydrated
 
-        emitted = self.content_buffer[:-retention_length]
-        self.content_buffer = self.content_buffer[-retention_length:]
-        return emitted
+            # Calculate dynamic prefix retention bound
+            retention_length = self._calculate_retention_length(self.content_buffer)
+
+            # Apply boundary-aware rehydration up to the retention boundary
+            self.content_buffer = self.vault.rehydrate(self.content_buffer, retention_length=retention_length)
+
+            # Recalculate retention in case replacements modified the tail
+            retention_length = self._calculate_retention_length(self.content_buffer)
+
+            if retention_length == 0 or len(self.content_buffer) <= retention_length:
+                if retention_length == 0:
+                    emitted = self.content_buffer
+                    self.content_buffer = ""
+                    return emitted
+                return ""
+
+            emitted = self.content_buffer[:-retention_length]
+            self.content_buffer = self.content_buffer[-retention_length:]
+            return emitted
 
 
 async def rehydrate_sse_stream(
@@ -155,11 +157,17 @@ async def rehydrate_sse_stream(
         cached_created = 0
         cached_model = "unknown"
         is_anthropic_stream = False
+        failed_open = False
 
         try:
             async for chunk in raw_stream:
-                chunk_text = decoder.decode(chunk, final=False)
-                line_accumulator += chunk_text
+                if failed_open:
+                    yield chunk
+                    continue
+
+                try:
+                    chunk_text = decoder.decode(chunk, final=False)
+                    line_accumulator += chunk_text
 
                 if len(line_accumulator) > max_line_length:
                     raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
@@ -237,14 +245,28 @@ async def rehydrate_sse_stream(
                             watermark_text = "" # prevent double yield
                             
                         yield (line + "\n").encode("utf-8")
+                        yield (line + "\n").encode("utf-8")
                     else:
                         yield (line + "\n").encode("utf-8")
+
+                except Exception as e:
+                    import logging
+                    if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
+                        logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_CLOSED): {e}")
+                        return
+                    else:
+                        logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_OPEN): {e}")
+                        failed_open = True
+                        if line_accumulator:
+                            yield line_accumulator.encode("utf-8")
+                        line_accumulator = ""
+                        continue
 
         except (GeneratorExit, asyncio.CancelledError):
             client_disconnected = True
             raise
         finally:
-            if not client_disconnected:
+            if not client_disconnected and not failed_open:
                 trailing_text = decoder.decode(b"", final=True)
                 if trailing_text:
                     line_accumulator += trailing_text

@@ -10,7 +10,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Optional, Set
+from typing import Literal, Optional, Set
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,6 +44,20 @@ class Settings(BaseSettings):
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
     ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = Field(
         default=False, description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
+    )
+    OVERRIDE_CLIENT_AUTH: bool = Field(default=False, description="Strip client auth and inject UPSTREAM_API_KEY")
+
+    # Rate Limiting
+    ENABLE_RATE_LIMITING: bool = Field(default=False, description="Enable distributed Token Bucket rate limiter")
+    RATE_LIMIT_RPM: int = Field(default=6000, description="Requests per minute per virtual key")
+    RATE_LIMIT_BURST: int = Field(default=200, description="Maximum burst size for rate limiter")
+
+    # Resilience & Failure Modes
+    SHIELD_FAILURE_MODE: Literal["FAIL_CLOSED", "FAIL_OPEN"] = Field(
+        default="FAIL_CLOSED", description="Default behavior upon engine failure"
+    )
+    DRAIN_TIMEOUT_SECONDS: int = Field(
+        default=25, description="Max seconds to wait for connection draining on SIGTERM"
     )
 
     # Vault & Session Storage Configuration
