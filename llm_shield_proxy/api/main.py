@@ -81,8 +81,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manages application lifecycle, shared HTTP connection pools, and background observers."""
     import os
     from llm_shield_proxy.api.grpc_service import serve_ext_proc
+    from llm_shield_proxy.security.vault_client import vault_provider
     
     AuditLogger.log_startup_event()
+
+    if settings.ENABLE_VAULT_SECRETS:
+        try:
+            await vault_provider.fetch_secrets()
+            vault_provider.start_background_refresh()
+        except Exception as e:
+            logger.error(f"Failed to fetch initial secrets from Vault: {e}")
+            raise RuntimeError(f"Vault initialization failed: {e}")
+
+    verify = settings.SSL_CA_BUNDLE_PATH if settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH else True
+    cert = None
+    if settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
+        cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
 
     limits = httpx.Limits(
         max_keepalive_connections=settings.HTTP_MAX_KEEPALIVE_CONNECTIONS,
@@ -96,6 +110,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         timeout=timeout,
         limits=limits,
         http2=True,
+        verify=verify,
+        cert=cert,
     )
 
     observer = Observer()
@@ -130,6 +146,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     observer.stop()
     observer.join()
     await app.state.http_client.aclose()
+    
+    from llm_shield_proxy.security.vault_client import vault_provider
+    await vault_provider.aclose()
     
     # Cleanly close gRPC server
     grpc_server.close()
@@ -190,10 +209,17 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
             timeout=settings.HTTP_TIMEOUT_SECONDS,
             connect=settings.HTTP_CONNECT_TIMEOUT_SECONDS,
         )
+        verify = settings.SSL_CA_BUNDLE_PATH if settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH else True
+        cert = None
+        if settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
+            cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
+
         client = httpx.AsyncClient(
             timeout=timeout,
             limits=limits,
             http2=True,
+            verify=verify,
+            cert=cert,
         )
         request.app.state.http_client = client
     return client
@@ -291,11 +317,23 @@ PROVIDER_KEY_MAP: Dict[str, str] = {
 
 def resolve_upstream_key(hostname: str) -> Optional[str]:
     """Resolves centralized enterprise provider key via dictionary lookup."""
+    from llm_shield_proxy.security.vault_client import vault_provider
+    
     attr_name = PROVIDER_KEY_MAP.get(hostname)
     if attr_name:
+        if settings.ENABLE_VAULT_SECRETS:
+            key = vault_provider.get_secret(attr_name)
+            if key:
+                return key
         key = getattr(settings, attr_name, None)
         if key:
             return key
+            
+    if settings.ENABLE_VAULT_SECRETS:
+        key = vault_provider.get_secret("UPSTREAM_API_KEY")
+        if key:
+            return key
+            
     return settings.UPSTREAM_API_KEY
 
 

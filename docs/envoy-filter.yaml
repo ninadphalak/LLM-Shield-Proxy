@@ -43,6 +43,10 @@ static_resources:
               grpc_service:
                 envoy_grpc:
                   cluster_name: llm_shield_ext_proc_cluster
+                timeout: 120s
+              # CRITICAL GOTCHA: Envoy default message_timeout is extremely short.
+              # Must be set high enough to survive slow LLM responses (TTFT)
+              message_timeout: 120s
               processing_mode:
                 # We need request_body for prompt redaction
                 request_body_mode: BUFFERED
