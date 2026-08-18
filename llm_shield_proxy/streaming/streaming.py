@@ -139,130 +139,142 @@ async def rehydrate_sse_stream(
     Yields:
         Rehydrated, UTF-8 encoded Server-Sent Events bytes.
     """
-    buffer = SSERehydrationBuffer(vault)
-    line_accumulator = ""
-    client_disconnected = False
-    max_line_length = settings.MAX_SSE_LINE_LENGTH
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    from llm_shield_proxy.security.attestation import MerkleAttestationStream
+    attestation = MerkleAttestationStream(session_id=vault.session_id)
 
-    cached_id = "chatcmpl-watermark"
-    cached_object = "chat.completion.chunk"
-    cached_created = 0
-    cached_model = "unknown"
-    is_anthropic_stream = False
+    async def _inner_stream() -> AsyncGenerator[bytes, None]:
+        nonlocal watermark_text
+        buffer = SSERehydrationBuffer(vault)
+        line_accumulator = ""
+        client_disconnected = False
+        max_line_length = settings.MAX_SSE_LINE_LENGTH
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+        cached_id = "chatcmpl-watermark"
+        cached_object = "chat.completion.chunk"
+        cached_created = 0
+        cached_model = "unknown"
+        is_anthropic_stream = False
+
+        try:
+            async for chunk in raw_stream:
+                chunk_text = decoder.decode(chunk, final=False)
+                line_accumulator += chunk_text
+
+                if len(line_accumulator) > max_line_length:
+                    raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
+
+                while "\n" in line_accumulator:
+                    line, line_accumulator = line_accumulator.split("\n", 1)
+                    stripped = line.strip()
+
+                    if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                        raw_json = stripped[6:]
+                        try:
+                            data_obj = json.loads(raw_json)
+                            
+                            if isinstance(data_obj, dict) and data_obj.get("type") in ("message_start", "content_block_delta", "content_block_start"):
+                                is_anthropic_stream = True
+
+                            if "id" in data_obj and cached_id == "chatcmpl-watermark":
+                                cached_id = data_obj.get("id", cached_id)
+                                cached_object = data_obj.get("object", cached_object)
+                                cached_created = data_obj.get("created", cached_created)
+                                cached_model = data_obj.get("model", cached_model)
+
+                            # 1. OpenAI Chat Completion Delta
+                            choices = data_obj.get("choices", [])
+                            if choices and isinstance(choices, list):
+                                delta = choices[0].get("delta", {})
+                                if "content" in delta and isinstance(delta["content"], str):
+                                    raw_content = delta["content"]
+                                    rehydrated_content = buffer.process_delta_text(raw_content)
+                                    delta["content"] = rehydrated_content
+                                    data_obj["choices"][0]["delta"] = delta
+                                    line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                            # 2. Anthropic Content Block Delta
+                            elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
+                                delta = data_obj["delta"]
+                                if "text" in delta and isinstance(delta["text"], str):
+                                    raw_content = delta["text"]
+                                    rehydrated_content = buffer.process_delta_text(raw_content)
+                                    delta["text"] = rehydrated_content
+                                    data_obj["delta"] = delta
+                                    line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                            # 3. Anthropic Content Block Start / Generic text delta
+                            elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
+                                cb = data_obj["content_block"]
+                                if "text" in cb and isinstance(cb["text"], str):
+                                    raw_content = cb["text"]
+                                    rehydrated_content = buffer.process_delta_text(raw_content)
+                                    cb["text"] = rehydrated_content
+                                    data_obj["content_block"] = cb
+                                    line = f"data: {json.dumps(data_obj).decode('utf-8')}"
+                        except (json.JSONDecodeError, TypeError, KeyError):
+                            pass
+
+                        yield (line + "\n").encode("utf-8")
+                    elif stripped == "data: [DONE]":
+                        # Flush the buffer completely BEFORE yielding the [DONE] signal
+                        remaining = buffer.process_delta_text("", is_final=True)
+                        if remaining:
+                            flush_obj = {"choices": [{"delta": {"content": remaining}}]}
+                            yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                            
+                        if watermark_text:
+                            if is_anthropic_stream:
+                                anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
+                                yield anthropic_chunk.encode("utf-8")
+                            else:
+                                watermark_obj = {
+                                    "id": cached_id,
+                                    "object": cached_object,
+                                    "created": cached_created,
+                                    "model": cached_model,
+                                    "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                                }
+                                yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                            watermark_text = "" # prevent double yield
+                            
+                        yield (line + "\n").encode("utf-8")
+                    else:
+                        yield (line + "\n").encode("utf-8")
+
+        except (GeneratorExit, asyncio.CancelledError):
+            client_disconnected = True
+            raise
+        finally:
+            if not client_disconnected:
+                trailing_text = decoder.decode(b"", final=True)
+                if trailing_text:
+                    line_accumulator += trailing_text
+
+                remaining = buffer.process_delta_text("", is_final=True)
+                if remaining:
+                    flush_obj = {"choices": [{"delta": {"content": remaining}}]}
+                    yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+
+                if watermark_text:
+                    if is_anthropic_stream:
+                        anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
+                        yield anthropic_chunk.encode("utf-8")
+                    else:
+                        watermark_obj = {
+                            "id": cached_id,
+                            "object": cached_object,
+                            "created": cached_created,
+                            "model": cached_model,
+                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                        }
+                        yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                    watermark_text = ""
+
+                if line_accumulator:
+                    yield line_accumulator.encode("utf-8")
 
     try:
-        async for chunk in raw_stream:
-            chunk_text = decoder.decode(chunk, final=False)
-            line_accumulator += chunk_text
-
-            if len(line_accumulator) > max_line_length:
-                raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
-
-            while "\n" in line_accumulator:
-                line, line_accumulator = line_accumulator.split("\n", 1)
-                stripped = line.strip()
-
-                if stripped.startswith("data: ") and stripped != "data: [DONE]":
-                    raw_json = stripped[6:]
-                    try:
-                        data_obj = json.loads(raw_json)
-                        
-                        if isinstance(data_obj, dict) and data_obj.get("type") in ("message_start", "content_block_delta", "content_block_start"):
-                            is_anthropic_stream = True
-
-                        if "id" in data_obj and cached_id == "chatcmpl-watermark":
-                            cached_id = data_obj.get("id", cached_id)
-                            cached_object = data_obj.get("object", cached_object)
-                            cached_created = data_obj.get("created", cached_created)
-                            cached_model = data_obj.get("model", cached_model)
-
-                        # 1. OpenAI Chat Completion Delta
-                        choices = data_obj.get("choices", [])
-                        if choices and isinstance(choices, list):
-                            delta = choices[0].get("delta", {})
-                            if "content" in delta and isinstance(delta["content"], str):
-                                raw_content = delta["content"]
-                                rehydrated_content = buffer.process_delta_text(raw_content)
-                                delta["content"] = rehydrated_content
-                                data_obj["choices"][0]["delta"] = delta
-                                line = f"data: {json.dumps(data_obj).decode('utf-8')}"
-                        # 2. Anthropic Content Block Delta
-                        elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
-                            delta = data_obj["delta"]
-                            if "text" in delta and isinstance(delta["text"], str):
-                                raw_content = delta["text"]
-                                rehydrated_content = buffer.process_delta_text(raw_content)
-                                delta["text"] = rehydrated_content
-                                data_obj["delta"] = delta
-                                line = f"data: {json.dumps(data_obj).decode('utf-8')}"
-                        # 3. Anthropic Content Block Start / Generic text delta
-                        elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
-                            cb = data_obj["content_block"]
-                            if "text" in cb and isinstance(cb["text"], str):
-                                raw_content = cb["text"]
-                                rehydrated_content = buffer.process_delta_text(raw_content)
-                                cb["text"] = rehydrated_content
-                                data_obj["content_block"] = cb
-                                line = f"data: {json.dumps(data_obj).decode('utf-8')}"
-                    except (json.JSONDecodeError, TypeError, KeyError):
-                        pass
-
-                    yield (line + "\n").encode("utf-8")
-                elif stripped == "data: [DONE]":
-                    # Flush the buffer completely BEFORE yielding the [DONE] signal
-                    remaining = buffer.process_delta_text("", is_final=True)
-                    if remaining:
-                        flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                        yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
-                        
-                    if watermark_text:
-                        if is_anthropic_stream:
-                            anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
-                            yield anthropic_chunk.encode("utf-8")
-                        else:
-                            watermark_obj = {
-                                "id": cached_id,
-                                "object": cached_object,
-                                "created": cached_created,
-                                "model": cached_model,
-                                "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
-                            }
-                            yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
-                        watermark_text = "" # prevent double yield
-                        
-                    yield (line + "\n").encode("utf-8")
-                else:
-                    yield (line + "\n").encode("utf-8")
-
-    except (GeneratorExit, asyncio.CancelledError):
-        client_disconnected = True
-        raise
+        async for outgoing_chunk in _inner_stream():
+            attestation.update(outgoing_chunk)
+            yield outgoing_chunk
     finally:
-        if not client_disconnected:
-            trailing_text = decoder.decode(b"", final=True)
-            if trailing_text:
-                line_accumulator += trailing_text
-
-            remaining = buffer.process_delta_text("", is_final=True)
-            if remaining:
-                flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
-
-            if watermark_text:
-                if is_anthropic_stream:
-                    anthropic_chunk = f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": 0, "delta": {{"type": "text_delta", "text": "{watermark_text}"}}}}\n\n'
-                    yield anthropic_chunk.encode("utf-8")
-                else:
-                    watermark_obj = {
-                        "id": cached_id,
-                        "object": cached_object,
-                        "created": cached_created,
-                        "model": cached_model,
-                        "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
-                    }
-                    yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
-                watermark_text = ""
-
-            if line_accumulator:
-                yield line_accumulator.encode("utf-8")
+        attestation.emit_audit_receipt()
