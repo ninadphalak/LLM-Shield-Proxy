@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     MAX_SESSION_VAULTS: int = Field(default=10000, description="Maximum capacity of in-memory LRU session vault cache")
 
     # Redaction & Detection Cascade Settings
+    SHIELD_DEFAULT_MASKING_MODE: str = Field(
+        default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_CRYPTO)"
+    )
+    SHIELD_ENCRYPTION_KEY: Optional[str] = Field(
+        default=None, description="256-bit AES-GCM encryption key for stateless crypto masking (base64 or hex)"
+    )
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
         default=True, description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
     )

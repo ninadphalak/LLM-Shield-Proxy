@@ -49,17 +49,28 @@ class SSERehydrationBuffer:
         Returns:
             Number of trailing characters to retain in the buffer.
         """
-        if not text or not self.vault.token_to_original:
+        if not text:
             return 0
 
         max_k = 0
-        for token in self.vault.token_to_original:
-            # Check prefix lengths up to min(len(text), len(token) - 1)
-            limit = min(len(text), len(token) - 1)
-            for k in range(limit, max_k, -1):
-                if text.endswith(token[:k]):
-                    max_k = k
-                    break
+        token_to_original = getattr(self.vault, "token_to_original", None)
+        if token_to_original:
+            for token in token_to_original:
+                # Check prefix lengths up to min(len(text), len(token) - 1)
+                limit = min(len(text), len(token) - 1)
+                for k in range(limit, max_k, -1):
+                    if text.endswith(token[:k]):
+                        max_k = k
+                        break
+
+        # Check for partial [ENC_v1_ tokens for StatelessCryptoVault
+        if type(self.vault).__name__ == "StatelessCryptoVault":
+            last_bracket_idx = text.rfind('[')
+            if last_bracket_idx != -1:
+                suffix = text[last_bracket_idx:]
+                prefix = "[ENC_v1_"
+                if prefix.startswith(suffix) or (suffix.startswith(prefix) and ']' not in suffix):
+                    max_k = max(max_k, len(suffix))
 
         return max_k
 
@@ -81,7 +92,8 @@ class SSERehydrationBuffer:
         if len(self.content_buffer) > 64 * 1024:
             raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
 
-        if is_final or not self.vault.token_to_original:
+        token_to_original = getattr(self.vault, "token_to_original", None)
+        if is_final or (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
             rehydrated = self.vault.rehydrate(self.content_buffer, retention_length=0)
             self.content_buffer = ""
             return rehydrated

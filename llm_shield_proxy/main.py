@@ -254,11 +254,12 @@ async def proxy_catch_all(
     path: str,
     x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
     x_upstream_base_url: Optional[str] = Header(None, alias="X-Upstream-Base-Url"),
+    x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
 ) -> Response:
     """Main reverse-proxy catch-all endpoint handling redaction and rehydration."""
     start_time = time.perf_counter()
     try:
-        response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url)
+        response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode)
         llm_shield_requests_total.labels(status_code=response.status_code).inc()
         llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
         return response
@@ -273,6 +274,7 @@ async def _proxy_catch_all_internal(
     path: str,
     x_session_id: Optional[str],
     x_upstream_base_url: Optional[str],
+    x_shield_masking_mode: Optional[str] = None,
 ) -> Response:
     # Route exemptions
     if path in ("health", "healthz", "livez"):
@@ -379,8 +381,31 @@ async def _proxy_catch_all_internal(
     request_id = getattr(request.state, "request_id", None)
     request.state.virtual_key_id = virtual_key_id
 
-    # Retrieve session-bound vault
-    vault = vault_store.get_vault(x_session_id, virtual_key_id)
+    # Vault resolution based on masking mode
+    from llm_shield_proxy.masking import MaskingMode, resolve_masking_mode
+    from llm_shield_proxy.crypto_vault import StatelessCryptoVault
+    
+    masking_mode = resolve_masking_mode(x_shield_masking_mode)
+    
+    if masking_mode == MaskingMode.STATELESS_CRYPTO:
+        vault = StatelessCryptoVault()
+    elif masking_mode == MaskingMode.SCRUB:
+        class ScrubVault:
+            def __init__(self) -> None:
+                self.type_counters: dict[str, int] = {}
+            def get_or_create_token(self, original_val: str, entity_type: str) -> str:
+                self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
+                return "[REDACTED]"
+            def rehydrate(self, text: str, retention_length: int = 0) -> str:
+                return text
+        vault = ScrubVault() # type: ignore
+    elif masking_mode == MaskingMode.STRUCTURAL_TAG:
+        vault = vault_store.get_vault(x_session_id, virtual_key_id)
+        vault.synthetic = False
+    else: # SYNTHETIC
+        vault = vault_store.get_vault(x_session_id, virtual_key_id)
+        vault.synthetic = True
+        
     http_client = get_http_client(request)
 
     # Handle POST Payload Redaction
