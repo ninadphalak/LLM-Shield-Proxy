@@ -42,6 +42,7 @@ from llm_shield_proxy.observability.metrics import (
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
+from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.security.circuit_breaker import check_circuit_breaker, CircuitBreakerTrippedException
 
 APP_VERSION = "1.0.20"
@@ -458,6 +459,20 @@ async def _proxy_catch_all_internal(
                             }
                         )
 
+            # Pre-flight Watermark Check
+            watermark_text = ""
+            if settings.ENABLE_WATERMARKING and settings.SHIELD_WATERMARK_SECRET:
+                response_format = payload.get("response_format", {})
+                fmt_type = response_format.get("type", "") if isinstance(response_format, dict) else ""
+                if "json" not in fmt_type.lower():
+                    watermark_text = generate_watermark_text(
+                        secret=settings.SHIELD_WATERMARK_SECRET,
+                        authorization_header=request.headers.get("authorization"),
+                        x_virtual_key_header=request.headers.get("x-virtual-key"),
+                        client_ip=request.client.host if request.client else None,
+                        session_id=x_session_id or "unknown_session"
+                    )
+
             is_streaming = bool(payload.get("stream", False))
             try:
                 redacted_payload = pii_engine.redact_payload(payload, vault)
@@ -524,7 +539,7 @@ async def _proxy_catch_all_internal(
                 async def wrapped_stream() -> AsyncGenerator[bytes, None]:
                     llm_shield_sse_active_streams.inc()
                     try:
-                        async for chunk in rehydrate_sse_stream(upstream_res.aiter_bytes(), vault):
+                        async for chunk in rehydrate_sse_stream(upstream_res.aiter_bytes(), vault, watermark_text=watermark_text):
                             yield chunk
                     finally:
                         llm_shield_sse_active_streams.dec()
