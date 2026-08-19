@@ -53,7 +53,7 @@ dependencies = [
     "google-re2>=1.1.20231101",
     "cachetools>=5.3.0",
     "grpclib>=0.4.3",
-    "betterproto>=2.0.0b6",
+    "betterproto>=2.0.0",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp>=1.20.0"
@@ -139,3 +139,9 @@ replace = "v{new_version}.zip"
 filename = "deploy/helm/llm-shield-proxy/Chart.yaml"
 search = 'appVersion: "{current_version}"'
 replace = 'appVersion: "{new_version}"'
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:fastapi.*:",
+    "ignore::DeprecationWarning:starlette.*:",
+]
