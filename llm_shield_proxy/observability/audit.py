@@ -25,9 +25,21 @@ audit_logger = logging.getLogger("llm_shield.audit")
 audit_logger.setLevel(logging.INFO)
 
 if not audit_logger.handlers:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    audit_logger.addHandler(handler)
+    import queue
+    from logging.handlers import QueueHandler, QueueListener
+
+    # True asynchronous logging: a lock-free queue that won't block the ASGI event loop.
+    _log_queue = queue.Queue(-1)
+    _queue_handler = QueueHandler(_log_queue)
+
+    _stream_handler = logging.StreamHandler(sys.stdout)
+    _stream_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    # The listener runs on a dedicated background thread
+    _queue_listener = QueueListener(_log_queue, _stream_handler, respect_handler_level=True)
+    _queue_listener.start()
+
+    audit_logger.addHandler(_queue_handler)
 
 
 class AuditLogger:
