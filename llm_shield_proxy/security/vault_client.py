@@ -146,6 +146,11 @@ class AsyncVaultSecretProvider:
             except Exception as e:
                 # Log but do not overwrite cached secrets
                 logger.error(f"Background Vault refresh failed: {e}. Retaining previously cached secrets.")
+                try:
+                    from llm_shield_proxy.observability.metrics import llm_shield_vault_refresh_errors_total
+                    llm_shield_vault_refresh_errors_total.inc()
+                except ImportError:
+                    pass
 
     def start_background_refresh(self) -> None:
         """Start the background refresh loop if not already running."""

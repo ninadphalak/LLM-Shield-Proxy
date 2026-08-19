@@ -362,10 +362,6 @@ async def _proxy_catch_all_internal(
     x_shield_masking_mode: Optional[str] = None,
     x_shield_bypass_breaker: Optional[str] = None,
 ) -> Response:
-    # Route exemptions
-    if path in ("health", "healthz", "livez"):
-        return JSONResponse(status_code=200, content={"status": "ok", "service": "llm-shield-proxy"})
-
     if path == "metrics":
         return await metrics_endpoint(request)
 

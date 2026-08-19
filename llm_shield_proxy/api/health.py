@@ -62,7 +62,7 @@ async def _check_redis() -> bool:
     """Validates Redis rate limiting backend."""
     try:
         if isinstance(vault_store, RedisVaultStore):
-            return await vault_store.ping_async()
+            return await asyncio.wait_for(vault_store.ping_async(), timeout=0.5)
         return True
     except Exception:
         return False
