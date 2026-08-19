@@ -52,7 +52,8 @@ dependencies = [
     "cryptography>=41.0.0",
     "google-re2>=1.1.20231101",
     "cachetools>=5.3.0",
-    "grpclib>=0.4.3"
+    "grpclib>=0.4.3",
+    "betterproto>=2.0.0b6"
 ]
 
 [project.optional-dependencies]
