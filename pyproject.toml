@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.2.2"
+version = "1.2.3"
 description = "Fast, zero-egress PII redaction and context preservation reverse proxy for LLM streaming and completions."
 readme = "README.md"
 requires-python = ">=3.9"
