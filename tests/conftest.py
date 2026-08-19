@@ -11,6 +11,8 @@ def test_environment_setup():
     settings.ENABLE_RATE_LIMITING = False
     settings.ENABLE_VAULT_SECRETS = False
     settings.ENABLE_TIER3_ONNX_NER = False
+    settings.ENABLE_EXT_PROC = False
+    settings.EXT_PROC_SOCK_PATH = "/tmp/ext_proc.sock"
     settings._valid_virtual_keys_set = frozenset()
     settings.VALID_VIRTUAL_KEYS = ""
     settings.SHIELD_ENCRYPTION_KEY = "00" * 32

@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     observer.start()
 
     # Start gRPC ext_proc server in background
-    sock_path = "/var/run/llm-shield/ext_proc.sock"
+    sock_path = settings.EXT_PROC_SOCK_PATH
 
     if os.name != "nt":
         sock_dir = os.path.dirname(sock_path)
