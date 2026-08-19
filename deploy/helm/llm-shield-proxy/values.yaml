@@ -1,0 +1,40 @@
+replicaCount: 1
+
+image:
+  repository: llm-shield-proxy
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+webhook:
+  certManager:
+    enabled: false
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 60Mi
+  requests:
+    cpu: 100m
+    memory: 60Mi
+
+service:
+  type: ClusterIP
+  httpPort: 8000
+  grpcPort: 50051
+
+config:
+  redisUrl: ""
+  vaultAddr: ""
+  auditLogFormat: "RFC6902_DIFF"
+  fipsStrictMode: "true"
+
+mTLS:
+  enabled: false
+  caBundlePath: ""
+  clientCertPath: ""
+  clientKeyPath: ""
+
+prometheus:
+  enabled: true
+  prometheusRule:
+    enabled: false

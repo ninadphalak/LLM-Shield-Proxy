@@ -1,0 +1,51 @@
+{{- if and .Values.prometheus.enabled .Values.prometheus.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "llm-shield-proxy.fullname" . }}-alerts
+  labels:
+    {{- include "llm-shield-proxy.labels" . | nindent 4 }}
+spec:
+  groups:
+  - name: llm-shield-proxy.rules
+    rules:
+    - alert: LLMShieldDLPFailureRateSpike
+      expr: |
+        sum(rate(llm_shield_requests_total{status_code="503"}[5m]))
+        / sum(rate(llm_shield_requests_total[5m])) > 0.02
+      for: 5m
+      labels:
+        severity: critical
+        team: security-sre
+      annotations:
+        summary: High rate of DLP failures (FAIL_CLOSED)
+        description: >
+          The proxy is blocking over 2% of requests with 503s in the last 5 minutes,
+          which may indicate a broad PII pattern false-positive or an active data exfiltration attempt.
+
+    - alert: LLMShieldLookaheadBufferBackpressure
+      expr: |
+        histogram_quantile(0.99, sum(rate(llm_shield_latency_seconds_bucket[5m])) by (le)) > 2.0
+      for: 2m
+      labels:
+        severity: warning
+        team: streaming-sre
+      annotations:
+        summary: SSE Chunk Rehydration Latency Spike
+        description: >
+          The 99th percentile proxy latency is exceeding 2 seconds, which may indicate
+          SSE chunk rehydration buffer backpressure or ONNX CPU starvation.
+
+    - alert: LLMShieldVaultAuthExpiry
+      expr: |
+        rate(llm_shield_vault_refresh_errors_total[5m]) > 0
+      for: 1m
+      labels:
+        severity: critical
+        team: identity-sre
+      annotations:
+        summary: Vault Background Rotation Failure
+        description: >
+          The proxy failed to automatically refresh its Vault token or cached secrets.
+          Review the Vault server availability and the kubernetes service account token.
+{{- end }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llm-shield-proxy
+description: A Helm chart for Enterprise LLM-Shield Proxy
+type: application
+version: 1.0.0
+appVersion: "1.0.20"

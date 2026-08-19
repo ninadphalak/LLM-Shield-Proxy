@@ -14,8 +14,11 @@ import secrets
 import socket
 import sys
 import threading
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+from llm_shield_proxy.core.config import settings
 
 # Structured audit logger configuration
 audit_logger = logging.getLogger("llm_shield.audit")
@@ -61,6 +64,7 @@ class AuditLogger:
             "event": "PROXY_STARTUP",
             "service": "LLM-Shield",
             "instance_id": cls._instance_id,
+            "process_id": os.getpid(),
             "initial_hash": initial_hash,
         }
         cls._compute_and_append_hash(log_entry)
@@ -74,6 +78,7 @@ class AuditLogger:
         virtual_key_id: str = "BYOK",
         status_code: int = 200,
         request_id: Optional[str] = None,
+        patch_operations: Optional[list[Dict[str, Any]]] = None,
     ) -> None:
         """Emits a structured JSON audit event recording entity redaction counts."""
         log_entry: Dict[str, Any] = {
@@ -81,6 +86,7 @@ class AuditLogger:
             "event": "PII_REDACTION_EVENT",
             "service": "LLM-Shield",
             "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
             "request_id": request_id or "n/a",
             "virtual_key_id": virtual_key_id,
             "session_id": session_id or "ephemeral",
@@ -89,6 +95,9 @@ class AuditLogger:
             "total_entities_redacted": sum(entity_counts.values()),
             "entity_breakdown": entity_counts,
         }
+        
+        if settings.AUDIT_LOG_FORMAT == "RFC6902_DIFF" and patch_operations is not None:
+            log_entry["patch_operations"] = patch_operations
         AuditLogger._compute_and_append_hash(log_entry)
         audit_logger.info(json.dumps(log_entry))
 
@@ -115,6 +124,7 @@ class AuditLogger:
             "event": "PROXY_TRAFFIC_EVENT",
             "service": "LLM-Shield",
             "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
             "request_id": request_id or "n/a",
             "virtual_key_id": virtual_key_id,
             "session_id": session_id or "ephemeral",

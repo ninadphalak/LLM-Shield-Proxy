@@ -1,0 +1,29 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "llm-shield-proxy.fullname" . }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: "{{ .Release.Namespace }}/{{ include "llm-shield-proxy.fullname" . }}-webhook-cert"
+  {{- end }}
+webhooks:
+  - name: inject.llm-shield.io
+    clientConfig:
+      service:
+        name: {{ include "llm-shield-proxy.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: "/mutate"
+      {{- if not .Values.webhook.certManager.enabled }}
+      {{- $ca := genCA "llm-shield-proxy-ca" 3650 }}
+      caBundle: {{ $ca.Cert | b64enc }}
+      {{- end }}
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    sideEffects: None
+    admissionReviewVersions: ["v1"]
+    objectSelector:
+      matchLabels:
+        llm-shield.io/inject: "true"

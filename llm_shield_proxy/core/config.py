@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000, description="Proxy listen port")
     WORKERS: int = Field(default=1, description="Number of uvicorn worker processes")
     LOG_LEVEL: str = Field(default="INFO", description="Standard logging level")
+    AUDIT_LOG_FORMAT: Literal["STANDARD", "RFC6902_DIFF"] = Field(
+        default="STANDARD", description="Format for audit logs (STANDARD or RFC6902_DIFF)"
+    )
+    FIPS_STRICT_MODE: bool = Field(default=True, description="Strict fail-closed for FIPS tests")
 
     # Upstream Provider Configuration
     DEFAULT_UPSTREAM_PROVIDER: Literal["openai", "azure", "anthropic", "bedrock"] = Field(
