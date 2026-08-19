@@ -23,3 +23,8 @@ llm_shield_latency_seconds_bucket = Histogram(
     "llm_shield_latency_seconds",
     "End-to-end request processing latency in seconds",
 )
+
+llm_shield_vault_refresh_errors_total = Counter(
+    "llm_shield_vault_refresh_errors_total",
+    "Total number of background Vault secret refresh errors",
+)
