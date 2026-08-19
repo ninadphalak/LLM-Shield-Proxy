@@ -84,7 +84,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manages application lifecycle, shared HTTP connection pools, and background observers."""
     import os
 
-    from llm_shield_proxy.api.grpc_service import serve_ext_proc
+    if settings.ENABLE_EXT_PROC:
+        from llm_shield_proxy.api.grpc_service import serve_ext_proc
     from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
     from llm_shield_proxy.security.vault_client import vault_provider
 
@@ -141,26 +142,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     observer.start()
 
     # Start gRPC ext_proc server in background
+    grpc_server = None
     sock_path = settings.EXT_PROC_SOCK_PATH
 
-    if os.name != "nt":
-        sock_dir = os.path.dirname(sock_path)
-        # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
-        os.makedirs(sock_dir, exist_ok=True)
-        os.chmod(sock_dir, 0o770)  # nosec B103
+    if settings.ENABLE_EXT_PROC:
+        if os.name != "nt":
+            sock_dir = os.path.dirname(sock_path)
+            # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
+            os.makedirs(sock_dir, exist_ok=True)
+            os.chmod(sock_dir, 0o770)  # nosec B103
 
-        if os.path.exists(sock_path):
-            os.unlink(sock_path)
+            if os.path.exists(sock_path):
+                os.unlink(sock_path)
 
-        # SECURITY: Prevent local privilege escalation (TOCTOU) by using umask
-        # before socket creation, rather than chmod after creation.
-        old_umask = os.umask(0o117) # Inverts to 0o660
-        try:
+            # SECURITY: Prevent local privilege escalation (TOCTOU) by using umask
+            # before socket creation, rather than chmod after creation.
+            old_umask = os.umask(0o117) # Inverts to 0o660
+            try:
+                grpc_server = await serve_ext_proc(sock_path)
+            finally:
+                os.umask(old_umask)
+        else:
             grpc_server = await serve_ext_proc(sock_path)
-        finally:
-            os.umask(old_umask)
-    else:
-        grpc_server = await serve_ext_proc(sock_path)
 
     yield
 
@@ -179,10 +182,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await vault_provider.aclose()
 
     # Cleanly close gRPC server
-    grpc_server.close()
-    await grpc_server.wait_closed()
-    if os.path.exists(sock_path):
-        os.unlink(sock_path)
+    if settings.ENABLE_EXT_PROC and grpc_server:
+        grpc_server.close()
+        await grpc_server.wait_closed()
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
 
 
 app = FastAPI(
