@@ -26,7 +26,7 @@ _CACHE_TTL_SECONDS = 2.0
 @health_router.get("/healthz")
 async def liveness_probe() -> Dict[str, str]:
     """Instant zero-await Liveness probe ensuring the event loop is responsive."""
-    return {"status": "alive"}
+    return {"status": "ok"}
 
 
 async def _check_pii_engine() -> bool:

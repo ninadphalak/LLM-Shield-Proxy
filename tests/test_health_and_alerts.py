@@ -15,7 +15,7 @@ async def test_livez_endpoint():
     for path in ["/livez", "/health", "/healthz"]:
         response = client.get(path)
         assert response.status_code == 200
-        assert response.json() == {"status": "alive"}
+        assert response.json() == {"status": "ok"}
 
 @pytest.mark.asyncio
 async def test_readyz_endpoint(monkeypatch):

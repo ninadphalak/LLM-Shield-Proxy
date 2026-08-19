@@ -33,7 +33,7 @@ def test_health_and_metrics():
         # Health endpoint
         res_health = client.get("/health")
         assert res_health.status_code == 200, f"Expected 200, got {res_health.status_code}"
-        assert res_health.json()["status"] == "alive"
+        assert res_health.json()["status"] == "ok"
 
         # Metrics endpoint
         res_metrics = client.get("/metrics")
