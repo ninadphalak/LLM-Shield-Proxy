@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 
+
 def run_command(cmd, shell=False):
     print(f"\n🚀 Running: {' '.join(cmd) if not shell else cmd}")
     result = subprocess.run(cmd, shell=shell)
