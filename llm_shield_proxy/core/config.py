@@ -33,6 +33,8 @@ class Settings(BaseSettings):
         default="STANDARD", description="Format for audit logs (STANDARD or RFC6902_DIFF)"
     )
     FIPS_STRICT_MODE: bool = Field(default=True, description="Strict fail-closed for FIPS tests")
+    ENABLE_EXT_PROC: bool = Field(default=True, description="Enable Envoy ext_proc gRPC hook")
+    EXT_PROC_SOCK_PATH: str = Field(default="/var/run/llm-shield/ext_proc.sock", description="Path to the ext_proc UDS socket")
 
     # Upstream Provider Configuration
     DEFAULT_UPSTREAM_PROVIDER: Literal["openai", "azure", "anthropic", "bedrock"] = Field(
