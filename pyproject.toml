@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.2.3"
+version = "1.2.4"
 description = "Fast, zero-egress PII redaction and context preservation reverse proxy for LLM streaming and completions."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -50,7 +50,8 @@ dependencies = [
     "prometheus-client>=0.17.0",
     "watchdog>=3.0.0",
     "cryptography>=41.0.0",
-    "google-re2>=1.1.20231101"
+    "google-re2>=1.1.20231101",
+    "cachetools>=5.3.0"
 ]
 
 [project.optional-dependencies]
