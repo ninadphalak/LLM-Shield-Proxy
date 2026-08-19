@@ -83,6 +83,7 @@ LLM-Shield-Proxy is validated against an exhaustive suite of **78 automated unit
 
 #### Service Mesh Native gRPC ext_proc Integration
 * **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks. By implementing Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`), it achieves Zero HTTP network hops, streaming buffers directly over highly secure UDS (Unix Domain Sockets).
+* **Flags**: [`ENABLE_EXT_PROC`](DEPLOYMENT.md), [`EXT_PROC_SOCK_PATH`](DEPLOYMENT.md)
 
 #### Zero-Dependency Kubernetes Mutating Webhook
 * **Implementation Details**: Intercepts Pod deployment manifests directly via a standalone Mutating Webhook to seamlessly inject the LLM-Shield sidecar container and mTLS certificates, requiring zero external dependencies or elevated cluster privileges.
