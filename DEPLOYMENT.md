@@ -12,7 +12,9 @@
 
 ## 3. Service Mesh Native gRPC ext_proc Integration
 * **Implementation Details**: Implements Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`). Achieves Zero HTTP network hops by streaming buffers directly over UDS (Unix Domain Sockets).
-* **Relevant Flags**: N/A (Handled via Envoy socket proxy configuration).
+* **Relevant Flags**: 
+  * [`ENABLE_EXT_PROC`](#advanced-feature-flags-compliance-security-and-engineering)
+  * [`EXT_PROC_SOCK_PATH`](#advanced-feature-flags-compliance-security-and-engineering)
 
 ## 4. Traffic Engineering & Resiliency
 * **Implementation Details**:
@@ -76,6 +78,8 @@
 | **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Secret for HMAC-SHA256 watermarking. |
 | **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry & WORM-Compliant Merkle Logging. |
 | **OTel & Tracing** | `TELEMETRY_ENDPOINT_URL` | `None` | Target webhook endpoint URL for audit telemetry. |
+| **gRPC ext_proc Mesh** | `ENABLE_EXT_PROC` | `True` | Enable Envoy ext_proc gRPC hook. |
+| **gRPC ext_proc Mesh** | `EXT_PROC_SOCK_PATH` | `/var/run/llm-shield/ext_proc.sock` | Path to the ext_proc UDS socket. |
 | **Fail-Safe Policy** | `SHIELD_FAILURE_MODE` | `FAIL_CLOSED` | Enforces Zero-Trust default ($O(1)$ in-memory mapping FAIL_CLOSED). |
 | **Anthropic Adapter** | `DEFAULT_UPSTREAM_PROVIDER` | `openai` | Set to `anthropic` for native OpenAI-to-Anthropic request transformation. |
 | **Anthropic Adapter** | `ANTHROPIC_API_VERSION` | `2023-06-01` | Anthropic API version header for SSE stream normalization. |
