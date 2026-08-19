@@ -5,8 +5,9 @@ event loop starvation and caps memory usage to strictly adhere to the < 60 MB RS
 """
 
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 
@@ -23,14 +24,23 @@ def _init_tracing() -> trace.Tracer:
     # We strictly bound the queue size and export batch size to prevent unbounded memory bloat.
     from llm_shield_proxy.core.config import settings
     if settings.TELEMETRY_ENABLED:
+        headers = {}
+        if settings.TELEMETRY_API_KEY:
+            headers["Authorization"] = settings.TELEMETRY_API_KEY
+
+        # Truly asynchronous lock-free network export!
+        exporter = OTLPSpanExporter(
+            endpoint=settings.TELEMETRY_ENDPOINT_URL,
+            headers=headers
+        )
         processor = BatchSpanProcessor(
-            ConsoleSpanExporter(),
+            exporter,
             max_queue_size=256,
             schedule_delay_millis=500,
             max_export_batch_size=64,
         )
         provider.add_span_processor(processor)
-        
+
     trace.set_tracer_provider(provider)
 
     return trace.get_tracer("llm-shield-proxy")
