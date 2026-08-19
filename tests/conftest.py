@@ -8,7 +8,10 @@ from llm_shield_proxy.core.config import settings
 def test_environment_setup():
     """Ensure consistent environment for tests, disregarding developer .env files."""
     settings.UPSTREAM_BASE_URL = "https://api.openai.com"
-    settings.valid_virtual_keys_set = frozenset()
+    settings.ENABLE_RATE_LIMITING = False
+    settings.ENABLE_VAULT_SECRETS = False
+    settings.ENABLE_TIER3_ONNX_NER = False
+    settings._valid_virtual_keys_set = frozenset()
     settings.VALID_VIRTUAL_KEYS = ""
     settings.SHIELD_ENCRYPTION_KEY = "00" * 32
 

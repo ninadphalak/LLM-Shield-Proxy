@@ -69,7 +69,7 @@ async def test_readyz_endpoint(monkeypatch):
 
 def test_prometheus_rule_yaml():
     """Validate Kubernetes PrometheusRule CRD YAML rendering."""
-    helm_path = Path("c:/git_repo/LLM-Shield-Proxy/deploy/helm/llm-shield-proxy/templates/prometheus-rule.yaml")
+    helm_path = Path(__file__).parent.parent / "deploy" / "helm" / "llm-shield-proxy" / "templates" / "prometheus-rule.yaml"
     assert helm_path.exists(), "prometheus-rule.yaml not found"
 
     content = helm_path.read_text(encoding="utf-8")

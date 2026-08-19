@@ -16,13 +16,13 @@ except ImportError:
 @pytest.fixture(autouse=True)
 def setup_teardown():
     orig_swapping = settings.ENABLE_SYNTHETIC_SWAPPING
-    settings.valid_virtual_keys_set = frozenset(["sk-proxy-team-a", "sk-proxy-team-b"])
+    settings._valid_virtual_keys_set = frozenset(["sk-proxy-team-a", "sk-proxy-team-b"])
     settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE = True
     settings.UPSTREAM_BASE_URL = "https://api.openai.com"
     settings.OPENAI_API_KEY = "mock_key"
     settings.ENABLE_SYNTHETIC_SWAPPING = False
     yield
-    settings.valid_virtual_keys_set = frozenset()
+    settings._valid_virtual_keys_set = frozenset()
     settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE = False
     settings.OPENAI_API_KEY = None
     settings.ENABLE_SYNTHETIC_SWAPPING = orig_swapping
