@@ -1,7 +1,7 @@
-import time
-import requests
-import json
 import sys
+
+import requests
+
 
 def test_health():
     try:
