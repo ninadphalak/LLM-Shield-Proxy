@@ -84,9 +84,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import os
     from llm_shield_proxy.api.grpc_service import serve_ext_proc
     from llm_shield_proxy.security.vault_client import vault_provider
+    from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
     
-    AuditLogger.log_startup_event()
+    if not run_fips_kat_self_test():
+        if settings.FIPS_STRICT_MODE:
+            AuditLogger.audit_logger.critical("FIPS 140-3 Cryptographic Integrity Self-Test Failed. Halting.")
+            raise RuntimeError("FIPS 140-3 Cryptographic Integrity Self-Test Failed")
+        else:
+            AuditLogger.audit_logger.critical("FIPS 140-3 KAT Failed, but FIPS_STRICT_MODE=False. Continuing.")
 
+    AuditLogger.log_startup_event()
+    
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+    print(
+        f"--- LLM-Shield Proxy Startup Diagnostics ---\n"
+        f"  PII Engine: {'Active (Tier 1, 2, 3)' if pii_engine.enable_tier3 else 'Active (Tier 1, 2)'}\n"
+        f"  FIPS 140-3 Self-Test: {'Enforced (Passed)' if settings.FIPS_STRICT_MODE else 'Permissive'}\n"
+        f"  Vault Provider: {'Enabled' if settings.ENABLE_VAULT_SECRETS else 'Disabled'}\n"
+        f"  Rate Limiter: {'Redis' if settings.REDIS_URL else 'In-Memory'}\n"
+        f"  Failure Mode: {settings.SHIELD_FAILURE_MODE}\n"
+        f"--------------------------------------------"
+    )
     if settings.ENABLE_VAULT_SECRETS:
         try:
             await vault_provider.fetch_secrets()
@@ -168,6 +186,9 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
 )
+
+from llm_shield_proxy.api.health import health_router
+app.include_router(health_router)
 
 
 @app.middleware("http")
@@ -256,44 +277,8 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
 
 
 # -----------------------------------------------------------------------------
-# Health & Observability Endpoints
+# Observability Endpoints
 # -----------------------------------------------------------------------------
-
-
-@app.get("/health", tags=["Health"])
-@app.get("/healthz", tags=["Health"])
-@app.get("/livez", tags=["Health"])
-async def liveness_probe() -> Dict[str, str]:
-    """Kubernetes liveness check endpoint."""
-    return {
-        "status": "ok",
-        "service": "llm-shield-proxy",
-        "version": APP_VERSION,
-    }
-
-
-@app.get("/readyz", tags=["Health"])
-async def readiness_probe(request: Request) -> JSONResponse:
-    """Kubernetes readiness check validating Redis backend and upstream status."""
-    redis_healthy = True
-    if isinstance(vault_store, RedisVaultStore):
-        redis_healthy = await vault_store.ping_async()
-
-    if not redis_healthy:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "degraded", "reason": "Redis backend unreachable"},
-        )
-
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "ready",
-            "service": "llm-shield-proxy",
-            "version": APP_VERSION,
-            "redis_connected": bool(settings.REDIS_URL),
-        },
-    )
 
 
 @app.get("/metrics", tags=["Observability"])
