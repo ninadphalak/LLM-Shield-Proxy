@@ -41,7 +41,7 @@ def test_vault_tenant_isolation(mock_send, mock_request):
     original_keys = settings.valid_virtual_keys_set
     original_openai_key = settings.OPENAI_API_KEY
     try:
-        settings.valid_virtual_keys_set = {"sk-proxy-tenant-A", "sk-proxy-tenant-B"}
+        settings._valid_virtual_keys_set = {"sk-proxy-tenant-A", "sk-proxy-tenant-B"}
         settings.OPENAI_API_KEY = "mock_key"
 
         # Generate PII as Tenant A
@@ -75,7 +75,7 @@ def test_vault_tenant_isolation(mock_send, mock_request):
         assert rehydrated == token_id
         assert "test@example.com" not in rehydrated
     finally:
-        settings.valid_virtual_keys_set = original_keys
+        settings._valid_virtual_keys_set = original_keys
         settings.OPENAI_API_KEY = original_openai_key
 
 
@@ -93,11 +93,11 @@ def test_vault_tenant_isolation_unit():
 
 def test_body_size_limit_content_length():
     original_keys = settings.valid_virtual_keys_set
-    settings.valid_virtual_keys_set = set()
+    settings._valid_virtual_keys_set = set()
 
     # Send an 11MB payload spoofed via header
     headers = {"x-api-key": "sk-proj-test", "Content-Length": str(11 * 1024 * 1024 + 1)}
     response = client.post("/v1/chat/completions", headers=headers, json={"data": "fake"})
     assert response.status_code == 413
     assert "payload exceeds maximum allowed limit" in response.text
-    settings.valid_virtual_keys_set = original_keys
+    settings._valid_virtual_keys_set = original_keys
