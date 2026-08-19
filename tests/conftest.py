@@ -25,3 +25,6 @@ def test_environment_setup():
 
     from llm_shield_proxy.api.main import app_state
     app_state.is_draining = False
+
+    from llm_shield_proxy.api.health import _readyz_cache
+    _readyz_cache.clear()
