@@ -119,7 +119,7 @@ LLM-Shield-Proxy is engineered for extreme zero-egress data privacy and enterpri
 ## Supported Versions
 As an open-source project, **only the absolute latest release version** is actively supported with security updates. 
 
-We do not backport security patches to older versions. If a vulnerability is found and patched (e.g., in `1.2.5`), users on older versions (e.g., `1.2.4`) are expected to upgrade to the latest release to secure their environment. The onus is entirely on the user to ensure they are pulling the latest Docker image or PyPI package.
+We do not backport security patches to older versions. If a vulnerability is found and patched (e.g., in `1.x.y`), users on older versions are expected to upgrade to the latest release to secure their environment. The onus is entirely on the user to ensure they are pulling the latest Docker image or PyPI package.
 
 | Version | Supported          |
 | ------- | ------------------ |

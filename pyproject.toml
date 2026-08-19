@@ -77,7 +77,8 @@ dev = [
     "psutil>=5.0.0",
     "redis>=5.0.0",
     "build",
-    "twine"
+    "twine",
+    "bump-my-version>=0.20.0"
 ]
 
 [project.urls]
@@ -105,3 +106,33 @@ select = [
 ignore = [
     "E501", # line length handled by formatter
 ]
+
+[tool.bumpversion]
+current_version = "1.2.5"
+commit = true
+tag = true
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "llm_shield_proxy/api/main.py"
+search = 'APP_VERSION = "{current_version}"'
+replace = 'APP_VERSION = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "README.md"
+search = 'version":"{current_version}"'
+replace = 'version":"{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "README.md"
+search = "v{current_version}.zip"
+replace = "v{new_version}.zip"
+
+[[tool.bumpversion.files]]
+filename = "deploy/helm/llm-shield-proxy/Chart.yaml"
+search = 'appVersion: "{current_version}"'
+replace = 'appVersion: "{new_version}"'
