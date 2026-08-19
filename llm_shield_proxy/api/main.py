@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sock_dir = os.path.dirname(sock_path)
         # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
         os.makedirs(sock_dir, exist_ok=True)
-        os.chmod(sock_dir, 0o770)
+        os.chmod(sock_dir, 0o770)  # nosec B103
 
         if os.path.exists(sock_path):
             os.unlink(sock_path)
