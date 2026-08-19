@@ -192,13 +192,13 @@ class Settings(BaseSettings):
             key_bytes = None
             try:
                 key_bytes = base64.b64decode(key_src)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
             if key_bytes is None or len(key_bytes) != 32:
                 try:
                     key_bytes = bytes.fromhex(key_src)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
             if key_bytes is None or len(key_bytes) != 32:

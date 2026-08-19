@@ -90,7 +90,7 @@ class DistributedRateLimiter:
                     self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1
                 )
                 return bool(result)
-            except Exception:
+            except Exception:  # nosec B110
                 # Fallback to in-memory on Redis failure
                 pass
 

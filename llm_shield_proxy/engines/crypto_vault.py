@@ -38,7 +38,7 @@ def get_crypto_dek() -> bytes:
             if len(key_bytes) == 32:
                 _DEK = key_bytes
                 return _DEK
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
         try:
@@ -47,7 +47,7 @@ def get_crypto_dek() -> bytes:
             if len(key_bytes) == 32:
                 _DEK = key_bytes
                 return _DEK
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     raise ValueError("Valid 256-bit SHIELD_ENCRYPTION_KEY not found or invalid.")
