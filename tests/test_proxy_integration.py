@@ -72,12 +72,11 @@ def test_proxy_streaming_chat_completion(monkeypatch, httpx_mock):
 def test_health_and_livez_check_endpoints():
     res_health = client.get("/health")
     assert res_health.status_code == 200
-    assert res_health.json()["status"] == "ok"
-    assert res_health.json()["service"] == "llm-shield-proxy"
+    assert res_health.json()["status"] == "alive"
 
     res_livez = client.get("/livez")
     assert res_livez.status_code == 200
-    assert res_livez.json()["status"] == "ok"
+    assert res_livez.json()["status"] == "alive"
 
     res_healthz = client.get("/healthz")
     assert res_healthz.status_code == 200

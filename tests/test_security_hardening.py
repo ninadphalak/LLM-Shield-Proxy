@@ -51,18 +51,19 @@ def test_vault_tenant_isolation(mock_send, mock_request):
         assert res_a.status_code == 200
 
         # Verify Tenant A's vault has the email mapped
-        hashed_key_a = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-A", b"llm_shield_salt", 100000).hex()[:12]
+        hashed_key_a = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-A", b"llm_shield_salt", 600000).hex()[:12]
         vault_a = vault_store.get_vault("shared_sess_123", hashed_key_a)
         assert "test@example.com" in vault_a.original_to_token
         token_id = vault_a.original_to_token["test@example.com"]
 
         # Query as Tenant B with the same session ID
         headers_b = {"X-Session-ID": "shared_sess_123", "x-api-key": "sk-proxy-tenant-B"}
-        # Send a request so the vault is initialized for Tenant B
-        client.post(
-            "/v1/chat/completions", headers=headers_b, json={"messages": [{"role": "user", "content": "Hello"}]}
-        )
-        hashed_key_b = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-B", b"llm_shield_salt", 100000).hex()[:12]
+        payload_b = {"model": "gpt-4", "messages": [{"role": "user", "content": "What is the name?"}]}
+        res_b = client.post("/v1/chat/completions", headers=headers_b, json=payload_b)
+        assert res_b.status_code == 200
+
+        # Verify Tenant B gets a separate vault
+        hashed_key_b = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-B", b"llm_shield_salt", 600000).hex()[:12]
         vault_b = vault_store.get_vault("shared_sess_123", hashed_key_b)
 
         # Verify Tenant B's vault is isolated and does not contain the email
