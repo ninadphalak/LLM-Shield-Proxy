@@ -175,6 +175,13 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_mtls_paths(self) -> 'Settings':
+        if self.ENABLE_MTLS:
+            if not self.SSL_CLIENT_CERT_PATH or not self.SSL_CLIENT_KEY_PATH:
+                raise ValueError("SSL_CLIENT_CERT_PATH and SSL_CLIENT_KEY_PATH must be set if ENABLE_MTLS is True.")
+        return self
+
+    @model_validator(mode="after")
     def validate_stateless_crypto_key(self) -> 'Settings':
         if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_CRYPTO":
             key_src = self.SHIELD_ENCRYPTION_KEY

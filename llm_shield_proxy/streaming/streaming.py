@@ -94,44 +94,34 @@ class SSERehydrationBuffer:
             emitted_parts = []
             
             if delta_text:
-                tokens = self.lexer.feed_chunk(delta_text)
-                for token_text, is_maskable in tokens:
-                    if is_maskable:
-                        self.content_buffer += token_text
+                self.content_buffer += delta_text
 
-                        if len(self.content_buffer) > 64 * 1024:
-                            raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+                # Enforce maximum safety length on the buffer
+                if len(self.content_buffer) > 64 * 1024:
+                    raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+                
+                # In a fast-path, empty token_to_original can just skip rehydrate
+                token_to_original = getattr(self.vault, "token_to_original", None)
+                if (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
+                    pass
+                else:
+                    # Calculate dynamic prefix retention bound
+                    retention_length = self._calculate_retention_length(self.content_buffer)
 
-                        token_to_original = getattr(self.vault, "token_to_original", None)
-                        if (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
-                            emitted_parts.append(self.vault.rehydrate(self.content_buffer, retention_length=0))
-                            self.content_buffer = ""
-                            continue
+                    # Apply boundary-aware rehydration up to the retention boundary
+                    self.content_buffer = self.vault.rehydrate(self.content_buffer, retention_length=retention_length)
 
-                        # Calculate dynamic prefix retention bound
-                        retention_length = self._calculate_retention_length(self.content_buffer)
+                # Recalculate retention in case replacements modified the tail
+                retention_length = self._calculate_retention_length(self.content_buffer)
 
-                        # Apply boundary-aware rehydration up to the retention boundary
-                        self.content_buffer = self.vault.rehydrate(self.content_buffer, retention_length=retention_length)
-
-                        # Recalculate retention in case replacements modified the tail
-                        retention_length = self._calculate_retention_length(self.content_buffer)
-
-                        if retention_length == 0 or len(self.content_buffer) <= retention_length:
-                            if retention_length == 0:
-                                emitted_parts.append(self.content_buffer)
-                                self.content_buffer = ""
-                            continue
-
-                        emitted = self.content_buffer[:-retention_length]
-                        self.content_buffer = self.content_buffer[-retention_length:]
-                        emitted_parts.append(emitted)
-                    else:
-                        # Flush the buffer because we hit a structural boundary
-                        if self.content_buffer:
-                            emitted_parts.append(self.vault.rehydrate(self.content_buffer, retention_length=0))
-                            self.content_buffer = ""
-                        emitted_parts.append(token_text)
+                if retention_length == 0 or len(self.content_buffer) <= retention_length:
+                    if retention_length == 0:
+                        emitted_parts.append(self.content_buffer)
+                        self.content_buffer = ""
+                else:
+                    emitted = self.content_buffer[:-retention_length]
+                    self.content_buffer = self.content_buffer[-retention_length:]
+                    emitted_parts.append(emitted)
             
             if is_final and self.content_buffer:
                 emitted_parts.append(self.vault.rehydrate(self.content_buffer, retention_length=0))

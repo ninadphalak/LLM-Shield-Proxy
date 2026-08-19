@@ -67,7 +67,7 @@ def get_virtual_key_id(client_auth: str) -> str:
 
     Cached via LRU to guarantee 0ms latency impact during proxy routing.
     """
-    return hashlib.pbkdf2_hmac("sha256", client_auth.encode("utf-8"), b"llm_shield_salt", 100000).hex()[:12]
+    return hashlib.pbkdf2_hmac("sha256", client_auth.encode("utf-8"), b"llm_shield_salt", 600000).hex()[:12]
 
 
 class ConfigHandler(FileSystemEventHandler):
@@ -150,12 +150,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if os.path.exists(sock_path):
             os.unlink(sock_path)
 
-    grpc_server = await serve_ext_proc(sock_path)
-    # SECURITY: Prevent local privilege escalation by restricting socket access
-    # to the proxy group (0o660) instead of world-writable (0o666).
-    # Envoy must be deployed with a shared GID (e.g., fsGroup).
-    if os.name != "nt":
-        os.chmod(sock_path, 0o660)
+        # SECURITY: Prevent local privilege escalation (TOCTOU) by using umask
+        # before socket creation, rather than chmod after creation.
+        old_umask = os.umask(0o117) # Inverts to 0o660
+        try:
+            grpc_server = await serve_ext_proc(sock_path)
+        finally:
+            os.umask(old_umask)
+    else:
+        grpc_server = await serve_ext_proc(sock_path)
 
     yield
 
@@ -380,7 +383,7 @@ async def _proxy_catch_all_internal(
     upstream_base = settings.UPSTREAM_BASE_URL
 
     # SSRF Protection on Dynamic Client Upstream Override
-    print(f"DEBUG: x_upstream_base_url={x_upstream_base_url}, override={settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE}")
+    upstream_host_header = None
     if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
         if x_upstream_base_url.startswith(("http://", "https://")):
             parsed = urlparse(x_upstream_base_url)
@@ -388,13 +391,15 @@ async def _proxy_catch_all_internal(
             try:
                 ip = socket.gethostbyname(hostname)
                 ip_obj = ipaddress.ip_address(ip)
-                print(f"DEBUG: ip={ip}, link_local={ip_obj.is_link_local}")
                 if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
                     return JSONResponse(
                         status_code=403,
                         content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}},
                     )
-                upstream_base = x_upstream_base_url
+                # Overwrite upstream base with the resolved IP to prevent DNS rebinding SSRF
+                port_str = f":{parsed.port}" if parsed.port else ""
+                upstream_base = f"{parsed.scheme}://{ip}{port_str}{parsed.path}"
+                upstream_host_header = hostname
             except socket.gaierror:
                 return JSONResponse(
                     status_code=400,
@@ -408,6 +413,9 @@ async def _proxy_catch_all_internal(
     headers.pop("host", None)
     headers.pop("content-length", None)
     headers.pop("accept-encoding", None)
+
+    if upstream_host_header:
+        headers["host"] = upstream_host_header
 
     # Inject trace context into upstream HTTP request headers
     propagator.inject(headers)

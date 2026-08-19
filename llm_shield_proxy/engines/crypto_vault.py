@@ -57,7 +57,12 @@ def get_aesgcm() -> AESGCM:
     return AESGCM(get_crypto_dek())
 
 def encrypt_to_token(raw_pii: str) -> str:
-    """Encrypts a string to a Base64URL token."""
+    """Encrypts a string to a Base64URL token.
+    
+    WARNING: This uses a 96-bit random nonce (os.urandom(12)) under AES-GCM. 
+    To prevent birthday bound collisions, the SHIELD_ENCRYPTION_KEY MUST be 
+    rotated before 2^32 encryption operations.
+    """
     nonce = os.urandom(12)
     aesgcm = get_aesgcm()
     ciphertext = aesgcm.encrypt(nonce, raw_pii.encode('utf-8'), None)

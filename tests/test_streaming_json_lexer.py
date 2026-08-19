@@ -9,7 +9,7 @@ from llm_shield_proxy.engines.vault import Vault
 class MockVault(Vault):
     def __init__(self):
         super().__init__("mock_session")
-        self.token_to_original: Dict[str, str] = {}
+        self.token_to_original: Dict[str, str] = {"dummy": "dummy"}
 
     def mask(self, text: str) -> str:
         return text
