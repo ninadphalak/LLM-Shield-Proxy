@@ -4,8 +4,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.api.main import app
+from llm_shield_proxy.core.config import settings
 
 try:
     import psutil
@@ -192,31 +192,32 @@ def test_client_lifecycle_persistence(httpx_mock):
             json={"model": "gpt-4", "messages": [{"role": "user", "content": "ping"}]},
         )
         first_client_id = id(app.state.http_client)
-        
+
         client.post(
             "/v1/chat/completions",
             headers={"authorization": "Bearer sk-proxy-team-a"},
             json={"model": "gpt-4", "messages": [{"role": "user", "content": "pong"}]},
         )
         second_client_id = id(app.state.http_client)
-        
+
         assert first_client_id == second_client_id, "http_client should persist across requests"
 
 
 def test_anthropic_adapter_large_payload_memory():
     """Verify AnthropicAdapter deepcopy and transformation stays within memory limits."""
-    from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
     import gc
-    
+
+    from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
+
     if psutil is None:
         pytest.skip("psutil not available")
 
     process = psutil.Process(os.getpid())
     gc.collect()
     mem_before = process.memory_info().rss
-    
+
     # 100k token equivalent payload
-    large_text = "word " * 100000 
+    large_text = "word " * 100000
     payload = {
         "model": "claude-3-sonnet-20240229",
         "messages": [
@@ -224,13 +225,13 @@ def test_anthropic_adapter_large_payload_memory():
             {"role": "user", "content": large_text}
         ]
     }
-    
+
     adapter = AnthropicAdapter()
     transformed = adapter.transform_request(payload)
-    
+
     gc.collect()
     mem_after = process.memory_info().rss
-    
+
     assert transformed["messages"][0]["content"] == large_text
     # 100k words is ~500KB. Deepcopy should not blow up memory.
     assert mem_after - mem_before < 10 * 1024 * 1024, (

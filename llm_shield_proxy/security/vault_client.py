@@ -58,7 +58,7 @@ class AsyncVaultSecretProvider:
         elif method == "APPROLE":
             if not settings.VAULT_ROLE_ID or not settings.VAULT_SECRET_ID:
                 raise ValueError("VAULT_ROLE_ID and VAULT_SECRET_ID are required for APPROLE auth method")
-            
+
             url = f"{settings.VAULT_ADDR.rstrip('/')}/v1/auth/approle/login"
             payload = {
                 "role_id": settings.VAULT_ROLE_ID,
@@ -73,14 +73,14 @@ class AsyncVaultSecretProvider:
             role = settings.VAULT_K8S_ROLE
             if not role:
                 raise ValueError("VAULT_K8S_ROLE is required for KUBERNETES auth method")
-            
+
             jwt_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
             if not os.path.exists(jwt_path):
                 raise ValueError(f"Kubernetes service account token not found at {jwt_path}")
-                
+
             with open(jwt_path, "r") as f:
                 jwt = f.read().strip()
-                
+
             url = f"{settings.VAULT_ADDR.rstrip('/')}/v1/auth/kubernetes/login"
             payload = {
                 "role": role,
@@ -90,7 +90,7 @@ class AsyncVaultSecretProvider:
             resp.raise_for_status()
             data = resp.json()
             return data["auth"]["client_token"]
-            
+
         else:
             raise ValueError(f"Unsupported Vault auth method: {method}")
 
@@ -102,7 +102,7 @@ class AsyncVaultSecretProvider:
         try:
             token = await self._authenticate()
             headers = {"X-Vault-Token": token}
-            
+
             # Format URL for KV v2 or v1
             path = settings.VAULT_SECRET_PATH.strip('/')
             # KV v2 usually has 'data' in the path, e.g., secret/data/llm-shield/keys
@@ -112,7 +112,7 @@ class AsyncVaultSecretProvider:
             resp = await self.client.get(url, headers=headers)
             resp.raise_for_status()
             data = resp.json()
-            
+
             # Extract secrets, supporting both KV v1 and v2 formats
             # KV v2 wraps secrets in 'data.data', KV v1 is just 'data'
             if "data" in data and "data" in data["data"]:
@@ -127,7 +127,7 @@ class AsyncVaultSecretProvider:
             logger.info(f"Successfully refreshed {len(self._cached_secrets)} secrets from Vault.")
 
         except httpx.HTTPError as e:
-            # We don't want to dump the actual response body if it contains secrets, 
+            # We don't want to dump the actual response body if it contains secrets,
             # though an HTTP error might not. Just log the status and path safely.
             status_code = getattr(e.response, "status_code", None) if hasattr(e, "response") else None
             logger.error(f"Vault HTTPError during fetch_secrets: status={status_code}")

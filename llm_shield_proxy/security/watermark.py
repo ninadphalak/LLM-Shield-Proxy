@@ -21,17 +21,17 @@ def get_identity(
         auth = authorization_header.replace("Bearer ", "").strip()
         if auth:
             return auth
-            
+
     if x_virtual_key_header:
         vk = x_virtual_key_header.strip()
         if vk:
             return vk
-            
+
     if client_ip:
         ip = client_ip.strip()
         if ip:
             return ip
-            
+
     return "anonymous_client"
 
 
@@ -54,7 +54,7 @@ def encode_steganography(hex_fingerprint: str) -> str:
     """Maps a hex fingerprint to invisible Unicode zero-width characters."""
     # Convert each hex char to a 4-bit binary string
     binary_str = "".join(f"{int(c, 16):04b}" for c in hex_fingerprint)
-    
+
     # Map 0 -> \u200B (Zero-Width Space)
     # Map 1 -> \u200C (Zero-Width Non-Joiner)
     invisible_chars = []
@@ -65,7 +65,7 @@ def encode_steganography(hex_fingerprint: str) -> str:
         else:
             invisible_chars.append("\u200C")
     invisible_chars.append("\u200D") # End delimiter
-    
+
     return "".join(invisible_chars)
 
 

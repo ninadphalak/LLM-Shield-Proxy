@@ -9,6 +9,7 @@ from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.pii_engine import PIIEngine
 from llm_shield_proxy.engines.vault import Vault
 
+
 def test_granular_policy_scopes():
     """Tests Pydantic validation, tenant routing, and differential masking."""
     custom_yaml = {

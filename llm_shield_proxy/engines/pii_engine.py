@@ -15,8 +15,8 @@ import os
 import re
 import unicodedata
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -153,7 +153,7 @@ class PIIEngine:
         self._compiled_profiles: Dict[str, CompiledProfile] = {}
         self._tenant_mappings: Dict[str, str] = {}
         self._global_strict_profile: CompiledProfile = CompiledProfile(name="global_strict")
-        
+
         self._init_onnx_model()
         self._init_custom_regex()
 
@@ -189,10 +189,10 @@ class PIIEngine:
         """Loads and compiles BYOR (Bring Your Own Regex) patterns via re2 and builds Policy Profiles."""
         self._compiled_profiles.clear()
         self._tenant_mappings.clear()
-        
+
         all_tier1 = list(TIER1_PATTERNS)
         all_tier3 = {entity_type for entity_type, _ in TIER3_NER_PATTERNS}
-        
+
         if settings.CUSTOM_REGEX_PATH and os.path.exists(settings.CUSTOM_REGEX_PATH):
             if re2 is None:
                 logger.error("google-re2 is required for BYOR custom regex to prevent ReDoS. Skipping custom regex load.")
@@ -207,9 +207,9 @@ class PIIEngine:
                         # Compile using re2 to guarantee O(N) execution and ReDoS immunity
                         compiled = re2.compile(custom_pattern.pattern)
                         all_tier1.append((custom_pattern.name, compiled))
-                    
+
                     tier1_lookup = {name: pattern for name, pattern in all_tier1}
-                    
+
                     for profile_config in config.profiles:
                         profile = CompiledProfile(name=profile_config.name)
                         for t1_name in profile_config.tier1_regex:
@@ -217,7 +217,7 @@ class PIIEngine:
                                 profile.tier1_patterns.append((t1_name, tier1_lookup[t1_name]))
                         profile.tier3_ner_entities = set(profile_config.tier2_ner)
                         self._compiled_profiles[profile.name] = profile
-                        
+
                     self._tenant_mappings = config.tenant_mappings
 
                     logger.info("Successfully loaded custom regex patterns and %d profiles from %s", len(self._compiled_profiles), settings.CUSTOM_REGEX_PATH)
@@ -254,7 +254,7 @@ class PIIEngine:
             return []
 
         raw_spans: List[Tuple[int, int, str, str]] = []
-        
+
         if active_profile is None:
             active_profile = self._global_strict_profile
 

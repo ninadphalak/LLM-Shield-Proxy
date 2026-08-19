@@ -21,11 +21,11 @@ class AnthropicAdapter:
         """
         payload = copy.deepcopy(openai_payload)
         anthropic_payload = {}
-        
+
         # Model mapping
         original_model = payload.get("model", "gpt-4o")
         anthropic_payload["model"] = AnthropicAdapter.MODEL_ALIASES.get(original_model, original_model)
-        
+
         # Top-level settings
         anthropic_payload["max_tokens"] = payload.get("max_tokens", 4096)
         if "temperature" in payload:
@@ -34,11 +34,11 @@ class AnthropicAdapter:
             anthropic_payload["top_p"] = payload["top_p"]
         if "stream" in payload:
             anthropic_payload["stream"] = payload["stream"]
-            
+
         system_prompts = []
         messages = payload.get("messages", [])
         filtered_messages = []
-        
+
         for msg in messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
@@ -46,10 +46,10 @@ class AnthropicAdapter:
                 system_prompts.append(content)
             else:
                 filtered_messages.append({"role": role, "content": content})
-                
+
         if system_prompts:
             anthropic_payload["system"] = "\n\n".join(system_prompts)
-            
+
         # Collapse consecutive roles and enforce strictly alternating
         final_messages = []
         for msg in filtered_messages:
@@ -58,7 +58,7 @@ class AnthropicAdapter:
             # Anthropic only supports 'user' and 'assistant'
             if role not in ("user", "assistant"):
                 role = "user" # fallback for 'tool' etc. if not specifically handled
-                
+
             if not final_messages:
                 if role == "assistant":
                     # Must start with user
@@ -69,10 +69,10 @@ class AnthropicAdapter:
                     final_messages[-1]["content"] += "\n\n" + content
                 else:
                     final_messages.append({"role": role, "content": content})
-                    
+
         if not final_messages:
             final_messages.append({"role": "user", "content": "Hello"})
-            
+
         anthropic_payload["messages"] = final_messages
         return anthropic_payload
 
@@ -83,9 +83,9 @@ class AnthropicAdapter:
         """
         content_blocks = anthropic_payload.get("content", [])
         text_content = "".join([block.get("text", "") for block in content_blocks if block.get("type") == "text"])
-        
+
         usage = anthropic_payload.get("usage", {})
-        
+
         openai_res = {
             "id": anthropic_payload.get("id", "chatcmpl-anthropic"),
             "object": "chat.completion",

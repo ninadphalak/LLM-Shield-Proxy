@@ -10,11 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import secrets
 import socket
 import sys
 import threading
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -95,7 +95,7 @@ class AuditLogger:
             "total_entities_redacted": sum(entity_counts.values()),
             "entity_breakdown": entity_counts,
         }
-        
+
         if settings.AUDIT_LOG_FORMAT == "RFC6902_DIFF" and patch_operations is not None:
             log_entry["patch_operations"] = patch_operations
         AuditLogger._compute_and_append_hash(log_entry)

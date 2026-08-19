@@ -3,8 +3,8 @@ import os
 
 import pytest
 
-from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 from llm_shield_proxy.engines.vault import Vault
+from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer, rehydrate_sse_stream
 
 try:
     import psutil

@@ -92,14 +92,14 @@ class SSERehydrationBuffer:
         """
         with tracer.start_as_current_span("buffer_flush"):
             emitted_parts = []
-            
+
             if delta_text:
                 self.content_buffer += delta_text
 
                 # Enforce maximum safety length on the buffer
                 if len(self.content_buffer) > 64 * 1024:
                     raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
-                
+
                 # In a fast-path, empty token_to_original can just skip rehydrate
                 token_to_original = getattr(self.vault, "token_to_original", None)
                 if (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
@@ -122,7 +122,7 @@ class SSERehydrationBuffer:
                     emitted = self.content_buffer[:-retention_length]
                     self.content_buffer = self.content_buffer[-retention_length:]
                     emitted_parts.append(emitted)
-            
+
             if is_final and self.content_buffer:
                 emitted_parts.append(self.vault.rehydrate(self.content_buffer, retention_length=0))
                 self.content_buffer = ""
@@ -189,7 +189,7 @@ async def rehydrate_sse_stream(
                         if stripped.startswith("event: "):
                             yield (line + "\n").encode("utf-8")
                             continue
-                    
+
                         if stripped.startswith("data: ") and stripped != "data: [DONE]":
                             try:
                                 json_str = stripped[6:]
@@ -258,7 +258,7 @@ async def rehydrate_sse_stream(
                             if remaining:
                                 flush_obj = {"choices": [{"delta": {"content": remaining}}]}
                                 yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
-                            
+
                             if watermark_text:
                                 if is_anthropic_stream:
                                     anthropic_chunk = {
@@ -279,7 +279,7 @@ async def rehydrate_sse_stream(
                                     }
                                     yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
                                 watermark_text = "" # prevent double yield
-                            
+
                             yield (line + "\n").encode("utf-8")
                         else:
                             yield (line + "\n").encode("utf-8")

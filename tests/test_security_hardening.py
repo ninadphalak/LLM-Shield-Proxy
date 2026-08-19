@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.api.main import app
+from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.vault import vault_store
 
 client = TestClient(app)
