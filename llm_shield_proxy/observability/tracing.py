@@ -21,13 +21,16 @@ def _init_tracing() -> trace.Tracer:
 
     # Use BatchSpanProcessor on a background daemon thread to prevent ASGI event loop starvation.
     # We strictly bound the queue size and export batch size to prevent unbounded memory bloat.
-    processor = BatchSpanProcessor(
-        ConsoleSpanExporter(),
-        max_queue_size=256,
-        schedule_delay_millis=500,
-        max_export_batch_size=64,
-    )
-    provider.add_span_processor(processor)
+    from llm_shield_proxy.core.config import settings
+    if settings.TELEMETRY_ENABLED:
+        processor = BatchSpanProcessor(
+            ConsoleSpanExporter(),
+            max_queue_size=256,
+            schedule_delay_millis=500,
+            max_export_batch_size=64,
+        )
+        provider.add_span_processor(processor)
+        
     trace.set_tracer_provider(provider)
 
     return trace.get_tracer("llm-shield-proxy")
