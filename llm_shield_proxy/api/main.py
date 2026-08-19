@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import socket
 import time
 import uuid
@@ -32,22 +33,22 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
+from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.engines.vault import vault_store
+from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.observability.metrics import (
     llm_shield_latency_seconds_bucket,
     llm_shield_requests_total,
     llm_shield_sse_active_streams,
 )
-from llm_shield_proxy.observability.tracing import tracer, propagator
-from llm_shield_proxy.engines.pii_engine import pii_engine
-from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
-from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
+from llm_shield_proxy.observability.tracing import propagator, tracer
+from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
 from llm_shield_proxy.security.watermark import generate_watermark_text
-from llm_shield_proxy.security.circuit_breaker import check_circuit_breaker, CircuitBreakerTrippedException
-from llm_shield_proxy.adapters.provider_factory import resolve_provider
-from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
-import logging
+from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +83,11 @@ class ConfigHandler(FileSystemEventHandler):
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manages application lifecycle, shared HTTP connection pools, and background observers."""
     import os
+
     from llm_shield_proxy.api.grpc_service import serve_ext_proc
-    from llm_shield_proxy.security.vault_client import vault_provider
     from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
-    
+    from llm_shield_proxy.security.vault_client import vault_provider
+
     if not run_fips_kat_self_test():
         if settings.FIPS_STRICT_MODE:
             AuditLogger.audit_logger.critical("FIPS 140-3 Cryptographic Integrity Self-Test Failed. Halting.")
@@ -94,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             AuditLogger.audit_logger.critical("FIPS 140-3 KAT Failed, but FIPS_STRICT_MODE=False. Continuing.")
 
     AuditLogger.log_startup_event()
-    
+
     from llm_shield_proxy.engines.pii_engine import pii_engine
     print(
         f"--- LLM-Shield Proxy Startup Diagnostics ---\n"
@@ -137,10 +139,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     observer = Observer()
     observer.schedule(ConfigHandler(), path=".", recursive=False)
     observer.start()
-    
+
     # Start gRPC ext_proc server in background
     sock_path = "/var/run/llm-shield/ext_proc.sock"
-    
+
     if os.name != "nt":
         sock_dir = os.path.dirname(sock_path)
         # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
@@ -172,10 +174,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     observer.stop()
     observer.join()
     await app.state.http_client.aclose()
-    
+
     from llm_shield_proxy.security.vault_client import vault_provider
     await vault_provider.aclose()
-    
+
     # Cleanly close gRPC server
     grpc_server.close()
     await grpc_server.wait_closed()
@@ -190,7 +192,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from llm_shield_proxy.api.health import health_router
+
 app.include_router(health_router)
 
 
@@ -311,7 +313,7 @@ PROVIDER_KEY_MAP: Dict[str, str] = {
 def resolve_upstream_key(hostname: str) -> Optional[str]:
     """Resolves centralized enterprise provider key via dictionary lookup."""
     from llm_shield_proxy.security.vault_client import vault_provider
-    
+
     attr_name = PROVIDER_KEY_MAP.get(hostname)
     if attr_name:
         if settings.ENABLE_VAULT_SECRETS:
@@ -321,12 +323,12 @@ def resolve_upstream_key(hostname: str) -> Optional[str]:
         key = getattr(settings, attr_name, None)
         if key:
             return key
-            
+
     if settings.ENABLE_VAULT_SECRETS:
         key = vault_provider.get_secret("UPSTREAM_API_KEY")
         if key:
             return key
-            
+
     return settings.UPSTREAM_API_KEY
 
 
@@ -493,11 +495,11 @@ async def _proxy_catch_all_internal(
         )
 
     # Vault resolution based on masking mode
-    from llm_shield_proxy.engines.masking import MaskingMode, resolve_masking_mode
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
-    
+    from llm_shield_proxy.engines.masking import MaskingMode, resolve_masking_mode
+
     masking_mode = resolve_masking_mode(x_shield_masking_mode)
-    
+
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
         vault = StatelessCryptoVault()
     elif masking_mode == MaskingMode.SCRUB:
@@ -516,7 +518,7 @@ async def _proxy_catch_all_internal(
     else: # SYNTHETIC
         vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
         vault.synthetic = True
-        
+
     http_client = get_http_client(request)
 
     # Handle POST Payload Redaction
@@ -585,7 +587,7 @@ async def _proxy_catch_all_internal(
                 active_profile = pii_engine.get_profile(virtual_key_id)
                 loop = asyncio.get_running_loop()
                 redacted_payload = await loop.run_in_executor(None, pii_engine.redact_payload, payload, vault, active_profile)
-                
+
                 # target_provider is refined with payload
                 target_provider = resolve_provider(dict(request.headers), redacted_payload)
                 if target_provider == "anthropic":
@@ -730,7 +732,7 @@ async def _proxy_catch_all_internal(
                 try:
                     res_json = upstream_res.json()
                     loop = asyncio.get_running_loop()
-                    
+
                     if target_provider == "anthropic":
                         rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
                         rehydrated_res = AnthropicAdapter.transform_response(rehydrated_res)
@@ -784,7 +786,7 @@ async def _proxy_catch_all_internal(
         headers=headers,
         content=body_bytes,
     )
-    
+
     if upstream_res.status_code >= 400:
         # Prevent upstream auth key leakage
         return JSONResponse(
@@ -797,7 +799,7 @@ async def _proxy_catch_all_internal(
                 }
             },
         )
-        
+
     return Response(
         content=upstream_res.content,
         status_code=upstream_res.status_code,

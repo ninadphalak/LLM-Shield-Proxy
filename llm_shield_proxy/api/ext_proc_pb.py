@@ -1,6 +1,7 @@
 """Minimal Envoy ext_proc betterproto dataclasses for grpclib to maintain < 60 MB RSS."""
+from typing import Dict, List
+
 import betterproto
-from typing import AsyncIterator, Dict, List, Optional
 import grpclib.server
 
 
@@ -50,7 +51,7 @@ class CommonResponseStatus(betterproto.Enum):
 
 class ProcessingRequest(betterproto.Message):
     async_mode: bool = betterproto.bool_field(1)
-    
+
     request_headers: HttpHeaders = betterproto.message_field(2, group="request")
     response_headers: HttpHeaders = betterproto.message_field(3, group="request")
     request_body: HttpBody = betterproto.message_field(4, group="request")

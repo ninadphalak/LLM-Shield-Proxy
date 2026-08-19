@@ -15,11 +15,11 @@ def resolve_provider(headers: dict, payload: Optional[dict] = None) -> str:
     header_provider = headers.get("x-shield-provider") or headers.get("X-Shield-Provider")
     if header_provider:
         return header_provider.lower()
-        
+
     if payload and isinstance(payload, dict):
         model = payload.get("model", "")
         if isinstance(model, str):
             if "claude" in model.lower() or model.lower().startswith("anthropic/"):
                 return "anthropic"
-                
+
     return settings.DEFAULT_UPSTREAM_PROVIDER.lower()

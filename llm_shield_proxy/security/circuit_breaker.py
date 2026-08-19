@@ -12,9 +12,8 @@ from dataclasses import dataclass, field
 
 from cachetools import TTLCache
 
-from llm_shield_proxy.engines.vault import vault_store, RedisVaultStore
-
 from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
 
 
 class CircuitBreakerTrippedException(Exception):
@@ -53,7 +52,7 @@ def calculate_shannon_entropy(text: str) -> float:
 def extract_tool_call_signature_hash(payload: dict) -> str:
     """Quickly extracts and hashes tool_call signatures to detect identical actions."""
     signatures = []
-    
+
     # We inspect the messages list to find recent assistant tool calls
     messages = payload.get("messages", [])
     if isinstance(messages, list) and messages:
@@ -116,10 +115,10 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
         payload_str = json.dumps(payload)
     except (TypeError, ValueError):
         payload_str = str(payload)
-    
+
     if len(payload_str) < 50:
         return
-        
+
     bounded_payload_str = payload_str[:4096]
 
     current_entropy = calculate_shannon_entropy(bounded_payload_str)
@@ -138,10 +137,10 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
         delta_h = abs(current_entropy - prev_entropy)
 
         if delta_h < 0.05:
-            # We must store a small piece of previous state to compare, 
+            # We must store a small piece of previous state to compare,
             # but since we avoid storing raw text across turns to save memory,
-            # we rely primarily on the tool hash. 
-            # Since the user requested string similarity between consecutive turns, 
+            # we rely primarily on the tool hash.
+            # Since the user requested string similarity between consecutive turns,
             # we will store the last bounded payload directly in the dataclass as an exception
             # with strict bounds to maintain memory limits.
             last_payload_str = getattr(metrics, "_last_bounded_payload", "")
@@ -160,7 +159,7 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
                                (diff_chars2 and not diff_chars2.isdigit()):
                                 is_purely_numeric_diff = False
                                 break
-                    
+
                     if not (has_diff and is_purely_numeric_diff):
                         is_duplicate = True
 
@@ -188,9 +187,9 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
             await pipe.execute()
 
     if metrics.consecutive_duplicate_count >= settings.AGENT_BREAKER_THRESHOLD - 1:
-        # Reset count so they can try again after being tripped once? 
+        # Reset count so they can try again after being tripped once?
         # For now, let it trip repeatedly if they keep sending the exact same payload.
         raise CircuitBreakerTrippedException(
-            "Agent loop detected", 
+            "Agent loop detected",
             metrics.consecutive_duplicate_count + 1
         )

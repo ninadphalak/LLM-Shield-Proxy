@@ -1,6 +1,7 @@
 import asyncio
 import time
 from typing import Optional
+
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
 
@@ -79,12 +80,12 @@ class DistributedRateLimiter:
                 now_ms = int(time.time() * 1000)
                 rate_per_ms = rate_per_sec / 1000.0
                 key = f"rate_limit:{virtual_key_id}"
-                
+
                 if not self._lua_sha:
                     async with self._lock:
                         if not self._lua_sha:
                             self._lua_sha = await vault_store.redis.script_load(RATE_LIMIT_LUA)
-                
+
                 result = await vault_store.redis.evalsha(
                     self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1
                 )
@@ -98,7 +99,7 @@ class DistributedRateLimiter:
             async with self._lock:
                 if virtual_key_id not in self._in_memory_buckets:
                     self._in_memory_buckets[virtual_key_id] = InMemoryBucket(rate_per_sec, burst)
-        
+
         return await self._in_memory_buckets[virtual_key_id].acquire()
 
 rate_limiter = DistributedRateLimiter()

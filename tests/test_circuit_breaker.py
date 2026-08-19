@@ -1,5 +1,5 @@
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from llm_shield_proxy.api.main import app
 from llm_shield_proxy.core.config import settings
@@ -17,9 +17,9 @@ def clear_cache():
 @pytest.mark.asyncio
 async def test_circuit_breaker_trips_on_consecutive_duplicates():
     """Simulate 3 consecutive identical tool-call requests and assert HTTP 429."""
-    
+
     session_id = "test-session-123"
-    
+
     payload = {
         "model": "gpt-4",
         "messages": [
@@ -37,7 +37,7 @@ async def test_circuit_breaker_trips_on_consecutive_duplicates():
             }
         ]
     }
-    
+
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",
@@ -48,20 +48,20 @@ async def test_circuit_breaker_trips_on_consecutive_duplicates():
         # Request 1: OK
         response1 = await ac.post("/v1/chat/completions", json=payload, headers=headers)
         assert response1.status_code != 429
-        
+
         # Request 2: OK
         response2 = await ac.post("/v1/chat/completions", json=payload, headers=headers)
         assert response2.status_code != 429
 
         # Request 3: Should trip
         response3 = await ac.post("/v1/chat/completions", json=payload, headers=headers)
-        
+
         assert response3.status_code == 429
         data = response3.json()
         assert data["error"] == "circuit_breaker_tripped"
         assert data["reason"] == "agent_loop_detected"
         assert data["consecutive_turns"] == 3
-        
+
         assert response3.headers.get("X-Shield-Circuit-Breaker") == "TRIPPED"
         assert response3.headers.get("Retry-After") == "60"
 
@@ -70,7 +70,7 @@ async def test_circuit_breaker_trips_on_consecutive_duplicates():
 async def test_circuit_breaker_remains_closed_for_diverse_requests():
     """Simulate 5 diverse requests and assert circuit breaker remains closed."""
     session_id = "test-session-456"
-    
+
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",
@@ -96,7 +96,7 @@ async def test_circuit_breaker_remains_closed_for_diverse_requests():
                     }
                 ]
             }
-            
+
             response = await ac.post("/v1/chat/completions", json=payload, headers=headers)
             assert response.status_code != 429
 
@@ -105,7 +105,7 @@ async def test_circuit_breaker_remains_closed_for_diverse_requests():
 async def test_circuit_breaker_bypass_header():
     """Assert X-Shield-Bypass-Breaker: true allows duplicate requests."""
     session_id = "test-session-789"
-    
+
     payload = {
         "model": "gpt-4",
         "messages": [
@@ -115,7 +115,7 @@ async def test_circuit_breaker_bypass_header():
             }
         ]
     }
-    
+
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",

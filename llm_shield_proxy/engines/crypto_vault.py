@@ -40,7 +40,7 @@ def get_crypto_dek() -> bytes:
                 return _DEK
         except Exception:
             pass
-        
+
         try:
             # Try to decode hex
             key_bytes = bytes.fromhex(key_src)
@@ -49,7 +49,7 @@ def get_crypto_dek() -> bytes:
                 return _DEK
         except Exception:
             pass
-            
+
     raise ValueError("Valid 256-bit SHIELD_ENCRYPTION_KEY not found or invalid.")
 
 def get_aesgcm() -> AESGCM:
@@ -58,9 +58,9 @@ def get_aesgcm() -> AESGCM:
 
 def encrypt_to_token(raw_pii: str) -> str:
     """Encrypts a string to a Base64URL token.
-    
-    WARNING: This uses a 96-bit random nonce (os.urandom(12)) under AES-GCM. 
-    To prevent birthday bound collisions, the SHIELD_ENCRYPTION_KEY MUST be 
+
+    WARNING: This uses a 96-bit random nonce (os.urandom(12)) under AES-GCM.
+    To prevent birthday bound collisions, the SHIELD_ENCRYPTION_KEY MUST be
     rotated before 2^32 encryption operations.
     """
     nonce = os.urandom(12)
@@ -76,7 +76,7 @@ def decrypt_from_token(token: str) -> str:
     # Strict format check based on length/prefix (prefix is 8 chars `[ENC_v1_`)
     if not token.startswith("[ENC_v1_") or not token.endswith("]"):
         return token
-        
+
     b64_payload = token[8:-1]
     # Re-pad base64
     padding_needed = len(b64_payload) % 4
@@ -87,11 +87,11 @@ def decrypt_from_token(token: str) -> str:
         payload = base64.urlsafe_b64decode(b64_payload)
         if len(payload) < 28: # 12 byte nonce + 16 byte tag
             return token
-        
+
         nonce = payload[:12]
         ciphertext = payload[12:]
         aesgcm = get_aesgcm()
-        
+
         decrypted = aesgcm.decrypt(nonce, ciphertext, None)
         return decrypted.decode('utf-8')
     except Exception:
@@ -100,37 +100,37 @@ def decrypt_from_token(token: str) -> str:
 
 class StatelessCryptoVault:
     """Duck-types Vault to provide stateless crypto integration."""
-    
+
     # Strict Base64URL extraction regex
     TOKEN_REGEX = re.compile(r'\[ENC_v1_[A-Za-z0-9\-_=]+\]')
 
     def __init__(self) -> None:
         # Provide type_counters attribute to satisfy AuditLogger
         self.type_counters: dict[str, int] = {}
-        
+
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         """Encrypts the original value to a token."""
         self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
         return encrypt_to_token(original_val)
-        
+
     def rehydrate(self, text: str, retention_length: int = 0) -> str:
         """Rehydrates by finding and decrypting tokens.
-        
+
         Regex Safety: strictly matches r'\\[ENC_v1_[A-Za-z0-9\\-_=]+\\]'.
         Respects retention boundary if provided.
         """
         if not text:
             return text
-            
+
         def repl(match: re.Match[str]) -> str:
             token = match.group(0)
             end_idx = match.end()
-            
+
             # Check if token crosses into trailing retention window
             if retention_length > 0 and end_idx > len(text) - retention_length:
                 # Defer replacement
                 return token
-                
+
             decrypted = decrypt_from_token(token)
             return decrypted
 

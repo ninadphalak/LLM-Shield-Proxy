@@ -3,15 +3,15 @@
 import asyncio
 import logging
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
 from llm_shield_proxy.security.vault_client import vault_provider
-from llm_shield_proxy.engines.vault import vault_store, RedisVaultStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,12 @@ async def _check_pii_engine() -> bool:
         # Check if Tier 1 patterns are loaded
         if not pii_engine._global_strict_profile.tier1_patterns:
             return False
-            
+
         # If Tier 3 ONNX is enabled, verify the session is loaded
         if pii_engine.enable_tier3 and settings.ENABLE_TIER3_ONNX_NER and settings.ONNX_MODEL_PATH:
             if pii_engine._onnx_session is None:
                 return False
-                
+
         return True
     except Exception:
         return False
@@ -72,7 +72,7 @@ async def _check_redis() -> bool:
 async def readiness_probe() -> JSONResponse:
     """Asynchronous Readiness check verifying internal sub-system health."""
     current_time = time.monotonic()
-    
+
     # 2-second TTL cache to prevent probe storms from stalling the ASGI event loop.
     # Cold start will skip this because cache is empty.
     if _readyz_cache and _readyz_cache.get("timestamp", 0) > current_time - _CACHE_TTL_SECONDS:

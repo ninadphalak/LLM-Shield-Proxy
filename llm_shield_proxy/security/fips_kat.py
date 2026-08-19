@@ -5,8 +5,9 @@ Ensures the integrity of cryptographic primitives at boot time.
 
 import hashlib
 import logging
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def test_aes_256_gcm_kat() -> bool:
 
 def run_fips_kat_self_test() -> bool:
     """Execute all deterministic cryptographic self-tests.
-    
+
     Returns True if all tests pass. If any fails, raises ValueError or returns False depending on usage.
     For this module, it just returns a boolean.
     """
@@ -41,7 +42,7 @@ def run_fips_kat_self_test() -> bool:
         sha_passed = test_sha256_kat()
         if not sha_passed:
             logger.error("FIPS KAT Failure: SHA-256")
-            
+
         aes_passed = test_aes_256_gcm_kat()
         if not aes_passed:
             logger.error("FIPS KAT Failure: AES-256-GCM")

@@ -187,14 +187,14 @@ class Settings(BaseSettings):
             key_src = self.SHIELD_ENCRYPTION_KEY
             if not key_src:
                 raise ValueError("SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_CRYPTO.")
-            
+
             import base64
             key_bytes = None
             try:
                 key_bytes = base64.b64decode(key_src)
             except Exception:
                 pass
-                
+
             if key_bytes is None or len(key_bytes) != 32:
                 try:
                     key_bytes = bytes.fromhex(key_src)
@@ -203,7 +203,7 @@ class Settings(BaseSettings):
 
             if key_bytes is None or len(key_bytes) != 32:
                 raise ValueError("SHIELD_ENCRYPTION_KEY must be a valid 256-bit (32 bytes) base64 or hex string.")
-                
+
         return self
 
     @property
