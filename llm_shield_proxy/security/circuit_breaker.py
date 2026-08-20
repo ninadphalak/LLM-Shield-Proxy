@@ -102,8 +102,8 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
         else:
             metrics = SessionMetrics()
     else:
-        metrics = circuit_breaker_cache.get(session_id) or SessionMetrics()
-        if not metrics:
+        metrics = circuit_breaker_cache.get(session_id)
+        if metrics is None:
             metrics = SessionMetrics()
             circuit_breaker_cache[session_id] = metrics
 
