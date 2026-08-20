@@ -620,13 +620,11 @@ async def _proxy_catch_all_internal(
             try:
                 active_profile = pii_engine.get_profile(virtual_key_id)
                 redacted_payload = await asyncio.get_running_loop().run_in_executor(
-                    thread_pool,
+                    None,
                     pii_engine.redact_payload,
                     payload,
                     vault,
-                    None,
-                    1,
-                    1,  # type: ignore
+                    active_profile,  # type: ignore
                 )
 
                 # target_provider is refined with payload

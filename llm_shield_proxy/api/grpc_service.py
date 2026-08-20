@@ -22,6 +22,7 @@ from llm_shield_proxy.api.ext_proc_pb import (
 )
 from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
 from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer
 
 logger = logging.getLogger(__name__)
