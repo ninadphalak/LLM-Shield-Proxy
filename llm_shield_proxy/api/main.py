@@ -27,7 +27,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, Header, Request, Response
+from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from watchdog.events import FileSystemEventHandler
@@ -47,6 +47,7 @@ from llm_shield_proxy.observability.metrics import (
 )
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
+from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 
@@ -302,13 +303,13 @@ async def metrics_endpoint(request: Request) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-from fastapi import Depends
-from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, RedisPolicyResolver
-from llm_shield_proxy.engines.vault import vault_store
+
 
 async def get_policy_resolver() -> BasePolicyResolver:
     """Dependency injection provider for the active Pluggable RBAC Engine."""
-    return RedisPolicyResolver(vault_store.async_client)
+    if hasattr(vault_store, "async_client"):
+        return RedisPolicyResolver(vault_store.async_client)
+    return InMemoryPolicyResolver()
 
 
 # -----------------------------------------------------------------------------
