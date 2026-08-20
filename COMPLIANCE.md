@@ -1,12 +1,18 @@
 # 📜 Compliance: Audit, Forensics & Legal
 
-LLM-Shield-Proxy is designed specifically to help enterprise engineering teams adopt Generative AI without violating data privacy regulations. Operating as a zero-egress, stateless middleware proxy deployed entirely within your own Virtual Private Cloud (VPC), it inherently bypasses the major compliance risks associated with third-party SaaS security tools.
+LLM-Shield-Proxy is an enterprise **AI Gateway** and **LLM Firewall** designed specifically to help engineering teams adopt Generative AI and maintain continuous **AI Governance** without violating data privacy regulations. Operating as a zero-egress, stateless middleware proxy deployed entirely within your own Virtual Private Cloud (VPC), it inherently bypasses the major compliance risks associated with third-party SaaS security tools and enforces robust **LLM Security Posture Management (LLM SPM)**.
 
 This document maps LLM-Shield's architectural features directly to standard enterprise compliance frameworks and strict forensic controls.
 
 ## 🛡️ SOC 2 Type II & HITRUST Audit Capabilities
 
 To satisfy the strict Privacy, Security, and Confidentiality criteria required by B2B SaaS and healthcare SOC 2 audits, LLM-Shield-Proxy employs military-grade cryptographic logging and availability controls.
+
+### 🛡️ SOC 2 Compliance for AI & ISO 42001 AI Management System
+If you are deploying LLM-Shield to satisfy a compliance audit for **SOC 2 Compliance for AI** or the **ISO 42001 AI Management System**, map the proxy's features directly to your Trust Services Criteria:
+* **CC6.1 (Logical Access):** Satisfied by [Pluggable Tool-Call RBAC](docs/PLUGGABLE_RBAC_ENGINE.md).
+* **CC6.6 (Boundary Protection):** Satisfied by Zero-Egress Synthetic Masking.
+* **CC7.2 (Security Monitoring):** Satisfied by the Merkle-Attested OTel Trace Exporter.
 
 ### Cryptographic Audit & Tamper Evidence
 * **WORM-Compliant Merkle Attestation & Audit Logging**: Emits structured compliance events containing precise timestamps, tenant IDs, and session metadata into write-once-read-many (WORM) storage.
@@ -15,7 +21,7 @@ To satisfy the strict Privacy, Security, and Confidentiality criteria required b
 * **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md), [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md)
 
 ### Availability, Reliability, and Resiliency (SOC 2 Security Principles)
-* **Composite Agent Loop Circuit Breaker**: Actively tracks `tool_calls` array depths and initiates a deterministic circuit break against runaway autonomous agents, preventing API billing exhaustion and DoS attacks.
+* **Composite Agent Loop Circuit Breaker (Autonomous Agent Security)**: Actively tracks `tool_calls` array depths and initiates a deterministic circuit break against runaway autonomous agents, ensuring strict **Autonomous Agent Security** by preventing API billing exhaustion and DoS attacks.
 * **Zero-Allocation Streaming JSON Lexer**: Defends against memory ballooning and Slowloris attacks by using a Rust-backed `orjson` lexer, strictly bounding memory utilization below 60MB.
 * **Traffic Engineering & Resiliency**: Employs a Redis `evalsha` Token-Bucket Rate Limiter (6000 RPM / 200 Burst) alongside Kubernetes 25s SIGTERM connection draining to ensure high availability and graceful degradation.
 * **Deep Component Health Probes**: Integrates `/healthz`, `/livez`, and `/readyz` probes with Prometheus Alert Rules to constantly monitor Redis and Vault connectivity.
@@ -48,7 +54,7 @@ For healthcare organizations and digital health startups, streaming Protected He
 
 | HIPAA Requirement | Architectural Defense |
 | :--- | :--- |
-| **Transmission Security**<br>*(45 CFR § 164.312(e)(1))* | **Format-Preserving Synthetic Masking & Entropy**: The proxy intercepts outbound payloads locally. Utilizing a math-bound $O(N)$ Tier-2 Shannon Entropy scanner, it detects unstructured secrets and deterministically substitutes them with realistic Faker-based synthetic entities. No raw PHI traverses the public internet.<br>Flags: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md) |
+| **Transmission Security**<br>*(45 CFR § 164.312(e)(1))* | **Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)**: The proxy intercepts outbound payloads locally. Utilizing a math-bound $O(N)$ Tier-2 Shannon Entropy scanner, it performs **Data Loss Prevention (DLP) for LLMs** by detecting unstructured secrets and deterministically substituting them with realistic Faker-based synthetic entities. No raw PHI traverses the public internet.<br>Flags: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md) |
 | **Audit Controls**<br>*(45 CFR § 164.312(b))* | **RFC 6902 Differential Audit Logging**: Generates exact RFC 6902 compliant JSON patch differential logs detailing redacted string indices without ever persisting raw PHI to disk, compatible with SIEMs like Splunk.<br>Flags: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md) |
 | **Data Integrity & Storage** | **In-Band Stateless Cryptographic Masking**: Avoids permanent databases entirely. Sensitive entities are either encrypted directly in the LLM context using **AES-256-GCM**, or held temporarily in a volatile Redis Vault with strict rolling TTLs and Deterministic HMAC masking.<br>Flags: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md) |
-| **Person or Entity Authentication** | **Granular Entity Policy Scopes**: Enforces $O(1)$ in-memory tenant profile mapping. Binds incoming requests to department-level profiles via Virtual Keys, defaulting to `FAIL_CLOSED` Zero-Trust policies to prevent unauthorized lateral access.<br>Flags: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md) |
+| **Person or Entity Authentication** | **Granular Entity Policy Scopes**: Enforces $O(1)$ in-memory tenant profile mapping. Binds incoming requests to department-level profiles via Virtual Keys, defaulting to `FAIL_CLOSED` **Zero Trust AI** policies to prevent unauthorized lateral access and enforce strict **AI Governance**.<br>Flags: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md) |

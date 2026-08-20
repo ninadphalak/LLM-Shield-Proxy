@@ -1,7 +1,7 @@
 # 🔐 Security: Threat Model & Defenses
 
 ## 18-Vector Threat Matrix
-LLM-Shield-Proxy is validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests**.
+LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests** to ensure continuous **LLM Security Posture Management (LLM SPM)**.
 
 | Threat Vector / Attack Category | Adversarial Payload / Vector | Proxy Defense Mechanism | Verification Status |
 | :--- | :--- | :--- | :--- |
@@ -28,8 +28,8 @@ LLM-Shield-Proxy is validated against an exhaustive suite of **78 automated unit
 
 ### 🛡️ Core Cryptographic Masking & Defenses
 
-#### Format-Preserving Synthetic Masking & Entropy
-* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound $O(N)$ **Shannon Entropy** scanner that computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic Faker-based synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
+#### Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)
+* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound $O(N)$ **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic Faker-based synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
 * **Flags**: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md)
 
 #### In-Band Stateless Cryptographic Masking
@@ -46,12 +46,12 @@ LLM-Shield-Proxy is validated against an exhaustive suite of **78 automated unit
 
 ### 🛑 Threat Prevention & Isolation
 
-#### Composite Agent Loop Circuit Breaker
-* **Implementation Details**: Actively monitors recursive LLM agent executions and composite tool calls. It tracks `tool_calls` array depths and initiates a deterministic circuit break when recursive calls hit a strict threshold, preventing Autonomous Agent DoS attacks and runaway API billing.
+#### Autonomous Agent Security (Composite Agent Loop Circuit Breaker)
+* **Implementation Details**: Enforces **Autonomous Agent Security** by actively monitoring recursive LLM agent executions and composite tool calls. It tracks `tool_calls` array depths and initiates a deterministic circuit break when recursive calls hit a strict threshold, preventing Autonomous Agent DoS attacks and runaway API billing.
 * **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md), [`AGENT_BREAKER_THRESHOLD`](DEPLOYMENT.md)
 
-#### Granular Entity Policy Scopes & Zero-Trust Defaults
-* **Implementation Details**: Binds incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes $O(1)$ in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` Zero-Trust default—if a policy resolution fails or the engine faults, the proxy drops the connection rather than failing open and leaking data.
+#### Granular Entity Policy Scopes & Zero Trust AI Defaults
+* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes $O(1)$ in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default—if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
 * **Flags**: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md), [`SHIELD_FAILURE_MODE`](DEPLOYMENT.md)
 
 #### Zero-Allocation Streaming JSON Lexer
@@ -65,7 +65,7 @@ LLM-Shield-Proxy is validated against an exhaustive suite of **78 automated unit
 * **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md)
 
 #### Cryptographic SHA-256 Hash Chaining
-* **Implementation Details**: Every emitted audit log entry cryptographically signs and chains to the previous record's hash. This guarantees tamper-evidence; any post-facto modification or deletion of a log entry (e.g., to cover up a leak) will instantly invalidate the entire cryptographic chain, satisfying strict SOC 2 and HIPAA audit controls.
+* **Implementation Details**: Every emitted audit log entry cryptographically signs and chains to the previous record's hash. This guarantees tamper-evidence; any post-facto modification or deletion of a log entry (e.g., to cover up a leak) will instantly invalidate the entire cryptographic chain, satisfying strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** requirements, and HIPAA audit controls.
 * **Flags**: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md)
 
 #### Cryptographic Proof of Non-Egress Merkle Attestation
