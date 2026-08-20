@@ -9,14 +9,19 @@ async def fetch_memory_usage():
     try:
         cmd = ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", "llm-shield-proxy"]
         output = subprocess.check_output(cmd).decode('utf-8').strip()
-        if not output: return 0.0
+        if not output:
+            return 0.0
 
         mem_str = output.split(" / ")[0].strip()
         mem_mb = 0.0
-        if "MiB" in mem_str: mem_mb = float(mem_str.replace("MiB", ""))
-        elif "KiB" in mem_str: mem_mb = float(mem_str.replace("KiB", "")) / 1024.0
-        elif "GiB" in mem_str: mem_mb = float(mem_str.replace("GiB", "")) * 1024.0
-        elif "B" in mem_str: mem_mb = float(mem_str.replace("B", "")) / (1024.0 * 1024.0)
+        if "MiB" in mem_str:
+            mem_mb = float(mem_str.replace("MiB", ""))
+        elif "KiB" in mem_str:
+            mem_mb = float(mem_str.replace("KiB", "")) / 1024.0
+        elif "GiB" in mem_str:
+            mem_mb = float(mem_str.replace("GiB", "")) * 1024.0
+        elif "B" in mem_str:
+            mem_mb = float(mem_str.replace("B", "")) / (1024.0 * 1024.0)
         return mem_mb
     except Exception:
         return 0.0
