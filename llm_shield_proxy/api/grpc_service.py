@@ -16,6 +16,7 @@ from llm_shield_proxy.api.ext_proc_pb import (
     CommonResponse,
     CommonResponseStatus,
     ExternalProcessorBase,
+    HeadersResponse,
     ProcessingRequest,
     ProcessingResponse,
 )
@@ -56,12 +57,16 @@ class ExtProcService(ExternalProcessorBase):
                         thread_pool, self._process_request_body, request.request_body.body, vault
                     )
 
-                    body_mutation = BodyMutation(body=redacted_body)
-                    common_res = CommonResponse(
-                        status=CommonResponseStatus.CONTINUE_AND_REPLACE,
-                        body_mutation=body_mutation,
-                    )
-                    await stream.send_message(ProcessingResponse(request_body=BodyResponse(response=common_res)))
+                    body_mutation = BodyMutation()
+                    body_mutation.body = redacted_body
+                    common_res = CommonResponse()
+                    common_res.status = CommonResponseStatus.CONTINUE_AND_REPLACE
+                    common_res.body_mutation = body_mutation
+                    body_res = BodyResponse()
+                    body_res.response = common_res
+                    proc_res = ProcessingResponse()
+                    proc_res.request_body = body_res
+                    await stream.send_message(proc_res)
 
                 elif request.response_body.body:
                     # Response Body Phase (SSE Chunks)
@@ -72,31 +77,42 @@ class ExtProcService(ExternalProcessorBase):
                     rehydrated_text = sse_buffer.process_delta_text(chunk_text, is_final=is_final)
 
                     if rehydrated_text:
-                        body_mutation = BodyMutation(body=rehydrated_text.encode("utf-8"))
-                        common_res = CommonResponse(
-                            status=CommonResponseStatus.CONTINUE_AND_REPLACE,
-                            body_mutation=body_mutation,
-                        )
+                        body_mutation = BodyMutation()
+                        body_mutation.body = rehydrated_text.encode("utf-8")
+                        common_res = CommonResponse()
+                        common_res.status = CommonResponseStatus.CONTINUE_AND_REPLACE
+                        common_res.body_mutation = body_mutation
                     else:
                         # Hold the chunk (don't emit incomplete tokens)
-                        body_mutation = BodyMutation(clear_body=True)
-                        common_res = CommonResponse(
-                            status=CommonResponseStatus.CONTINUE_AND_REPLACE,
-                            body_mutation=body_mutation,
-                        )
+                        body_mutation = BodyMutation()
+                        body_mutation.clear_body = True
+                        common_res = CommonResponse()
+                        common_res.status = CommonResponseStatus.CONTINUE_AND_REPLACE
+                        common_res.body_mutation = body_mutation
 
-                    await stream.send_message(ProcessingResponse(response_body=BodyResponse(response=common_res)))
+                    body_res = BodyResponse()
+                    body_res.response = common_res
+                    proc_res = ProcessingResponse()
+                    proc_res.response_body = body_res
+                    await stream.send_message(proc_res)
 
                 else:
                     # Pass-through for headers/trailers if forwarded
                     # In this minimal integration, we just CONTINUE
-                    common_res = CommonResponse(status=CommonResponseStatus.CONTINUE)
+                    common_res = CommonResponse()
+                    common_res.status = CommonResponseStatus.CONTINUE
                     if request.request_headers.headers:
-                        await stream.send_message(ProcessingResponse(request_headers=BodyResponse(response=common_res)))
+                        head_res = HeadersResponse()
+                        head_res.response = common_res
+                        proc_res = ProcessingResponse()
+                        proc_res.request_headers = head_res
+                        await stream.send_message(proc_res)
                     elif request.response_headers.headers:
-                        await stream.send_message(
-                            ProcessingResponse(response_headers=BodyResponse(response=common_res))
-                        )
+                        head_res = HeadersResponse()
+                        head_res.response = common_res
+                        proc_res = ProcessingResponse()
+                        proc_res.response_headers = head_res
+                        await stream.send_message(proc_res)
 
         except Exception as exc:
             logger.error(f"Error in ext_proc stream: {exc}", exc_info=True)
