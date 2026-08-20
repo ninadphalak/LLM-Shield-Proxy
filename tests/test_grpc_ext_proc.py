@@ -40,8 +40,12 @@ async def test_ext_proc_redacts_request_body():
 
     req_body_bytes = json.dumps(raw_payload).encode("utf-8")
 
-    mock_request = ProcessingRequest(request_body=HttpBody(body=req_body_bytes, end_of_stream=True))
+    body = HttpBody()
+    body.body = req_body_bytes
+    body.end_of_stream = True
 
+    mock_request = ProcessingRequest()
+    mock_request.request_body = body
     stream = MockStream([mock_request])
 
     await service.process(stream)  # type: ignore
