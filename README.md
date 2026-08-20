@@ -547,18 +547,18 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
   * [Anthropic Adapter Implementation](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Zero-Allocation Streaming JSON Lexer](ARCHITECTURE.md#zero-allocation-streaming-json-lexer-orjson--rust)
 * **[SECURITY.md](SECURITY.md) - Threat Model & Defenses**
-  * [MODULE 2: Composite Agent Loop Circuit Breaker](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)
+  * [Composite Agent Loop Circuit Breaker](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)
   * [Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)
   * [Granular Entity Policy Scopes (O(1) in-memory tenant profile mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)
   * [Centralized Enterprise Secrets & mTLS (Native HashiCorp Vault)](SECURITY.md#centralized-enterprise-secrets--mtls)
 * **[COMPLIANCE.md](COMPLIANCE.md) - Audit, Forensics & Legal**
   * [Cryptographic SHA-256 Hash Chaining](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [Dynamic Canary Watermarking & Steganography (Leak Forensics)](COMPLIANCE.md#dynamic-canary-watermarking--steganography)
-  * [MODULE 4: Cryptographic Proof of Non-Egress Merkle Attestation](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
+  * [Cryptographic Proof of Non-Egress Merkle Attestation](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [WORM-Compliant Merkle Attestation & Audit Logging](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [FIPS 140-3 KAT, RFC 6902 Differential Audit Logging](COMPLIANCE.md#data-in-transit-encryption--fips-integrity)
 * **[DEPLOYMENT.md](DEPLOYMENT.md) - Infrastructure & Resiliency**
-  * [MODULE 5: Service Mesh Native Interface](DEPLOYMENT.md#1-service-mesh-native-interface)
+  * [Service Mesh Native Interface](DEPLOYMENT.md#1-service-mesh-native-interface)
   * [Zero-Overhead OpenTelemetry Tracing (W3C traceparent propagation via background thread)](DEPLOYMENT.md#2-zero-overhead-opentelemetry-tracing)
   * [Service Mesh Native gRPC ext_proc Integration (Zero HTTP network hops)](DEPLOYMENT.md#3-service-mesh-native-grpc-extproc-integration)
   * [Traffic Engineering & Resiliency (Redis evalsha Token-Bucket Rate Limiter, Kubernetes 25s SIGTERM draining)](DEPLOYMENT.md#4-traffic-engineering--resiliency)
