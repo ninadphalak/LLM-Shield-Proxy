@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mock-upstream:
+    image: python:3.11-alpine
+    command: >
+      sh -c "pip install aiohttp && python -c \"
+      import asyncio, random
+      from aiohttp import web
+      async def handle_stream(request):
+          response = web.StreamResponse()
+          response.content_type = 'text/event-stream'
+          await response.prepare(request)
+          for i in range(5):
+              await asyncio.sleep(random.uniform(0.02, 0.10))
+              chunk = f'data: {{\\\"id\\\": \\\"mock\\\", \\\"choices\\\": [{{\\\"delta\\\": {{\\\"content\\\": \\\"chunk{i}\\\"}}}}]} }\\n\\n'
+              await response.write(chunk.encode('utf-8'))
+          await response.write(b'data: [DONE]\\n\\n')
+          return response
+      app = web.Application()
+      app.router.add_post('/v1/chat/completions', handle_stream)
+      web.run_app(app, port=8080)
+      \""
+    ports:
+      - "8080:8080"
+
+  llm-shield-proxy:
+    build: 
+      context: ../../
+      dockerfile: Dockerfile
+    container_name: llm-shield-proxy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - UPSTREAM_URL=http://mock-upstream:8080
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 55M
+    depends_on:
+      - redis
+      - mock-upstream
