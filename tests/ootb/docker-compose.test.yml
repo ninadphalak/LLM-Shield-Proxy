@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  proxy:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - UPSTREAM_URL=http://mock-upstream:8080
+    depends_on:
+      - redis
+      - mock-upstream
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  mock-upstream:
+    image: python:3.11-alpine
+    command: python -m http.server 8080
+    ports:
+      - "8080:8080"

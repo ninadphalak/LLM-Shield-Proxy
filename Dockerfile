@@ -13,9 +13,11 @@ FROM python:3.14-slim AS runner
 
 WORKDIR /app
 
-# Create non-root system user and group
+# Create non-root system user and group, and provision socket directory
 RUN groupadd -g 10001 appgroup && \
-    useradd -u 10001 -g appgroup -d /app -s /bin/false appuser
+    useradd -u 10001 -g appgroup -d /app -s /bin/false appuser && \
+    mkdir -p /var/run/llm-shield && \
+    chown appuser:appgroup /var/run/llm-shield
 
 # Copy installed Python dependencies from builder
 COPY --from=builder --chown=appuser:appgroup /root/.local /app/.local

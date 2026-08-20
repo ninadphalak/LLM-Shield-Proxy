@@ -90,7 +90,7 @@ Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 "Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
 
 [project.scripts]
-llm-shield-proxy = "llm_shield_proxy.cli:main"
+llm-shield-proxy = "llm_shield_proxy.api.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["llm_shield_proxy*"]

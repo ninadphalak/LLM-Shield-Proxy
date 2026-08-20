@@ -677,6 +677,14 @@ async def _proxy_catch_all_internal(
                     try:
                         async for chunk in rehydrate_sse_stream(upstream_res.aiter_bytes(), vault, watermark_text=watermark_text):
                             yield chunk
+                    except asyncio.CancelledError:
+                        logger.info("Client disconnected mid-stream. Cleaning up SSE stream and upstream socket.")
+                        if x_session_id:
+                            if hasattr(vault_store, "clear_session_async"):
+                                await vault_store.clear_session_async(x_session_id, virtual_key_id)
+                            else:
+                                vault_store.clear_session(x_session_id, virtual_key_id)
+                        return
                     finally:
                         llm_shield_sse_active_streams.dec()
                         await upstream_res.aclose()
