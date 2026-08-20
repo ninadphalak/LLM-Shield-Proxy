@@ -1,5 +1,5 @@
-from typing import AsyncGenerator, Set
 from abc import ABC, abstractmethod
+from typing import AsyncGenerator, Set
 
 import orjson
 import redis.asyncio as redis
@@ -40,6 +40,10 @@ class RedisPolicyResolver(BasePolicyResolver):
 class OPAPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
         raise NotImplementedError("OPA integration coming in v1.2")
+
+class InMemoryPolicyResolver(BasePolicyResolver):
+    async def resolve_policy(self, virtual_key: str) -> dict:
+        return {"allowed_tools": [], "blocked_tools": []}
 
 class VaultPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
