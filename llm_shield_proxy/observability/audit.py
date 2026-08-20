@@ -29,7 +29,7 @@ if not audit_logger.handlers:
     from logging.handlers import QueueHandler, QueueListener
 
     # True asynchronous logging: a lock-free queue that won't block the ASGI event loop.
-    _log_queue = queue.Queue(-1)
+    _log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(-1)
     _queue_handler = QueueHandler(_log_queue)
 
     _stream_handler = logging.StreamHandler(sys.stdout)

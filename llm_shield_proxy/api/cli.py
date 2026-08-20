@@ -7,7 +7,7 @@ import asyncio
 import sys
 
 if sys.platform == "win32":
-    asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore
 
 import uvicorn
 

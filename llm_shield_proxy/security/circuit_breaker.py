@@ -82,11 +82,12 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
     if not session_id:
         return
 
-    use_redis = isinstance(vault_store, RedisVaultStore)
+    vs = vault_store
+    use_redis = isinstance(vs, RedisVaultStore) and getattr(vs, "async_client", None) is not None
     redis_key = f"circuit_breaker:{session_id}"
 
     if use_redis:
-        data = await vault_store.async_client.get(redis_key)
+        data = await vs.async_client.get(redis_key)  # type: ignore
         if data:
             try:
                 metrics_dict = json.loads(data)
@@ -101,7 +102,7 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
         else:
             metrics = SessionMetrics()
     else:
-        metrics = circuit_breaker_cache.get(session_id)
+        metrics = circuit_breaker_cache.get(session_id) or SessionMetrics()
         if not metrics:
             metrics = SessionMetrics()
             circuit_breaker_cache[session_id] = metrics
@@ -179,7 +180,7 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
             "consecutive_duplicate_count": metrics.consecutive_duplicate_count,
             "_last_bounded_payload": getattr(metrics, "_last_bounded_payload", ""),
         }
-        async with vault_store.async_client.pipeline(transaction=False) as pipe:
+        async with vs.async_client.pipeline(transaction=False) as pipe:  # type: ignore
             pipe.setex(redis_key, 600, json.dumps(metrics_dict))
             await pipe.execute()
 

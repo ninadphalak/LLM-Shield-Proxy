@@ -43,7 +43,7 @@ class ExtProcService(ExternalProcessorBase):
 
         # Instantiate a stateful SSERehydrationBuffer per Envoy stream
         # Using StatelessCryptoVault by default for high-throughput UDS deployments
-        vault = StatelessCryptoVault()
+        vault: "Vault" = StatelessCryptoVault()  # type: ignore
         sse_buffer = SSERehydrationBuffer(vault)
         # Stateful decoder to prevent multibyte UTF-8 character splitting across chunk boundaries
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -54,7 +54,10 @@ class ExtProcService(ExternalProcessorBase):
                     # Request Body Phase (Prompt)
                     # Offload the 3-Tier cascade to threadpool
                     redacted_body = await asyncio.get_running_loop().run_in_executor(
-                        thread_pool, self._process_request_body, request.request_body.body, vault
+                        thread_pool,
+                        self._process_request_body,
+                        request.request_body.body,
+                        vault,  # type: ignore
                     )
 
                     body_mutation = BodyMutation()
@@ -121,7 +124,7 @@ class ExtProcService(ExternalProcessorBase):
         """Executes the 3-Tier cascade on the request body (Runs in threadpool)."""
         try:
             payload = json.loads(raw_body.decode("utf-8"))
-            redacted_payload = pii_engine.redact_payload(payload, vault)
+            redacted_payload = pii_engine.redact_payload(payload, vault)  # type: ignore
             return json.dumps(redacted_payload).encode("utf-8")
         except json.JSONDecodeError as e:
             logger.error(f"Malformed JSON payload blocked: {e}")

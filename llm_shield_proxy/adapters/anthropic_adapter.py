@@ -52,7 +52,7 @@ class AnthropicAdapter:
             anthropic_payload["system"] = "\n\n".join(system_prompts)
 
         # Collapse consecutive roles and enforce strictly alternating
-        final_messages = []
+        final_messages: list[dict] = []
         for msg in filtered_messages:
             role = msg["role"]
             content = msg["content"]

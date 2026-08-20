@@ -10,7 +10,7 @@ import asyncio
 import sys
 
 if sys.platform == "win32":
-    asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore
 
 import hashlib
 import hmac
@@ -94,10 +94,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if not run_fips_kat_self_test():
         if settings.FIPS_STRICT_MODE:
-            AuditLogger.audit_logger.critical("FIPS 140-3 Cryptographic Integrity Self-Test Failed. Halting.")
+            logging.getLogger("llm_shield.audit").critical(
+                "FIPS 140-3 Cryptographic Integrity Self-Test Failed. Halting."
+            )
             raise RuntimeError("FIPS 140-3 Cryptographic Integrity Self-Test Failed")
         else:
-            AuditLogger.audit_logger.critical("FIPS 140-3 KAT Failed, but FIPS_STRICT_MODE=False. Continuing.")
+            logging.getLogger("llm_shield.audit").critical(
+                "FIPS 140-3 KAT Failed, but FIPS_STRICT_MODE=False. Continuing."
+            )
 
     AuditLogger.log_startup_event()
 
@@ -546,11 +550,11 @@ async def _proxy_catch_all_internal(
 
         vault = ScrubVault()  # type: ignore
     elif masking_mode == MaskingMode.STRUCTURAL_TAG:
-        vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
-        vault.synthetic = False
+        vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)  # type: ignore
+        vault.synthetic = False  # type: ignore
     else:  # SYNTHETIC
-        vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
-        vault.synthetic = True
+        vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)  # type: ignore
+        vault.synthetic = True  # type: ignore
 
     http_client = get_http_client(request)
 
@@ -615,9 +619,14 @@ async def _proxy_catch_all_internal(
             is_streaming = bool(payload.get("stream", False))
             try:
                 active_profile = pii_engine.get_profile(virtual_key_id)
-                loop = asyncio.get_running_loop()
-                redacted_payload = await loop.run_in_executor(
-                    None, pii_engine.redact_payload, payload, vault, active_profile
+                redacted_payload = await asyncio.get_running_loop().run_in_executor(
+                    thread_pool,
+                    pii_engine.redact_payload,
+                    payload,
+                    vault,
+                    None,
+                    1,
+                    1,  # type: ignore
                 )
 
                 # target_provider is refined with payload
@@ -709,7 +718,9 @@ async def _proxy_catch_all_internal(
                     llm_shield_sse_active_streams.inc()
                     try:
                         async for chunk in rehydrate_sse_stream(
-                            upstream_res.aiter_bytes(), vault, watermark_text=watermark_text
+                            upstream_res.aiter_bytes(),
+                            vault,
+                            watermark_text=watermark_text,  # type: ignore
                         ):
                             yield chunk
                     except asyncio.CancelledError:

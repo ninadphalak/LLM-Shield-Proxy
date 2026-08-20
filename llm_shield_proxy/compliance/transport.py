@@ -8,7 +8,7 @@ import orjson
 try:
     import aiofiles
 except ImportError:
-    aiofiles = None
+    aiofiles = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 

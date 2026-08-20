@@ -77,7 +77,8 @@ class DistributedRateLimiter:
         rate_per_sec = settings.RATE_LIMIT_RPM / 60.0
         burst = settings.RATE_LIMIT_BURST
 
-        if isinstance(vault_store, RedisVaultStore) and vault_store.redis is not None:
+        vs = vault_store
+        if isinstance(vs, RedisVaultStore) and getattr(vs, "async_client", None) is not None:
             try:
                 now_ms = int(time.time() * 1000)
                 rate_per_ms = rate_per_sec / 1000.0
@@ -86,9 +87,9 @@ class DistributedRateLimiter:
                 if not self._lua_sha:
                     async with self._lock:
                         if not self._lua_sha:
-                            self._lua_sha = await vault_store.redis.script_load(RATE_LIMIT_LUA)
+                            self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
 
-                result = await vault_store.redis.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)
+                result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
                 return bool(result)
             except Exception:  # nosec B110
                 # Fallback to in-memory on Redis failure

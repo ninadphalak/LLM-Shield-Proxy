@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import orjson
 from opentelemetry import trace
@@ -53,7 +53,7 @@ class MerkleTreeWORM:
 
 
 class DecisionTraceExporter:
-    def __init__(self, transports: List[BaseGRCTransport] = None):
+    def __init__(self, transports: list[BaseGRCTransport] | None = None):
         self.merkle_tree = MerkleTreeWORM()
         self.transports = transports or []
 
