@@ -36,7 +36,7 @@ Below is a summary of our compliance mappings. For the exhaustive deep-dive mapp
 
 | Compliance Domain | Supported Features & Capabilities |
 | :--- | :--- |
-| **🏥 HIPAA Transmission Security** | Local $O(1)$ Redaction, Tier-2 Shannon Entropy + Faker synthetic substituting. No raw PHI traverses public internet to third-party APIs. |
+| **🏥 HIPAA Transmission Security** | Local O(1) Redaction, Tier-2 Shannon Entropy + Faker synthetic substituting. No raw PHI traverses public internet to third-party APIs. |
 | **🛡️ SOC 2 Audit Controls** | WORM-Compliant Merkle Attestation & SHA-256 Hash Chaining. Emits tamper-evident structured logs with strict RFC 6902 differential patching. |
 | **⚖️ Legal & Egress Provenance** | Cryptographic Proof of Non-Egress Merkle Attestation. Dynamic Canary Watermarking for insider leak forensics. |
 | **🔐 Data Integrity & Storage** | Zero long-term storage. In-Band Stateless AES-256-GCM masking or ephemeral Redis TTL Vault mapping with Deterministic HMAC masking. |

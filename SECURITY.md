@@ -30,60 +30,60 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 
 #### Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)
 * **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound $O(N)$ **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic Faker-based synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
-* **Flags**: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md#core-configuration-flags)
 
 #### In-Band Stateless Cryptographic Masking
 * **Implementation Details**: Eliminates the need for external session vaults by encrypting sensitive entities directly in the LLM context using **AES-256-GCM** with a 256-bit Data Encryption Key (DEK). The encrypted payload remains mathematically unbreakable upstream and is decrypted seamlessly during the SSE stream return, guaranteeing zero state-leakage.
-* **Flags**: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md), [`SHIELD_ENCRYPTION_KEY`](DEPLOYMENT.md)
+* **Flags**: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_ENCRYPTION_KEY`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Stateless Redis TTL Vault & Deterministic HMAC Masking
 * **Implementation Details**: Provides flexible anonymization modes. When stateful masking is required, rehydration mappings are pushed to a centralized Redis Vault. Keys are hashed deterministically using HMAC-SHA256, allowing stateless tracking across horizontal proxy replicas without exposing raw data in memory.
-* **Flags**: [`REDIS_URL`](DEPLOYMENT.md), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md)
+* **Flags**: [`REDIS_URL`](DEPLOYMENT.md#core-configuration-flags), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md#core-configuration-flags)
 
 #### Dynamic Canary Watermarking & Steganography (Leak Forensics)
 * **Implementation Details**: Injects cryptographically verifiable, invisible canary tokens (via zero-width characters or deterministic synthetic swapping) into the outbound stream. If an employee leaks a response or uses it to train a shadow-IT model, the watermark can be extracted to mathematically prove provenance and identify the exact session/tenant that leaked the data.
-* **Flags**: [`ENABLE_WATERMARKING`](DEPLOYMENT.md), [`SHIELD_WATERMARK_SECRET`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_WATERMARKING`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_WATERMARK_SECRET`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ### 🛑 Threat Prevention & Isolation
 
 #### Autonomous Agent Security (Composite Agent Loop Circuit Breaker)
 * **Implementation Details**: Enforces **Autonomous Agent Security** by actively monitoring recursive LLM agent executions and composite tool calls. It tracks `tool_calls` array depths and initiates a deterministic circuit break when recursive calls hit a strict threshold, preventing Autonomous Agent DoS attacks and runaway API billing.
-* **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md), [`AGENT_BREAKER_THRESHOLD`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Granular Entity Policy Scopes & Zero Trust AI Defaults
 * **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes $O(1)$ in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default—if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
-* **Flags**: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md), [`SHIELD_FAILURE_MODE`](DEPLOYMENT.md)
+* **Flags**: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md#core-configuration-flags), [`SHIELD_FAILURE_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Zero-Allocation Streaming JSON Lexer
 * **Implementation Details**: Defends against Slowloris and memory ballooning attacks by utilizing a Rust-backed (`orjson`) zero-allocation lexer. This processes massive multi-megabyte SSE stream lines without spiking the Resident Set Size (RSS), keeping memory strictly bounded below 60MB.
-* **Flags**: [`MAX_SSE_LINE_LENGTH`](DEPLOYMENT.md)
+* **Flags**: [`MAX_SSE_LINE_LENGTH`](DEPLOYMENT.md#core-configuration-flags)
 
 ### 📜 Audit, Forensics, and Compliance
 
 #### WORM-Compliant Merkle Attestation & Audit Logging
 * **Implementation Details**: Emits structured compliance events containing timestamps, tenant IDs, redacted entity types, and session metadata. The logs are Write-Once-Read-Many (WORM) compliant, generating mathematical proof that specific data never egressed the VPC boundaries.
-* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md)
+* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Cryptographic SHA-256 Hash Chaining
 * **Implementation Details**: Every emitted audit log entry cryptographically signs and chains to the previous record's hash. This guarantees tamper-evidence; any post-facto modification or deletion of a log entry (e.g., to cover up a leak) will instantly invalidate the entire cryptographic chain, satisfying strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** requirements, and HIPAA audit controls.
-* **Flags**: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md)
+* **Flags**: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Cryptographic Proof of Non-Egress Merkle Attestation
 * **Implementation Details**: Constructs a Merkle Tree of all redacted tokens per session. The proxy provides a cryptographic root hash confirming exactly what was stripped, allowing third-party auditors to verify non-egress without ever seeing the raw sensitive data.
 
 #### FIPS 140-3 KAT & RFC 6902 Differential Audit Logging
 * **Implementation Details**: Executes Known Answer Tests (KAT) at startup to verify cryptographic module integrity (FIPS 140-3). Emits logs strictly utilizing RFC 6902 JSON Patch formats to precisely record mutations made to the outbound LLM payload.
-* **Flags**: [`FIPS_STRICT_MODE`](DEPLOYMENT.md), [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md)
+* **Flags**: [`FIPS_STRICT_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ### 🏗️ Secure Infrastructure & Service Mesh
 
 #### Centralized Enterprise Secrets & mTLS
 * **Implementation Details**: Features native HashiCorp Vault integration supporting AppRole, Kubernetes Service Accounts, and Token authentication. Provides a non-blocking TTL cache and enforces strict X.509 mutual TLS (mTLS) transport for backend secret retrieval, ensuring data-in-transit security.
-* **Flags**: [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md), [`ENABLE_MTLS`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Service Mesh Native gRPC ext_proc Integration
 * **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks. By implementing Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`), it achieves Zero HTTP network hops, streaming buffers directly over highly secure UDS (Unix Domain Sockets).
-* **Flags**: [`ENABLE_EXT_PROC`](DEPLOYMENT.md), [`EXT_PROC_SOCK_PATH`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_EXT_PROC`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`EXT_PROC_SOCK_PATH`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Zero-Dependency Kubernetes Mutating Webhook
 * **Implementation Details**: Intercepts Pod deployment manifests directly via a standalone Mutating Webhook to seamlessly inject the LLM-Shield sidecar container and mTLS certificates, requiring zero external dependencies or elevated cluster privileges.
@@ -93,19 +93,19 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
   * **Redis Token-Bucket**: Pre-loaded Lua scripts (`evalsha`) handle high-throughput rate limiting to prevent noisy-neighbor DoS.
   * **SIGTERM Draining**: Kubernetes 25s SIGTERM connection draining ensures active SSE streams finish transmission securely during pod termination.
   * **Upstream Key Overriding**: Strips vulnerable client keys and injects internal load-balanced provider API keys dynamically.
-* **Flags**: [`ENABLE_RATE_LIMITING`](DEPLOYMENT.md), [`DRAIN_TIMEOUT_SECONDS`](DEPLOYMENT.md), [`OVERRIDE_CLIENT_AUTH`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_RATE_LIMITING`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`DRAIN_TIMEOUT_SECONDS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`OVERRIDE_CLIENT_AUTH`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Deep Component Health Probes and Prometheus Alerts
 * **Implementation Details**: Provides granular `/healthz`, `/livez`, and `/readyz` probes covering Redis connectivity and Vault mTLS states to ensure traffic is never routed to a compromised or disconnected node. Integrates directly with Prometheus Alertmanager.
-* **Flags**: [`METRICS_BEARER_TOKEN`](DEPLOYMENT.md)
+* **Flags**: [`METRICS_BEARER_TOKEN`](DEPLOYMENT.md#core-configuration-flags)
 
 #### Zero-Overhead OpenTelemetry (OTel) Tracing
 * **Implementation Details**: Handles W3C `traceparent` distributed tracing propagation via a dedicated asynchronous background thread. Provides full observability to Jaeger or Datadog with strictly zero latency overhead to the active HTTP streaming loop, ensuring security monitoring never degrades LLM performance.
-* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md)
+* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Multi-Provider Translators & Anthropic Adapter
 * **Implementation Details**: Acts as an un-bypassable security layer by universally intercepting requests and employing a Zero-SDK OpenAI-to-Anthropic request transformation. It normalizes distinct SSE stream formats at the network edge, ensuring security policies are uniformly applied regardless of the backend LLM provider.
-* **Flags**: [`DEFAULT_UPSTREAM_PROVIDER`](DEPLOYMENT.md), [`ANTHROPIC_API_VERSION`](DEPLOYMENT.md)
+* **Flags**: [`DEFAULT_UPSTREAM_PROVIDER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ANTHROPIC_API_VERSION`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ---
 

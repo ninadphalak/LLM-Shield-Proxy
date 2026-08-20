@@ -18,29 +18,29 @@ If you are deploying LLM-Shield to satisfy a compliance audit for **SOC 2 Compli
 * **WORM-Compliant Merkle Attestation & Audit Logging**: Emits structured compliance events containing precise timestamps, tenant IDs, and session metadata into write-once-read-many (WORM) storage.
 * **Cryptographic SHA-256 Hash Chaining**: Every log entry cryptographically signs and chains to the previous record's hash (`current_hash = SHA256(prev_hash + timestamp + tenant_id + payload_diff)`). This guarantees tamper-evidence; any post-facto modification instantly invalidates the chain.
 * **Cryptographic Proof of Non-Egress Merkle Attestation**: Constructs runtime Merkle trees over redacted streaming chunks. This provides mathematical proof that no unredacted chunks escaped the VPC boundary, satisfying strict auditor verification requirements.
-* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md), [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md)
+* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ### Availability, Reliability, and Resiliency (SOC 2 Security Principles)
 * **Composite Agent Loop Circuit Breaker (Autonomous Agent Security)**: Actively tracks `tool_calls` array depths and initiates a deterministic circuit break against runaway autonomous agents, ensuring strict **Autonomous Agent Security** by preventing API billing exhaustion and DoS attacks.
 * **Zero-Allocation Streaming JSON Lexer**: Defends against memory ballooning and Slowloris attacks by using a Rust-backed `orjson` lexer, strictly bounding memory utilization below 60MB.
 * **Traffic Engineering & Resiliency**: Employs a Redis `evalsha` Token-Bucket Rate Limiter (6000 RPM / 200 Burst) alongside Kubernetes 25s SIGTERM connection draining to ensure high availability and graceful degradation.
 * **Deep Component Health Probes**: Integrates `/healthz`, `/livez`, and `/readyz` probes with Prometheus Alert Rules to constantly monitor Redis and Vault connectivity.
-* **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md), [`ENABLE_RATE_LIMITING`](DEPLOYMENT.md), [`MAX_SSE_LINE_LENGTH`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_RATE_LIMITING`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`MAX_SSE_LINE_LENGTH`](DEPLOYMENT.md#core-configuration-flags)
 
 ### Data-in-Transit Encryption & FIPS Integrity
 * **FIPS 140-3 KAT**: All cryptographic modules run FIPS 140-3 Known Answer Tests (KAT) at startup to verify integrity.
 * **Centralized Enterprise Secrets & mTLS**: Features native HashiCorp Vault (AppRole / K8s / Token) integration with non-blocking TTL caching. Enforces strict X.509 mTLS transport for backend secret retrieval.
-* **Flags**: [`FIPS_STRICT_MODE`](DEPLOYMENT.md), [`ENABLE_MTLS`](DEPLOYMENT.md), [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md)
+* **Flags**: [`FIPS_STRICT_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ## 🕵️ Insider Forensics & Tracing
 
 ### Dynamic Canary Watermarking & Steganography
 * **Implementation Details**: Injects cryptographically verifiable, invisible canary tokens (via zero-width Unicode characters representing `HMAC_SHA256(Tenant_ID + Timestamp + Virtual_Key)`) into the output stream. This allows exact forensic tracing and attribution of leaked screenshots or text payloads, prosecuting insider model leaks.
-* **Flags**: [`ENABLE_WATERMARKING`](DEPLOYMENT.md), [`SHIELD_WATERMARK_SECRET`](DEPLOYMENT.md)
+* **Flags**: [`ENABLE_WATERMARKING`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_WATERMARK_SECRET`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ### Lightweight OpenTelemetry (OTel) Tracing
 * **Implementation Details**: Implements zero-overhead W3C `traceparent` distributed tracing propagation via a dedicated asynchronous background thread, allowing SOC analysts to track complete request lifecycles without degrading LLM response latency.
-* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md), [`TELEMETRY_ENDPOINT_URL`](DEPLOYMENT.md)
+* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`TELEMETRY_ENDPOINT_URL`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ## 🌐 Secure Mesh Architecture
 To ensure the proxy itself cannot be bypassed by malicious internal developers, LLM-Shield leverages natively secure infrastructure patterns:
@@ -54,7 +54,7 @@ For healthcare organizations and digital health startups, streaming Protected He
 
 | HIPAA Requirement | Architectural Defense |
 | :--- | :--- |
-| **Transmission Security**<br>*(45 CFR § 164.312(e)(1))* | **Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)**: The proxy intercepts outbound payloads locally. Utilizing a math-bound $O(N)$ Tier-2 Shannon Entropy scanner, it performs **Data Loss Prevention (DLP) for LLMs** by detecting unstructured secrets and deterministically substituting them with realistic Faker-based synthetic entities. No raw PHI traverses the public internet.<br>Flags: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md) |
-| **Audit Controls**<br>*(45 CFR § 164.312(b))* | **RFC 6902 Differential Audit Logging**: Generates exact RFC 6902 compliant JSON patch differential logs detailing redacted string indices without ever persisting raw PHI to disk, compatible with SIEMs like Splunk.<br>Flags: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md) |
-| **Data Integrity & Storage** | **In-Band Stateless Cryptographic Masking**: Avoids permanent databases entirely. Sensitive entities are either encrypted directly in the LLM context using **AES-256-GCM**, or held temporarily in a volatile Redis Vault with strict rolling TTLs and Deterministic HMAC masking.<br>Flags: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md) |
-| **Person or Entity Authentication** | **Granular Entity Policy Scopes**: Enforces $O(1)$ in-memory tenant profile mapping. Binds incoming requests to department-level profiles via Virtual Keys, defaulting to `FAIL_CLOSED` **Zero Trust AI** policies to prevent unauthorized lateral access and enforce strict **AI Governance**.<br>Flags: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md) |
+| **Transmission Security**<br>*(45 CFR § 164.312(e)(1))* | **Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)**: The proxy intercepts outbound payloads locally. Utilizing a math-bound O(N) Tier-2 Shannon Entropy scanner, it performs **Data Loss Prevention (DLP) for LLMs** by detecting unstructured secrets and deterministically substituting them with realistic Faker-based synthetic entities. No raw PHI traverses the public internet.<br>Flags: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md#core-configuration-flags) |
+| **Audit Controls**<br>*(45 CFR § 164.312(b))* | **RFC 6902 Differential Audit Logging**: Generates exact RFC 6902 compliant JSON patch differential logs detailing redacted string indices without ever persisting raw PHI to disk, compatible with SIEMs like Splunk.<br>Flags: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering) |
+| **Data Integrity & Storage** | **In-Band Stateless Cryptographic Masking**: Avoids permanent databases entirely. Sensitive entities are either encrypted directly in the LLM context using **AES-256-GCM**, or held temporarily in a volatile Redis Vault with strict rolling TTLs and Deterministic HMAC masking.<br>Flags: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md#core-configuration-flags) |
+| **Person or Entity Authentication** | **Granular Entity Policy Scopes**: Enforces O(1) in-memory tenant profile mapping. Binds incoming requests to department-level profiles via Virtual Keys, defaulting to `FAIL_CLOSED` **Zero Trust AI** policies to prevent unauthorized lateral access and enforce strict **AI Governance**.<br>Flags: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md#core-configuration-flags) |
