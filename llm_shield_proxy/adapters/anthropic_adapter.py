@@ -3,6 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class AnthropicAdapter:
     MODEL_ALIASES = {
         "gpt-4o": "claude-3-5-sonnet-20241022",
@@ -57,7 +58,7 @@ class AnthropicAdapter:
             content = msg["content"]
             # Anthropic only supports 'user' and 'assistant'
             if role not in ("user", "assistant"):
-                role = "user" # fallback for 'tool' etc. if not specifically handled
+                role = "user"  # fallback for 'tool' etc. if not specifically handled
 
             if not final_messages:
                 if role == "assistant":
@@ -94,17 +95,16 @@ class AnthropicAdapter:
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": text_content
-                    },
-                    "finish_reason": "stop" if anthropic_payload.get("stop_reason") == "end_turn" else anthropic_payload.get("stop_reason")
+                    "message": {"role": "assistant", "content": text_content},
+                    "finish_reason": "stop"
+                    if anthropic_payload.get("stop_reason") == "end_turn"
+                    else anthropic_payload.get("stop_reason"),
                 }
             ],
             "usage": {
                 "prompt_tokens": usage.get("input_tokens", 0),
                 "completion_tokens": usage.get("output_tokens", 0),
-                "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-            }
+                "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+            },
         }
         return openai_res

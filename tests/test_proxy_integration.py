@@ -99,7 +99,9 @@ def test_cors_preflight_options():
 
 def test_inbound_auth_validation(monkeypatch):
     monkeypatch.setattr("llm_shield_proxy.core.config.settings.VALID_VIRTUAL_KEYS", "sk-proxy-finance")
-    monkeypatch.setattr("llm_shield_proxy.core.config.settings._valid_virtual_keys_set", frozenset({"sk-proxy-finance"}))
+    monkeypatch.setattr(
+        "llm_shield_proxy.core.config.settings._valid_virtual_keys_set", frozenset({"sk-proxy-finance"})
+    )
 
     # Missing header
     res_missing = client.post("/v1/chat/completions", json={"model": "gpt-4", "messages": []})

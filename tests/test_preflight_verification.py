@@ -222,8 +222,8 @@ def test_anthropic_adapter_large_payload_memory():
         "model": "claude-3-sonnet-20240229",
         "messages": [
             {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": large_text}
-        ]
+            {"role": "user", "content": large_text},
+        ],
     }
 
     adapter = AnthropicAdapter()

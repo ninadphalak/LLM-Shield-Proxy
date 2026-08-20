@@ -11,9 +11,7 @@ from typing import Optional
 
 
 def get_identity(
-    authorization_header: Optional[str],
-    x_virtual_key_header: Optional[str],
-    client_ip: Optional[str]
+    authorization_header: Optional[str], x_virtual_key_header: Optional[str], client_ip: Optional[str]
 ) -> str:
     """Resolves identity in order of precedence: Authorization -> X-Virtual-Key -> Client_IP."""
     if authorization_header:
@@ -35,19 +33,10 @@ def get_identity(
     return "anonymous_client"
 
 
-def generate_fingerprint(
-    secret: str,
-    identity: str,
-    session_id: str,
-    epoch_minute: int
-) -> str:
+def generate_fingerprint(secret: str, identity: str, session_id: str, epoch_minute: int) -> str:
     """Computes a 16-character HMAC-SHA256 fingerprint."""
     message = f"{identity}:{session_id}:{epoch_minute}".encode("utf-8")
-    return hmac.new(
-        secret.encode("utf-8"),
-        message,
-        hashlib.sha256
-    ).hexdigest()[:16]
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()[:16]
 
 
 def encode_steganography(hex_fingerprint: str) -> str:
@@ -58,13 +47,13 @@ def encode_steganography(hex_fingerprint: str) -> str:
     # Map 0 -> \u200B (Zero-Width Space)
     # Map 1 -> \u200C (Zero-Width Non-Joiner)
     invisible_chars = []
-    invisible_chars.append("\u200D") # Start delimiter (Zero-Width Joiner)
+    invisible_chars.append("\u200d")  # Start delimiter (Zero-Width Joiner)
     for bit in binary_str:
         if bit == "0":
-            invisible_chars.append("\u200B")
+            invisible_chars.append("\u200b")
         else:
-            invisible_chars.append("\u200C")
-    invisible_chars.append("\u200D") # End delimiter
+            invisible_chars.append("\u200c")
+    invisible_chars.append("\u200d")  # End delimiter
 
     return "".join(invisible_chars)
 
@@ -74,7 +63,7 @@ def generate_watermark_text(
     authorization_header: Optional[str],
     x_virtual_key_header: Optional[str],
     client_ip: Optional[str],
-    session_id: str
+    session_id: str,
 ) -> str:
     """End-to-end generation of the invisible watermark string."""
     identity = get_identity(authorization_header, x_virtual_key_header, client_ip)

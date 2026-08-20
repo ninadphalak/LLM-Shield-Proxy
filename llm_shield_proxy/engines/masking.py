@@ -8,10 +8,12 @@ from llm_shield_proxy.core.config import settings
 
 class MaskingMode(str, Enum):
     """Supported masking modes for the proxy."""
+
     SYNTHETIC = "SYNTHETIC"
     STRUCTURAL_TAG = "STRUCTURAL_TAG"
     SCRUB = "SCRUB"
     STATELESS_CRYPTO = "STATELESS_CRYPTO"
+
 
 def resolve_masking_mode(header_value: Optional[str] = None) -> MaskingMode:
     """Resolves masking mode from header or default configuration."""

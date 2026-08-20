@@ -28,12 +28,8 @@ class CircuitBreakerTrippedException(Exception):
 class SessionMetrics:
     """Memory-safe state tracking for a single session."""
 
-    entropy_history: collections.deque[float] = field(
-        default_factory=lambda: collections.deque(maxlen=5)
-    )
-    tool_call_hashes: collections.deque[str] = field(
-        default_factory=lambda: collections.deque(maxlen=5)
-    )
+    entropy_history: collections.deque[float] = field(default_factory=lambda: collections.deque(maxlen=5))
+    tool_call_hashes: collections.deque[str] = field(default_factory=lambda: collections.deque(maxlen=5))
     consecutive_duplicate_count: int = 0
 
 
@@ -97,7 +93,7 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
                 metrics = SessionMetrics(
                     entropy_history=collections.deque(metrics_dict.get("entropy_history", []), maxlen=5),
                     tool_call_hashes=collections.deque(metrics_dict.get("tool_call_hashes", []), maxlen=5),
-                    consecutive_duplicate_count=metrics_dict.get("consecutive_duplicate_count", 0)
+                    consecutive_duplicate_count=metrics_dict.get("consecutive_duplicate_count", 0),
                 )
                 setattr(metrics, "_last_bounded_payload", metrics_dict.get("_last_bounded_payload", ""))
             except (json.JSONDecodeError, TypeError):
@@ -151,12 +147,13 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
                     is_purely_numeric_diff = True
                     has_diff = False
                     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-                        if tag in ('replace', 'insert', 'delete'):
+                        if tag in ("replace", "insert", "delete"):
                             has_diff = True
                             diff_chars1 = last_payload_str[i1:i2]
                             diff_chars2 = bounded_payload_str[j1:j2]
-                            if (diff_chars1 and not diff_chars1.isdigit()) or \
-                               (diff_chars2 and not diff_chars2.isdigit()):
+                            if (diff_chars1 and not diff_chars1.isdigit()) or (
+                                diff_chars2 and not diff_chars2.isdigit()
+                            ):
                                 is_purely_numeric_diff = False
                                 break
 
@@ -180,7 +177,7 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
             "entropy_history": list(metrics.entropy_history),
             "tool_call_hashes": list(metrics.tool_call_hashes),
             "consecutive_duplicate_count": metrics.consecutive_duplicate_count,
-            "_last_bounded_payload": getattr(metrics, "_last_bounded_payload", "")
+            "_last_bounded_payload": getattr(metrics, "_last_bounded_payload", ""),
         }
         async with vault_store.async_client.pipeline(transaction=False) as pipe:
             pipe.setex(redis_key, 600, json.dumps(metrics_dict))
@@ -189,7 +186,4 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
     if metrics.consecutive_duplicate_count >= settings.AGENT_BREAKER_THRESHOLD - 1:
         # Reset count so they can try again after being tripped once?
         # For now, let it trip repeatedly if they keep sending the exact same payload.
-        raise CircuitBreakerTrippedException(
-            "Agent loop detected",
-            metrics.consecutive_duplicate_count + 1
-        )
+        raise CircuitBreakerTrippedException("Agent loop detected", metrics.consecutive_duplicate_count + 1)

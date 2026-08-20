@@ -68,11 +68,11 @@ class SSERehydrationBuffer:
 
         # Check for partial [ENC_v1_ tokens for StatelessCryptoVault
         if type(self.vault).__name__ == "StatelessCryptoVault":
-            last_bracket_idx = text.rfind('[')
+            last_bracket_idx = text.rfind("[")
             if last_bracket_idx != -1:
                 suffix = text[last_bracket_idx:]
                 prefix = "[ENC_v1_"
-                if prefix.startswith(suffix) or (suffix.startswith(prefix) and ']' not in suffix):
+                if prefix.startswith(suffix) or (suffix.startswith(prefix) and "]" not in suffix):
                     max_k = max(max_k, len(suffix))
 
         return max_k
@@ -102,7 +102,11 @@ class SSERehydrationBuffer:
 
                 # In a fast-path, empty token_to_original can just skip rehydrate
                 token_to_original = getattr(self.vault, "token_to_original", None)
-                if (token_to_original is not None and not token_to_original and type(self.vault).__name__ != "StatelessCryptoVault"):
+                if (
+                    token_to_original is not None
+                    and not token_to_original
+                    and type(self.vault).__name__ != "StatelessCryptoVault"
+                ):
                     pass
                 else:
                     # Calculate dynamic prefix retention bound
@@ -151,6 +155,7 @@ async def rehydrate_sse_stream(
         Rehydrated, UTF-8 encoded Server-Sent Events bytes.
     """
     from llm_shield_proxy.security.attestation import MerkleAttestationStream
+
     session_id = getattr(vault, "session_id", "stateless-session")
     attestation = MerkleAttestationStream(session_id=session_id)
 
@@ -195,7 +200,11 @@ async def rehydrate_sse_stream(
                                 json_str = stripped[6:]
                                 data_obj = json.loads(json_str)
 
-                                if isinstance(data_obj, dict) and data_obj.get("type") in ("message_start", "content_block_delta", "content_block_start"):
+                                if isinstance(data_obj, dict) and data_obj.get("type") in (
+                                    "message_start",
+                                    "content_block_delta",
+                                    "content_block_start",
+                                ):
                                     is_anthropic_stream = True
 
                                 if "id" in data_obj and cached_id == "chatcmpl-watermark":
@@ -225,11 +234,16 @@ async def rehydrate_sse_stream(
                                             "object": "chat.completion.chunk",
                                             "created": cached_created,
                                             "model": cached_model,
-                                            "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                            "choices": [
+                                                {
+                                                    "index": data_obj.get("index", 0),
+                                                    "delta": {"content": rehydrated_content},
+                                                }
+                                            ],
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
                                     else:
-                                        pass # Skip non-text deltas
+                                        pass  # Skip non-text deltas
                                 # 3. Anthropic Content Block Start / Generic text delta
                                 elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
                                     cb = data_obj["content_block"]
@@ -241,13 +255,18 @@ async def rehydrate_sse_stream(
                                             "object": "chat.completion.chunk",
                                             "created": cached_created,
                                             "model": cached_model,
-                                            "choices": [{"index": data_obj.get("index", 0), "delta": {"content": rehydrated_content}}]
+                                            "choices": [
+                                                {
+                                                    "index": data_obj.get("index", 0),
+                                                    "delta": {"content": rehydrated_content},
+                                                }
+                                            ],
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
                                     else:
-                                        pass # Skip non-text start blocks
+                                        pass  # Skip non-text start blocks
                                 elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
-                                    pass # We let [DONE] be handled at stream end
+                                    pass  # We let [DONE] be handled at stream end
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
 
@@ -266,7 +285,9 @@ async def rehydrate_sse_stream(
                                         "object": "chat.completion.chunk",
                                         "created": cached_created,
                                         "model": cached_model,
-                                        "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                                        "choices": [
+                                            {"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}
+                                        ],
                                     }
                                     yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
                                 else:
@@ -275,10 +296,12 @@ async def rehydrate_sse_stream(
                                         "object": cached_object,
                                         "created": cached_created,
                                         "model": cached_model,
-                                        "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                                        "choices": [
+                                            {"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}
+                                        ],
                                     }
                                     yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
-                                watermark_text = "" # prevent double yield
+                                watermark_text = ""  # prevent double yield
 
                             yield (line + "\n").encode("utf-8")
                         else:
@@ -286,6 +309,7 @@ async def rehydrate_sse_stream(
 
                 except Exception as e:
                     import logging
+
                     if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
                         logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_CLOSED): {e}")
                         return
@@ -318,7 +342,7 @@ async def rehydrate_sse_stream(
                             "object": "chat.completion.chunk",
                             "created": cached_created,
                             "model": cached_model,
-                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}],
                         }
                         yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
                     else:
@@ -327,7 +351,7 @@ async def rehydrate_sse_stream(
                             "object": cached_object,
                             "created": cached_created,
                             "model": cached_model,
-                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}]
+                            "choices": [{"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}],
                         }
                         yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
                     watermark_text = ""

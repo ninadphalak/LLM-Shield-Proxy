@@ -43,6 +43,7 @@ else
 end
 """
 
+
 class InMemoryBucket:
     def __init__(self, rate: float, burst: int):
         self.rate = rate
@@ -61,6 +62,7 @@ class InMemoryBucket:
                 self.tokens -= 1.0
                 return True
             return False
+
 
 class DistributedRateLimiter:
     def __init__(self):
@@ -86,9 +88,7 @@ class DistributedRateLimiter:
                         if not self._lua_sha:
                             self._lua_sha = await vault_store.redis.script_load(RATE_LIMIT_LUA)
 
-                result = await vault_store.redis.evalsha(
-                    self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1
-                )
+                result = await vault_store.redis.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)
                 return bool(result)
             except Exception:  # nosec B110
                 # Fallback to in-memory on Redis failure
@@ -101,5 +101,6 @@ class DistributedRateLimiter:
                     self._in_memory_buckets[virtual_key_id] = InMemoryBucket(rate_per_sec, burst)
 
         return await self._in_memory_buckets[virtual_key_id].acquire()
+
 
 rate_limiter = DistributedRateLimiter()

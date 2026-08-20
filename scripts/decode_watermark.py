@@ -18,7 +18,7 @@ def decode_steganography(text: str) -> str:
     """Finds zero-width watermark sequences and decodes them to hex."""
     # Look for sequences starting and ending with ZWJ (\u200D)
     # containing only ZWSP (\u200B) and ZWNJ (\u200C).
-    pattern = re.compile(r'\u200D([\u200B\u200C]+)\u200D')
+    pattern = re.compile(r"\u200D([\u200B\u200C]+)\u200D")
 
     matches = pattern.findall(text)
     if not matches:
@@ -26,7 +26,7 @@ def decode_steganography(text: str) -> str:
 
     fingerprints = []
     for match in matches:
-        binary_str = match.replace('\u200B', '0').replace('\u200C', '1')
+        binary_str = match.replace("\u200b", "0").replace("\u200c", "1")
 
         # Every 4 bits forms one hex character
         if len(binary_str) % 4 != 0:
@@ -35,7 +35,7 @@ def decode_steganography(text: str) -> str:
 
         hex_str = ""
         for i in range(0, len(binary_str), 4):
-            nibble = binary_str[i:i+4]
+            nibble = binary_str[i : i + 4]
             hex_str += hex(int(nibble, 2))[2:]
 
         fingerprints.append(hex_str)
@@ -45,6 +45,7 @@ def decode_steganography(text: str) -> str:
     if len(unique) == 1:
         return f"Forensic Fingerprint: {unique[0]}"
     return f"Multiple Fingerprints Found: {', '.join(unique)}"
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Decode zero-width steganographic watermarks.")
@@ -65,6 +66,7 @@ def main() -> None:
 
     result = decode_steganography(content)
     print(result)
+
 
 if __name__ == "__main__":
     main()

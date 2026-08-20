@@ -14,6 +14,7 @@ from llm_shield_proxy.compliance.transport import AsyncWebhookTransport, Sidecar
 def oscal_payload():
     return {"test": "payload"}
 
+
 @pytest.mark.asyncio
 async def test_webhook_transport_fire_and_forget_failure(caplog, oscal_payload):
     """
@@ -45,6 +46,7 @@ async def test_webhook_transport_fire_and_forget_failure(caplog, oscal_payload):
             await transport.dispatch(oscal_payload)
         assert "Unexpected error in Webhook transport" in caplog.text
 
+
 @pytest.mark.asyncio
 async def test_sidecar_file_transport(tmp_path, oscal_payload):
     """
@@ -58,13 +60,14 @@ async def test_sidecar_file_transport(tmp_path, oscal_payload):
 
     # Read back and verify
     assert log_file.exists()
-    lines = log_file.read_text().strip().split('\n')
+    lines = log_file.read_text().strip().split("\n")
     assert len(lines) == 2
 
     parsed1 = orjson.loads(lines[0])
     parsed2 = orjson.loads(lines[1])
     assert parsed1 == oscal_payload
     assert parsed2 == oscal_payload
+
 
 @pytest.mark.asyncio
 async def test_trace_exporter_async_dispatch():
@@ -77,6 +80,7 @@ async def test_trace_exporter_async_dispatch():
     # Needs an async mock for the dispatch method
     async def mock_dispatch1(payload):
         mock_transport1.payload = payload
+
     async def mock_dispatch2(payload):
         mock_transport2.payload = payload
 
@@ -92,7 +96,7 @@ async def test_trace_exporter_async_dispatch():
         redacted_prompt_hash="prompt_hash",
         tool_name="get_weather",
         rbac_decision="ALLOW",
-        payload_entropy=3.14
+        payload_entropy=3.14,
     )
 
     # Let the event loop process the background tasks

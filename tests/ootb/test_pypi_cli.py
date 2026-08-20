@@ -26,7 +26,7 @@ def test_pypi_cli_happy_path():
         venv.create(tmpdir, with_pip=True)
 
         # Handle cross-platform venv paths
-        if os.name == 'nt':
+        if os.name == "nt":
             pip_exe = os.path.join(tmpdir, "Scripts", "pip.exe")
             shield_exe = os.path.join(tmpdir, "Scripts", "llm-shield-proxy.exe")
         else:
@@ -38,6 +38,7 @@ def test_pypi_cli_happy_path():
         # 3. Run llm-shield --help and assert exit code is 0
         result = subprocess.run([shield_exe, "--help"], capture_output=True, text=True)
         assert result.returncode == 0, f"Expected exit code 0, got {result.returncode}. Stderr: {result.stderr}"
+
 
 if __name__ == "__main__":
     test_pypi_cli_happy_path()

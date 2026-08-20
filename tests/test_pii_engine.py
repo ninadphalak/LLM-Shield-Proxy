@@ -31,7 +31,7 @@ def test_pii_custom_regex_byor():
             {
                 "name": "INTERNAL_EMPLOYEE_ID",
                 "pattern": r"(?i)EMP-[A-Z]{3}-\d{5}",
-                "description": "Matches internal Acme Corp employee IDs"
+                "description": "Matches internal Acme Corp employee IDs",
             }
         ]
     }

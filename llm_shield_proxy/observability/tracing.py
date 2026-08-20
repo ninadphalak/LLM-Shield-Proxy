@@ -23,16 +23,14 @@ def _init_tracing() -> trace.Tracer:
     # Use BatchSpanProcessor on a background daemon thread to prevent ASGI event loop starvation.
     # We strictly bound the queue size and export batch size to prevent unbounded memory bloat.
     from llm_shield_proxy.core.config import settings
+
     if settings.TELEMETRY_ENABLED:
         headers = {}
         if settings.TELEMETRY_API_KEY:
             headers["Authorization"] = settings.TELEMETRY_API_KEY
 
         # Truly asynchronous lock-free network export!
-        exporter = OTLPSpanExporter(
-            endpoint=settings.TELEMETRY_ENDPOINT_URL,
-            headers=headers
-        )
+        exporter = OTLPSpanExporter(endpoint=settings.TELEMETRY_ENDPOINT_URL, headers=headers)
         processor = BatchSpanProcessor(
             exporter,
             max_queue_size=256,

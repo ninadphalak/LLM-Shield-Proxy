@@ -11,11 +11,13 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 logger = logging.getLogger(__name__)
 
+
 def test_sha256_kat() -> bool:
     """NIST SHA-256 Known Answer Test for empty string."""
     expected_digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     h = hashlib.sha256(b"")
     return h.hexdigest() == expected_digest
+
 
 def test_aes_256_gcm_kat() -> bool:
     """NIST SP 800-38D AES-256-GCM Known Answer Test (Test Case 1)."""
@@ -31,6 +33,7 @@ def test_aes_256_gcm_kat() -> bool:
     ciphertext = encryptor.update(plaintext) + encryptor.finalize()
 
     return ciphertext == b"" and encryptor.tag == expected_tag
+
 
 def run_fips_kat_self_test() -> bool:
     """Execute all deterministic cryptographic self-tests.

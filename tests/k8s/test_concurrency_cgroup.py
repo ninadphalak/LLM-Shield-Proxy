@@ -8,7 +8,7 @@ import pytest
 async def fetch_memory_usage():
     try:
         cmd = ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", "llm-shield-proxy"]
-        output = subprocess.check_output(cmd).decode('utf-8').strip()
+        output = subprocess.check_output(cmd).decode("utf-8").strip()
         if not output:
             return 0.0
 
@@ -25,6 +25,7 @@ async def fetch_memory_usage():
         return mem_mb
     except Exception:
         return 0.0
+
 
 @pytest.mark.asyncio
 async def test_concurrency_memory_limits():

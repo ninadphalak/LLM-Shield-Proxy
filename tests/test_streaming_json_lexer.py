@@ -22,24 +22,21 @@ class MockVault(Vault):
             return text.replace("123-45-6789", "[MASKED_SSN]")
         return text
 
+
 def test_streaming_fragmented_tool_calls():
     """
     Test streaming fragmented tool calls with escaped quotes.
     Ensures keys are unredacted and values are properly identified for masking/rehydration.
     """
     # Simulate chunks splitting on escaped quotes
-    chunks = [
-        '{"arguments": "{\\"ssn\\": \\"',
-        '123-45-6789',
-        '\\"}"}'
-    ]
+    chunks = ['{"arguments": "{\\"ssn\\": \\"', "123-45-6789", '\\"}"}']
 
     vault = MockVault()
     buffer = SSERehydrationBuffer(vault)
 
     assembled_stream = ""
     for i, chunk in enumerate(chunks):
-        is_final = (i == len(chunks) - 1)
+        is_final = i == len(chunks) - 1
         emitted = buffer.process_delta_text(chunk, is_final=is_final)
         assembled_stream += emitted
 
@@ -57,26 +54,28 @@ def test_streaming_fragmented_tool_calls():
     except json.JSONDecodeError as e:
         pytest.fail(f"JSON syntax corrupted during stream processing: {e}\\nAssembled stream: {assembled_stream}")
 
+
 def test_json_lexer_state_machine_simple():
     lexer = StreamingJSONLexer()
     tokens = lexer.feed_chunk('{"key": "value", "arr": [1, 2, 3]}')
 
     # Verify keys are False and values are True
-    assert tokens[0] == ('{', False)
+    assert tokens[0] == ("{", False)
     assert tokens[1] == ('"key"', False)
-    assert tokens[2] == (': ', False)
+    assert tokens[2] == (": ", False)
     assert tokens[3] == ('"', False)
-    assert tokens[4] == ('value', True)
+    assert tokens[4] == ("value", True)
     assert tokens[5] == ('"', False)
-    assert tokens[6] == (', ', False)
+    assert tokens[6] == (", ", False)
     assert tokens[7] == ('"arr"', False)
-    assert tokens[8] == (': [', False)
-    assert tokens[9] == ('1', True)
-    assert tokens[10] == (', ', False)
-    assert tokens[11] == ('2', True)
-    assert tokens[12] == (', ', False)
-    assert tokens[13] == ('3', True)
-    assert tokens[14] == (']}', False)
+    assert tokens[8] == (": [", False)
+    assert tokens[9] == ("1", True)
+    assert tokens[10] == (", ", False)
+    assert tokens[11] == ("2", True)
+    assert tokens[12] == (", ", False)
+    assert tokens[13] == ("3", True)
+    assert tokens[14] == ("]}", False)
+
 
 def test_json_lexer_escaped_backslash_handling():
     """
@@ -105,6 +104,7 @@ def test_json_lexer_escaped_backslash_handling():
     # Specifically assert that the lexer ended up in ROOT state, meaning the quote successfully terminated the string
     assert lexer.state == StreamingJSONLexer.STATE_ROOT
 
+
 def test_json_lexer_nested_objects():
     """
     Test Nested Objects within Values.
@@ -122,7 +122,7 @@ def test_json_lexer_nested_objects():
     assert ('"user_id"', False) in tokens
 
     # Validate 123 is a value (True)
-    assert ('123', True) in tokens
+    assert ("123", True) in tokens
 
     # The JSON structure should be perfectly preserved in unmaskable tokens
     # excluding the maskable value "123"

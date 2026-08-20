@@ -11,7 +11,8 @@ def test_fips_kat_success():
     """Test that the FIPS 140-3 KAT passes normally."""
     assert run_fips_kat_self_test() is True
 
-@patch('llm_shield_proxy.security.fips_kat.hashlib.sha256')
+
+@patch("llm_shield_proxy.security.fips_kat.hashlib.sha256")
 def test_fips_kat_sha256_corruption(mock_sha256):
     """Test that intentional corruption of SHA256 KAT fails the test."""
     mock_hash = MagicMock()
@@ -20,7 +21,8 @@ def test_fips_kat_sha256_corruption(mock_sha256):
 
     assert run_fips_kat_self_test() is False
 
-@patch('llm_shield_proxy.security.fips_kat.Cipher')
+
+@patch("llm_shield_proxy.security.fips_kat.Cipher")
 def test_fips_kat_aes_corruption(mock_cipher):
     """Test that intentional corruption of AES-GCM KAT fails the test."""
     mock_cipher_instance = MagicMock()
@@ -33,6 +35,7 @@ def test_fips_kat_aes_corruption(mock_cipher):
 
     assert run_fips_kat_self_test() is False
 
+
 def test_audit_logger_rfc6902_diff_and_chaining(caplog):
     """Test RFC 6902 JSON Patch structures and cryptographic hash chaining."""
     settings.AUDIT_LOG_FORMAT = "RFC6902_DIFF"
@@ -44,10 +47,7 @@ def test_audit_logger_rfc6902_diff_and_chaining(caplog):
 
     start_time = time.perf_counter()
     AuditLogger.log_redaction_event(
-        session_id="test_session",
-        entity_counts={"SSN": 1},
-        path="/v1/chat/completions",
-        patch_operations=patch_ops
+        session_id="test_session", entity_counts={"SSN": 1}, path="/v1/chat/completions", patch_operations=patch_ops
     )
     duration = (time.perf_counter() - start_time) * 1000  # in ms
 
@@ -71,7 +71,6 @@ def test_audit_logger_rfc6902_diff_and_chaining(caplog):
     # Reconstruct the string used for hashing (JSON serialized, keys sorted)
     event_str = json.dumps(event_copy, sort_keys=True)
     hash_payload = (event_str + prev_hash).encode("utf-8")
-    expected_hash = __import__('hashlib').sha256(hash_payload).hexdigest()
+    expected_hash = __import__("hashlib").sha256(hash_payload).hexdigest()
 
     assert event_hash == expected_hash
-

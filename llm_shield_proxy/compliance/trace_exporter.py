@@ -16,9 +16,7 @@ from .transport import BaseGRCTransport
 logger = logging.getLogger(__name__)
 
 # Initialize OpenTelemetry configuration
-resource = Resource(attributes={
-    SERVICE_NAME: "llm-shield-proxy"
-})
+resource = Resource(attributes={SERVICE_NAME: "llm-shield-proxy"})
 provider = TracerProvider(resource=resource)
 # Use gRPC Exporter by default for lower overhead
 processor = BatchSpanProcessor(OTLPSpanExporter())
@@ -32,6 +30,7 @@ class MerkleTreeWORM:
     """
     Append-only Merkle Tree for Cryptographic Decision Traceability.
     """
+
     def __init__(self):
         self.root_hash = hashlib.sha256(b"init").hexdigest()
         self.records = []
@@ -44,15 +43,11 @@ class MerkleTreeWORM:
         record_hash = hashlib.sha256(serialized).hexdigest()
 
         # New root hash is hash of (old_root + record_hash)
-        combined = f"{self.root_hash}{record_hash}".encode('utf-8')
+        combined = f"{self.root_hash}{record_hash}".encode("utf-8")
         self.root_hash = hashlib.sha256(combined).hexdigest()
 
         # Attach the hashes to the stored record for traceability
-        stored_record = {
-            "payload": record,
-            "record_hash": record_hash,
-            "merkle_root": self.root_hash
-        }
+        stored_record = {"payload": record, "record_hash": record_hash, "merkle_root": self.root_hash}
         self.records.append(stored_record)
         return self.root_hash
 
@@ -71,7 +66,7 @@ class DecisionTraceExporter:
         rbac_decision: str,
         payload_entropy: float,
         tool_call_id: Optional[str] = None,
-        pii_redacted_count: int = 0
+        pii_redacted_count: int = 0,
     ) -> Dict[str, Any]:
         """
         Records the RBAC decision in the Merkle Tree and emits OTel spans.
@@ -86,14 +81,14 @@ class DecisionTraceExporter:
             "Redacted_Prompt_Hash": redacted_prompt_hash,
             "Tool_Name": tool_name,
             "RBAC_Decision": rbac_decision,
-            "Payload_Entropy": payload_entropy
+            "Payload_Entropy": payload_entropy,
         }
 
         # 1. Merkle-Attested append
         new_root = self.merkle_tree.append_record(decision_record)
 
         # 2. OTel Span Emission
-        authorized = (rbac_decision.upper() == "ALLOW")
+        authorized = rbac_decision.upper() == "ALLOW"
         span_name = "gen_ai.client.operation.tool_call"
 
         with tracer.start_as_current_span(span_name) as span:
@@ -114,7 +109,7 @@ class DecisionTraceExporter:
                         "title": "LLM-Shield-Proxy Runtime Assessment Delta",
                         "last-modified": f"{timestamp}",
                         "version": "1.0.0",
-                        "oscal-version": "1.1.2"
+                        "oscal-version": "1.1.2",
                     },
                     "results": [
                         {
@@ -131,14 +126,14 @@ class DecisionTraceExporter:
                                             "description": "Merkle Hash Chain",
                                             "properties": [
                                                 {"name": "merkle_root", "value": new_root},
-                                                {"name": "prompt_hash", "value": redacted_prompt_hash}
-                                            ]
+                                                {"name": "prompt_hash", "value": redacted_prompt_hash},
+                                            ],
                                         }
-                                    ]
+                                    ],
                                 }
-                            ]
+                            ],
                         }
-                    ]
+                    ],
                 }
             }
 
@@ -164,7 +159,7 @@ class DecisionTraceExporter:
                     "title": "LLM-Shield-Proxy Runtime Assessment",
                     "last-modified": f"{time.time()}",
                     "version": "1.0.0",
-                    "oscal-version": "1.1.2"
+                    "oscal-version": "1.1.2",
                 },
                 "import-ap": {
                     "href": "https://raw.githubusercontent.com/usnistgov/oscal-content/master/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json"
@@ -187,15 +182,15 @@ class DecisionTraceExporter:
                                         "properties": [
                                             {"name": "record_hash", "value": rec["record_hash"]},
                                             {"name": "merkle_root", "value": rec["merkle_root"]},
-                                            {"name": "prompt_hash", "value": rec['payload']['Redacted_Prompt_Hash']}
-                                        ]
+                                            {"name": "prompt_hash", "value": rec["payload"]["Redacted_Prompt_Hash"]},
+                                        ],
                                     }
-                                ]
+                                ],
                             }
                             for idx, rec in enumerate(self.merkle_tree.records)
-                        ]
+                        ],
                     }
-                ]
+                ],
             }
         }
         return orjson.dumps(oscal_payload, option=orjson.OPT_SORT_KEYS)

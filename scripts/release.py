@@ -13,9 +13,16 @@ def run_command(cmd, shell=False):
         print(f"❌ Error: Command failed with exit code {result.returncode}")
         sys.exit(1)
 
+
 def main():
     parser = argparse.ArgumentParser(description="Automate version bump, PyPI publish, and GitHub push.")
-    parser.add_argument("bump_type", choices=["patch", "minor", "major"], default="patch", nargs="?", help="The type of version bump to perform (default: patch)")
+    parser.add_argument(
+        "bump_type",
+        choices=["patch", "minor", "major"],
+        default="patch",
+        nargs="?",
+        help="The type of version bump to perform (default: patch)",
+    )
     args = parser.parse_args()
 
     # 1. Bump version
@@ -42,6 +49,7 @@ def main():
     run_command(["git", "push", "origin", "main", "--tags"])
 
     print("\n✅ Release completed successfully!")
+
 
 if __name__ == "__main__":
     main()

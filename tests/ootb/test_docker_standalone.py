@@ -14,12 +14,7 @@ def test_docker_standalone_happy_path():
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
 
     # 2. Run the container
-    subprocess.run([
-        "docker", "run", "-d",
-        "--name", container_name,
-        "-p", "8000:8000",
-        image_name
-    ], check=True)
+    subprocess.run(["docker", "run", "-d", "--name", container_name, "-p", "8000:8000", image_name], check=True)
 
     try:
         # 3. Ping healthz
@@ -40,6 +35,7 @@ def test_docker_standalone_happy_path():
     finally:
         # 4. Tear down
         subprocess.run(["docker", "rm", "-f", container_name], check=True)
+
 
 if __name__ == "__main__":
     test_docker_standalone_happy_path()

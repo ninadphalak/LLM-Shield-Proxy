@@ -6,15 +6,18 @@ def test_resolve_provider_header():
     headers = {"x-shield-provider": "anthropic"}
     assert resolve_provider(headers, {}) == "anthropic"
 
+
 def test_resolve_provider_model_claude():
     headers = {}
     payload = {"model": "claude-3-opus-20240229"}
     assert resolve_provider(headers, payload) == "anthropic"
 
+
 def test_resolve_provider_model_openai():
     headers = {}
     payload = {"model": "gpt-4"}
     assert resolve_provider(headers, payload) == "openai"  # Assuming openai is default
+
 
 def test_anthropic_adapter_request_transform():
     openai_payload = {
@@ -26,8 +29,8 @@ def test_anthropic_adapter_request_transform():
             {"role": "user", "content": "User message 1"},
             {"role": "user", "content": "User message 2"},
             {"role": "assistant", "content": "Assistant message 1"},
-            {"role": "assistant", "content": "Assistant message 2"}
-        ]
+            {"role": "assistant", "content": "Assistant message 2"},
+        ],
     }
 
     anthropic_payload = AnthropicAdapter.transform_request(openai_payload)
@@ -46,12 +49,9 @@ def test_anthropic_adapter_request_transform():
     assert anthropic_payload["messages"][1]["role"] == "assistant"
     assert anthropic_payload["messages"][1]["content"] == "Assistant message 1\n\nAssistant message 2"
 
+
 def test_anthropic_adapter_request_transform_starts_with_assistant():
-    openai_payload = {
-        "messages": [
-            {"role": "assistant", "content": "Should not start with assistant"}
-        ]
-    }
+    openai_payload = {"messages": [{"role": "assistant", "content": "Should not start with assistant"}]}
     anthropic_payload = AnthropicAdapter.transform_request(openai_payload)
 
     assert len(anthropic_payload["messages"]) == 2
@@ -60,20 +60,16 @@ def test_anthropic_adapter_request_transform_starts_with_assistant():
     assert anthropic_payload["messages"][1]["role"] == "assistant"
     assert anthropic_payload["messages"][1]["content"] == "Should not start with assistant"
 
+
 def test_anthropic_adapter_response_transform():
     anthropic_res = {
         "id": "msg_01X",
         "type": "message",
         "role": "assistant",
         "model": "claude-3-5-sonnet-20241022",
-        "content": [
-            {"type": "text", "text": "Hello world"}
-        ],
+        "content": [{"type": "text", "text": "Hello world"}],
         "stop_reason": "end_turn",
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 20
-        }
+        "usage": {"input_tokens": 10, "output_tokens": 20},
     }
 
     openai_res = AnthropicAdapter.transform_response(anthropic_res)
@@ -86,13 +82,8 @@ def test_anthropic_adapter_response_transform():
     assert openai_res["usage"]["completion_tokens"] == 20
     assert openai_res["usage"]["total_tokens"] == 30
 
+
 def test_anthropic_adapter_request_transform_stream():
-    openai_payload = {
-        "model": "gpt-4",
-        "stream": True,
-        "messages": [
-            {"role": "user", "content": "Hello"}
-        ]
-    }
+    openai_payload = {"model": "gpt-4", "stream": True, "messages": [{"role": "user", "content": "Hello"}]}
     anthropic_payload = AnthropicAdapter.transform_request(openai_payload)
     assert anthropic_payload.get("stream") is True

@@ -1,3 +1,5 @@
+[⬅️ Back to README](README.md)
+
 # 🏛️ Architecture: Deep Dive into the Data Plane
 
 LLM-Shield-Proxy is engineered as a stateless, asynchronous middleware data plane. It sits transparently between your enterprise applications and upstream Large Language Models, optimizing for microsecond latency overhead while performing heavy cryptographic and heuristic operations. 

@@ -9,6 +9,7 @@ from llm_shield_proxy.security.rate_limit import rate_limiter
 
 client = TestClient(app)
 
+
 @pytest.fixture(autouse=True)
 def reset_state():
     orig_override = settings.OVERRIDE_CLIENT_AUTH
@@ -32,6 +33,7 @@ def reset_state():
     app_state.is_draining = orig_drain
     app_state.active_requests = orig_req
 
+
 def test_enterprise_secret_injection():
     settings.OVERRIDE_CLIENT_AUTH = True
     settings.UPSTREAM_API_KEY = "sk-master-key"
@@ -39,7 +41,10 @@ def test_enterprise_secret_injection():
     # We'll mock http_client.request to inspect the headers
     with patch("llm_shield_proxy.api.main.httpx.AsyncClient.request") as mock_request:
         import httpx
-        mock_response = httpx.Response(status_code=200, content=b'{"success": true}', request=httpx.Request("POST", "http://test"))
+
+        mock_response = httpx.Response(
+            status_code=200, content=b'{"success": true}', request=httpx.Request("POST", "http://test")
+        )
 
         async def mock_req(*args, **kwargs):
             return mock_response
@@ -55,6 +60,7 @@ def test_enterprise_secret_injection():
 
         assert headers.get("authorization") == "Bearer sk-master-key"
         assert "x-api-key" not in headers
+
 
 @pytest.mark.asyncio
 async def test_rate_limiter_429():
@@ -73,36 +79,47 @@ async def test_rate_limiter_429():
         # Note: in a real test we might need to manipulate time.monotonic, but a fast test works too
         assert await rate_limiter.acquire("test_vk") is False
 
+
 def test_fail_closed_mode():
     settings.SHIELD_FAILURE_MODE = "FAIL_CLOSED"
 
     # Mock pii_engine.redact_payload to raise an exception
     with patch("llm_shield_proxy.api.main.pii_engine.redact_payload", side_effect=Exception("Simulated ONNX crash")):
-        response = client.post("/v1/chat/completions", headers={"Authorization": "Bearer sk-proj-mock-key"}, json={"test": "data"})
+        response = client.post(
+            "/v1/chat/completions", headers={"Authorization": "Bearer sk-proj-mock-key"}, json={"test": "data"}
+        )
 
         assert response.status_code == 503
         assert "DLP Inspection Failure" in response.json()["error"]["message"]
+
 
 def test_fail_open_mode():
     settings.SHIELD_FAILURE_MODE = "FAIL_OPEN"
 
     # Mock pii_engine.redact_payload to raise an exception, and mock httpx request
-    with patch("llm_shield_proxy.api.main.pii_engine.redact_payload", side_effect=Exception("Simulated Redis drop")), \
-         patch("llm_shield_proxy.api.main.httpx.AsyncClient.request") as mock_request:
-
+    with (
+        patch("llm_shield_proxy.api.main.pii_engine.redact_payload", side_effect=Exception("Simulated Redis drop")),
+        patch("llm_shield_proxy.api.main.httpx.AsyncClient.request") as mock_request,
+    ):
         import httpx
-        mock_response = httpx.Response(status_code=200, content=b'{"success": true}', request=httpx.Request("POST", "http://test"))
+
+        mock_response = httpx.Response(
+            status_code=200, content=b'{"success": true}', request=httpx.Request("POST", "http://test")
+        )
 
         async def mock_req(*args, **kwargs):
             return mock_response
 
         mock_request.side_effect = mock_req
 
-        response = client.post("/v1/chat/completions", headers={"Authorization": "Bearer sk-proj-mock-key"}, json={"test": "data"})
+        response = client.post(
+            "/v1/chat/completions", headers={"Authorization": "Bearer sk-proj-mock-key"}, json={"test": "data"}
+        )
 
         # It should proxy the request despite the exception
         assert mock_request.called
         assert response.status_code == 200
+
 
 def test_graceful_draining_503():
     app_state.is_draining = True

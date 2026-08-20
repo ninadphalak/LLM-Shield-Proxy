@@ -32,9 +32,7 @@ def test_w3c_traceparent_propagation():
     # Valid W3C traceparent format: 00-traceid-spanid-traceflags
     mock_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
     mock_span_id = "00f067aa0ba902b7"
-    downstream_headers = {
-        "traceparent": f"00-{mock_trace_id}-{mock_span_id}-01"
-    }
+    downstream_headers = {"traceparent": f"00-{mock_trace_id}-{mock_span_id}-01"}
 
     # 2. Extract context
     ctx = propagator.extract(downstream_headers)

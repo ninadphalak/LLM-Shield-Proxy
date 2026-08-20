@@ -12,10 +12,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 class BaseGRCTransport(abc.ABC):
     """
     Abstract Base Class for GRC Transport Layers.
     """
+
     @abc.abstractmethod
     async def dispatch(self, oscal_payload: dict):
         pass
@@ -26,20 +28,22 @@ class SidecarFileTransport(BaseGRCTransport):
     Kube Sidecar Native Transport.
     Appends the OSCAL JSON payload as a single line (JSONL format) to a file.
     """
+
     def __init__(self, file_path: str = "/var/log/llm_shield/oscal.jsonl"):
         self.file_path = file_path
 
     async def dispatch(self, oscal_payload: dict):
         try:
-            line = orjson.dumps(oscal_payload).decode('utf-8') + '\n'
+            line = orjson.dumps(oscal_payload).decode("utf-8") + "\n"
             if aiofiles:
-                async with aiofiles.open(self.file_path, mode='a', encoding='utf-8') as f:
+                async with aiofiles.open(self.file_path, mode="a", encoding="utf-8") as f:
                     await f.write(line)
             else:
                 # Fallback to standard async I/O if aiofiles is not installed
                 def write_sync():
-                    with open(self.file_path, mode='a', encoding='utf-8') as f:
+                    with open(self.file_path, mode="a", encoding="utf-8") as f:
                         f.write(line)
+
                 await asyncio.to_thread(write_sync)
         except Exception as e:
             # Do not crash the data plane
@@ -51,6 +55,7 @@ class AsyncWebhookTransport(BaseGRCTransport):
     Asynchronous Webhook Transport.
     Fires a non-blocking POST request to a configured webhook URL.
     """
+
     def __init__(self, webhook_url: str, timeout: float = 2.0):
         self.webhook_url = webhook_url
         self.timeout = timeout

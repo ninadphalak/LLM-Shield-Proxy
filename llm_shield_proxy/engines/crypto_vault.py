@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _DEK: Optional[bytes] = None
 
+
 def get_crypto_dek() -> bytes:
     """Retrieves or derives the 256-bit AES-GCM encryption key."""
     global _DEK
@@ -28,6 +29,7 @@ def get_crypto_dek() -> bytes:
     key_src = None
     if settings.ENABLE_VAULT_SECRETS:
         from llm_shield_proxy.security.vault_client import vault_provider
+
         key_src = vault_provider.get_secret("SHIELD_ENCRYPTION_KEY")
     if not key_src:
         key_src = settings.SHIELD_ENCRYPTION_KEY
@@ -52,9 +54,11 @@ def get_crypto_dek() -> bytes:
 
     raise ValueError("Valid 256-bit SHIELD_ENCRYPTION_KEY not found or invalid.")
 
+
 def get_aesgcm() -> AESGCM:
     """Returns a cached AESGCM instance."""
     return AESGCM(get_crypto_dek())
+
 
 def encrypt_to_token(raw_pii: str) -> str:
     """Encrypts a string to a Base64URL token.
@@ -65,11 +69,12 @@ def encrypt_to_token(raw_pii: str) -> str:
     """
     nonce = os.urandom(12)
     aesgcm = get_aesgcm()
-    ciphertext = aesgcm.encrypt(nonce, raw_pii.encode('utf-8'), None)
+    ciphertext = aesgcm.encrypt(nonce, raw_pii.encode("utf-8"), None)
     # Payload is nonce + ciphertext (which includes the 16-byte tag at the end)
     payload = nonce + ciphertext
-    b64_payload = base64.urlsafe_b64encode(payload).decode('ascii').rstrip('=')
+    b64_payload = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
     return f"[ENC_v1_{b64_payload}]"
+
 
 def decrypt_from_token(token: str) -> str:
     """Decrypts a Base64URL token back to string in < 5us. Returns token if fails."""
@@ -85,7 +90,7 @@ def decrypt_from_token(token: str) -> str:
 
     try:
         payload = base64.urlsafe_b64decode(b64_payload)
-        if len(payload) < 28: # 12 byte nonce + 16 byte tag
+        if len(payload) < 28:  # 12 byte nonce + 16 byte tag
             return token
 
         nonce = payload[:12]
@@ -93,16 +98,17 @@ def decrypt_from_token(token: str) -> str:
         aesgcm = get_aesgcm()
 
         decrypted = aesgcm.decrypt(nonce, ciphertext, None)
-        return decrypted.decode('utf-8')
+        return decrypted.decode("utf-8")
     except Exception:
         # Invalid tag, corrupted base64, etc.
         return token
+
 
 class StatelessCryptoVault:
     """Duck-types Vault to provide stateless crypto integration."""
 
     # Strict Base64URL extraction regex
-    TOKEN_REGEX = re.compile(r'\[ENC_v1_[A-Za-z0-9\-_=]+\]')
+    TOKEN_REGEX = re.compile(r"\[ENC_v1_[A-Za-z0-9\-_=]+\]")
 
     def __init__(self) -> None:
         # Provide type_counters attribute to satisfy AuditLogger

@@ -26,22 +26,16 @@ async def test_circuit_breaker_trips_on_consecutive_duplicates():
             {
                 "role": "assistant",
                 "tool_calls": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "search_db",
-                            "arguments": '{"query": "error"}'
-                        }
-                    }
-                ]
+                    {"type": "function", "function": {"name": "search_db", "arguments": '{"query": "error"}'}}
+                ],
             }
-        ]
+        ],
     }
 
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",
-        "X-Upstream-Base-Url": "https://api.openai.com"
+        "X-Upstream-Base-Url": "https://api.openai.com",
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -74,7 +68,7 @@ async def test_circuit_breaker_remains_closed_for_diverse_requests():
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",
-        "X-Upstream-Base-Url": "https://api.openai.com"
+        "X-Upstream-Base-Url": "https://api.openai.com",
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -87,14 +81,11 @@ async def test_circuit_breaker_remains_closed_for_diverse_requests():
                         "tool_calls": [
                             {
                                 "type": "function",
-                                "function": {
-                                    "name": "search_db",
-                                    "arguments": f'{{"query": "query_{i}"}}'
-                                }
+                                "function": {"name": "search_db", "arguments": f'{{"query": "query_{i}"}}'},
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             }
 
             response = await ac.post("/v1/chat/completions", json=payload, headers=headers)
@@ -106,21 +97,13 @@ async def test_circuit_breaker_bypass_header():
     """Assert X-Shield-Bypass-Breaker: true allows duplicate requests."""
     session_id = "test-session-789"
 
-    payload = {
-        "model": "gpt-4",
-        "messages": [
-            {
-                "role": "user",
-                "content": "Tell me a joke."
-            }
-        ]
-    }
+    payload = {"model": "gpt-4", "messages": [{"role": "user", "content": "Tell me a joke."}]}
 
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",
         "X-Upstream-Base-Url": "https://api.openai.com",
-        "X-Shield-Bypass-Breaker": "true"
+        "X-Shield-Bypass-Breaker": "true",
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -137,7 +120,7 @@ async def test_circuit_breaker_pagination_trap():
     headers = {
         "X-Session-ID": session_id,
         "Authorization": "Bearer sk-proj-123",
-        "X-Upstream-Base-Url": "https://api.openai.com"
+        "X-Upstream-Base-Url": "https://api.openai.com",
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -148,11 +131,9 @@ async def test_circuit_breaker_pagination_trap():
                 "messages": [
                     {
                         "role": "user",
-                        "content": f"Please execute the following query: SELECT * FROM users ORDER BY id DESC LIMIT 10 OFFSET {offset}"
+                        "content": f"Please execute the following query: SELECT * FROM users ORDER BY id DESC LIMIT 10 OFFSET {offset}",
                     }
-                ]
+                ],
             }
             response = await ac.post("/v1/chat/completions", json=payload, headers=headers)
             assert response.status_code != 429
-
-

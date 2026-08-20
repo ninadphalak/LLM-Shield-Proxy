@@ -22,8 +22,8 @@ def test_steganography_math():
     zero_width = encode_steganography(original_hex)
 
     # Assert start and end characters
-    assert zero_width.startswith("\u200D")
-    assert zero_width.endswith("\u200D")
+    assert zero_width.startswith("\u200d")
+    assert zero_width.endswith("\u200d")
 
     # Each hex char = 4 bits, so 16 * 4 = 64 characters + 2 delimiters = 66
     assert len(zero_width) == 66
@@ -35,19 +35,11 @@ def test_steganography_math():
 def test_config_fail_fast():
     """Verify that ENABLE_WATERMARKING without secret fails to boot."""
     with pytest.raises(ValidationError) as exc:
-        Settings(
-            ENABLE_WATERMARKING=True,
-            SHIELD_WATERMARK_SECRET=None,
-            VALID_VIRTUAL_KEYS="test"
-        )
+        Settings(ENABLE_WATERMARKING=True, SHIELD_WATERMARK_SECRET=None, VALID_VIRTUAL_KEYS="test")
     assert "SHIELD_WATERMARK_SECRET must be set" in str(exc.value)
 
     # Should work if set
-    s = Settings(
-        ENABLE_WATERMARKING=True,
-        SHIELD_WATERMARK_SECRET="test-secret",
-        VALID_VIRTUAL_KEYS="test"
-    )
+    s = Settings(ENABLE_WATERMARKING=True, SHIELD_WATERMARK_SECRET="test-secret", VALID_VIRTUAL_KEYS="test")
     assert s.ENABLE_WATERMARKING is True
 
 
@@ -59,7 +51,7 @@ async def test_synthetic_final_chunk_injection():
     async def mock_stream() -> AsyncGenerator[bytes, None]:
         yield b'data: {"id": "test-id", "object": "chat.completion.chunk", "created": 1234, "model": "gpt-4", "choices":[{"delta":{"content":"Hello"}}]}\n\n'
         yield b'data: {"id": "test-id", "object": "chat.completion.chunk", "created": 1234, "model": "gpt-4", "choices":[{"delta":{"content":" World"}}]}\n\n'
-        yield b'data: [DONE]\n\n'
+        yield b"data: [DONE]\n\n"
 
     vault = StatelessCryptoVault()
     chunks = []
@@ -88,15 +80,16 @@ async def test_synthetic_final_chunk_injection():
     assert '"model":"gpt-4"' in chunk_str or '"model": "gpt-4"' in chunk_str
 
     # Check final chunk is [DONE]
-    assert logical_chunks[3] == b'data: [DONE]\n\n'
+    assert logical_chunks[3] == b"data: [DONE]\n\n"
 
 
 @pytest.mark.asyncio
 async def test_watermark_not_injected_if_empty():
     """Assert no synthetic chunk is injected if watermark_text is empty."""
+
     async def mock_stream() -> AsyncGenerator[bytes, None]:
         yield b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
-        yield b'data: [DONE]\n\n'
+        yield b"data: [DONE]\n\n"
 
     vault = StatelessCryptoVault()
     chunks = []
@@ -107,4 +100,4 @@ async def test_watermark_not_injected_if_empty():
     logical_chunks = [c + b"\n\n" for c in joined.split(b"\n\n") if c]
 
     assert len(logical_chunks) == 2
-    assert logical_chunks[1] == b'data: [DONE]\n\n'
+    assert logical_chunks[1] == b"data: [DONE]\n\n"

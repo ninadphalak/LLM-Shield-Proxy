@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     )
     FIPS_STRICT_MODE: bool = Field(default=True, description="Strict fail-closed for FIPS tests")
     ENABLE_EXT_PROC: bool = Field(default=True, description="Enable Envoy ext_proc gRPC hook")
-    EXT_PROC_SOCK_PATH: str = Field(default="/var/run/llm-shield/ext_proc.sock", description="Path to the ext_proc UDS socket")
+    EXT_PROC_SOCK_PATH: str = Field(
+        default="/var/run/llm-shield/ext_proc.sock", description="Path to the ext_proc UDS socket"
+    )
 
     # Upstream Provider Configuration
     DEFAULT_UPSTREAM_PROVIDER: Literal["openai", "azure", "anthropic", "bedrock"] = Field(
@@ -67,9 +69,7 @@ class Settings(BaseSettings):
     SHIELD_FAILURE_MODE: Literal["FAIL_CLOSED", "FAIL_OPEN"] = Field(
         default="FAIL_CLOSED", description="Default behavior upon engine failure"
     )
-    DRAIN_TIMEOUT_SECONDS: int = Field(
-        default=25, description="Max seconds to wait for connection draining on SIGTERM"
-    )
+    DRAIN_TIMEOUT_SECONDS: int = Field(default=25, description="Max seconds to wait for connection draining on SIGTERM")
 
     # mTLS & Custom CA Support
     ENABLE_MTLS: bool = Field(default=False, description="Enable mutual TLS")
@@ -123,12 +123,8 @@ class Settings(BaseSettings):
     )
 
     # Agent Circuit Breaker Settings
-    ENABLE_AGENT_BREAKER: bool = Field(
-        default=True, description="Enable Composite Agent Loop Circuit Breaker"
-    )
-    AGENT_BREAKER_THRESHOLD: int = Field(
-        default=3, description="Consecutive duplicate turns before tripping"
-    )
+    ENABLE_AGENT_BREAKER: bool = Field(default=True, description="Enable Composite Agent Loop Circuit Breaker")
+    AGENT_BREAKER_THRESHOLD: int = Field(default=3, description="Consecutive duplicate turns before tripping")
 
     # HTTP Client & Connection Pooling
     HTTP_TIMEOUT_SECONDS: float = Field(
@@ -171,26 +167,29 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(_ENV_FILE_PATH, ".env"), env_file_encoding="utf-8", extra="ignore")
 
     @model_validator(mode="after")
-    def validate_watermark_secret(self) -> 'Settings':
+    def validate_watermark_secret(self) -> "Settings":
         if self.ENABLE_WATERMARKING and not self.SHIELD_WATERMARK_SECRET:
             raise ValueError("SHIELD_WATERMARK_SECRET must be set if ENABLE_WATERMARKING is True.")
         return self
 
     @model_validator(mode="after")
-    def validate_mtls_paths(self) -> 'Settings':
+    def validate_mtls_paths(self) -> "Settings":
         if self.ENABLE_MTLS:
             if not self.SSL_CLIENT_CERT_PATH or not self.SSL_CLIENT_KEY_PATH:
                 raise ValueError("SSL_CLIENT_CERT_PATH and SSL_CLIENT_KEY_PATH must be set if ENABLE_MTLS is True.")
         return self
 
     @model_validator(mode="after")
-    def validate_stateless_crypto_key(self) -> 'Settings':
+    def validate_stateless_crypto_key(self) -> "Settings":
         if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_CRYPTO":
             key_src = self.SHIELD_ENCRYPTION_KEY
             if not key_src:
-                raise ValueError("SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_CRYPTO.")
+                raise ValueError(
+                    "SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_CRYPTO."
+                )
 
             import base64
+
             key_bytes = None
             try:
                 key_bytes = base64.b64decode(key_src)
