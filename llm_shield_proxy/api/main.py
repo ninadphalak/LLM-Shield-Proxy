@@ -302,6 +302,15 @@ async def metrics_endpoint(request: Request) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+from fastapi import Depends
+from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, RedisPolicyResolver
+from llm_shield_proxy.engines.vault import vault_store
+
+async def get_policy_resolver() -> BasePolicyResolver:
+    """Dependency injection provider for the active Pluggable RBAC Engine."""
+    return RedisPolicyResolver(vault_store.async_client)
+
+
 # -----------------------------------------------------------------------------
 # Proxy Catch-All Gateway Routing
 # -----------------------------------------------------------------------------
@@ -347,13 +356,14 @@ async def proxy_catch_all(
     x_upstream_base_url: Optional[str] = Header(None, alias="X-Upstream-Base-Url"),
     x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
     x_shield_bypass_breaker: Optional[str] = Header(None, alias="X-Shield-Bypass-Breaker"),
+    policy_resolver: BasePolicyResolver = Depends(get_policy_resolver),
 ) -> Response:
     """Main reverse-proxy catch-all endpoint handling redaction and rehydration."""
     start_time = time.perf_counter()
     ctx = propagator.extract(request.headers)
     with tracer.start_as_current_span("proxy_catch_all", context=ctx):
         try:
-            response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode, x_shield_bypass_breaker)
+            response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode, x_shield_bypass_breaker, policy_resolver)
             llm_shield_requests_total.labels(status_code=response.status_code).inc()
             llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
             return response
@@ -370,6 +380,7 @@ async def _proxy_catch_all_internal(
     x_upstream_base_url: Optional[str],
     x_shield_masking_mode: Optional[str] = None,
     x_shield_bypass_breaker: Optional[str] = None,
+    policy_resolver: Optional[BasePolicyResolver] = None,
 ) -> Response:
     if path == "metrics":
         return await metrics_endpoint(request)
