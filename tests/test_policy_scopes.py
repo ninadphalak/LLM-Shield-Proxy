@@ -1,4 +1,4 @@
-"""Tests for Granular Entity Policy Scopes ($O(1)$ pre-compilation routing)."""
+"""Tests for Granular Entity Policy Scopes (O(1) pre-compilation routing)."""
 
 import os
 import tempfile

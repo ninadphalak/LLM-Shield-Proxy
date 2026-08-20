@@ -122,7 +122,7 @@ Enterprise compliance often requires scanning for proprietary internal formats (
 To inject custom regexes, mount a `custom_regex.yaml` file into the proxy and point `CUSTOM_REGEX_PATH` to it.
 
 **Security & ReDoS Immunity:**
-Naive reverse proxies can crash when evaluated against poorly written backtracking regexes like `(a+)+$`. To prevent this, LLM-Shield-Proxy leverages the **`google-re2` C++ engine** for all BYOR custom patterns. It parses your YAML configuration via **Pydantic** during the FastAPI `lifespan` startup event, and compiles all patterns using `re2`, mathematically guaranteeing $O(N)$ execution time regardless of how complex your regex or how adversarial the streaming payload is. This ensures complete immunity against ReDoS attacks without sacrificing the microsecond latency overhead.
+Naive reverse proxies can crash when evaluated against poorly written backtracking regexes like `(a+)+$`. To prevent this, LLM-Shield-Proxy leverages the **`google-re2` C++ engine** for all BYOR custom patterns. It parses your YAML configuration via **Pydantic** during the FastAPI `lifespan` startup event, and compiles all patterns using `re2`, mathematically guaranteeing O(N) execution time regardless of how complex your regex or how adversarial the streaming payload is. This ensures complete immunity against ReDoS attacks without sacrificing the microsecond latency overhead.
 
 ```yaml
 # custom_regex.yaml
@@ -308,11 +308,11 @@ Below is a high-level summary of our defense architecture. For the complete **18
 
 | Security Domain | Defense Mechanisms & Capabilities |
 | :--- | :--- |
-| **🛡️ Core Cryptographic Masking & Defenses** | [Format-Preserving Synthetic Masking, Tier-2 Shannon Entropy, In-Band Stateless Crypto, Dynamic Canary Watermarking, HMAC Vaults](SECURITY.md#️-core-cryptographic-masking--defenses) |
-| **🛑 Threat Prevention & Isolation** | [Composite Agent Loop Circuit Breakers, Granular Policy Scopes ($O(1)$ mapping), Zero-Allocation JSON Lexers against Slowloris](SECURITY.md#-threat-prevention--isolation) |
-| **📜 Audit, Forensics, and Compliance** | [WORM-Compliant Merkle Attestation, SHA-256 Hash Chaining, FIPS 140-3 KAT, RFC 6902 Differential Audit Logging](SECURITY.md#-audit-forensics-and-compliance) |
-| **🏗️ Secure Infrastructure & Service Mesh** | [Centralized Vault mTLS, Zero-Dependency Mutating Webhooks, gRPC ext_proc Integration, Token-Bucket Traffic Engineering](SECURITY.md#️-secure-infrastructure--service-mesh) |
-| **🔄 Multi-Provider Adapters** | [Un-bypassable Zero-SDK OpenAI-to-Anthropic translation layers, Network edge SSE normalization](SECURITY.md#-multi-provider-translators--anthropic-adapter) |
+| **🛡️ Core Cryptographic Masking & Defenses** | [Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)](SECURITY.md#data-loss-prevention-dlp-for-llms-synthetic-masking--entropy)<br>[In-Band Stateless Cryptographic Masking](SECURITY.md#in-band-stateless-cryptographic-masking)<br>[Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)<br>[Dynamic Canary Watermarking & Steganography (Leak Forensics)](SECURITY.md#dynamic-canary-watermarking--steganography-leak-forensics) |
+| **🛑 Threat Prevention & Isolation** | [Autonomous Agent Security (Composite Agent Loop Circuit Breaker)](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)<br>[Granular Entity Policy Scopes & Zero Trust AI Defaults (O(1) mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)<br>[Zero-Allocation Streaming JSON Lexer](SECURITY.md#zero-allocation-streaming-json-lexer) |
+| **📜 Audit, Forensics, and Compliance** | [WORM-Compliant Merkle Attestation & Audit Logging](SECURITY.md#worm-compliant-merkle-attestation--audit-logging)<br>[Cryptographic SHA-256 Hash Chaining](SECURITY.md#cryptographic-sha-256-hash-chaining)<br>[Cryptographic Proof of Non-Egress Merkle Attestation](SECURITY.md#cryptographic-proof-of-non-egress-merkle-attestation)<br>[FIPS 140-3 KAT & RFC 6902 Differential Audit Logging](SECURITY.md#fips-140-3-kat--rfc-6902-differential-audit-logging) |
+| **🏗️ Secure Infrastructure & Service Mesh** | [Centralized Enterprise Secrets & mTLS](SECURITY.md#centralized-enterprise-secrets--mtls)<br>[Service Mesh Native gRPC ext_proc Integration](SECURITY.md#service-mesh-native-grpc-ext_proc-integration)<br>[Zero-Dependency Kubernetes Mutating Webhook](SECURITY.md#zero-dependency-kubernetes-mutating-webhook)<br>[Traffic Engineering & Resiliency](SECURITY.md#traffic-engineering--resiliency) |
+| **🔄 Multi-Provider Adapters** | [Multi-Provider Translators & Anthropic Adapter](SECURITY.md#multi-provider-translators--anthropic-adapter) |
 
 ## 📜 Enterprise Compliance: Audit, Forensics & Legal
 
