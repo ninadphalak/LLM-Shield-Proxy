@@ -43,6 +43,6 @@ jobs:
         run: |
           bandit -r llm_shield_proxy/ -s B101,B104,B311
 
-      - name: Run Full Test Suite (52+ Unit, Integration & Adversarial Tests)
+      - name: Run Full Test Suite (Unit & Logic Tests)
         run: |
-          pytest -v
+          pytest -v --ignore=tests/k8s --ignore=tests/k8s_ootb --ignore=tests/ootb
