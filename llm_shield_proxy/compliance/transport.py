@@ -54,13 +54,12 @@ class AsyncWebhookTransport(BaseGRCTransport):
     def __init__(self, webhook_url: str, timeout: float = 2.0):
         self.webhook_url = webhook_url
         self.timeout = timeout
+        self.client = httpx.AsyncClient(timeout=self.timeout)
 
     async def dispatch(self, oscal_payload: dict):
         try:
-            # We construct a new client per dispatch.
-            # Using httpx.AsyncClient with context manager ensures connections are closed.
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                await client.post(self.webhook_url, json=oscal_payload)
+            # We reuse the client to avoid exhausting memory with connection pools
+            await self.client.post(self.webhook_url, json=oscal_payload)
         except httpx.TimeoutException:
             logger.warning(f"WORM warning: Webhook transport timed out sending to {self.webhook_url}")
         except httpx.RequestError as e:

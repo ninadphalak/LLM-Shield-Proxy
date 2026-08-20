@@ -19,14 +19,14 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 
 ### 🔥 Enterprise Flagship Features
 * **[Pluggable Tool-Call RBAC (MCP Governance)](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercept autonomous agent tool executions using a Zero-Allocation Streaming JSON Lexer. Enforce strict logical access controls for robust **Autonomous Agent Security** and **AI Governance** against your existing **Redis, Open Policy Agent (OPA), or HashiCorp Vault** infrastructure to prevent agent drift.
-* **Zero-Egress Synthetic Masking:** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
-* **Sub-Millisecond SSE Rehydration:** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag.
-* **Zero-Data Stateless Cryptography:** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<=55MB RAM`).
-* **Universal Decision Trace Exporter:** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) for strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
-* **Kubernetes-Native GRC Dispatcher:** Supports non-blocking HTTP webhooks for direct Vanta/Drata/Sprinto evidence ingestion, as well as an optimized Sidecar Append-Only mode for Fluent Bit/Promtail. Ensures your compliance evidence plane never bottlenecks your LLM data plane.
-* **Service Mesh Native gRPC Sidecar:** Stream buffers directly over Unix Domain Sockets (UDS) via Envoy's `ext_proc` for zero HTTP network hops.
-* **ReDoS-Immune C++ DFA Engine:** Pre-compiled Deterministic Finite Automatons (`google-re2`) guarantee linear execution time against adversarial regex payloads.
-* **Universal Zero-SDK Translators:** Drop-in compatibility for existing OpenAI SDKs with automatic edge-translation to Anthropic, Gemini, and vLLM schemas.
+* **[Zero-Egress Synthetic Masking](#️-redaction-modes):** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
+* **[Sub-Millisecond SSE Rehydration](#-how-it-works-the-data-flow):** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag.
+* **[Zero-Data Stateless Cryptography](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<=55MB RAM`).
+* **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) for strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
+* **[Kubernetes-Native GRC Dispatcher](#-enterprise-compliance-audit-forensics--legal):** Supports non-blocking HTTP webhooks for direct Vanta/Drata/Sprinto evidence ingestion, as well as an optimized Sidecar Append-Only mode for Fluent Bit/Promtail. Ensures your compliance evidence plane never bottlenecks your LLM data plane.
+* **[Service Mesh Native gRPC Sidecar](#5-service-mesh-native-grpc-ext_proc--k8s-sidecar):** Stream buffers directly over Unix Domain Sockets (UDS) via Envoy's `ext_proc` for zero HTTP network hops.
+* **[ReDoS-Immune C++ DFA Engine](#️-bring-your-own-regex-byor-enterprise-rule-injection):** Pre-compiled Deterministic Finite Automatons (`google-re2`) guarantee linear execution time against adversarial regex payloads.
+* **[Universal Zero-SDK Translators](#-the-drop-in-proof-zero-sdk-integration):** Drop-in compatibility for existing OpenAI SDKs with automatic edge-translation to Anthropic, Gemini, and vLLM schemas.
 
 ### Upstream Integration & Context
 This repository provides the reference proxy architecture and benchmark suite for resolving SSE stream fragmentation in enterprise sandboxes, as proposed in:
@@ -182,6 +182,8 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 
 ## 🛡️ Redaction Modes
 
+> **[View Security Documentation for DLP & Entropy 🛡️](SECURITY.md#data-loss-prevention-dlp-for-llms-synthetic-masking--entropy)**
+
 LLM-Shield-Proxy supports two configurable tokenization strategies out of the box:
 
 | Mode | Configuration | Description | Best For |
@@ -322,7 +324,7 @@ LLM-Shield-Proxy is engineered specifically to help enterprises utilize Generati
 Below is a summary of our compliance mappings. For the exhaustive deep-dive mapping, view our [Enterprise Compliance Documentation](COMPLIANCE.md).
 
 ### 🛡️ SOC 2 & ISO 42001 Auditor Evidence Mapping
-If you are deploying LLM-Shield to satisfy a compliance audit, map the proxy's features directly to your Trust Services Criteria. See our complete [Auditor Evidence Mapping](COMPLIANCE.md#️-soc-2--iso-42001-auditor-evidence-mapping).
+If you are deploying LLM-Shield to satisfy a compliance audit, map the proxy's features directly to your Trust Services Criteria. See our complete [Auditor Evidence Mapping](COMPLIANCE.md#️-soc-2--iso-42001-auditor-evidence-mapping). Includes documentation for the **Universal Decision Trace Exporter** and **Kubernetes-Native GRC Dispatcher**.
 
 | Compliance Domain | Supported Features & Capabilities |
 | :--- | :--- |
