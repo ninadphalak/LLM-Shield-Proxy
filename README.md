@@ -541,29 +541,29 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 ## 📚 Enterprise Documentation Hub & Feature Matrix
 
 * **[ARCHITECTURE.md](ARCHITECTURE.md) - Engine & Data Plane**
-  * Format-Preserving Synthetic Masking & Entropy (Shannon entropy with faker Tier 2)
-  * In-Band Stateless Cryptographic Masking
-  * Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)
-  * Anthropic Adapter Implementation
-  * Zero-Allocation Streaming JSON Lexer
+  * [Format-Preserving Synthetic Masking & Entropy (Shannon entropy with faker Tier 2)](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
+  * [In-Band Stateless Cryptographic Masking](ARCHITECTURE.md#in-band-stateless-cryptographic-masking)
+  * [Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
+  * [Anthropic Adapter Implementation](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
+  * [Zero-Allocation Streaming JSON Lexer](ARCHITECTURE.md#zero-allocation-streaming-json-lexer-orjson--rust)
 * **[SECURITY.md](SECURITY.md) - Threat Model & Defenses**
-  * MODULE 2: Composite Agent Loop Circuit Breaker
-  * Stateless Redis TTL Vault & Deterministic HMAC Masking
-  * Granular Entity Policy Scopes ((1)$ in-memory tenant profile mapping)
-  * Centralized Enterprise Secrets & mTLS (Native HashiCorp Vault)
+  * [MODULE 2: Composite Agent Loop Circuit Breaker](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)
+  * [Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)
+  * [Granular Entity Policy Scopes (O(1) in-memory tenant profile mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)
+  * [Centralized Enterprise Secrets & mTLS (Native HashiCorp Vault)](SECURITY.md#centralized-enterprise-secrets--mtls)
 * **[COMPLIANCE.md](COMPLIANCE.md) - Audit, Forensics & Legal**
-  * Cryptographic SHA-256 Hash Chaining
-  * Dynamic Canary Watermarking & Steganography (Leak Forensics)
-  * MODULE 4: Cryptographic Proof of Non-Egress Merkle Attestation
-  * WORM-Compliant Merkle Attestation & Audit Logging
-  * FIPS 140-3 KAT, RFC 6902 Differential Audit Logging
+  * [Cryptographic SHA-256 Hash Chaining](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
+  * [Dynamic Canary Watermarking & Steganography (Leak Forensics)](COMPLIANCE.md#dynamic-canary-watermarking--steganography)
+  * [MODULE 4: Cryptographic Proof of Non-Egress Merkle Attestation](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
+  * [WORM-Compliant Merkle Attestation & Audit Logging](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
+  * [FIPS 140-3 KAT, RFC 6902 Differential Audit Logging](COMPLIANCE.md#data-in-transit-encryption--fips-integrity)
 * **[DEPLOYMENT.md](DEPLOYMENT.md) - Infrastructure & Resiliency**
-  * MODULE 5: Service Mesh Native Interface
-  * Zero-Overhead OpenTelemetry Tracing (W3C traceparent propagation via background thread)
-  * Service Mesh Native gRPC ext_proc Integration (Zero HTTP network hops)
-  * Traffic Engineering & Resiliency (Redis evalsha Token-Bucket Rate Limiter, Kubernetes 25s SIGTERM draining)
-  * Zero-Dependency Kubernetes Mutating Webhook
-  * Deep Component Health Probes and Prometheus Alert Rules
+  * [MODULE 5: Service Mesh Native Interface](DEPLOYMENT.md#1-service-mesh-native-interface)
+  * [Zero-Overhead OpenTelemetry Tracing (W3C traceparent propagation via background thread)](DEPLOYMENT.md#2-zero-overhead-opentelemetry-tracing)
+  * [Service Mesh Native gRPC ext_proc Integration (Zero HTTP network hops)](DEPLOYMENT.md#3-service-mesh-native-grpc-extproc-integration)
+  * [Traffic Engineering & Resiliency (Redis evalsha Token-Bucket Rate Limiter, Kubernetes 25s SIGTERM draining)](DEPLOYMENT.md#4-traffic-engineering--resiliency)
+  * [Zero-Dependency Kubernetes Mutating Webhook](DEPLOYMENT.md#5-zero-dependency-kubernetes-mutating-webhook)
+  * [Deep Component Health Probes and Prometheus Alert Rules](DEPLOYMENT.md#6-deep-component-health-probes-and-prometheus-alert-rules)
 
 ## 📄 Intellectual Property & Licensing
 
