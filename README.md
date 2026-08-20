@@ -13,9 +13,19 @@
 
 > **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
 
-**LLM-Shield-Proxy** is an open-source, zero-egress middleware reverse proxy deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
+**LLM-Shield-Proxy** is an open-source, zero-egress **AI Gateway** and **LLM Firewall** deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
 
-Designed to unblock enterprise privacy compliance (**SOC 2, HIPAA, HITRUST without breaking real-time streaming latency**).
+Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance (**SOC 2 Compliance for AI**, HIPAA, HITRUST without breaking real-time streaming latency).
+
+### 🔥 Enterprise Flagship Features
+* **[Pluggable Tool-Call RBAC (MCP Governance)](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercept autonomous agent tool executions using a Zero-Allocation Streaming JSON Lexer. Enforce strict logical access controls for robust **Autonomous Agent Security** and **AI Governance** against your existing **Redis, Open Policy Agent (OPA), or HashiCorp Vault** infrastructure to prevent agent drift.
+* **Zero-Egress Synthetic Masking:** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
+* **Sub-Millisecond SSE Rehydration:** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag.
+* **Zero-Data Stateless Cryptography:** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<=55MB RAM`).
+* **Universal Decision Trace Exporter:** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) for strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
+* **Service Mesh Native gRPC Sidecar:** Stream buffers directly over Unix Domain Sockets (UDS) via Envoy's `ext_proc` for zero HTTP network hops.
+* **ReDoS-Immune C++ DFA Engine:** Pre-compiled Deterministic Finite Automatons (`google-re2`) guarantee linear execution time against adversarial regex payloads.
+* **Universal Zero-SDK Translators:** Drop-in compatibility for existing OpenAI SDKs with automatic edge-translation to Anthropic, Gemini, and vLLM schemas.
 
 ### Upstream Integration & Context
 This repository provides the reference proxy architecture and benchmark suite for resolving SSE stream fragmentation in enterprise sandboxes, as proposed in:
@@ -26,11 +36,10 @@ This repository provides the reference proxy architecture and benchmark suite fo
 
 ## ⚡ 60-Second Quickstart & Deployment
 
-### 🔄 The Drop-In Proof (Zero-SDK Integration)
-Because LLM-Shield-Proxy natively mimics the OpenAI specification, **you do not need to rewrite your application code**. 
+### 🔄 The Drop-In Proof: Zero-SDK Integration
+Because LLM-Shield-Proxy natively mimics the OpenAI specification, **you do not need to rewrite your application code**. You simply change the `base_url` in your SDK or the endpoint in your `curl` command. The proxy intercepts the payload, redacts it, and translates the schema to the correct upstream provider automatically.
 
-You simply change the `base_url` in your SDK or the endpoint in your `curl` command. The proxy intercepts the payload, redacts it, and translates the schema to the correct upstream provider automatically.
-
+**Option A: cURL**
 ```bash
 # ❌ Before: Sending raw PHI directly to OpenAI
 curl https://api.openai.com/v1/chat/completions \
@@ -43,9 +52,29 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"messages": [{"role": "user", "content": "My SSN is 000-00-0000"}]}'
 ```
 
-### 🚀 Quick Start (Docker) — 3 Lines of Bash
-Spin up the zero-egress proxy and run the live streaming PII demo in 3 lines:
+**Option B: Python SDK (1-Line Change)**
+```python
+from openai import OpenAI
 
+client = OpenAI(
+    api_key="your-openai-api-key",
+    base_url="http://localhost:8000/v1",  # Point to LLM-Shield-Proxy
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Contact Sarah Connor at sarah@example.com or 555-0199."}],
+    stream=True,
+)
+
+for chunk in response:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
+```
+
+### 🚀 Docker Quickstart
+Spin up the zero-egress proxy in seconds.
+
+**Option A: Run the Live Streaming Demo (Docker Compose)**
 ```bash
 # 1. Spin up the proxy container in background
 docker compose up -d
@@ -55,6 +84,16 @@ curl http://localhost:8000/healthz
 
 # 3. Run the live demo script
 python examples/demo.py
+```
+
+**Option B: Standalone Container (Production Base)**
+```bash
+docker run -d -p 8000:8000 \
+  -e OPENAI_API_KEY="sk-your-openai-api-key" \
+  -e HOST="0.0.0.0" \
+  -e PORT=8000 \
+  --name llm-shield-proxy \
+  ghcr.io/ninadphalak/llm-shield-proxy:latest
 ```
 
 ---
@@ -98,36 +137,6 @@ custom_patterns:
 llm-shield-proxy --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-### 🐳 Run via Docker Directly
-```bash
-docker run -d -p 8000:8000 \
-  -e OPENAI_API_KEY="sk-your-openai-api-key" \
-  -e HOST="0.0.0.0" \
-  -e PORT=8000 \
-  --name llm-shield-proxy \
-  ghcr.io/ninadphalak/llm-shield-proxy:latest
-```
-
-### 1-Line SDK Change
-Point your existing OpenAI SDK `base_url` to your local LLM-Shield-Proxy instance:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    api_key="your-openai-api-key",
-    base_url="http://localhost:8000/v1",  # Point to LLM-Shield-Proxy
-)
-
-response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[{"role": "user", "content": "Contact Sarah Connor at sarah@example.com or 555-0199."}],
-    stream=True,
-)
-
-for chunk in response:
-    print(chunk.choices[0].delta.content or "", end="", flush=True)
-```
 
 ---
 
@@ -141,7 +150,7 @@ for chunk in response:
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
 ### 🏛️ Built for Trust & Transparency
-Designed specifically for highly regulated enterprise environments, Zero-Trust network architectures, and security-first engineering teams. 
+Designed specifically for highly regulated enterprise environments, strict **Zero Trust AI** network architectures, and security-first engineering teams implementing **LLM Security Posture Management (LLM SPM)**. 
 1. **It keeps your data in your building:** I do not send your data to a third-party security company. The shield runs 100% inside your own servers.
 2. **Zero-Data Storage:** I do not save or log your sensitive prompts. The system uses a "self-destructing" memory vault that erases the mappings automatically.
 3. **Continuous Stability:** The system has been aggressively tested under heavy, simulated usage (thousands of concurrent users) for hours on end to ensure it never crashes or slows down your AI tools.
@@ -269,7 +278,7 @@ Rust-backed `orjson` engine parses fragmented Server-Sent Events with mathematic
 All identifiers and custom dictionaries are pre-compiled into Deterministic Finite Automatons (DFAs) in C++, guaranteeing linear execution time to physically immunize the proxy against Regex Denial of Service (ReDoS).
 
 ### [3. Dual-Mode Shannon Entropy Secret Scanner](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
-Vectorized $O(N)$ math loop evaluating $H(S)$ bit density to instantly intercept unstructured 64-char cryptographic keys and substitute them with Faker-based synthetic equivalents in `<6 µs`.
+Vectorized O(N) math loop evaluating H(S) bit density to instantly intercept unstructured 64-char cryptographic keys and substitute them with Faker-based synthetic equivalents in `<6 µs`.
 
 ### [4. In-Band Stateless Crypto & Ephemeral Vaults](ARCHITECTURE.md#3--cryptographic-memory-vaults)
 Zero-Data proxying via stateless AES-256-GCM envelope encryption (data encrypted inside the LLM prompt) or ephemeral Redis TTL vaults with Deterministic HMAC masking.
@@ -311,9 +320,12 @@ LLM-Shield-Proxy is engineered specifically to help enterprises utilize Generati
 
 Below is a summary of our compliance mappings. For the exhaustive deep-dive mapping, view our [Enterprise Compliance Documentation](COMPLIANCE.md).
 
+### 🛡️ SOC 2 & ISO 42001 Auditor Evidence Mapping
+If you are deploying LLM-Shield to satisfy a compliance audit, map the proxy's features directly to your Trust Services Criteria. See our complete [Auditor Evidence Mapping](COMPLIANCE.md#️-soc-2--iso-42001-auditor-evidence-mapping).
+
 | Compliance Domain | Supported Features & Capabilities |
 | :--- | :--- |
-| **🏥 HIPAA Transmission Security** | Local $O(1)$ Redaction, Tier-2 Shannon Entropy + Faker synthetic substituting. No raw PHI traverses public internet to third-party APIs. |
+| **🏥 HIPAA Transmission Security** | Local O(1) Redaction, Tier-2 Shannon Entropy + Faker synthetic substituting. No raw PHI traverses public internet to third-party APIs. |
 | **🛡️ SOC 2 Audit Controls** | WORM-Compliant Merkle Attestation & SHA-256 Hash Chaining. Emits tamper-evident structured logs with strict RFC 6902 differential patching. |
 | **⚖️ Legal & Egress Provenance** | Cryptographic Proof of Non-Egress Merkle Attestation. Dynamic Canary Watermarking for insider leak forensics. |
 | **🔐 Data Integrity & Storage** | Zero long-term storage. In-Band Stateless AES-256-GCM masking or ephemeral Redis TTL Vault mapping with Deterministic HMAC masking. |
