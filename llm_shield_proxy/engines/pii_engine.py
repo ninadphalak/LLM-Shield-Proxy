@@ -26,7 +26,7 @@ from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.tracing import tracer
 
 try:
-    import re2
+    import re2  # type: ignore
 except ImportError:
     re2 = None
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 import orjson as json
 
@@ -135,7 +135,7 @@ class SSERehydrationBuffer:
 
 
 async def rehydrate_sse_stream(
-    raw_stream: AsyncGenerator[bytes, None],
+    raw_stream: AsyncIterator[bytes],
     vault: Vault,
     watermark_text: str = "",
 ) -> AsyncGenerator[bytes, None]:
