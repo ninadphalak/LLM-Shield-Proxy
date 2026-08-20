@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-if sys.platform == 'win32':
+if sys.platform == "win32":
     asyncio.WindowsSelectorEventLoopPolicy = asyncio.WindowsProactorEventLoopPolicy
 
 import hashlib
@@ -55,10 +55,12 @@ logger = logging.getLogger(__name__)
 
 APP_VERSION = "1.2.11"
 
+
 class AppState:
     is_draining: bool = False
     active_requests: int = 0
     shutdown_event = asyncio.Event()
+
 
 app_state = AppState()
 
@@ -100,6 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     AuditLogger.log_startup_event()
 
     from llm_shield_proxy.engines.pii_engine import pii_engine
+
     print(
         f"--- LLM-Shield Proxy Startup Diagnostics ---\n"
         f"  PII Engine: {'Active (Tier 1, 2, 3)' if pii_engine.enable_tier3 else 'Active (Tier 1, 2)'}\n"
@@ -158,7 +161,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             # SECURITY: Prevent local privilege escalation (TOCTOU) by using umask
             # before socket creation, rather than chmod after creation.
-            old_umask = os.umask(0o117) # Inverts to 0o660
+            old_umask = os.umask(0o117)  # Inverts to 0o660
             try:
                 grpc_server = await serve_ext_proc(sock_path)
             finally:
@@ -180,6 +183,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.http_client.aclose()
 
     from llm_shield_proxy.security.vault_client import vault_provider
+
     await vault_provider.aclose()
 
     # Cleanly close gRPC server
@@ -205,7 +209,9 @@ app.include_router(health_router)
 async def security_and_tracing_middleware(request: Request, call_next: Any) -> Response:
     """Attaches correlation request IDs and enterprise HTTP security headers."""
     if app_state.is_draining:
-        return JSONResponse(status_code=503, content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}})
+        return JSONResponse(
+            status_code=503, content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}}
+        )
 
     app_state.active_requests += 1
     try:
@@ -303,8 +309,6 @@ async def metrics_endpoint(request: Request) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-
-
 async def get_policy_resolver() -> BasePolicyResolver:
     """Dependency injection provider for the active Pluggable RBAC Engine."""
     if hasattr(vault_store, "async_client"):
@@ -364,7 +368,15 @@ async def proxy_catch_all(
     ctx = propagator.extract(request.headers)
     with tracer.start_as_current_span("proxy_catch_all", context=ctx):
         try:
-            response = await _proxy_catch_all_internal(request, path, x_session_id, x_upstream_base_url, x_shield_masking_mode, x_shield_bypass_breaker, policy_resolver)
+            response = await _proxy_catch_all_internal(
+                request,
+                path,
+                x_session_id,
+                x_upstream_base_url,
+                x_shield_masking_mode,
+                x_shield_bypass_breaker,
+                policy_resolver,
+            )
             llm_shield_requests_total.labels(status_code=response.status_code).inc()
             llm_shield_latency_seconds_bucket.observe(time.perf_counter() - start_time)
             return response
@@ -503,11 +515,12 @@ async def _proxy_catch_all_internal(
     request.state.virtual_key_id = virtual_key_id
 
     from llm_shield_proxy.security.rate_limit import rate_limiter
+
     if not await rate_limiter.acquire(virtual_key_id):
         return JSONResponse(
             status_code=429,
             content={"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}},
-            headers={"Retry-After": "1"}
+            headers={"Retry-After": "1"},
         )
 
     # Vault resolution based on masking mode
@@ -519,19 +532,23 @@ async def _proxy_catch_all_internal(
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
         vault = StatelessCryptoVault()
     elif masking_mode == MaskingMode.SCRUB:
+
         class ScrubVault:
             def __init__(self) -> None:
                 self.type_counters: dict[str, int] = {}
+
             def get_or_create_token(self, original_val: str, entity_type: str) -> str:
                 self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
                 return "[REDACTED]"
+
             def rehydrate(self, text: str, retention_length: int = 0) -> str:
                 return text
-        vault = ScrubVault() # type: ignore
+
+        vault = ScrubVault()  # type: ignore
     elif masking_mode == MaskingMode.STRUCTURAL_TAG:
         vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
         vault.synthetic = False
-    else: # SYNTHETIC
+    else:  # SYNTHETIC
         vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)
         vault.synthetic = True
 
@@ -576,12 +593,9 @@ async def _proxy_catch_all_internal(
                             content={
                                 "error": "circuit_breaker_tripped",
                                 "reason": "agent_loop_detected",
-                                "consecutive_turns": cbe.consecutive_turns
+                                "consecutive_turns": cbe.consecutive_turns,
                             },
-                            headers={
-                                "X-Shield-Circuit-Breaker": "TRIPPED",
-                                "Retry-After": "60"
-                            }
+                            headers={"X-Shield-Circuit-Breaker": "TRIPPED", "Retry-After": "60"},
                         )
 
             # Pre-flight Watermark Check
@@ -595,14 +609,16 @@ async def _proxy_catch_all_internal(
                         authorization_header=request.headers.get("authorization"),
                         x_virtual_key_header=request.headers.get("x-virtual-key"),
                         client_ip=request.client.host if request.client else None,
-                        session_id=x_session_id or "unknown_session"
+                        session_id=x_session_id or "unknown_session",
                     )
 
             is_streaming = bool(payload.get("stream", False))
             try:
                 active_profile = pii_engine.get_profile(virtual_key_id)
                 loop = asyncio.get_running_loop()
-                redacted_payload = await loop.run_in_executor(None, pii_engine.redact_payload, payload, vault, active_profile)
+                redacted_payload = await loop.run_in_executor(
+                    None, pii_engine.redact_payload, payload, vault, active_profile
+                )
 
                 # target_provider is refined with payload
                 target_provider = resolve_provider(dict(request.headers), redacted_payload)
@@ -632,7 +648,12 @@ async def _proxy_catch_all_internal(
                     logger.error(f"PII Engine failure (FAIL_CLOSED): {e}")
                     return JSONResponse(
                         status_code=503,
-                        content={"error": {"message": "DLP Inspection Failure: Request blocked by security policy", "type": "dlp_failure"}},
+                        content={
+                            "error": {
+                                "message": "DLP Inspection Failure: Request blocked by security policy",
+                                "type": "dlp_failure",
+                            }
+                        },
                     )
                 else:
                     logger.error(f"PII Engine failure (FAIL_OPEN): {e}")
@@ -687,7 +708,9 @@ async def _proxy_catch_all_internal(
                 async def wrapped_stream() -> AsyncGenerator[bytes, None]:
                     llm_shield_sse_active_streams.inc()
                     try:
-                        async for chunk in rehydrate_sse_stream(upstream_res.aiter_bytes(), vault, watermark_text=watermark_text):
+                        async for chunk in rehydrate_sse_stream(
+                            upstream_res.aiter_bytes(), vault, watermark_text=watermark_text
+                        ):
                             yield chunk
                     except asyncio.CancelledError:
                         logger.info("Client disconnected mid-stream. Cleaning up SSE stream and upstream socket.")
@@ -764,11 +787,19 @@ async def _proxy_catch_all_internal(
                         rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
 
                     if watermark_text:
-                        if "choices" in rehydrated_res and isinstance(rehydrated_res["choices"], list) and rehydrated_res["choices"]:
+                        if (
+                            "choices" in rehydrated_res
+                            and isinstance(rehydrated_res["choices"], list)
+                            and rehydrated_res["choices"]
+                        ):
                             msg = rehydrated_res["choices"][0].get("message", {})
                             if isinstance(msg, dict) and "content" in msg and isinstance(msg["content"], str):
                                 msg["content"] += watermark_text
-                        elif "content" in rehydrated_res and isinstance(rehydrated_res["content"], list) and rehydrated_res["content"]:
+                        elif (
+                            "content" in rehydrated_res
+                            and isinstance(rehydrated_res["content"], list)
+                            and rehydrated_res["content"]
+                        ):
                             block = rehydrated_res["content"][0]
                             if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
                                 block["text"] += watermark_text

@@ -1,3 +1,5 @@
+[⬅️ Back to README](README.md)
+
 # Contributing to LLM-Shield-Proxy
 
 Thank you for your interest in contributing to LLM-Shield-Proxy! We welcome community contributions, bug reports, and enhancements.

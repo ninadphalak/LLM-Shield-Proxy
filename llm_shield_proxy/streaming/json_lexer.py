@@ -48,15 +48,15 @@ class StreamingJSONLexer:
                     else:
                         self.state = self.STATE_IN_KEY
                         start_idx = i
-                elif char == ':':
+                elif char == ":":
                     self.expecting_value = True
-                elif char in ('{', ','):
+                elif char in ("{", ","):
                     self.expecting_value = False
-                elif char == '[':
+                elif char == "[":
                     self.expecting_value = True
-                elif char in ('}', ']'):
+                elif char in ("}", "]"):
                     self.expecting_value = False
-                elif char not in (' ', '\n', '\r', '\t'):
+                elif char not in (" ", "\n", "\r", "\t"):
                     if i > start_idx:
                         tokens.append((chunk_text[start_idx:i], False))
                     start_idx = i
@@ -66,14 +66,14 @@ class StreamingJSONLexer:
 
             elif self.state == self.STATE_IN_KEY:
                 next_quote = chunk_text.find('"', i)
-                next_esc = chunk_text.find('\\', i)
+                next_esc = chunk_text.find("\\", i)
 
                 if next_quote == -1 and next_esc == -1:
                     i = length
                 elif next_quote != -1 and (next_esc == -1 or next_quote < next_esc):
                     i = next_quote
                     self.state = self.STATE_WAIT_COLON
-                    tokens.append((chunk_text[start_idx:i+1], False))
+                    tokens.append((chunk_text[start_idx : i + 1], False))
                     start_idx = i + 1
                     i += 1
                 else:
@@ -83,17 +83,17 @@ class StreamingJSONLexer:
                     i += 1
 
             elif self.state == self.STATE_WAIT_COLON:
-                if char == ':':
+                if char == ":":
                     self.state = self.STATE_ROOT
                     self.expecting_value = True
-                elif char not in (' ', '\n', '\r', '\t'):
+                elif char not in (" ", "\n", "\r", "\t"):
                     self.state = self.STATE_ROOT
                     continue
                 i += 1
 
             elif self.state == self.STATE_IN_VALUE_STRING:
                 next_quote = chunk_text.find('"', i)
-                next_esc = chunk_text.find('\\', i)
+                next_esc = chunk_text.find("\\", i)
 
                 if next_quote == -1 and next_esc == -1:
                     i = length
@@ -112,12 +112,12 @@ class StreamingJSONLexer:
                     self.state = self.STATE_ESCAPE
                     if i > start_idx:
                         tokens.append((chunk_text[start_idx:i], True))
-                    tokens.append(('\\', True))
+                    tokens.append(("\\", True))
                     start_idx = i + 1
                     i += 1
 
             elif self.state == self.STATE_IN_VALUE_NON_STRING:
-                if char in (' ', '\n', '\r', '\t', ',', '}', ']'):
+                if char in (" ", "\n", "\r", "\t", ",", "}", "]"):
                     self.state = self.STATE_ROOT
                     if i > start_idx:
                         tokens.append((chunk_text[start_idx:i], True))

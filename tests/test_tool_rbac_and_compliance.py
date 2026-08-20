@@ -21,13 +21,15 @@ class MockPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
         return self.policy
 
+
 @pytest.fixture
 def mock_resolver():
     policy = {
         "allowed_tools": ["search_docs", "calculate_mortgage", "get_weather", "good_tool"],
-        "blocked_tools": ["execute_sql", "shell_exec", "read_local_file", "bad_tool"]
+        "blocked_tools": ["execute_sql", "shell_exec", "read_local_file", "bad_tool"],
     }
     return MockPolicyResolver(policy)
+
 
 @pytest.mark.asyncio
 async def test_slowloris_chunk_splitting(mock_resolver):
@@ -37,11 +39,12 @@ async def test_slowloris_chunk_splitting(mock_resolver):
     extracted = []
     # Feed 1 byte at a time
     for i in range(len(payload)):
-        chunk = payload[i:i+1]
+        chunk = payload[i : i + 1]
         tools = parser.feed(chunk)
         extracted.extend(tools)
 
     assert extracted == ["get_weather"]
+
 
 @pytest.mark.asyncio
 async def test_batch_json_rpc_injection(mock_resolver):
@@ -64,12 +67,13 @@ async def test_batch_json_rpc_injection(mock_resolver):
     assert error_json["error"]["code"] == "TOOL_ACCESS_FORBIDDEN"
     assert error_json["error"]["tool"] == "bad_tool"
 
+
 @pytest.mark.asyncio
 async def test_log_and_schema_injection():
     exporter = DecisionTraceExporter()
 
     # Malformed tool name with newline and null byte
-    malicious_tool_name = "get_weather\n\x00\r\""
+    malicious_tool_name = 'get_weather\n\x00\r"'
 
     exporter.record_decision(
         tenant_id="tenant-123",
@@ -77,7 +81,7 @@ async def test_log_and_schema_injection():
         redacted_prompt_hash="prompt_hash",
         tool_name=malicious_tool_name,
         rbac_decision="DENY",
-        payload_entropy=3.14
+        payload_entropy=3.14,
     )
 
     oscal_artifact = exporter.generate_oscal_artifact()
@@ -90,6 +94,7 @@ async def test_log_and_schema_injection():
     # Ensure the hashes are computed
     assert len(exporter.merkle_tree.records) == 1
     assert exporter.merkle_tree.records[0]["payload"]["Tool_Name"] == malicious_tool_name
+
 
 @pytest.mark.asyncio
 async def test_latency_overhead(mock_resolver):
@@ -108,6 +113,7 @@ async def test_latency_overhead(mock_resolver):
     latency_ms = (end - start) * 1000
     # Should definitely be < 1ms for such a tiny payload locally
     assert latency_ms < 1.0
+
 
 @pytest.mark.asyncio
 async def test_pluggable_redis_resolver():

@@ -1,3 +1,5 @@
+[⬅️ Back to README](README.md)
+
 # 📜 Compliance: Audit, Forensics & Legal
 
 LLM-Shield-Proxy is an enterprise **AI Gateway** and **LLM Firewall** designed specifically to help engineering teams adopt Generative AI and maintain continuous **AI Governance** without violating data privacy regulations. Operating as a zero-egress, stateless middleware proxy deployed entirely within your own Virtual Private Cloud (VPC), it inherently bypasses the major compliance risks associated with third-party SaaS security tools and enforces robust **LLM Security Posture Management (LLM SPM)**.

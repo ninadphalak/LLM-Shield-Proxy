@@ -1,4 +1,5 @@
 """Envoy ext_proc gRPC Service for zero-egress LLM shielding over UDS."""
+
 import asyncio
 import codecs
 import json
@@ -36,9 +37,7 @@ class ExtProcService(ExternalProcessorBase):
     def __init__(self) -> None:
         pass
 
-    async def process(
-        self, stream: "grpclib.server.Stream[ProcessingRequest, ProcessingResponse]"
-    ) -> None:
+    async def process(self, stream: "grpclib.server.Stream[ProcessingRequest, ProcessingResponse]") -> None:
         """Bidirectional async generator handling the Envoy stream."""
 
         # Instantiate a stateful SSERehydrationBuffer per Envoy stream
@@ -62,9 +61,7 @@ class ExtProcService(ExternalProcessorBase):
                         status=CommonResponseStatus.CONTINUE_AND_REPLACE,
                         body_mutation=body_mutation,
                     )
-                    await stream.send_message(
-                        ProcessingResponse(request_body=BodyResponse(response=common_res))
-                    )
+                    await stream.send_message(ProcessingResponse(request_body=BodyResponse(response=common_res)))
 
                 elif request.response_body.body:
                     # Response Body Phase (SSE Chunks)
@@ -88,18 +85,14 @@ class ExtProcService(ExternalProcessorBase):
                             body_mutation=body_mutation,
                         )
 
-                    await stream.send_message(
-                        ProcessingResponse(response_body=BodyResponse(response=common_res))
-                    )
+                    await stream.send_message(ProcessingResponse(response_body=BodyResponse(response=common_res)))
 
                 else:
                     # Pass-through for headers/trailers if forwarded
                     # In this minimal integration, we just CONTINUE
                     common_res = CommonResponse(status=CommonResponseStatus.CONTINUE)
                     if request.request_headers.headers:
-                        await stream.send_message(
-                            ProcessingResponse(request_headers=BodyResponse(response=common_res))
-                        )
+                        await stream.send_message(ProcessingResponse(request_headers=BodyResponse(response=common_res)))
                     elif request.response_headers.headers:
                         await stream.send_message(
                             ProcessingResponse(response_headers=BodyResponse(response=common_res))
@@ -128,6 +121,7 @@ async def serve_ext_proc(sock_path: str = "/var/run/llm-shield/ext_proc.sock") -
     """Instantiates and starts the grpclib ext_proc server over UDS or TCP."""
     server = grpclib.server.Server([ExtProcService()])
     import os
+
     if os.name == "nt":
         await server.start(host="127.0.0.1", port=50051)
         logger.info("gRPC ext_proc server listening on 127.0.0.1:50051 (Windows)")

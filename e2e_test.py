@@ -12,11 +12,10 @@ def test_health():
         print(f"Health check failed: {e}")
         sys.exit(1)
 
+
 def test_redaction():
     headers = {"Authorization": "Bearer test-key"}
-    data = {
-        "messages": [{"role": "user", "content": "My SSN is 000-00-0000"}]
-    }
+    data = {"messages": [{"role": "user", "content": "My SSN is 000-00-0000"}]}
     try:
         r = requests.post("http://localhost:8000/v1/chat/completions", headers=headers, json=data)
         if r.status_code != 200:
@@ -29,6 +28,7 @@ def test_redaction():
     except Exception as e:
         print(f"Redaction check failed: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     print("Running E2E Smoke Test against localhost:8000...")

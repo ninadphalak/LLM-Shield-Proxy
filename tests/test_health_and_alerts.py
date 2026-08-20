@@ -10,6 +10,7 @@ from llm_shield_proxy.api.main import app
 
 client = TestClient(app)
 
+
 @pytest.mark.asyncio
 async def test_livez_endpoint():
     """Verify the /livez alias group returns instantly."""
@@ -17,6 +18,7 @@ async def test_livez_endpoint():
         response = client.get(path)
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+
 
 @pytest.mark.asyncio
 async def test_readyz_endpoint(monkeypatch):
@@ -27,6 +29,7 @@ async def test_readyz_endpoint(monkeypatch):
         return True
 
     from llm_shield_proxy.api import health
+
     monkeypatch.setattr(health, "_check_pii_engine", mock_healthy)
     monkeypatch.setattr(health, "_check_vault", mock_healthy)
     monkeypatch.setattr(health, "_check_redis", mock_healthy)
@@ -44,16 +47,14 @@ async def test_readyz_endpoint(monkeypatch):
 
     # Test cache logic
     health._readyz_cache["timestamp"] = 9999999999.0  # Future time
-    health._readyz_cache["result"] = {
-        "status_code": 200,
-        "content": {"cached": "data"}
-    }
+    health._readyz_cache["result"] = {"status_code": 200, "content": {"cached": "data"}}
     response_cached = client.get("/readyz")
     assert response_cached.status_code == 200
     assert response_cached.json() == {"cached": "data"}
 
     # Mocking failure state
     health._readyz_cache.clear()
+
     async def mock_failed():
         return False
 
@@ -69,17 +70,20 @@ async def test_readyz_endpoint(monkeypatch):
 
 def test_prometheus_rule_yaml():
     """Validate Kubernetes PrometheusRule CRD YAML rendering."""
-    helm_path = Path(__file__).parent.parent / "deploy" / "helm" / "llm-shield-proxy" / "templates" / "prometheus-rule.yaml"
+    helm_path = (
+        Path(__file__).parent.parent / "deploy" / "helm" / "llm-shield-proxy" / "templates" / "prometheus-rule.yaml"
+    )
     assert helm_path.exists(), "prometheus-rule.yaml not found"
 
     content = helm_path.read_text(encoding="utf-8")
 
     # We must strip the helm templating logic before YAML parsing
     import re
+
     # Remove complete blocks like {{- if ... }} and {{- end }} that are on their own lines
-    content = re.sub(r'^\s*\{\{.*\}\}\s*$', '', content, flags=re.MULTILINE)
+    content = re.sub(r"^\s*\{\{.*\}\}\s*$", "", content, flags=re.MULTILINE)
     # Replace inline template tags with a dummy string to keep valid YAML
-    content = re.sub(r'\{\{.*?\}\}', 'dummy_value', content)
+    content = re.sub(r"\{\{.*?\}\}", "dummy_value", content)
 
     try:
         parsed = yaml.safe_load(content)

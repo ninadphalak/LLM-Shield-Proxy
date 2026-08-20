@@ -51,7 +51,7 @@ class MerkleAttestationStream:
             "session_id": self.session_id,
             "merkle_root": final_digest,
             "total_chunks_processed": self.total_chunks_processed,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Sign the payload using SHIELD_ENCRYPTION_KEY or fallback

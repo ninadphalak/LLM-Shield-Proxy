@@ -8,6 +8,7 @@ from llm_shield_proxy.security.vault_client import AsyncVaultSecretProvider
 
 pytestmark = pytest.mark.asyncio
 
+
 @pytest.fixture(autouse=True)
 def reset_settings():
     """Reset settings before each test."""
@@ -37,13 +38,11 @@ async def test_vault_token_auth():
     provider = AsyncVaultSecretProvider()
 
     # Mock httpx.AsyncClient.get
-    mock_response = httpx.Response(200, json={
-        "data": {
-            "data": {
-                "UPSTREAM_API_KEY": "vault-key-123"
-            }
-        }
-    }, request=httpx.Request("GET", "http://localhost:8200"))
+    mock_response = httpx.Response(
+        200,
+        json={"data": {"data": {"UPSTREAM_API_KEY": "vault-key-123"}}},
+        request=httpx.Request("GET", "http://localhost:8200"),
+    )
 
     with patch("httpx.AsyncClient.get", return_value=mock_response) as mock_get:
         await provider.fetch_secrets()
@@ -66,23 +65,20 @@ async def test_vault_approle_auth():
     provider = AsyncVaultSecretProvider()
 
     # Mock httpx.AsyncClient.post and get
-    mock_post_response = httpx.Response(200, json={
-        "auth": {
-            "client_token": "approle-token"
-        }
-    }, request=httpx.Request("POST", "http://localhost:8200"))
+    mock_post_response = httpx.Response(
+        200, json={"auth": {"client_token": "approle-token"}}, request=httpx.Request("POST", "http://localhost:8200")
+    )
 
-    mock_get_response = httpx.Response(200, json={
-        "data": {
-            "data": {
-                "UPSTREAM_API_KEY": "approle-key-123"
-            }
-        }
-    }, request=httpx.Request("GET", "http://localhost:8200"))
+    mock_get_response = httpx.Response(
+        200,
+        json={"data": {"data": {"UPSTREAM_API_KEY": "approle-key-123"}}},
+        request=httpx.Request("GET", "http://localhost:8200"),
+    )
 
-    with patch("httpx.AsyncClient.post", return_value=mock_post_response) as mock_post, \
-         patch("httpx.AsyncClient.get", return_value=mock_get_response) as mock_get:
-
+    with (
+        patch("httpx.AsyncClient.post", return_value=mock_post_response) as mock_post,
+        patch("httpx.AsyncClient.get", return_value=mock_get_response) as mock_get,
+    ):
         await provider.fetch_secrets()
 
         mock_post.assert_called_once()

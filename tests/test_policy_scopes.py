@@ -20,21 +20,10 @@ def test_granular_policy_scopes():
             }
         ],
         "profiles": [
-            {
-                "name": "hipaa_strict",
-                "tier1_regex": ["SSN", "PHONE", "EMAIL"],
-                "tier2_ner": ["PERSON"]
-            },
-            {
-                "name": "dev_general",
-                "tier1_regex": ["INTERNAL_PROJECT"],
-                "tier2_ner": []
-            }
+            {"name": "hipaa_strict", "tier1_regex": ["SSN", "PHONE", "EMAIL"], "tier2_ner": ["PERSON"]},
+            {"name": "dev_general", "tier1_regex": ["INTERNAL_PROJECT"], "tier2_ner": []},
         ],
-        "tenant_mappings": {
-            "tenant_a_hipaa": "hipaa_strict",
-            "tenant_b_dev": "dev_general"
-        }
+        "tenant_mappings": {"tenant_a_hipaa": "hipaa_strict", "tenant_b_dev": "dev_general"},
     }
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as tmp:

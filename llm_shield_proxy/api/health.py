@@ -81,10 +81,7 @@ async def readiness_probe() -> JSONResponse:
 
     # Concurrent execution to avoid blocking
     pii_healthy, vault_healthy, redis_healthy = await asyncio.gather(
-        _check_pii_engine(),
-        _check_vault(),
-        _check_redis(),
-        return_exceptions=True
+        _check_pii_engine(), _check_vault(), _check_redis(), return_exceptions=True
     )
 
     # Handle exceptions as failures
@@ -100,25 +97,16 @@ async def readiness_probe() -> JSONResponse:
 
     try:
         from llm_shield_proxy.api.main import APP_VERSION
+
         version = APP_VERSION
     except ImportError:
         version = "unknown"
 
     if not all([pii_healthy, vault_healthy, redis_healthy]):
-        content = {
-            "status": "degraded",
-            "service": "llm-shield-proxy",
-            "version": version,
-            "components": components
-        }
+        content = {"status": "degraded", "service": "llm-shield-proxy", "version": version, "components": components}
         status_code = 503
     else:
-        content = {
-            "status": "ready",
-            "service": "llm-shield-proxy",
-            "version": version,
-            "components": components
-        }
+        content = {"status": "ready", "service": "llm-shield-proxy", "version": version, "components": components}
         status_code = 200
 
     # Populate cache

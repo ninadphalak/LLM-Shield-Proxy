@@ -32,11 +32,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class CompiledProfile:
     name: str
     tier1_patterns: List[Tuple[str, Any]] = field(default_factory=list)
     tier3_ner_entities: Set[str] = field(default_factory=set)
+
 
 # Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
 INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
@@ -195,7 +197,9 @@ class PIIEngine:
 
         if settings.CUSTOM_REGEX_PATH and os.path.exists(settings.CUSTOM_REGEX_PATH):
             if re2 is None:
-                logger.error("google-re2 is required for BYOR custom regex to prevent ReDoS. Skipping custom regex load.")
+                logger.error(
+                    "google-re2 is required for BYOR custom regex to prevent ReDoS. Skipping custom regex load."
+                )
             else:
                 try:
                     with open(settings.CUSTOM_REGEX_PATH, "r", encoding="utf-8") as f:
@@ -220,14 +224,16 @@ class PIIEngine:
 
                     self._tenant_mappings = config.tenant_mappings
 
-                    logger.info("Successfully loaded custom regex patterns and %d profiles from %s", len(self._compiled_profiles), settings.CUSTOM_REGEX_PATH)
+                    logger.info(
+                        "Successfully loaded custom regex patterns and %d profiles from %s",
+                        len(self._compiled_profiles),
+                        settings.CUSTOM_REGEX_PATH,
+                    )
                 except Exception as exc:
                     logger.error("Failed to load custom regex configuration: %s", exc)
 
         self._global_strict_profile = CompiledProfile(
-            name="global_strict",
-            tier1_patterns=all_tier1,
-            tier3_ner_entities=all_tier3
+            name="global_strict", tier1_patterns=all_tier1, tier3_ner_entities=all_tier3
         )
 
     def get_profile(self, virtual_key_id: str) -> CompiledProfile:
@@ -237,7 +243,9 @@ class PIIEngine:
             return self._compiled_profiles.get(profile_name, self._global_strict_profile)
         return self._global_strict_profile
 
-    def detect_spans(self, text: str, active_profile: Optional[CompiledProfile] = None) -> List[Tuple[int, int, str, str]]:
+    def detect_spans(
+        self, text: str, active_profile: Optional[CompiledProfile] = None
+    ) -> List[Tuple[int, int, str, str]]:
         """Detects all PII and secret entity spans across the 3-Tier cascade.
 
         Time Complexity: O(N * P) where N is text length and P is pattern count.
@@ -424,7 +432,9 @@ class PIIEngine:
             for msg in new_payload["messages"]:
                 if isinstance(msg, dict):
                     if "messages" in msg:
-                        redacted_messages.append(self.redact_payload(msg, vault, active_profile, depth=depth + 1, max_depth=max_depth))
+                        redacted_messages.append(
+                            self.redact_payload(msg, vault, active_profile, depth=depth + 1, max_depth=max_depth)
+                        )
                         continue
 
                     msg_copy = msg.copy()
@@ -475,7 +485,9 @@ class PIIEngine:
                                 if "function" in tc_copy and isinstance(tc_copy["function"], dict):
                                     fn_copy = tc_copy["function"].copy()
                                     if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                                        fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
+                                        fn_copy["arguments"] = self.redact_text(
+                                            fn_copy["arguments"], vault, active_profile
+                                        )
                                     tc_copy["function"] = fn_copy
                                 new_tool_calls.append(tc_copy)
                             else:
@@ -500,7 +512,8 @@ class PIIEngine:
                 new_payload["prompt"] = self.redact_text(new_payload["prompt"], vault, active_profile)
             elif isinstance(new_payload["prompt"], list):
                 new_payload["prompt"] = [
-                    self.redact_text(p, vault, active_profile) if isinstance(p, str) else p for p in new_payload["prompt"]
+                    self.redact_text(p, vault, active_profile) if isinstance(p, str) else p
+                    for p in new_payload["prompt"]
                 ]
 
         # Redact system prompt if separated at top level
@@ -513,7 +526,8 @@ class PIIEngine:
                 new_payload["input"] = self.redact_text(new_payload["input"], vault, active_profile)
             elif isinstance(new_payload["input"], list):
                 new_payload["input"] = [
-                    self.redact_text(item, vault, active_profile) if isinstance(item, str) else item for item in new_payload["input"]
+                    self.redact_text(item, vault, active_profile) if isinstance(item, str) else item
+                    for item in new_payload["input"]
                 ]
 
         return new_payload

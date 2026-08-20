@@ -60,10 +60,7 @@ class AsyncVaultSecretProvider:
                 raise ValueError("VAULT_ROLE_ID and VAULT_SECRET_ID are required for APPROLE auth method")
 
             url = f"{settings.VAULT_ADDR.rstrip('/')}/v1/auth/approle/login"
-            payload = {
-                "role_id": settings.VAULT_ROLE_ID,
-                "secret_id": settings.VAULT_SECRET_ID
-            }
+            payload = {"role_id": settings.VAULT_ROLE_ID, "secret_id": settings.VAULT_SECRET_ID}
             resp = await self.client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -82,10 +79,7 @@ class AsyncVaultSecretProvider:
                 jwt = f.read().strip()
 
             url = f"{settings.VAULT_ADDR.rstrip('/')}/v1/auth/kubernetes/login"
-            payload = {
-                "role": role,
-                "jwt": jwt
-            }
+            payload = {"role": role, "jwt": jwt}
             resp = await self.client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -104,7 +98,7 @@ class AsyncVaultSecretProvider:
             headers = {"X-Vault-Token": token}
 
             # Format URL for KV v2 or v1
-            path = settings.VAULT_SECRET_PATH.strip('/')
+            path = settings.VAULT_SECRET_PATH.strip("/")
             # KV v2 usually has 'data' in the path, e.g., secret/data/llm-shield/keys
             # If the user provides the full path, we just query it.
             url = f"{settings.VAULT_ADDR.rstrip('/')}/v1/{path}"
@@ -148,6 +142,7 @@ class AsyncVaultSecretProvider:
                 logger.error(f"Background Vault refresh failed: {e}. Retaining previously cached secrets.")
                 try:
                     from llm_shield_proxy.observability.metrics import llm_shield_vault_refresh_errors_total
+
                     llm_shield_vault_refresh_errors_total.inc()
                 except ImportError:
                     pass
@@ -160,5 +155,6 @@ class AsyncVaultSecretProvider:
     def get_secret(self, key: str) -> Optional[str]:
         """O(1) memory lookup for a cached secret."""
         return self._cached_secrets.get(key)
+
 
 vault_provider = AsyncVaultSecretProvider()
