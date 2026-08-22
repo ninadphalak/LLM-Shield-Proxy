@@ -14,19 +14,25 @@ def override_settings():
     original_enable = settings.ENABLE_BLAST_RADIUS_LIMITS
     original_burst = settings.BLAST_RADIUS_BURST_CAPACITY
     original_replenish = settings.BLAST_RADIUS_REPLENISH_RATE_PER_MIN
-    original_keys = settings.valid_virtual_keys_set
+    original_keys = settings._valid_virtual_keys_set
+    original_upstream_key = settings.UPSTREAM_API_KEY
+    original_override_auth = settings.OVERRIDE_CLIENT_AUTH
 
     settings.ENABLE_BLAST_RADIUS_LIMITS = True
     settings.BLAST_RADIUS_BURST_CAPACITY = 100
     settings.BLAST_RADIUS_REPLENISH_RATE_PER_MIN = 600  # 10 tokens per second
-    settings.valid_virtual_keys_set = frozenset(["test_key"])
+    settings._valid_virtual_keys_set = frozenset(["test_key"])
+    settings.UPSTREAM_API_KEY = "mock_upstream_key"
+    settings.OVERRIDE_CLIENT_AUTH = True
 
     yield
 
     settings.ENABLE_BLAST_RADIUS_LIMITS = original_enable
     settings.BLAST_RADIUS_BURST_CAPACITY = original_burst
     settings.BLAST_RADIUS_REPLENISH_RATE_PER_MIN = original_replenish
-    settings.valid_virtual_keys_set = original_keys
+    settings._valid_virtual_keys_set = original_keys
+    settings.UPSTREAM_API_KEY = original_upstream_key
+    settings.OVERRIDE_CLIENT_AUTH = original_override_auth
 
 @pytest.mark.asyncio
 async def test_burst_capacity_exceeded(override_settings):
