@@ -54,7 +54,7 @@ from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.2.11"
+APP_VERSION = "1.2.12"
 
 
 class AppState:
