@@ -533,7 +533,7 @@ async def _proxy_catch_all_internal(
             virtual_key_id = vk
         else:
             if client_auth:
-                virtual_key_id = hashlib.sha256(client_auth.encode()).hexdigest()[:16]
+                virtual_key_id = get_virtual_key_id(client_auth)
             else:
                 virtual_key_id = "default-tenant"
 
