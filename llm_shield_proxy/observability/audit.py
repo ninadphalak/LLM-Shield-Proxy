@@ -91,6 +91,7 @@ class AuditLogger:
         status_code: int = 200,
         request_id: Optional[str] = None,
         patch_operations: Optional[list[Dict[str, Any]]] = None,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event recording entity redaction counts."""
         log_entry: Dict[str, Any] = {
@@ -104,6 +105,7 @@ class AuditLogger:
             "session_id": session_id or "ephemeral",
             "path": path,
             "status_code": status_code,
+            "applied_role_name": applied_role_name,
             "total_entities_redacted": sum(entity_counts.values()),
             "entity_breakdown": entity_counts,
         }
@@ -129,6 +131,7 @@ class AuditLogger:
         virtual_key_id: str = "BYOK",
         status_code: int = 200,
         request_id: Optional[str] = None,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event for incoming proxy traffic."""
         log_entry: Dict[str, Any] = {
@@ -143,6 +146,7 @@ class AuditLogger:
             "path": path,
             "method": method,
             "status_code": status_code,
+            "applied_role_name": applied_role_name,
         }
         AuditLogger._compute_and_append_hash(log_entry)
         audit_logger.info(json.dumps(log_entry))
@@ -153,6 +157,7 @@ class AuditLogger:
         path: str,
         virtual_key_id: str = "BYOK",
         request_id: Optional[str] = None,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event recording a Canary Tripwire trigger."""
         log_entry: Dict[str, Any] = {
@@ -167,6 +172,7 @@ class AuditLogger:
             "path": path,
             "severity": "CRITICAL",
             "action": "CONNECTION_SEVERED",
+            "applied_role_name": applied_role_name,
             "message": "Prompt-extraction attack detected. Canary token found in outbound stream.",
         }
         AuditLogger._compute_and_append_hash(log_entry)
@@ -179,6 +185,7 @@ class AuditLogger:
         entities_count: int,
         path: str,
         request_id: Optional[str] = None,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event recording a Blast Radius Circuit Breaker trip."""
         log_entry: Dict[str, Any] = {
@@ -193,6 +200,7 @@ class AuditLogger:
             "path": path,
             "severity": "CRITICAL",
             "action": "REQUEST_BLOCKED_HTTP_429",
+            "applied_role_name": applied_role_name,
             "total_entities_detected": entities_count,
             "message": f"Data exfiltration threshold exceeded. Detected {entities_count} PII entities in a single request or sliding window.",
         }
@@ -207,6 +215,7 @@ class AuditLogger:
         prompt_tokens: int,
         completion_tokens: int,
         total_tokens: int,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event for FinOps chargeback telemetry."""
         log_entry: Dict[str, Any] = {
@@ -219,6 +228,7 @@ class AuditLogger:
             "session_id": session_id or "ephemeral",
             "severity": "INFO",
             "model": model,
+            "applied_role_name": applied_role_name,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
@@ -233,6 +243,7 @@ class AuditLogger:
         virtual_key_id: str,
         attempt: int,
         url: str,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event for an upstream retry attempt."""
         log_entry: Dict[str, Any] = {
@@ -247,6 +258,7 @@ class AuditLogger:
             "severity": "WARNING",
             "attempt": attempt,
             "url": url,
+            "applied_role_name": applied_role_name,
         }
         AuditLogger._compute_and_append_hash(log_entry)
         audit_logger.warning(json.dumps(log_entry))
@@ -257,6 +269,7 @@ class AuditLogger:
         request_id: Optional[str],
         virtual_key_id: str,
         fallback_url: str,
+        applied_role_name: str = "global_env",
     ) -> None:
         """Emits a structured JSON audit event when an upstream request falls back."""
         log_entry: Dict[str, Any] = {
@@ -270,6 +283,7 @@ class AuditLogger:
             "session_id": session_id or "ephemeral",
             "severity": "CRITICAL",
             "fallback_url": fallback_url,
+            "applied_role_name": applied_role_name,
         }
         AuditLogger._compute_and_append_hash(log_entry)
         audit_logger.critical(json.dumps(log_entry))

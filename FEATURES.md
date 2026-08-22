@@ -41,3 +41,5 @@
 * **Centralized Enterprise Secrets & mTLS**: Secures backend communications via native HashiCorp Vault integrations (AppRole / K8s / Token) combined with a non-blocking TTL cache and X.509 mTLS transport.
 * **Zero-Dependency Kubernetes Mutating Webhook**: Enables frictionless drop-in K8s integration by seamlessly injecting the LLM-Shield sidecar container and mTLS certificates without requiring external controllers.
 * **Deep Component Health Probes and Prometheus Alert Rules**: Provides granular native endpoints for K8s liveness and readiness probes covering Redis connectivity and Vault mTLS states, alongside pre-packaged alert rules.
+* **Role-Based Policy-as-Code & Hot-Reloading**: Automates zero-downtime file polling for live policy updates with an $O(1)$ in-memory flattening architecture that maps incoming `virtual_key_id` requests to distinct security roles.
+* **Universal Dynamic Override Engine**: Enables $O(1)$ hash lookups via `contextvars.ContextVar`, thread-safe off-loop Executor propagation using `copy_context().run()`, and the ability to override any global `.env` configuration per-tenant without function-signature bloat.

@@ -36,6 +36,14 @@
 ## 7. ⚙️ Complete 12-Factor Environment Configuration (`pydantic-settings`)
 100% compliant with 12-factor app standards. All upstream target routing, keys, thresholds, and pool sizes are managed via validated `pydantic-settings`:
 
+### Hierarchical Policy-as-Code (RBAC)
+DevOps teams can now mount a `policies.yaml` file to dynamically map `virtual_key_id` client identities to distinct security roles. The proxy features a zero-downtime hot-reloading mechanism that continuously polls the file (defaulting to every 5 seconds) and applies modifications immediately without dropping active Server-Sent Event (SSE) streams. Unknown identifiers strictly enforce a Zero-Trust `FAIL_CLOSED` default.
+
+**Universal Dynamic Override Engine:**
+DevOps teams are no longer limited to basic security toggles; they can now dynamically override any of the 30+ `.env` properties (like `MAX_PAYLOAD_SIZE_BYTES` or `RATE_LIMIT_RPM`) natively per `virtual_key_id` inside `policies.yaml`. This is powered by an ASGI-native `contextvars.ContextVar` architecture to achieve strictly isolated, $O(1)$ thread-safe tenant configurations without global state leakage.
+
+> **[View the Complete Policy-as-Code Guide & Templates 📜](POLICIES.md)**: For detailed Role-Based Access Control (RBAC) templates, feature support matrices, and FAQs.
+
 ### Core Configuration Flags
 
 | Environment Variable | Type | Default | Description |
@@ -89,6 +97,8 @@
 | **FinOps Metering** | `ENABLE_FINOPS_METERING` | `True` | Enable token metering and FinOps telemetry. |
 | **gRPC ext_proc Mesh** | `ENABLE_EXT_PROC` | `True` | Enable Envoy ext_proc gRPC hook. |
 | **gRPC ext_proc Mesh** | `EXT_PROC_SOCK_PATH` | `/var/run/llm-shield/ext_proc.sock` | Path to the ext_proc UDS socket. |
+| **Policy-as-Code (RBAC)** | `POLICIES_FILE_PATH` | `policies.yaml` | Path to the hierarchical RBAC YAML policy definitions. |
+| **Policy-as-Code (RBAC)** | `POLICIES_RELOAD_INTERVAL_SECONDS` | `5` | File modification polling interval for zero-downtime hot-reloads. |
 | **Fail-Safe Policy** | `SHIELD_FAILURE_MODE` | `FAIL_CLOSED` | Enforces Zero-Trust default ($O(1)$ in-memory mapping FAIL_CLOSED). |
 | **Anthropic Adapter** | `DEFAULT_UPSTREAM_PROVIDER` | `openai` | Set to `anthropic` for native OpenAI-to-Anthropic request transformation. |
 | **Anthropic Adapter** | `ANTHROPIC_API_VERSION` | `2023-06-01` | Anthropic API version header for SSE stream normalization. |
