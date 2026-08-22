@@ -23,6 +23,13 @@ def main():
         nargs="?",
         help="The type of version bump to perform (default: patch)",
     )
+    parser.add_argument(
+        "--skip-pypi",
+        "--no-pypi",
+        dest="skip_pypi",
+        action="store_true",
+        help="Skip uploading to PyPI",
+    )
     args = parser.parse_args()
 
     # 1. Bump version
@@ -40,9 +47,12 @@ def main():
     run_command([sys.executable, "-m", "build"])
 
     # 4. Upload to PyPI
-    print("\n--- Uploading to PyPI ---")
-    # Use shell=True for glob expansion on Windows
-    run_command(f"{sys.executable} -m twine upload dist/*", shell=True)
+    if not args.skip_pypi:
+        print("\n--- Uploading to PyPI ---")
+        # Use shell=True for glob expansion on Windows
+        run_command(f"{sys.executable} -m twine upload dist/*", shell=True)
+    else:
+        print("\n--- Skipping PyPI upload as requested ---")
 
     # 5. Push to GitHub
     print("\n--- Pushing to GitHub (with tags) ---")
