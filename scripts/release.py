@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,67 @@ def run_command(cmd, shell=False):
     if result.returncode != 0:
         print(f"[ERROR] Command failed with exit code {result.returncode}")
         sys.exit(1)
+
+
+def bump_version_files(bump_type: str) -> tuple[str, str]:
+    with open("pyproject.toml", "r", encoding="utf-8") as f:
+        content = f.read()
+
+    match = re.search(r'version = "(\d+)\.(\d+)\.(\d+)"', content)
+    if not match:
+        raise ValueError("Could not find version in pyproject.toml")
+
+    major, minor, patch = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    current_version = f"{major}.{minor}.{patch}"
+
+    if bump_type == "major":
+        new_version = f"{major + 1}.0.0"
+    elif bump_type == "minor":
+        new_version = f"{major}.{minor + 1}.0"
+    else:  # patch
+        new_version = f"{major}.{minor}.{patch + 1}"
+
+    print(f"\n--- Bumping {bump_type} version: {current_version} -> {new_version} ---")
+
+    # 1. Update pyproject.toml
+    content = content.replace(f'version = "{current_version}"', f'version = "{new_version}"')
+    content = content.replace(f'current_version = "{current_version}"', f'current_version = "{new_version}"')
+    with open("pyproject.toml", "w", encoding="utf-8") as f:
+        f.write(content)
+
+    # 2. Update main.py
+    main_path = os.path.join("llm_shield_proxy", "api", "main.py")
+    if os.path.exists(main_path):
+        with open(main_path, "r", encoding="utf-8") as f:
+            main_content = f.read()
+        main_content = main_content.replace(f'APP_VERSION = "{current_version}"', f'APP_VERSION = "{new_version}"')
+        with open(main_path, "w", encoding="utf-8") as f:
+            f.write(main_content)
+
+    # 3. Update README.md
+    if os.path.exists("README.md"):
+        with open("README.md", "r", encoding="utf-8") as f:
+            readme_content = f.read()
+        readme_content = readme_content.replace(f'version":"{current_version}"', f'version":"{new_version}"')
+        readme_content = readme_content.replace(f'v{current_version}.zip', f'v{new_version}.zip')
+        with open("README.md", "w", encoding="utf-8") as f:
+            f.write(readme_content)
+
+    # 4. Update Chart.yaml
+    chart_path = os.path.join("deploy", "helm", "llm-shield-proxy", "Chart.yaml")
+    if os.path.exists(chart_path):
+        with open(chart_path, "r", encoding="utf-8") as f:
+            chart_content = f.read()
+        chart_content = chart_content.replace(f'appVersion: "{current_version}"', f'appVersion: "{new_version}"')
+        with open(chart_path, "w", encoding="utf-8") as f:
+            f.write(chart_content)
+
+    # Git commit and tag
+    run_command(["git", "add", "pyproject.toml", main_path, "README.md", chart_path])
+    run_command(["git", "commit", "--no-verify", "-m", f"chore(release): bump version to {new_version}"])
+    run_command(["git", "tag", f"v{new_version}"])
+
+    return current_version, new_version
 
 
 def main():
@@ -33,8 +95,7 @@ def main():
     args = parser.parse_args()
 
     # 1. Bump version
-    print(f"\n--- Bumping {args.bump_type} version ---")
-    run_command([sys.executable, "-m", "bump_my_version", "bump", args.bump_type])
+    bump_version_files(args.bump_type)
 
     # 2. Clean dist directory
     dist_dir = "dist"
