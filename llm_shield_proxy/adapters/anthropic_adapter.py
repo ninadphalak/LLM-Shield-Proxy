@@ -1,7 +1,22 @@
 import copy
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(content)
 
 
 class AnthropicAdapter:
@@ -42,11 +57,11 @@ class AnthropicAdapter:
 
         for msg in messages:
             role = msg.get("role", "")
-            content = msg.get("content", "")
+            content_str = _extract_text(msg.get("content", ""))
             if role == "system":
-                system_prompts.append(content)
+                system_prompts.append(content_str)
             else:
-                filtered_messages.append({"role": role, "content": content})
+                filtered_messages.append({"role": role, "content": content_str})
 
         if system_prompts:
             anthropic_payload["system"] = "\n\n".join(system_prompts)
