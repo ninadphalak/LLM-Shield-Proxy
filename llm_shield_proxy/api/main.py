@@ -195,7 +195,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     app_state.is_draining = True
-    if app_state.active_requests > 0:
+    if shutdown_ev is not None and app_state.active_requests > 0:
         try:
             await asyncio.wait_for(shutdown_ev.wait(), timeout=settings.DRAIN_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
@@ -255,7 +255,7 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         return response
     finally:
         app_state.active_requests -= 1
-        if app_state.is_draining and app_state.active_requests == 0:
+        if app_state.is_draining and app_state.active_requests == 0 and app_state.shutdown_event is not None:
             app_state.shutdown_event.set()
 
 
@@ -938,8 +938,7 @@ async def _proxy_catch_all_internal(
                         upstream_res.raise_for_status()
                         break
                     except (httpx.RequestError, httpx.HTTPStatusError) as err:
-                        with open("exception_log.txt", "w") as f:
-                            f.write(repr(err))
+                        logger.warning(f"Upstream request attempt failed: {err}")
 
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response

@@ -87,3 +87,33 @@ def test_anthropic_adapter_request_transform_stream():
     openai_payload = {"model": "gpt-4", "stream": True, "messages": [{"role": "user", "content": "Hello"}]}
     anthropic_payload = AnthropicAdapter.transform_request(openai_payload)
     assert anthropic_payload.get("stream") is True
+
+
+def test_anthropic_adapter_request_transform_multipart_blocks():
+    openai_payload = {
+        "model": "gpt-4o",
+        "messages": [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "System rule 1"},
+                    {"type": "text", "text": "System rule 2"},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Please analyze this context."},
+                ],
+            },
+            {
+                "role": "user",
+                "content": "Follow-up question.",
+            },
+        ],
+    }
+    anthropic_payload = AnthropicAdapter.transform_request(openai_payload)
+    assert "System rule 1\nSystem rule 2" in anthropic_payload["system"]
+    assert len(anthropic_payload["messages"]) == 1
+    assert "Please analyze this context.\n\nFollow-up question." == anthropic_payload["messages"][0]["content"]
+
