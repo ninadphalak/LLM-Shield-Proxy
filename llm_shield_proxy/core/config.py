@@ -6,12 +6,14 @@ security thresholds, and runtime settings using Pydantic Settings.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import secrets
 import threading
+import types
 from pathlib import Path
-from typing import Literal, Optional, Set
+from typing import Any, Literal, Optional, Set
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -179,8 +181,14 @@ class Settings(BaseSettings):
     # FinOps & Chargeback Metering
     ENABLE_FINOPS_METERING: bool = Field(default=True, description="Enable token metering and FinOps telemetry")
 
+    # Dynamic Policies
+    POLICIES_FILE_PATH: str = Field(default="policies.yaml", description="Path to RBAC policies file")
+    POLICIES_RELOAD_INTERVAL_SECONDS: int = Field(default=5, description="Interval to check policies file")
+
     # Internal dynamic cache
     _valid_virtual_keys_set: frozenset[str] = frozenset()
+    _flattened_policies: Any = {}
+    _policies_mtime: float = 0.0
 
     model_config = SettingsConfigDict(env_file=(_ENV_FILE_PATH, ".env"), env_file_encoding="utf-8", extra="ignore")
 
@@ -279,6 +287,62 @@ class Settings(BaseSettings):
             else:
                 self._valid_virtual_keys_set = frozenset()
 
+    def reload_policies(self) -> None:
+        """Safely hot-swap the immutable RBAC policy dictionary on file changes."""
+        path = self.POLICIES_FILE_PATH
+        if not os.path.exists(path):
+            return
 
-settings = Settings()
-settings.reload()
+        current_mtime = os.path.getmtime(path)
+        if current_mtime <= self._policies_mtime:
+            return
+
+        with _config_reload_lock:
+            try:
+                import yaml
+
+                with open(path, "r", encoding="utf-8") as f:
+                    yaml_data = yaml.safe_load(f)
+                    if not isinstance(yaml_data, dict):
+                        return
+
+                    roles = yaml_data.get("roles", {})
+                    virtual_keys = yaml_data.get("virtual_keys", {})
+
+                    new_policies = {}
+
+                    # Store default role if exists
+                    default_role_name = yaml_data.get("default_role")
+                    if default_role_name and default_role_name in roles:
+                        new_policies["default_role"] = roles[default_role_name]
+
+                    # Flatten virtual keys
+                    for vk, role_name in virtual_keys.items():
+                        if role_name in roles:
+                            new_policies[vk] = roles[role_name]
+
+                    self._flattened_policies = types.MappingProxyType(new_policies)
+                    self._policies_mtime = current_mtime
+                    logger.info("Successfully hot-reloaded policies.yaml")
+            except Exception as exc:
+                logger.error("Failed loading policies YAML configuration: %s", exc)
+
+request_policy_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar("request_policy_ctx", default={})
+
+class DynamicSettingsProxy:
+    """Zero-latency ContextVar proxy for per-tenant dynamic configuration overrides."""
+    def __init__(self, base_settings: Settings):
+        object.__setattr__(self, "_base", base_settings)
+
+    def __getattr__(self, name: str) -> Any:
+        ctx = request_policy_ctx.get()
+        if ctx and name in ctx:
+            return ctx[name]
+        return getattr(self._base, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._base, name, value)
+
+_global_settings = Settings()
+_global_settings.reload()
+settings = DynamicSettingsProxy(_global_settings)
