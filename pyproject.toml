@@ -111,7 +111,7 @@ ignore = [
 ]
 
 [tool.bumpversion]
-current_version = "1.2.9"
+current_version = "1.2.11"
 commit = true
 tag = true
 
