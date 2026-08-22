@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import threading
 from pathlib import Path
 from typing import Literal, Optional, Set
@@ -70,6 +71,10 @@ class Settings(BaseSettings):
         default="FAIL_CLOSED", description="Default behavior upon engine failure"
     )
     DRAIN_TIMEOUT_SECONDS: int = Field(default=25, description="Max seconds to wait for connection draining on SIGTERM")
+    ENABLE_RETRY_FAILOVER: bool = Field(default=True, description="Enable upstream retry and explicit failover logic")
+    MAX_RETRIES: int = Field(default=3, description="Maximum transient retry attempts")
+    FALLBACK_BASE_URL: Optional[str] = Field(default=None, description="Global fallback provider URL")
+    FALLBACK_API_KEY: Optional[str] = Field(default=None, description="Fallback provider API key")
 
     # mTLS & Custom CA Support
     ENABLE_MTLS: bool = Field(default=False, description="Enable mutual TLS")
@@ -126,6 +131,12 @@ class Settings(BaseSettings):
     ENABLE_AGENT_BREAKER: bool = Field(default=True, description="Enable Composite Agent Loop Circuit Breaker")
     AGENT_BREAKER_THRESHOLD: int = Field(default=3, description="Consecutive duplicate turns before tripping")
 
+    # Blast Radius Limits (Phase 2)
+    ENABLE_BLAST_RADIUS_LIMITS: bool = Field(default=False, description="Enable Entity-Weighted Blast Radius Limits")
+    BLAST_RADIUS_BURST_CAPACITY: int = Field(default=100, description="Maximum bucket size for PII entity exfiltration limit")
+    BLAST_RADIUS_REPLENISH_RATE_PER_MIN: int = Field(default=10, description="Tokens added back per minute to the bucket")
+
+
     # HTTP Client & Connection Pooling
     HTTP_TIMEOUT_SECONDS: float = Field(
         default=120.0, description="Total HTTP request timeout for upstream communication in seconds"
@@ -151,6 +162,10 @@ class Settings(BaseSettings):
     ENABLE_WATERMARKING: bool = Field(default=False, description="Enable dynamic canary watermarking")
     SHIELD_WATERMARK_SECRET: Optional[str] = Field(default=None, description="Secret for HMAC-SHA256 watermarking")
 
+    # Cryptographic Canary Prompt Tripwires
+    ENABLE_CANARY_TRIPWIRE: bool = Field(default=False, description="Enable deterministic prompt-extraction tripwire")
+    CANARY_TOKEN: Optional[str] = Field(default=None, description="Cryptographic canary string, auto-generated if unset")
+
     # Telemetry & Metrics (Strictly Opt-In)
     TELEMETRY_ENABLED: bool = Field(default=False, description="Enable external audit telemetry event forwarding")
     TELEMETRY_ENDPOINT_URL: Optional[str] = Field(
@@ -161,6 +176,9 @@ class Settings(BaseSettings):
         default=None, description="Optional Bearer token protecting the /metrics Prometheus endpoint"
     )
 
+    # FinOps & Chargeback Metering
+    ENABLE_FINOPS_METERING: bool = Field(default=True, description="Enable token metering and FinOps telemetry")
+
     # Internal dynamic cache
     _valid_virtual_keys_set: frozenset[str] = frozenset()
 
@@ -170,6 +188,13 @@ class Settings(BaseSettings):
     def validate_watermark_secret(self) -> "Settings":
         if self.ENABLE_WATERMARKING and not self.SHIELD_WATERMARK_SECRET:
             raise ValueError("SHIELD_WATERMARK_SECRET must be set if ENABLE_WATERMARKING is True.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_canary_token(self) -> "Settings":
+        if self.ENABLE_CANARY_TRIPWIRE and not self.CANARY_TOKEN:
+            self.CANARY_TOKEN = f"[SHIELD_TRIPWIRE_{secrets.token_urlsafe(32)}]"
+            logger.info("Generated synthetic Canary Tripwire Token.")
         return self
 
     @model_validator(mode="after")

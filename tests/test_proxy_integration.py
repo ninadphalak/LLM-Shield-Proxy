@@ -12,6 +12,7 @@ client = TestClient(app)
 def test_proxy_non_streaming_chat_completion(monkeypatch, httpx_mock):
     monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
     monkeypatch.setattr("llm_shield_proxy.core.config.settings.ENABLE_SYNTHETIC_SWAPPING", False)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.ENABLE_CANARY_TRIPWIRE", False)
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",

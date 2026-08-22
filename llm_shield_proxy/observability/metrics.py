@@ -24,6 +24,19 @@ llm_shield_latency_seconds_bucket = Histogram(
     "End-to-end request processing latency in seconds",
 )
 
+try:
+    from prometheus_client import REGISTRY
+    if "llm_shield_tokens_total" in REGISTRY._names_to_collectors:
+        llm_shield_tokens_total = REGISTRY._names_to_collectors["llm_shield_tokens_total"]
+    else:
+        llm_shield_tokens_total = Counter(
+            "llm_shield_tokens_total",
+            "Total number of tokens consumed by the virtual key",
+            ["virtual_key_id", "model", "type"],
+        )
+except ValueError:
+    pass
+
 llm_shield_vault_refresh_errors_total = Counter(
     "llm_shield_vault_refresh_errors_total",
     "Total number of background Vault secret refresh errors",

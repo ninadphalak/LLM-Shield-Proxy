@@ -1,6 +1,13 @@
 import asyncio
+import logging
 import time
 from typing import Optional
+
+try:
+    pass
+except ImportError:
+    pass
+
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
@@ -105,3 +112,65 @@ class DistributedRateLimiter:
 
 
 rate_limiter = DistributedRateLimiter()
+
+class DistributedBlastRadiusLimiter:
+    """Entity-Weighted Blast Radius Circuit Breaker (Phase 2).
+
+    Evaluates the volume of sensitive PII entities swapped per minute.
+    Acts as a fail-safe that halts compromised agents attempting bulk data exfiltration.
+    """
+    def __init__(self):
+        self._in_memory_buckets: dict[str, InMemoryBucket] = {}
+        self._lua_sha: Optional[str] = None
+        self._lock = asyncio.Lock()
+
+    async def check_blast_radius(self, virtual_key_id: str, requested: int) -> bool:
+        if not settings.ENABLE_BLAST_RADIUS_LIMITS:
+            return True
+
+        if requested <= 0:
+            return True
+
+        rate_per_sec = settings.BLAST_RADIUS_REPLENISH_RATE_PER_MIN / 60.0
+        burst = settings.BLAST_RADIUS_BURST_CAPACITY
+
+        vs = vault_store
+        if isinstance(vs, RedisVaultStore) and getattr(vs, "async_client", None) is not None:
+            try:
+                now_ms = int(time.time() * 1000)
+                rate_per_ms = rate_per_sec / 1000.0
+                key = f"blast_radius:{virtual_key_id}"
+
+                if not self._lua_sha:
+                    async with self._lock:
+                        if not self._lua_sha:
+                            self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
+
+                result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, requested)  # type: ignore
+                return bool(result)
+            except Exception as e:
+                # Catch redis.exceptions.RedisError and any other connection errors
+                logging.getLogger(__name__).warning("Redis error during blast radius evaluation, failing open: %s", e)
+                return True
+
+        # Fallback to in-memory bucket if no Redis (but we still want to limit)
+        if virtual_key_id not in self._in_memory_buckets:
+            async with self._lock:
+                if virtual_key_id not in self._in_memory_buckets:
+                    self._in_memory_buckets[virtual_key_id] = InMemoryBucket(rate_per_sec, burst)
+
+        # InMemoryBucket currently only supports acquire(1), we need to acquire(requested)
+        # We will dynamically adapt the InMemoryBucket for multiple tokens if needed,
+        # but for simplicity in fallback, we'll implement a quick inline check for requested.
+        bucket = self._in_memory_buckets[virtual_key_id]
+        now = time.monotonic()
+        async with bucket.lock:
+            time_passed = max(0.0, now - bucket.last_refresh)
+            bucket.tokens = min(float(bucket.burst), bucket.tokens + time_passed * bucket.rate)
+            bucket.last_refresh = now
+            if bucket.tokens >= requested:
+                bucket.tokens -= requested
+                return True
+            return False
+
+blast_radius_limiter = DistributedBlastRadiusLimiter()

@@ -146,3 +146,131 @@ class AuditLogger:
         }
         AuditLogger._compute_and_append_hash(log_entry)
         audit_logger.info(json.dumps(log_entry))
+
+    @staticmethod
+    def log_tripwire_event(
+        session_id: Optional[str],
+        path: str,
+        virtual_key_id: str = "BYOK",
+        request_id: Optional[str] = None,
+    ) -> None:
+        """Emits a structured JSON audit event recording a Canary Tripwire trigger."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "CANARY_TRIPWIRE_TRIGGERED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "session_id": session_id or "ephemeral",
+            "path": path,
+            "severity": "CRITICAL",
+            "action": "CONNECTION_SEVERED",
+            "message": "Prompt-extraction attack detected. Canary token found in outbound stream.",
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        audit_logger.critical(json.dumps(log_entry))
+
+    @staticmethod
+    def log_blast_radius_exceeded(
+        session_id: Optional[str],
+        virtual_key_id: str,
+        entities_count: int,
+        path: str,
+        request_id: Optional[str] = None,
+    ) -> None:
+        """Emits a structured JSON audit event recording a Blast Radius Circuit Breaker trip."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "BLAST_RADIUS_EXCEEDED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "session_id": session_id or "ephemeral",
+            "path": path,
+            "severity": "CRITICAL",
+            "action": "REQUEST_BLOCKED_HTTP_429",
+            "total_entities_detected": entities_count,
+            "message": f"Data exfiltration threshold exceeded. Detected {entities_count} PII entities in a single request or sliding window.",
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        audit_logger.critical(json.dumps(log_entry))
+
+    @staticmethod
+    def log_finops_metered(
+        session_id: Optional[str],
+        virtual_key_id: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+    ) -> None:
+        """Emits a structured JSON audit event for FinOps chargeback telemetry."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "FINOPS_USAGE_METERED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "virtual_key_id": virtual_key_id,
+            "session_id": session_id or "ephemeral",
+            "severity": "INFO",
+            "model": model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        audit_logger.info(json.dumps(log_entry))
+
+    @staticmethod
+    def log_upstream_retry_attempt(
+        session_id: Optional[str],
+        request_id: Optional[str],
+        virtual_key_id: str,
+        attempt: int,
+        url: str,
+    ) -> None:
+        """Emits a structured JSON audit event for an upstream retry attempt."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "UPSTREAM_RETRY_ATTEMPT",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "session_id": session_id or "ephemeral",
+            "severity": "WARNING",
+            "attempt": attempt,
+            "url": url,
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        audit_logger.warning(json.dumps(log_entry))
+
+    @staticmethod
+    def log_provider_failover_triggered(
+        session_id: Optional[str],
+        request_id: Optional[str],
+        virtual_key_id: str,
+        fallback_url: str,
+    ) -> None:
+        """Emits a structured JSON audit event when an upstream request falls back."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "PROVIDER_FAILOVER_TRIGGERED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "session_id": session_id or "ephemeral",
+            "severity": "CRITICAL",
+            "fallback_url": fallback_url,
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        audit_logger.critical(json.dumps(log_entry))
+

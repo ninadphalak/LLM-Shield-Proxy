@@ -43,6 +43,7 @@ def test_proxy_chat_completion_with_pii(monkeypatch, httpx_mock):
 def test_proxy_synthetic_swapping_e2e(monkeypatch, httpx_mock):
     """Verifies end-to-end synthetic swapping with dynamic upstream response."""
     monkeypatch.setattr(settings, "ENABLE_SYNTHETIC_SWAPPING", True)
+    monkeypatch.setattr(settings, "ENABLE_CANARY_TRIPWIRE", False)
     test_prompt = "Patient John Doe visited our clinic."
 
     def response_callback(request):
