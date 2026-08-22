@@ -549,17 +549,23 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
   * [Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Anthropic Adapter Implementation](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Zero-Allocation Streaming JSON Lexer](ARCHITECTURE.md#zero-allocation-streaming-json-lexer-orjson--rust)
+  * [Provider Failover Routing (Explicit header-driven rerouting to secondary mirrors without model downgrades)](ARCHITECTURE.md#provider-failover-routing)
+  * [Antifragile Exponential Retries (Native asyncio jitter catching network timeouts and 429/50x errors)](ARCHITECTURE.md#antifragile-exponential-retries)
 * **[SECURITY.md](SECURITY.md) - Threat Model & Defenses**
   * [Composite Agent Loop Circuit Breaker](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)
   * [Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)
   * [Granular Entity Policy Scopes (O(1) in-memory tenant profile mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)
   * [Centralized Enterprise Secrets & mTLS (Native HashiCorp Vault)](SECURITY.md#centralized-enterprise-secrets--mtls)
+  * [Cryptographic Canary Prompt Tripwires (Inbound honeytokens and outbound Generator Exit socket drops)](SECURITY.md#cryptographic-canary-prompt-tripwires)
+  * [Entity-Weighted Blast Radius Limits (Redis Token-Bucket circuit breakers for bulk data exfiltration)](SECURITY.md#entity-weighted-blast-radius-limits)
 * **[COMPLIANCE.md](COMPLIANCE.md) - Audit, Forensics & Legal**
   * [Cryptographic SHA-256 Hash Chaining](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [Dynamic Canary Watermarking & Steganography (Leak Forensics)](COMPLIANCE.md#dynamic-canary-watermarking--steganography)
   * [Cryptographic Proof of Non-Egress Merkle Attestation](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [WORM-Compliant Merkle Attestation & Audit Logging](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [FIPS 140-3 KAT, RFC 6902 Differential Audit Logging](COMPLIANCE.md#data-in-transit-encryption--fips-integrity)
+  * [LLM FinOps Chargeback Meter (Asynchronous Prometheus metrics for multi-tenant chargebacks)](COMPLIANCE.md#llm-finops-chargeback-meter)
+  * [Universal Decision Trace Exporter (NIST OSCAL artifacts and OpenTelemetry spans)](COMPLIANCE.md#universal-decision-trace-exporter)
 * **[DEPLOYMENT.md](DEPLOYMENT.md) - Infrastructure & Resiliency**
   * [Service Mesh Native Interface](DEPLOYMENT.md#1-service-mesh-native-interface)
   * [Zero-Overhead OpenTelemetry Tracing (W3C traceparent propagation via background thread)](DEPLOYMENT.md#2-zero-overhead-opentelemetry-tracing)
@@ -567,6 +573,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
   * [Traffic Engineering & Resiliency (Redis evalsha Token-Bucket Rate Limiter, Kubernetes 25s SIGTERM draining)](DEPLOYMENT.md#4-traffic-engineering--resiliency)
   * [Zero-Dependency Kubernetes Mutating Webhook](DEPLOYMENT.md#5-zero-dependency-kubernetes-mutating-webhook)
   * [Deep Component Health Probes and Prometheus Alert Rules](DEPLOYMENT.md#6-deep-component-health-probes-and-prometheus-alert-rules)
+  * [Zero-Overhead OpenTelemetry (OTel) Tracing (W3C traceparent distributed tracing propagation via background threads)](DEPLOYMENT.md#2-zero-overhead-opentelemetry-tracing)
 
 ## 📄 Intellectual Property & Licensing
 

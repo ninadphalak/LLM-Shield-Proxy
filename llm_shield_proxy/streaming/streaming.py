@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Any, AsyncGenerator, AsyncIterator, Optional
 
 import orjson as json
 
@@ -136,8 +136,10 @@ class SSERehydrationBuffer:
 
 async def rehydrate_sse_stream(
     raw_stream: AsyncIterator[bytes],
-    vault: Vault,
-    watermark_text: str = "",
+    vault: Any,
+    watermark_text: Optional[str] = None,
+    path: str = "v1/chat/completions",
+    request_id: Optional[str] = None,
 ) -> AsyncGenerator[bytes, None]:
     """Asynchronous generator consuming raw SSE bytes and yielding rehydrated SSE chunks.
 
@@ -174,6 +176,10 @@ async def rehydrate_sse_stream(
         is_anthropic_stream = False
         failed_open = False
 
+        canary_token = settings.CANARY_TOKEN if settings.ENABLE_CANARY_TRIPWIRE else None
+        canary_tail = ""
+        canary_len = len(canary_token) if canary_token else 0
+
         try:
             async for chunk in raw_stream:
                 if failed_open:
@@ -182,6 +188,23 @@ async def rehydrate_sse_stream(
 
                 try:
                     chunk_text = decoder.decode(chunk, final=False)
+
+                    if canary_token:
+                        if canary_token in chunk_text or (canary_tail and canary_token in (canary_tail + chunk_text[:canary_len - 1])):
+                            import logging
+
+                            from llm_shield_proxy.observability.audit import AuditLogger
+                            logging.getLogger("llm_shield").critical("Canary Tripwire triggered in SSE stream. Aborting connection natively.")
+                            AuditLogger.log_tripwire_event(
+                                session_id=getattr(vault, "session_id", "ephemeral"),
+                                path=path,
+                                virtual_key_id=getattr(vault, "virtual_key_id", "unknown"),
+                                request_id=request_id
+                            )
+                            break
+                        if chunk_text:
+                            canary_tail = (canary_tail + chunk_text)[-(canary_len - 1):] if canary_len > 1 else ""
+
                     line_accumulator += chunk_text
 
                     if len(line_accumulator) > max_line_length:
@@ -212,6 +235,33 @@ async def rehydrate_sse_stream(
                                     cached_object = data_obj.get("object", cached_object)
                                     cached_created = data_obj.get("created", cached_created)
                                     cached_model = data_obj.get("model", cached_model)
+
+                                # FinOps Stream Usage Extraction
+                                if settings.ENABLE_FINOPS_METERING and "usage" in data_obj and isinstance(data_obj["usage"], dict):
+                                    usage = data_obj["usage"]
+                                    if usage:
+                                        prompt_tokens = usage.get("prompt_tokens", 0)
+                                        completion_tokens = usage.get("completion_tokens", 0)
+                                        total_tokens = usage.get("total_tokens", 0)
+                                        model = cached_model
+                                        v_id = getattr(vault, "virtual_key_id", "default-tenant")
+                                        s_id = getattr(vault, "session_id", None)
+
+                                        def _record_sse_metrics(vk_id: str, mdl: str, p_tok: int, c_tok: int, t_tok: int, sess_id: Optional[str]) -> None:
+                                            try:
+                                                from llm_shield_proxy.observability.metrics import (
+                                                    llm_shield_tokens_total,
+                                                )
+                                                llm_shield_tokens_total.labels(virtual_key_id=vk_id, model=mdl, type="prompt").inc(p_tok)
+                                                llm_shield_tokens_total.labels(virtual_key_id=vk_id, model=mdl, type="completion").inc(c_tok)
+                                            except Exception as e:
+                                                import logging
+                                                logging.getLogger("llm_shield").error(f"Failed to record SSE token metrics: {e}")
+                                            from llm_shield_proxy.observability.audit import AuditLogger
+                                            AuditLogger.log_finops_metered(sess_id, vk_id, mdl, p_tok, c_tok, t_tok)
+
+                                        if total_tokens > 0:
+                                            asyncio.create_task(asyncio.to_thread(_record_sse_metrics, v_id, model, prompt_tokens, completion_tokens, total_tokens, s_id))
 
                                 # 1. OpenAI Chat Completion Delta
                                 choices = data_obj.get("choices", [])

@@ -60,6 +60,7 @@
 | **`SHANNON_MIN_LENGTH`** | `int` | `16` | Minimum token length to analyze for Shannon entropy |
 | **`ENABLE_TIER3_ONNX_NER`** | `bool` | `False` | Enables Tier 3 ONNX Runtime contextual NER |
 | **`ONNX_MODEL_PATH`** | `str` | `None` | Path to quantized ONNX BERT-NER model weights |
+| **`CUSTOM_REGEX_PATH`** | `str` | `None` | Path to `custom_regex.yaml` containing BYOR rules |
 | **`HTTP_TIMEOUT_SECONDS`** | `float` | `120.0` | Upstream HTTP request timeout in seconds |
 | **`HTTP_MAX_KEEPALIVE_CONNECTIONS`** | `int` | `10000` | Maximum keep-alive connections in HTTP pool |
 | **`MAX_PAYLOAD_SIZE_BYTES`** | `int` | `10485760` | Maximum allowed request body size |
@@ -80,6 +81,12 @@
 | **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Secret for HMAC-SHA256 watermarking. |
 | **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry & WORM-Compliant Merkle Logging. |
 | **OTel & Tracing** | `TELEMETRY_ENDPOINT_URL` | `None` | Target webhook endpoint URL for audit telemetry. |
+| **Tripwire** | `ENABLE_CANARY_TRIPWIRE` | `False` | Enable deterministic prompt-extraction tripwire. |
+| **Tripwire** | `CANARY_TOKEN` | `None` | Cryptographic canary string, auto-generated if unset. |
+| **Blast Radius Limits** | `ENABLE_BLAST_RADIUS_LIMITS` | `False` | Enable Entity-Weighted Blast Radius Limits. |
+| **Blast Radius Limits** | `BLAST_RADIUS_BURST_CAPACITY` | `100` | Maximum bucket size for PII entity exfiltration limit. |
+| **Blast Radius Limits** | `BLAST_RADIUS_REPLENISH_RATE_PER_MIN` | `10` | Tokens added back per minute to the bucket. |
+| **FinOps Metering** | `ENABLE_FINOPS_METERING` | `True` | Enable token metering and FinOps telemetry. |
 | **gRPC ext_proc Mesh** | `ENABLE_EXT_PROC` | `True` | Enable Envoy ext_proc gRPC hook. |
 | **gRPC ext_proc Mesh** | `EXT_PROC_SOCK_PATH` | `/var/run/llm-shield/ext_proc.sock` | Path to the ext_proc UDS socket. |
 | **Fail-Safe Policy** | `SHIELD_FAILURE_MODE` | `FAIL_CLOSED` | Enforces Zero-Trust default ($O(1)$ in-memory mapping FAIL_CLOSED). |
@@ -90,6 +97,10 @@
 | **Traffic Engineering** | `RATE_LIMIT_BURST` | `200` | Maximum burst size for rate limiter (200 Burst). |
 | **Traffic Engineering** | `DRAIN_TIMEOUT_SECONDS` | `25` | Kubernetes 25s SIGTERM connection draining. |
 | **Traffic Engineering** | `OVERRIDE_CLIENT_AUTH` | `False` | Strip client auth and inject UPSTREAM_API_KEY. |
+| **Resiliency & Failover** | `ENABLE_RETRY_FAILOVER` | `True` | Enable upstream retry and explicit failover logic. |
+| **Resiliency & Failover** | `MAX_RETRIES` | `3` | Maximum transient retry attempts. |
+| **Resiliency & Failover** | `FALLBACK_BASE_URL` | `None` | Global fallback provider URL. |
+| **Resiliency & Failover** | `FALLBACK_API_KEY` | `None` | Fallback provider API key. |
 | **Vault Secrets & mTLS** | `ENABLE_VAULT_SECRETS` | `False` | Enable HashiCorp Vault dynamic secrets. |
 | **Vault Secrets & mTLS** | `VAULT_ADDR` | `None` | Vault server address. |
 | **Vault Secrets & mTLS** | `VAULT_AUTH_METHOD` | `TOKEN` | Native HashiCorp Vault Auth (AppRole / KUBERNETES / TOKEN). |
