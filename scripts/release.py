@@ -7,10 +7,10 @@ import sys
 
 
 def run_command(cmd, shell=False):
-    print(f"\n🚀 Running: {' '.join(cmd) if not shell else cmd}")
+    print(f"\n>> Running: {' '.join(cmd) if not shell else cmd}")
     result = subprocess.run(cmd, shell=shell)
     if result.returncode != 0:
-        print(f"❌ Error: Command failed with exit code {result.returncode}")
+        print(f"[ERROR] Command failed with exit code {result.returncode}")
         sys.exit(1)
 
 
@@ -58,7 +58,7 @@ def main():
     print("\n--- Pushing to GitHub (with tags) ---")
     run_command(["git", "push", "origin", "main", "--tags"])
 
-    print("\n✅ Release completed successfully!")
+    print("\n[SUCCESS] Release completed successfully!")
 
 
 if __name__ == "__main__":
