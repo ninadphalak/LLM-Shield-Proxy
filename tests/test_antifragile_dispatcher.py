@@ -83,7 +83,8 @@ def test_explicit_failover(monkeypatch, mock_httpx_request):
 
         # Verify the last call was to the fallback URL
         last_call_url = str(mock_httpx_request.call_args_list[-1].kwargs["url"])
-        assert "fallback.example.com" in last_call_url
+        from urllib.parse import urlparse
+        assert urlparse(last_call_url).hostname == "fallback.example.com"
 
 
 def test_fast_fail(monkeypatch, mock_httpx_request):
