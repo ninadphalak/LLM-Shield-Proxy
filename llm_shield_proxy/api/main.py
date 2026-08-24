@@ -52,7 +52,7 @@ from llm_shield_proxy.observability.metrics import (
 from llm_shield_proxy.observability.telemetry_dispatcher import dispatch_telemetry
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
-from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver
+from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver, OPAPolicyResolver, VaultPolicyResolver
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.v3.ast_mutator import ASTDepthExceededException, StatelessASTVisitor
@@ -445,8 +445,13 @@ async def metrics_endpoint(request: Request) -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-async def get_policy_resolver() -> BasePolicyResolver:
+async def get_policy_resolver(request: Request) -> BasePolicyResolver:
     """Dependency injection provider for the active Pluggable RBAC Engine."""
+    http_client = get_http_client(request)
+    if settings.OPA_URL:
+        return OPAPolicyResolver(http_client, settings.OPA_URL)
+    if settings.ENABLE_VAULT_SECRETS and settings.VAULT_ADDR and settings.VAULT_TOKEN:
+        return VaultPolicyResolver(http_client, settings.VAULT_ADDR, settings.VAULT_TOKEN)
     if hasattr(vault_store, "async_client"):
         return RedisPolicyResolver(vault_store.async_client)
     return InMemoryPolicyResolver()
