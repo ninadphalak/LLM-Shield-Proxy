@@ -31,9 +31,8 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 * **[Universal Zero-SDK Translators](#-the-drop-in-proof-zero-sdk-integration):** Drop-in compatibility for existing OpenAI SDKs with automatic edge-translation to Anthropic, Gemini, and vLLM schemas.
 * **[Edge-Level Agent Identity Enforcer](docs/features/agent_identity_enforcer.md):** Cryptographic Zero-Trust ingress barrier that intercepts autonomous agent tool-calls, strictly validating mathematically signed Workload Identity and DPoP proofs in <1ms to prevent rogue agent escalation.
 
-### Upstream Integration & Context
+### Research & Publications
 This repository provides the reference proxy architecture and benchmark suite for resolving SSE stream fragmentation in enterprise sandboxes, as proposed in:
-* **Upstream Proposal:** [NVIDIA/OpenShell #2763](https://github.com/NVIDIA/OpenShell/issues/2763)
 * **Preprint Publication:** [DOI: 10.5281/zenodo.21955770](https://doi.org/10.5281/zenodo.21955770)
 
 ---
@@ -530,6 +529,7 @@ Abstracts configuration fatigue away from the global environment variables by mo
 I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. I am actively looking for open-source contributors and collaborators to help execute the following technical roadmap. If you submit a PR, I will personally review and merge your architecture contributions:
 
 1. **Cythonize the Sliding-Window Buffer:** Compile the pure-Python async generator (`streaming.py`) into a C-extension binary to aggressively drive down tail latencies for high-throughput enterprise deployments.
+2. **Upstream Integration:** Track upstream discussions and context for resolving SSE stream fragmentation in enterprise sandboxes, such as the [NVIDIA/OpenShell #2763](https://github.com/NVIDIA/OpenShell/issues/2763) proposal.
 
 If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim an issue (e.g., [Help Cythonize the proxy! #15](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/15))!
 
@@ -591,7 +591,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 **LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**. 
 
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
-* **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730).
+* **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730 and 64/139,263).
 
 ---
 
