@@ -38,7 +38,7 @@ AGENT_IDENTITY_ENFORCER="off"
 ```
 * `"off"`: Identity verification is bypassed completely (Default).
 * `"lenient"`: Verifies the base JWT/Identity and signature, but skips the strict DPoP URI (htu) and Method (htm) validations.
-* `"strict"`: Fully secures the proxy by strictly validating the JWT, binding the DPoP key to the `cnf.jkt` claim, and enforcing HTTP Method and URI matches.
+* `"strict"`: Fully secures the proxy by strictly validating the JWT, binding the DPoP key to the `cnf.jkt` claim, and enforcing HTTP Method and URI matches. **Note:** Keeping this in strict mode will immediately drop (HTTP 401) any malformed or non-compliant agent requests.
 
 For per-tenant enforcement, configure your `policies.yaml`:
 ```yaml
