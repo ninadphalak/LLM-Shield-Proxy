@@ -140,8 +140,8 @@ def test_virtual_key_id_fast_and_zero_knowledge():
 
 def test_non_streaming_rehydrator_depth_protection():
     """Asserts that NonStreamingRehydrator detects and raises ValueError on AST depth > 40."""
-    from llm_shield_proxy.v3.crypto import StatelessPIICipher
-    from llm_shield_proxy.v3.streaming_lexer import NonStreamingRehydrator
+    from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+    from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import NonStreamingRehydrator
 
     cipher = StatelessPIICipher(b"0123456789abcdef0123456789abcdef")
     rehydrator = NonStreamingRehydrator(cipher)
@@ -164,7 +164,7 @@ def test_schema_rewriter_input_immutability():
     """Asserts that DynamicSchemaRewriter does not mutate the caller's input dictionary."""
     import copy
 
-    from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
+    from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
 
     original_schema = {
         "type": "object",
