@@ -200,6 +200,8 @@ class Settings(BaseSettings):
     # Dynamic Policies
     POLICIES_FILE_PATH: str = Field(default="policies.yaml", description="Path to RBAC policies file")
     POLICIES_RELOAD_INTERVAL_SECONDS: int = Field(default=5, description="Interval to check policies file")
+    OPA_URL: Optional[str] = Field(default=None, description="Enterprise OPA server URL for RBAC")
+    RBAC_CACHE_TTL_SECONDS: int = Field(default=300, description="TTL for stale-while-revalidate RBAC cache")
 
     # Internal dynamic cache
     _valid_virtual_keys_set: frozenset[str] = frozenset()

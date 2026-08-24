@@ -315,3 +315,31 @@ class AuditLogger:
         AuditLogger._compute_and_append_hash(log_entry)
         audit_logger.critical(json.dumps(log_entry))
 
+    @staticmethod
+    def log_security_event(
+        event_type: str,
+        severity: str,
+        details: Dict[str, Any],
+        virtual_key_id: str = "BYOK",
+    ) -> None:
+        """Emits a structured JSON audit event for generic security events (e.g., RBAC failure)."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": event_type,
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "virtual_key_id": virtual_key_id,
+            "severity": severity,
+            "details": details,
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        
+        log_str = json.dumps(log_entry)
+        if severity == "CRITICAL":
+            audit_logger.critical(log_str)
+        elif severity == "WARNING":
+            audit_logger.warning(log_str)
+        else:
+            audit_logger.info(log_str)
+

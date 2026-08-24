@@ -1,9 +1,16 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Set
+from typing import AsyncGenerator, Set, Optional, Tuple
 
+import asyncio
+import time
+import httpx
+from types import MappingProxyType
 import orjson
 import redis.asyncio as redis
+
+from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.core.config import settings
 
 
 class ToolAccessForbiddenException(Exception):
@@ -37,21 +44,151 @@ class RedisPolicyResolver(BasePolicyResolver):
 
 
 class OPAPolicyResolver(BasePolicyResolver):
-    async def resolve_policy(self, virtual_key: str) -> dict:
-        logging.getLogger(__name__).warning("OPA integration coming in v1.2. Failing closed.")
-        return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+    def __init__(self, http_client: httpx.AsyncClient, opa_url: str):
+        self.http_client = http_client
+        self.opa_url = opa_url
+        self._cache = MappingProxyType({})
+        self._inflight: Set[str] = set()
 
+    async def _fetch_policy(self, virtual_key: str) -> None:
+        try:
+            response = await self.http_client.post(
+                self.opa_url, 
+                json={"input": {"virtual_key": virtual_key}},
+                timeout=0.05
+            )
+            response.raise_for_status()
+            policy = response.json().get("result", {})
+            
+            new_cache = dict(self._cache)
+            expiration = time.time() + settings.RBAC_CACHE_TTL_SECONDS
+            new_cache[virtual_key] = (policy, expiration)
+            self._cache = MappingProxyType(new_cache)
+        except Exception as e:
+            AuditLogger.log_security_event(
+                event_type="rbac_fetch_failure",
+                severity="WARNING",
+                details={"reason": "OPA fetch failed", "error_type": type(e).__name__},
+                virtual_key_id=virtual_key
+            )
+            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            new_cache = dict(self._cache)
+            expiration = time.time() + 5.0
+            new_cache[virtual_key] = (policy, expiration)
+            self._cache = MappingProxyType(new_cache)
+
+    async def _safe_background_fetch(self, virtual_key: str) -> None:
+        if virtual_key in self._inflight:
+            return
+        self._inflight.add(virtual_key)
+        try:
+            await self._fetch_policy(virtual_key)
+        except Exception as e:
+            AuditLogger.log_security_event(
+                event_type="rbac_background_fetch_critical_failure",
+                severity="CRITICAL",
+                details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
+                virtual_key_id=virtual_key
+            )
+            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            new_cache = dict(self._cache)
+            expiration = time.time() + 5.0
+            new_cache[virtual_key] = (policy, expiration)
+            self._cache = MappingProxyType(new_cache)
+        finally:
+            self._inflight.discard(virtual_key)
+
+    async def resolve_policy(self, virtual_key: str) -> dict:
+        entry = self._cache.get(virtual_key)
+        now = time.time()
+        if entry is None:
+            await self._fetch_policy(virtual_key)
+            entry = self._cache.get(virtual_key)
+            if entry is None:
+                return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            return entry[0]
+        else:
+            policy, expiration = entry
+            if now > expiration:
+                asyncio.create_task(self._safe_background_fetch(virtual_key))
+            return policy
+
+
+class VaultPolicyResolver(BasePolicyResolver):
+    def __init__(self, http_client: httpx.AsyncClient, vault_url: str, vault_token: str):
+        self.http_client = http_client
+        self.vault_url = vault_url
+        self.vault_token = vault_token
+        self._cache = MappingProxyType({})
+        self._inflight: Set[str] = set()
+
+    async def _fetch_policy(self, virtual_key: str) -> None:
+        try:
+            response = await self.http_client.get(
+                f"{self.vault_url}/v1/secret/data/shield/tenant/{virtual_key}",
+                headers={"X-Vault-Token": self.vault_token},
+                timeout=0.05
+            )
+            response.raise_for_status()
+            data = response.json()
+            policy = data.get("data", {}).get("data", {}).get("policy", {})
+            
+            new_cache = dict(self._cache)
+            expiration = time.time() + settings.RBAC_CACHE_TTL_SECONDS
+            new_cache[virtual_key] = (policy, expiration)
+            self._cache = MappingProxyType(new_cache)
+        except Exception as e:
+            AuditLogger.log_security_event(
+                event_type="rbac_fetch_failure",
+                severity="WARNING",
+                details={"reason": "Vault fetch failed", "error_type": type(e).__name__},
+                virtual_key_id=virtual_key
+            )
+            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            new_cache = dict(self._cache)
+            expiration = time.time() + 5.0
+            new_cache[virtual_key] = (policy, expiration)
+            self._cache = MappingProxyType(new_cache)
+
+    async def _safe_background_fetch(self, virtual_key: str) -> None:
+        if virtual_key in self._inflight:
+            return
+        self._inflight.add(virtual_key)
+        try:
+            await self._fetch_policy(virtual_key)
+        except Exception as e:
+            AuditLogger.log_security_event(
+                event_type="rbac_background_fetch_critical_failure",
+                severity="CRITICAL",
+                details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
+                virtual_key_id=virtual_key
+            )
+            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            new_cache = dict(self._cache)
+            expiration = time.time() + 5.0
+            new_cache[virtual_key] = (policy, expiration)
+            self._cache = MappingProxyType(new_cache)
+        finally:
+            self._inflight.discard(virtual_key)
+
+    async def resolve_policy(self, virtual_key: str) -> dict:
+        entry = self._cache.get(virtual_key)
+        now = time.time()
+        if entry is None:
+            await self._fetch_policy(virtual_key)
+            entry = self._cache.get(virtual_key)
+            if entry is None:
+                return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            return entry[0]
+        else:
+            policy, expiration = entry
+            if now > expiration:
+                asyncio.create_task(self._safe_background_fetch(virtual_key))
+            return policy
 
 class InMemoryPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
         return {"allowed_tools": [], "blocked_tools": []}
-
-
-class VaultPolicyResolver(BasePolicyResolver):
-    async def resolve_policy(self, virtual_key: str) -> dict:
-        logging.getLogger(__name__).warning("Vault integration coming in v1.2. Failing closed.")
-        return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-
 
 QUOTE_BYTE = 0x22      # ord('"')
 BACKSLASH_BYTE = 0x5C  # ord('\\')
