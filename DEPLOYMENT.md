@@ -85,6 +85,7 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **Audit, Forensics & Legal** | `FIPS_STRICT_MODE` | `True` | Strict fail-closed validation for FIPS 140-3 KAT tests. |
 | **Agent Circuit Breaker** | `ENABLE_AGENT_BREAKER` | `True` | Enable Composite Agent Loop Circuit Breaker. |
 | **Agent Circuit Breaker** | `AGENT_BREAKER_THRESHOLD` | `3` | Consecutive duplicate turns before tripping the circuit breaker. |
+| **Agent Identity Enforcer** | `AGENT_IDENTITY_ENFORCER` | `"off"` | Agent Identity Enforcer mode (`"off"`, `"lenient"`, `"strict"`). |
 | **Leak Forensics** | `ENABLE_WATERMARKING` | `False` | Enable Dynamic Canary Watermarking & Steganography. |
 | **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Secret for HMAC-SHA256 watermarking. |
 | **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry & WORM-Compliant Merkle Logging. |
