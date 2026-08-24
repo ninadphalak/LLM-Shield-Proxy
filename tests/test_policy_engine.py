@@ -74,7 +74,7 @@ async def test_policy_zero_trust_block(temp_policies_file):
     settings.SHIELD_FAILURE_MODE = "FAIL_CLOSED"
     settings.OVERRIDE_CLIENT_AUTH = True
     settings.UPSTREAM_API_KEY = "test"
-    settings.reload_policies()
+    settings.reload_policies(force=True)
 
     # Remove default_role to enforce zero trust
     with open(temp_policies_file, "r") as f:
@@ -82,7 +82,7 @@ async def test_policy_zero_trust_block(temp_policies_file):
     del policies["default_role"]
     with open(temp_policies_file, "w") as f:
         yaml.dump(policies, f)
-    settings.reload_policies()
+    settings.reload_policies(force=True)
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
         # Using a tenant ID that is not in the virtual_keys map
@@ -104,7 +104,7 @@ async def test_policy_role_overrides(temp_policies_file):
     settings.UPSTREAM_API_KEY = "test"
     settings.ENABLE_FINOPS_METERING = False
     settings.CANARY_TOKEN = "TEST_CANARY"
-    settings.reload_policies()
+    settings.reload_policies(force=True)
 
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_response = httpx.Response(200, request=httpx.Request("POST", "http://test"), json={"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 10}})
@@ -144,7 +144,7 @@ async def test_policy_role_overrides(temp_policies_file):
 @pytest.mark.asyncio
 async def test_policy_hot_reload(temp_policies_file):
     settings.POLICIES_FILE_PATH = temp_policies_file
-    settings.reload_policies()
+    settings.reload_policies(force=True)
 
     assert settings._flattened_policies["lax-tenant-id"]["ENABLE_CANARY_TRIPWIRE"] is False
 
@@ -155,7 +155,7 @@ async def test_policy_hot_reload(temp_policies_file):
     with open(temp_policies_file, "w") as f:
         yaml.dump(policies, f)
 
-    settings.reload_policies()
+    settings.reload_policies(force=True)
     assert settings._flattened_policies["lax-tenant-id"]["ENABLE_CANARY_TRIPWIRE"] is True
 
 
@@ -164,7 +164,7 @@ async def test_audit_log_applied_role_name(temp_policies_file):
     settings.POLICIES_FILE_PATH = temp_policies_file
     settings.OVERRIDE_CLIENT_AUTH = True
     settings.UPSTREAM_API_KEY = "test"
-    settings.reload_policies()
+    settings.reload_policies(force=True)
 
     mock_client = AsyncMock(spec=httpx.AsyncClient)
     mock_response = httpx.Response(200, request=httpx.Request("POST", "http://test"), json={"choices": [{"message": {"content": "ok"}}]})
