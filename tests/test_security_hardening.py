@@ -1,4 +1,3 @@
-import hashlib
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
