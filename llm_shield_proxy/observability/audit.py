@@ -52,36 +52,69 @@ class AuditLogger:
     """
 
     _last_hash: str = "0000000000000000000000000000000000000000000000000000000000000000"
-    _hash_lock: threading.Lock = threading.Lock()
     _instance_id: str = socket.gethostname()
+    _log_queue: "queue.Queue[tuple[str, Dict[str, Any]]]" = queue.Queue(-1)
+    _worker_thread: Optional[threading.Thread] = None
 
     @classmethod
-    def _compute_and_append_hash(cls, log_entry: Dict[str, Any]) -> None:
-        """Computes and attaches the cryptographic hash chain to a log record."""
+    def _start_worker_if_needed(cls):
+        if cls._worker_thread is None or not cls._worker_thread.is_alive():
+            cls._worker_thread = threading.Thread(target=cls._worker, daemon=True, name="AuditWORMHashWorker")
+            cls._worker_thread.start()
+
+    @classmethod
+    def _worker(cls):
+        while True:
+            try:
+                severity, log_entry = cls._log_queue.get()
+
+                # Try to fetch agent_id from context if available in this thread.
+                # Note: contextvars don't automatically propagate to background threads unless explicitly passed.
+                # Since log_entry is fully constructed by the caller, we assume all necessary context is already inside log_entry!
+                # Wait, the original code did: agent_id = agent_identity_ctx.get() inside the method.
+                # If we do it in the background thread, agent_identity_ctx.get() will be empty because it's a new thread!
+                # So we MUST extract agent_id in the caller and pass it in!
+
+                log_entry["previous_hash"] = cls._last_hash
+
+                try:
+                    # Single-pass serialization for hashing
+                    event_str = json.dumps(log_entry, sort_keys=True)
+                except Exception:
+                    continue
+
+                new_hash = hashlib.sha256(event_str.encode("utf-8")).hexdigest()
+                cls._last_hash = new_hash
+
+                # Avoid double serialization by mutating the JSON string directly
+                final_str = f'{event_str[:-1]}, "hash": "{new_hash}"}}'
+
+                if severity == "CRITICAL":
+                    audit_logger.critical(final_str)
+                elif severity == "WARNING":
+                    audit_logger.warning(final_str)
+                else:
+                    audit_logger.info(final_str)
+
+            except Exception:
+                # Silently drop failed logs to prevent worker crash
+                pass
+
+    @classmethod
+    def _enqueue_log(cls, severity: str, log_entry: Dict[str, Any]) -> None:
         from llm_shield_proxy.core.config import agent_identity_ctx
         agent_id = agent_identity_ctx.get()
         if agent_id:
             log_entry["agent_identity_claim"] = agent_id
 
-        with cls._hash_lock:
-            log_entry["previous_hash"] = cls._last_hash
-            try:
-                event_str = json.dumps(log_entry, sort_keys=True)
-            except Exception:
-                log_entry.pop("previous_hash", None)
-                raise
-            
-            hash_payload = event_str.encode("utf-8")
-            new_hash = hashlib.sha256(hash_payload).hexdigest()
-            log_entry["hash"] = new_hash
-            cls._last_hash = new_hash
+        cls._start_worker_if_needed()
+        cls._log_queue.put_nowait((severity, log_entry))
 
     @classmethod
     def log_startup_event(cls) -> None:
         """Emits a Genesis startup audit event initializing the cryptographic hash chain."""
         initial_hash = secrets.token_hex(32)
-        with cls._hash_lock:
-            cls._last_hash = initial_hash
+        cls._last_hash = initial_hash
 
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -91,8 +124,7 @@ class AuditLogger:
             "process_id": os.getpid(),
             "initial_hash": initial_hash,
         }
-        cls._compute_and_append_hash(log_entry)
-        audit_logger.info(json.dumps(log_entry))
+        cls._enqueue_log("INFO", log_entry)
 
     @staticmethod
     def log_redaction_event(
@@ -124,8 +156,8 @@ class AuditLogger:
 
         if settings.AUDIT_LOG_FORMAT == "RFC6902_DIFF" and patch_operations is not None:
             log_entry["patch_operations"] = patch_operations
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.info(json.dumps(log_entry))
+
+        AuditLogger._enqueue_log("INFO", log_entry)
 
         try:
             from llm_shield_proxy.observability.metrics import llm_shield_pii_redacted_total
@@ -160,8 +192,7 @@ class AuditLogger:
             "status_code": status_code,
             "applied_role_name": applied_role_name,
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.info(json.dumps(log_entry))
+        AuditLogger._enqueue_log("INFO", log_entry)
 
     @staticmethod
     def log_tripwire_event(
@@ -187,8 +218,7 @@ class AuditLogger:
             "applied_role_name": applied_role_name,
             "message": "Prompt-extraction attack detected. Canary token found in outbound stream.",
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.critical(json.dumps(log_entry))
+        AuditLogger._enqueue_log("CRITICAL", log_entry)
 
     @staticmethod
     def log_blast_radius_exceeded(
@@ -216,8 +246,7 @@ class AuditLogger:
             "total_entities_detected": entities_count,
             "message": f"Data exfiltration threshold exceeded. Detected {entities_count} PII entities in a single request or sliding window.",
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.critical(json.dumps(log_entry))
+        AuditLogger._enqueue_log("CRITICAL", log_entry)
 
     @staticmethod
     def log_finops_metered(
@@ -245,8 +274,7 @@ class AuditLogger:
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.info(json.dumps(log_entry))
+        AuditLogger._enqueue_log("INFO", log_entry)
 
     @staticmethod
     def log_upstream_retry_attempt(
@@ -272,8 +300,7 @@ class AuditLogger:
             "url": url,
             "applied_role_name": applied_role_name,
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.warning(json.dumps(log_entry))
+        AuditLogger._enqueue_log("WARNING", log_entry)
 
     @staticmethod
     def log_provider_failover_triggered(
@@ -297,8 +324,7 @@ class AuditLogger:
             "fallback_url": fallback_url,
             "applied_role_name": applied_role_name,
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.critical(json.dumps(log_entry))
+        AuditLogger._enqueue_log("CRITICAL", log_entry)
 
     @staticmethod
     def log_circuit_breaker_tripped(
@@ -322,8 +348,7 @@ class AuditLogger:
             "consecutive_loops": consecutive_loops,
             "applied_role_name": applied_role_name,
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-        audit_logger.critical(json.dumps(log_entry))
+        AuditLogger._enqueue_log("CRITICAL", log_entry)
 
     @staticmethod
     def log_security_event(
@@ -343,13 +368,5 @@ class AuditLogger:
             "severity": severity,
             "details": details,
         }
-        AuditLogger._compute_and_append_hash(log_entry)
-
-        log_str = json.dumps(log_entry)
-        if severity == "CRITICAL":
-            audit_logger.critical(log_str)
-        elif severity == "WARNING":
-            audit_logger.warning(log_str)
-        else:
-            audit_logger.info(log_str)
+        AuditLogger._enqueue_log(severity, log_entry)
 

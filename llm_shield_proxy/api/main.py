@@ -23,6 +23,7 @@ import re
 import socket
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -42,6 +43,12 @@ from llm_shield_proxy.adapters.provider_factory import resolve_provider
 from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
+    ASTDepthExceededException,
+    StatelessASTVisitor,
+)
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
 from llm_shield_proxy.engines.vault import vault_store
 from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.observability.metrics import (
@@ -61,9 +68,6 @@ from llm_shield_proxy.security.tool_rbac import (
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
-from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import ASTDepthExceededException, StatelessASTVisitor
-from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
-from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
 
 logger = logging.getLogger(__name__)
 
@@ -453,14 +457,23 @@ async def metrics_endpoint(request: Request) -> Response:
 
 async def get_policy_resolver(request: Request) -> BasePolicyResolver:
     """Dependency injection provider for the active Pluggable RBAC Engine."""
+    if not hasattr(request.app.state, "rbac_state"):
+        request.app.state.rbac_state = {
+            "cache": OrderedDict(),
+            "cache_lock": asyncio.Lock(),
+            "inflight": {},
+            "inflight_lock": asyncio.Lock()
+        }
+    shared_state = request.app.state.rbac_state
+
     http_client = get_http_client(request)
     if settings.OPA_URL:
-        return OPAPolicyResolver(http_client, settings.OPA_URL)
+        return OPAPolicyResolver(http_client, settings.OPA_URL, shared_state)
     if settings.ENABLE_VAULT_SECRETS and settings.VAULT_ADDR and settings.VAULT_TOKEN:
-        return VaultPolicyResolver(http_client, settings.VAULT_ADDR, settings.VAULT_TOKEN)
+        return VaultPolicyResolver(http_client, settings.VAULT_ADDR, settings.VAULT_TOKEN, shared_state)
     if hasattr(vault_store, "async_client"):
-        return RedisPolicyResolver(vault_store.async_client)
-    return InMemoryPolicyResolver()
+        return RedisPolicyResolver(vault_store.async_client, shared_state)
+    return InMemoryPolicyResolver(shared_state)
 
 
 # -----------------------------------------------------------------------------
@@ -712,14 +725,14 @@ async def _proxy_catch_all_internal(
                 content={"error": {"message": "Unauthorized virtual key", "type": "security_error"}},
             )
 
-    # Agent Identity Enforcer (Edge-Level JWT/DPoP Validation)
-    from llm_shield_proxy.security.identity import verify_agent_identity
-    await verify_agent_identity(request, resolved_role)
-
     if resolved_role:
         request_policy_ctx.set(resolved_role)
     else:
         request_policy_ctx.set({})
+
+    # Agent Identity Enforcer (Edge-Level JWT/DPoP Validation)
+    from llm_shield_proxy.security.identity import verify_agent_identity
+    await verify_agent_identity(request, resolved_role)
 
     enable_canary_tripwire = settings.ENABLE_CANARY_TRIPWIRE
     enable_blast_radius_limits = settings.ENABLE_BLAST_RADIUS_LIMITS
@@ -1065,7 +1078,9 @@ async def _proxy_catch_all_internal(
                     llm_shield_sse_active_streams.inc()
                     try:
                         if is_v3 and v3_cipher:
-                            from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
+                            from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import (
+                                StatelessStreamingLexer,
+                            )
                             lexer = StatelessStreamingLexer(v3_cipher)
                             async for chunk in upstream_res.aiter_text():
                                 safe_chunk = lexer.feed_chunk(chunk)
@@ -1197,7 +1212,9 @@ async def _proxy_catch_all_internal(
                     loop = asyncio.get_running_loop()
 
                     if is_v3 and v3_cipher:
-                        from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import NonStreamingRehydrator
+                        from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import (
+                            NonStreamingRehydrator,
+                        )
                         rehydrator = NonStreamingRehydrator(v3_cipher)
                         rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, res_json)
                     else:
