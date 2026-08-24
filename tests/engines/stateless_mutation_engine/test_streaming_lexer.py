@@ -4,8 +4,11 @@ import json
 
 import pytest
 
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.streaming_lexer import NonStreamingRehydrator, StatelessStreamingLexer
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import (
+    NonStreamingRehydrator,
+    StatelessStreamingLexer,
+)
 
 
 @pytest.fixture
@@ -136,7 +139,7 @@ async def test_generator_exit_teardown():
             return
 
     chunks = []
-    with pytest.raises(asyncio.CancelledError) as exc_info:
+    with pytest.raises(asyncio.CancelledError):
         async for c in wrapped():
             chunks.append(c)
             # simulate upstream abort

@@ -3,7 +3,7 @@ import json
 import re
 from typing import Any, Dict
 
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
 
 
 class StatelessStreamingLexer:

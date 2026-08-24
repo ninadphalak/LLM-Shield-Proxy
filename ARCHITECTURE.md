@@ -17,6 +17,9 @@ To process millions of tokens per minute without saturating the Python Global In
 ### Resilient SSE Sliding-Window Buffer
 * **Implementation Mechanics:** Server-Sent Events (SSE) stream arbitrary token chunks. An entity like `[PERSON_1]` may arrive fragmented across `[PER`, `SON_`, and `1]`. The `SSERehydrationBuffer` is a custom asynchronous generator that dynamically retains trailing characters. The buffer bound is defined by $L = \max(0, 	ext{max\_token\_length} - 1)$, maintaining mathematical overlap and executing prefix-safe regex rehydration without dropping streams or blocking the event loop.
 
+### Context-Aware MCP Discovery Interception
+* **Implementation Mechanics:** To support Stateless MCP architecture and Progressive Discovery (SEP-2549), the proxy utilizes `MCPDiscoveryPrunerMiddleware`. It streams JSON-RPC tool catalogs through our Rust-backed `orjson` lexer, performing $O(1)$ RBAC `frozenset` evaluations to redact unauthorized tools. The payload is piped downstream in 64KB chunks to perfectly respect ASGI backpressure and maintain the strictly capped `<85 MB` RAM process footprint.
+
 ## 2. 🛡️ The 3-Tier Redaction Cascade
 
 The engine pipelines payload text through three consecutive filters, balancing compute cost against redaction recall.

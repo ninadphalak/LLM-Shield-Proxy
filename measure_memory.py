@@ -6,8 +6,8 @@ import psutil
 from llm_shield_proxy.engines.pii_engine import pii_engine
 
 # Import V3 components to ensure they are loaded and initialized
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.streaming_lexer import StatelessStreamingLexer
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
 
 # Initialize the components to ensure they are loaded in memory
 DUMMY_KEY = b"0" * 32

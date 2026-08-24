@@ -1,9 +1,12 @@
 import orjson
 import pytest
 
-from llm_shield_proxy.v3.ast_mutator import ASTDepthExceededException, StatelessASTVisitor
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
+from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
+    ASTDepthExceededException,
+    StatelessASTVisitor,
+)
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
 
 
 @pytest.fixture
@@ -17,7 +20,7 @@ def mutator(cipher):
 @pytest.mark.asyncio
 async def test_json_bomb_circuit_breaker(mutator):
     """
-    Test 1: Construct a 45-level nested JSON payload and verify the proxy 
+    Test 1: Construct a 45-level nested JSON payload and verify the proxy
     halts traversal at depth 40 and raises ASTDepthExceededException.
     """
     payload = {}
@@ -44,7 +47,7 @@ async def test_json_bomb_circuit_breaker(mutator):
 async def test_heterogeneous_array_structural_parity(mutator):
     """
     Test: Complex Heterogeneous Arrays
-    Verify non-sensitive types remain identical, sensitive strings are masked, 
+    Verify non-sensitive types remain identical, sensitive strings are masked,
     array length is unchanged, and JSON syntax is 100% valid.
     """
     payload = {

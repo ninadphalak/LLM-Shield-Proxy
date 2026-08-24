@@ -48,6 +48,10 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 
 ### 🛑 Threat Prevention & Isolation
 
+#### Edge-Level Agent Identity Enforcer
+* **Implementation Details**: Acts as a strict cryptographic notary at the ingress boundary to prevent rogue agent escalation. Requires agents to present an unforgeable, mathematically signed Workload Identity (JWT) and Demonstrating Proof-of-Possession (DPoP) proof before executing tool calls. Identites are validated in `<1ms` via cached JWKS and mathematically sealed into a WORM-compliant tamper-proof hash chain. See the [detailed documentation](docs/features/agent_identity_enforcer.md) for more info.
+* **Flags**: [`AGENT_IDENTITY_ENFORCER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
+
 #### Autonomous Agent Security (Composite Agent Loop Circuit Breaker)
 * **Implementation Details**: Enforces **Autonomous Agent Security** by actively monitoring recursive LLM agent executions and composite tool calls. It tracks `tool_calls` array depths and initiates a deterministic circuit break when recursive calls hit a strict threshold, preventing Autonomous Agent DoS attacks and runaway API billing.
 * **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
