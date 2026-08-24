@@ -9,12 +9,12 @@ from __future__ import annotations
 import asyncio
 import random
 import sys
-
-import atomics
+import threading
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore
 
+import datetime
 import hashlib
 import hmac
 import ipaddress
@@ -49,6 +49,7 @@ from llm_shield_proxy.observability.metrics import (
     llm_shield_requests_total,
     llm_shield_sse_active_streams,
 )
+from llm_shield_proxy.observability.telemetry_dispatcher import dispatch_telemetry
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver
@@ -65,12 +66,12 @@ APP_VERSION = "1.2.14"
 
 class AppState:
     is_draining: bool = False
-    active_requests = atomics.atomic(width=4, atype=atomics.INT)
+    active_requests: int = 0
+    active_requests_lock: threading.Lock = threading.Lock()
     shutdown_event: Optional[asyncio.Event] = None
 
 
 app_state = AppState()
-app_state.active_requests.store(0)
 
 
 _SAFE_REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-_.:]{1,64}$")
@@ -191,9 +192,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from llm_shield_proxy.engines.pii_engine import pii_engine
 
+    if pii_engine.enable_tier3:
+        tier3_status = "Active (Production ONNX Model)" if settings.ONNX_MODEL_PATH else "Mock Session (Keyword fallback only - no ONNX model path configured)"
+    else:
+        tier3_status = "Disabled"
+
     print(
         f"--- LLM-Shield Proxy Startup Diagnostics ---\n"
-        f"  PII Engine: {'Active (Tier 1, 2, 3)' if pii_engine.enable_tier3 else 'Active (Tier 1, 2)'}\n"
+        f"  PII Engine (Tier 1, 2): Active\n"
+        f"  Tier 3 NER: {tier3_status}\n"
         f"  FIPS 140-3 Self-Test: {'Enforced (Passed)' if settings.FIPS_STRICT_MODE else 'Permissive'}\n"
         f"  Vault Provider: {'Enabled' if settings.ENABLE_VAULT_SECRETS else 'Disabled'}\n"
         f"  Rate Limiter: {'Redis' if settings.REDIS_URL else 'In-Memory'}\n"
@@ -283,7 +290,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     app_state.is_draining = True
-    if shutdown_ev is not None and app_state.active_requests.load() > 0:
+    if shutdown_ev is not None and app_state.active_requests > 0:
         try:
             await asyncio.wait_for(shutdown_ev.wait(), timeout=settings.DRAIN_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
@@ -334,7 +341,8 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
             status_code=503, content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}}
         )
 
-    app_state.active_requests.fetch_add(1)
+    with app_state.active_requests_lock:
+        app_state.active_requests += 1
     try:
         raw_id = request.headers.get("x-request-id", "")
         request_id = raw_id if (raw_id and _SAFE_REQUEST_ID_PATTERN.match(raw_id)) else str(uuid.uuid4())
@@ -347,9 +355,12 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
     finally:
-        app_state.active_requests.fetch_sub(1)
-        if app_state.is_draining and app_state.active_requests.load() == 0 and app_state.shutdown_event is not None:
-            app_state.shutdown_event.set()
+        # Lock wraps both the decrement and the drain-signal check to prevent a TOCTOU
+        # race where active_requests transitions 1→0 between the read and set() calls.
+        with app_state.active_requests_lock:
+            app_state.active_requests -= 1
+            if app_state.is_draining and app_state.active_requests == 0 and app_state.shutdown_event is not None:
+                app_state.shutdown_event.set()
 
 
 @app.exception_handler(Exception)
@@ -953,7 +964,6 @@ async def _proxy_catch_all_internal(
                 is_fallback = False
 
                 while True:
-                    print("DEBUG REDACTED PAYLOAD:", type(redacted_payload), redacted_payload)
                     req = http_client.build_request(
                         method=request.method,
                         url=current_target_url,
@@ -1221,6 +1231,21 @@ async def _proxy_catch_all_internal(
                             if total_tokens > 0:
                                 background_tasks.add_task(_record_metrics, virtual_key_id, model, prompt_tokens, completion_tokens, total_tokens, x_session_id)
 
+                    if getattr(settings, "ANONYMOUS_USAGE_TRACKING", True) and settings.TELEMETRY_ENDPOINT_URL:
+                        _usage = res_json.get("usage", {}) if res_json else {}
+                        _model = res_json.get("model", "unknown") if res_json else "unknown"
+                        _total_tokens = _usage.get("total_tokens", 0) if isinstance(_usage, dict) else 0
+
+                        _tel_payload = {
+                            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            "project_id": "llm-shield-proxy",
+                            "request_count": 1,
+                            "token_count": _total_tokens,
+                            "model": _model,
+                        }
+                        # Fire-and-forget; use shared http_client to avoid socket exhaustion
+                        asyncio.create_task(dispatch_telemetry(settings.TELEMETRY_ENDPOINT_URL, _tel_payload, http_client))
+
                     return JSONResponse(
                         content=rehydrated_res,
                         status_code=upstream_res.status_code,
@@ -1292,7 +1317,6 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     if "choices" in res_copy and isinstance(res_copy["choices"], list):
         for choice in res_copy["choices"]:
             if isinstance(choice, dict):
-                print("DEBUG: Checking canary tripwire injection...")
                 message = choice.get("message", {})
                 if isinstance(message, dict):
                     if "content" in message and isinstance(message["content"], str):
