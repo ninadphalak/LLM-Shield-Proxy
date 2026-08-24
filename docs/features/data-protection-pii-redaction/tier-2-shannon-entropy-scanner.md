@@ -49,5 +49,10 @@ A: Regex dictionaries for secrets require evaluating hundreds of patterns (AWS k
 A: No. Standard English and typical URLs do not contain the random character distribution required to trip the $\ge 4.5$ bits/char Base64 threshold. 
 
 
+## Plainspeak
+This feature acts like a randomness detector. While some sensitive information (like phone numbers) has a predictable format, things like passwords or secret API keys just look like random gibberish.
+
+Because we can't search for a specific password pattern, this scanner mathematically measures how "random" a piece of text is (known as Shannon entropy). If it spots a string of text that is completely unpredictable and random, it flags it as a likely secret key and hides it to prevent accidental leaks.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

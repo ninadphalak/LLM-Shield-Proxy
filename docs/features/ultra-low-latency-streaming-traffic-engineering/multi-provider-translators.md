@@ -49,5 +49,10 @@ A: No. You simply point the `base_url` to the proxy and keep writing standard Op
 A: PII redaction happens *before* translation on the ingress, and *after* normalization on the egress. The translation layer is completely agnostic to whether the text is raw or synthetically masked.
 
 
+## Plainspeak
+This feature acts as an automatic, universal translator between different AI companies.
+
+Every AI provider (like OpenAI or Anthropic) requires you to speak to them in a slightly different computer language. If you build your app for OpenAI, it usually breaks if you try to switch to Anthropic. This feature automatically translates your app's standard OpenAI requests into whatever language the target AI provider needs, allowing you to seamlessly swap between different AIs without rewriting any code.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](../../../tests/test_provider_adapters.py).

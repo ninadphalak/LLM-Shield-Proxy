@@ -49,5 +49,10 @@ A: You can! But in large enterprises with hundreds of internal applications and 
 A: Yes, but it is vastly cheaper. Standard structural tags `[PERSON_1]` often consume 4 or 5 tokens via BPE. The proxy's synthetic masking ensures that a fake name like "Michael" only consumes 1 token, actively reducing your upstream LLM invoice.
 
 
+## Plainspeak
+This feature acts as an automatic accountant that tracks exactly how much AI computing power is being used.
+
+When an AI streams its response word-by-word, it sometimes forgets to send a final "receipt" of how many words were generated. This feature intercepts your request on the way out and secretly adds a tiny instruction asking the AI to always include the final token count. This ensures your billing department can always track exact usage costs without you having to change any code.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](../../../tests/test_finops_meter.py).

@@ -46,5 +46,10 @@ A: No, the proxy is engineered to reconstruct and redact payloads on the fly wit
 A: All decisions are exported via the Universal Decision Trace Exporter (OTel / OSCAL) for SOC 2 compliance.
 
 
+## Plainspeak
+This feature acts as a bouncer that strictly controls what an AI agent is allowed to do.
+
+When an AI decides it wants to use a tool (like "delete a file" or "send an email"), it shouldn't be blindly trusted. This feature intercepts the AI's request before it happens, checks the AI's "ID badge" against a strict list of permissions, and blocks the action immediately if the AI isn't authorized to use that specific tool.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](../../../tests/test_proxy.py).

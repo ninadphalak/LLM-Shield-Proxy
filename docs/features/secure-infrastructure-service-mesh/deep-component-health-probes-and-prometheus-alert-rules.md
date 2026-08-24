@@ -50,5 +50,10 @@ A: The repository includes a `prometheus-rules.yaml` file in the `/deploy/` dire
 A: The readiness probe does not execute a full LLM completion. It only tests the TCP/TLS socket connection to the API gateway. If OpenAI is returning 503s but the network is reachable, the pod remains "Ready" to handle failover routing correctly.
 
 
+## Plainspeak
+This feature acts like a highly sensitive heart monitor for the proxy.
+
+Normally, a cloud server just checks if an app is "turned on." This feature goes much deeper. It actively tests all of the proxy's internal organs (like testing its connection to the password vault and the database). If it detects that a critical organ is failing, it immediately alerts the cloud to stop sending it traffic and pages an engineer before a major crash happens.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](../../../tests/test_health_and_alerts.py).

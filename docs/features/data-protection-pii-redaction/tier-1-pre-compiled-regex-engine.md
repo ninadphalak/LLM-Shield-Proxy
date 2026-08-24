@@ -56,6 +56,10 @@ A: No. Because `google-re2` guarantees O(N) performance by strictly using DFAs, 
 **Q: Does injecting thousands of custom regexes slow down the proxy?**
 A: No. The `re2` engine compiles them into a highly optimized state machine. While startup time might marginally increase, runtime matching remains practically constant-time and ultra-low latency.
 
+## Plainspeak
+This feature quickly scans text for sensitive information like Social Security Numbers and email addresses using pre-defined search patterns (like a highly advanced "CTRL+F"). 
+
+Unlike standard search engines that can get stuck or crash if a hacker sends a tricky "bomb" of confusing text (known as backtracking), this engine uses a specialized, math-based search method. This guarantees the search moves straight through the text at a fast, predictable speed and can never be tricked into freezing the system.
 
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

@@ -49,5 +49,10 @@ A: The LLM will treat it as a unique ID. However, if your use case requires the 
 A: Because LLMs respond within seconds, key rotation is designed to maintain the previous key in a short-lived memory cache (TTL) until all in-flight streaming requests using that DEK have completed.
 
 
+## Plainspeak
+This feature allows you to securely hide sensitive data and retrieve it later, without ever having to save it to a database.
+
+Normally, to hide a name and restore it later, you have to store the real name in a secure vault somewhere. Instead, this feature mathematically scrambles the real name using a master password and replaces the text directly in the message with the scrambled version. When the message comes back, it uses the master password to unscramble it. This means there is zero risk of a database being hacked, because no database is used!
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_stateless_crypto.py`](../../../tests/test_stateless_crypto.py).

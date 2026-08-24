@@ -43,5 +43,10 @@ A: No. A new, cryptographically random canary token is generated for every indiv
 A: Yes! While it won't stop the LLM from entering a jailbroken state, it prevents the attacker from utilizing the jailbreak to extract sensitive corporate data. If the jailbroken model attempts to output the protected context containing the tripwire, the connection is instantly killed.
 
 
+## Plainspeak
+This feature acts as a hidden burglar alarm to catch hackers trying to steal data from the AI.
+
+It secretly plants fake, highly sensitive-looking information (like a fake "master password") inside the AI's context. A normal user will never see or ask about it. However, if a hacker tries to trick the AI into revealing all its secret instructions, the AI might repeat the fake password. The proxy is watching the response; the absolute second it sees the fake password coming out, it instantly pulls the plug and cuts off the hacker's connection.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

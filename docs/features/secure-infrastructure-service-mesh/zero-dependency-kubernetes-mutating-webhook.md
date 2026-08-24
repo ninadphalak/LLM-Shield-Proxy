@@ -50,5 +50,10 @@ A: No, this mutates the *environment variables* of the pod. By changing the base
 A: Not at all. If you prefer to manage environment variables via Helm, Kustomize, or Terraform, you can simply leave this disabled and point your apps to the proxy manually.
 
 
+## Plainspeak
+This feature acts as an automatic, invisible traffic diverter for your software engineers.
+
+If you want to force 100 different apps to route their traffic through the security proxy, you usually have to beg 100 different developers to change their code. This feature completely bypasses the developers. When they deploy their app to the cloud, this feature intercepts the deployment and invisibly edits their configuration to point to the proxy, securing the app without the developer lifting a finger.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

@@ -45,5 +45,10 @@ These headers are hardcoded into the security middleware to ensure baseline OWAS
 A: Yes. The headers are applied to the initial HTTP 200 OK response that establishes the SSE connection, securing the stream at the transport layer before the delta chunks begin arriving.
 
 
+## Plainspeak
+This feature adds an invisible armor plating to the web browser when communicating with the proxy.
+
+When an app connects to the internet, hackers often try tricky browser attacks (like secretly embedding your chat window inside a malicious website to steal clicks). This feature forcefully attaches strict security instructions to every single response, ordering the user's web browser to instantly block those types of attacks.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

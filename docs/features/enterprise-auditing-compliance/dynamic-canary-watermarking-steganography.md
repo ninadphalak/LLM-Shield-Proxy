@@ -52,5 +52,10 @@ A: Zero-width spaces (`U+200B`), non-joiners (`U+200C`), and joiners (`U+200D`) 
 A: Not at all. The visible letters, punctuation, and markdown formatting remain 100% untouched. The text reads perfectly to the user.
 
 
+## Plainspeak
+This feature acts as an invisible tracking tag to help catch leaks.
+
+If sensitive text ever leaks out of the system, it's hard to prove who leaked it. This feature injects invisible, zero-width characters into the text response as it flows out to the user. These characters act like a secret barcode. If a malicious employee copies the text and pastes it somewhere public, the invisible barcode is copied with it. We can later scan the leaked text to instantly identify the exact user and time the text was stolen.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_watermark.py`](../../../tests/test_watermark.py).

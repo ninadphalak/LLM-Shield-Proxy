@@ -46,5 +46,10 @@ View diagram on GitHub mobile 📱 -->
 A: No. TLS certificates and core `google-re2` compilations (BYOR) operate at a lower C++ level and currently require a graceful pod restart to take effect. Hot-reloading strictly applies to the RBAC roles and routing settings in `policies.yaml`.
 
 
+## Plainspeak
+This feature allows security teams to change the rules of the proxy instantly, without rebooting the system.
+
+Normally, if you update the security rules, you have to restart the server, which kicks everyone off their active chats. This feature constantly watches the rulebook file. The absolute second the file is updated, it smoothly slides the new rules into the system's memory. The next question asked uses the new rules, and no one's connection drops.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).

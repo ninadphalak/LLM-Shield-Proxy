@@ -50,5 +50,10 @@ A: Yes! Because the proxy features Multi-Provider Translators, you can set the p
 A: The delay is equal to the configured timeout for the primary request. You can aggressively tune `HTTP_TIMEOUT_SECONDS` (e.g., to 3 seconds) to ensure failovers happen almost instantaneously if a provider hangs.
 
 
+## Plainspeak
+This feature is an automatic backup plan that ensures your app never goes down when an AI provider crashes.
+
+If OpenAI's servers suddenly go offline, this feature detects the crash and instantly reroutes the question to a backup provider (like Anthropic or a different server) before the user even realizes there was a problem. It also allows developers to easily specify exactly which backup server they prefer to use for any given request.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

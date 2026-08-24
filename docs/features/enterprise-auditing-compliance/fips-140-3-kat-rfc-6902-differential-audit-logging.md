@@ -49,5 +49,10 @@ A: No. It simply enforces cryptographic boundary checks and ensures that weak ci
 A: Because it is a deterministic, machine-readable standard. An auditor can write a script that takes the final payload, applies the RFC 6902 patch in reverse, and mathematically prove the sequence of operations the proxy executed on the payload.
 
 
+## Plainspeak
+This feature proves to government auditors that our encryption math isn't broken.
+
+High-security environments (like the government) don't just trust that your encryption works; they demand proof. Every time the proxy starts up, it forces itself to take a math test (encrypting a known word and checking the result). If it fails the test, it instantly shuts down, refusing to handle any real data with broken encryption.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_fips_and_audit_diff.py`](../../../tests/test_fips_and_audit_diff.py).

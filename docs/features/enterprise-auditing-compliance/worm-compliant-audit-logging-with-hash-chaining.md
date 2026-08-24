@@ -48,5 +48,10 @@ A: You will have a dangling chain. The final log received by your SIEM (e.g., Sp
 A: Absolutely not. The proxy logs the *metadata* of the redaction (e.g., `entities_redacted: ["SSN", "CREDIT_CARD"]`) but never the sensitive strings themselves, ensuring the log aggregation platform does not become a toxic data lake.
 
 
+## Plainspeak
+This feature creates an unhackable, permanent diary of every security decision the proxy makes.
+
+To pass strict security audits (like SOC 2 or HIPAA), companies need absolute proof of what happened and when. This feature records every action and mathematically locks it to the action that happened right before it (like links in a chain). If a hacker tries to go back in time to delete or change a log entry, the entire mathematical chain breaks, instantly revealing the tampering to auditors.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

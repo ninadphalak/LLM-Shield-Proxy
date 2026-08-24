@@ -49,5 +49,10 @@ A: If the proxy is running in single-node, stateless mode without Redis, it util
 A: Both. The proxy deducts tokens for sensitive data detected in the user's prompt, and actively tracks de-masked entities streaming back from the LLM, ensuring bi-directional blast radius protection.
 
 
+## Plainspeak
+This feature prevents a catastrophic data leak by putting a strict limit on how much sensitive information can be moved at one time.
+
+Standard security limits only care about how many *questions* you ask (e.g., "10 questions a minute"). This feature is much smarter: it counts the actual *amount of sensitive data* (like counting how many Credit Card numbers) in the response. If an AI accidentally tries to output an entire database of 500 credit cards in a single response, this feature slams the brakes and blocks the massive leak, acting as a blast shield.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_blast_radius.py`](../../../tests/test_blast_radius.py).

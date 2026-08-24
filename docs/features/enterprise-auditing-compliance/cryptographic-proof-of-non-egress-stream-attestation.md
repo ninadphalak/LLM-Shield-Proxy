@@ -49,5 +49,10 @@ A: No. The text is passed through a one-way cryptographic hash function. It is i
 A: The key can be safely rotated inside HashiCorp Vault. The proxy will seamlessly pick up the new key on restart. Receipts are always logged with a timestamp, allowing auditors to correlate which key version was active at the time of the signature.
 
 
+## Plainspeak
+This feature creates a mathematically guaranteed receipt proving that sensitive data was successfully redacted.
+
+When an AI streams a long response, how do you prove to an auditor that no Social Security Numbers accidentally leaked out? This feature calculates a unique digital fingerprint of the data as it flows out. At the very end of the stream, it attaches this fingerprint like a wax seal. If anyone questions the security later, this seal serves as absolute mathematical proof that the data was sanitized.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_attestation.py`](../../../tests/test_attestation.py).

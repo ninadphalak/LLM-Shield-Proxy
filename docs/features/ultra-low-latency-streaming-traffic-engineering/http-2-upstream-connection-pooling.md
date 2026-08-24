@@ -49,5 +49,10 @@ A: No. The proxy automatically negotiates ALPN (Application-Layer Protocol Negot
 A: Yes! Even on a local loopback interface, connection pooling eliminates TCP handshake overhead, increasing your total tokens-per-second (TPS) throughput dramatically.
 
 
+## Plainspeak
+This feature acts like a permanent carpool lane for internet traffic, making communication much faster.
+
+Normally, every time your app asks the AI a question, it has to spend time "shaking hands" and setting up a secure connection over the internet, which takes a split second. This feature sets up a secure connection once, keeps it open, and forces all future questions to share that exact same connection simultaneously. This eliminates the repetitive setup delays.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_transport.py`](../../../tests/test_transport.py).
