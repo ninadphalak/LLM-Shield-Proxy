@@ -1,16 +1,15 @@
-import logging
-from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Set, Optional, Tuple
-
 import asyncio
 import time
-import httpx
+from abc import ABC, abstractmethod
 from types import MappingProxyType
+from typing import AsyncGenerator, Set
+
+import httpx
 import orjson
 import redis.asyncio as redis
 
-from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.observability.audit import AuditLogger
 
 
 class ToolAccessForbiddenException(Exception):
@@ -53,13 +52,13 @@ class OPAPolicyResolver(BasePolicyResolver):
     async def _fetch_policy(self, virtual_key: str) -> None:
         try:
             response = await self.http_client.post(
-                self.opa_url, 
+                self.opa_url,
                 json={"input": {"virtual_key": virtual_key}},
                 timeout=0.05
             )
             response.raise_for_status()
             policy = response.json().get("result", {})
-            
+
             new_cache = dict(self._cache)
             expiration = time.time() + settings.RBAC_CACHE_TTL_SECONDS
             new_cache[virtual_key] = (policy, expiration)
@@ -132,7 +131,7 @@ class VaultPolicyResolver(BasePolicyResolver):
             response.raise_for_status()
             data = response.json()
             policy = data.get("data", {}).get("data", {}).get("policy", {})
-            
+
             new_cache = dict(self._cache)
             expiration = time.time() + settings.RBAC_CACHE_TTL_SECONDS
             new_cache[virtual_key] = (policy, expiration)

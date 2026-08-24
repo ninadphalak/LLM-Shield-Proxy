@@ -334,7 +334,7 @@ class AuditLogger:
             "details": details,
         }
         AuditLogger._compute_and_append_hash(log_entry)
-        
+
         log_str = json.dumps(log_entry)
         if severity == "CRITICAL":
             audit_logger.critical(log_str)

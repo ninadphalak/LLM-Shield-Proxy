@@ -52,7 +52,13 @@ from llm_shield_proxy.observability.metrics import (
 from llm_shield_proxy.observability.telemetry_dispatcher import dispatch_telemetry
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
-from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver, OPAPolicyResolver, VaultPolicyResolver
+from llm_shield_proxy.security.tool_rbac import (
+    BasePolicyResolver,
+    InMemoryPolicyResolver,
+    OPAPolicyResolver,
+    RedisPolicyResolver,
+    VaultPolicyResolver,
+)
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 from llm_shield_proxy.v3.ast_mutator import ASTDepthExceededException, StatelessASTVisitor

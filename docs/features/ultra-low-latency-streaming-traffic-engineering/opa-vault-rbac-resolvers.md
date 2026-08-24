@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](../../../FEATURES.md)
 
 ## What It Does
-LLM-Shield-Proxy features a highly optimized Pluggable RBAC Engine for tool-call governance. Starting in version 1.2, it supports asynchronous, high-performance resolvers for **Open Policy Agent (OPA)** and **HashiCorp Vault**. 
+LLM-Shield-Proxy features a highly optimized Pluggable RBAC Engine for tool-call governance. Starting in version 1.3, it supports asynchronous, high-performance resolvers for **Open Policy Agent (OPA)** and **HashiCorp Vault**.
 
 Traditional API gateways query policy engines synchronously. If a policy engine or secret store is under heavy load or experiences network latency, that latency is passed directly to the LLM streaming client. For ultra-low latency streaming architecture, a 50ms-100ms penalty on the first byte is unacceptable. This feature solves this by implementing an atomic, non-blocking **Stale-While-Revalidate** caching mechanism, guaranteeing sub-millisecond policy resolution without stalling the event loop.
 
