@@ -1,6 +1,6 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Set
-import logging
 
 import orjson
 import redis.asyncio as redis

@@ -1,9 +1,9 @@
 """Enterprise Masking Mode definitions."""
 
-from enum import Enum
-from typing import Optional
 import hashlib
 import hmac
+from enum import Enum
+from typing import Optional
 
 from llm_shield_proxy.core.config import settings
 

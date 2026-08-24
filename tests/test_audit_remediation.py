@@ -6,21 +6,18 @@ and cryptographic isolation guarantees identified during the codebase audit.
 
 import asyncio
 import hashlib
-import ipaddress
-import re
 import uuid
+
 import pytest
-import httpx
 
 from llm_shield_proxy.api.main import (
-    _is_safe_ip,
-    _resolve_and_validate_hostname,
-    get_virtual_key_id,
     _SAFE_REQUEST_ID_PATTERN,
+    _is_safe_ip,
+    get_virtual_key_id,
 )
-from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.engines.pii_engine import pii_engine
-from llm_shield_proxy.security.rate_limit import DistributedRateLimiter, DistributedBlastRadiusLimiter
+from llm_shield_proxy.engines.vault import Vault
+from llm_shield_proxy.security.rate_limit import DistributedBlastRadiusLimiter, DistributedRateLimiter
 from llm_shield_proxy.security.watermark import generate_watermark_text, get_identity
 
 
@@ -165,8 +162,9 @@ def test_non_streaming_rehydrator_depth_protection():
 
 def test_schema_rewriter_input_immutability():
     """Asserts that DynamicSchemaRewriter does not mutate the caller's input dictionary."""
-    from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
     import copy
+
+    from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
 
     original_schema = {
         "type": "object",

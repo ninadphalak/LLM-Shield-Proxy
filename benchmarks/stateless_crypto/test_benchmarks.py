@@ -1,14 +1,13 @@
-import time
-import pytest
 import asyncio
 import os
-import psutil
-import json
-import base64
+import time
 
+import psutil
+import pytest
+
+from llm_shield_proxy.engines.pii_engine import calculate_shannon_entropy, pii_engine
 from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.streaming_lexer import StatelessStreamingLexer, NonStreamingRehydrator
-from llm_shield_proxy.engines.pii_engine import pii_engine, calculate_shannon_entropy
+from llm_shield_proxy.v3.streaming_lexer import StatelessStreamingLexer
 
 DUMMY_KEY = b"0" * 32
 
@@ -48,7 +47,7 @@ def test_int8_onnx_ner_overhead():
     # we refuse to fudge this data with a mocked time.sleep.
     if not os.environ.get("ENABLE_TIER3_ONNX_NER") == "true":
         pytest.skip("ONNX model weights not enabled; skipping Tier 3 benchmark.")
-    
+
     start = time.perf_counter()
     iterations = 10
     test_str = "John Doe went to the hospital."
@@ -63,7 +62,7 @@ def test_sse_delta_chunk_latency(v3_cipher):
     lexer = StatelessStreamingLexer(v3_cipher)
     enc_token = v3_cipher.encrypt("secret_value", "my_prop")
     chunk = f'{{"_ctx_hash_my_prop":"{enc_token}", "my_prop": "[MASKED]"}}'
-    
+
     start = time.perf_counter()
     iterations = 10000
     for _ in range(iterations):
@@ -92,7 +91,7 @@ def test_memory_footprint():
     rss_mb = mem_info.rss / (1024 * 1024)
     # Pytest loads a lot of plugins, so RSS will easily exceed 60MB.
     # The actual constraint applies to bare proxy worker, not pytest runner.
-    assert rss_mb < 150.0 
+    assert rss_mb < 150.0
     print(f"\nVerified Process Memory Footprint RSS: {rss_mb:.2f} MB")
 
 @pytest.mark.asyncio
@@ -100,7 +99,7 @@ def test_memory_footprint():
 async def test_high_concurrency_scalability(v3_cipher):
     """High Concurrency Scalability."""
     tasks = []
-    
+
     async def simulate_stream():
         # Execute an actual AST Lexer parse operation to verify real O(1) buffer isolation
         # rather than faking the scale with asyncio.sleep.
@@ -109,11 +108,11 @@ async def test_high_concurrency_scalability(v3_cipher):
         lexer.feed_chunk(chunk)
         await asyncio.sleep(0)  # Yield to the event loop
         return True
-    
+
     start = time.perf_counter()
     for _ in range(1800):
         tasks.append(simulate_stream())
-    
+
     results = await asyncio.gather(*tasks)
     elapsed = (time.perf_counter() - start) * 1e3
     assert len(results) == 1800

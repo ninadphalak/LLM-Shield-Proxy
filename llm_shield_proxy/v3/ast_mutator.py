@@ -1,8 +1,10 @@
+
 import orjson
-import asyncio
-from typing import Any, Dict, List, Optional
-from .crypto import StatelessPIICipher
+
 from llm_shield_proxy.engines.pii_engine import pii_engine
+
+from .crypto import StatelessPIICipher
+
 
 class ASTDepthExceededException(Exception):
     """Raised when the AST depth exceeds the circuit breaker limit (40)."""
@@ -20,22 +22,22 @@ class StatelessASTVisitor:
 
     async def mutate(self, payload: bytes) -> bytes:
         data = orjson.loads(payload)
-        
+
         # Iterative stack tracking (node, path, depth)
         stack = [(data, "$", 0)]
-        
+
         while stack:
             node, path, depth = stack.pop()
-            
+
             if depth >= self.max_depth:
                 raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}")
-                
+
             if isinstance(node, dict):
                 for k, v in node.items():
                     # Preserve JSON-RPC structural keys entirely
                     if k in ("jsonrpc", "method", "id"):
                         continue
-                        
+
                     if isinstance(v, (dict, list)):
                         if depth + 1 >= self.max_depth:
                             raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}.{k}")
@@ -45,7 +47,7 @@ class StatelessASTVisitor:
                             aad = f"{path}.{k}"
                             cipher_text = self.cipher.encrypt(v, aad)
                             node[k] = {"_shield_val": "[REDACTED]", "_shield_ctx": cipher_text}
-                            
+
             elif isinstance(node, list):
                 for i in range(len(node)):
                     v = node[i]
