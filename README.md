@@ -154,7 +154,7 @@ llm-shield-proxy --host 0.0.0.0 --port 8000 --workers 1
 ### 🏛️ Built for Trust & Transparency
 Designed specifically for highly regulated enterprise environments, strict **Zero Trust AI** network architectures, and security-first engineering teams implementing **LLM Security Posture Management (LLM SPM)**. 
 1. **Keeps data in your VPC:** The shield runs 100% inside your corporate boundary without transmitting unredacted data to external third parties.
-2. **Zero-Data Storage:** Sensitive prompts are never persisted. The proxy utilizes self-destructing in-memory vaults with deterministic TTL eviction.
+2. **Zero-Data Storage:** Sensitive prompts are never persisted. The proxy utilizes self-destructing in-memory vaults with deterministic TTL eviction. To help quantify open-source adoption, the proxy optionally transmits anonymous, zero-payload volumetric request counts (opt-out via ANONYMOUS_USAGE_TRACKING=False).
 3. **Continuous Stability:** Validated under high-concurrency stress testing to maintain consistent throughput and sub-millisecond latency.
 4. **Transparent Rule Engine:** Combines transparent, deterministic pattern matching with Shannon entropy and local ONNX neural entity recognition.
 

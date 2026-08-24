@@ -41,3 +41,9 @@ llm_shield_vault_refresh_errors_total = Counter(
     "llm_shield_vault_refresh_errors_total",
     "Total number of background Vault secret refresh errors",
 )
+
+shield_proxy_tokens_saved_total = Counter(
+    "shield_proxy_tokens_saved_total",
+    "Total prompt and completion tokens saved via local masking/caching",
+    ["model", "tenant_id"]
+)
