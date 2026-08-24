@@ -55,3 +55,7 @@ A: No. Because `google-re2` guarantees O(N) performance by strictly using DFAs, 
 
 **Q: Does injecting thousands of custom regexes slow down the proxy?**
 A: No. The `re2` engine compiles them into a highly optimized state machine. While startup time might marginally increase, runtime matching remains practically constant-time and ultra-low latency.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

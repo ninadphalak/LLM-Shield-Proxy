@@ -44,3 +44,7 @@ View diagram on GitHub mobile 📱 -->
 
 **Q: Do I need to worry about this if I'm just running the proxy on port 8000?**
 A: No. This specific hardening technique only applies when you are using the [Service Mesh Native gRPC ext_proc Integration](./service-mesh-native-grpc-ext-proc-integration.md) via Unix Domain Sockets, as TCP ports do not suffer from file-level permission race conditions.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

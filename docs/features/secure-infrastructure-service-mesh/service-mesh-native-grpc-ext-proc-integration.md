@@ -43,3 +43,7 @@ View diagram on GitHub mobile 📱 -->
 
 **Q: Can I run this without Istio or Envoy?**
 A: Absolutely. The default mode is the standalone HTTP FastAPI server. The gRPC `ext_proc` integration is an advanced feature explicitly for enterprise service mesh architectures.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_grpc_ext_proc.py`](../../../tests/test_grpc_ext_proc.py).

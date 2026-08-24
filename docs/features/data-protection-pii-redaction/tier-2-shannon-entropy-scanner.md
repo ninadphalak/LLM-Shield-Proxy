@@ -47,3 +47,7 @@ A: Regex dictionaries for secrets require evaluating hundreds of patterns (AWS k
 
 **Q: Will this accidentally redact normal words or long URLs?**
 A: No. Standard English and typical URLs do not contain the random character distribution required to trip the $\ge 4.5$ bits/char Base64 threshold. 
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

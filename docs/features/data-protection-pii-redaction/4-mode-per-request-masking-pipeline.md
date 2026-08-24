@@ -49,3 +49,7 @@ A: Yes. You can define a strict `enforced_masking_mode` within `policies.yaml` f
 
 **Q: Why use `SCRUB` if it destroys the LLM context?**
 A: `SCRUB` is highly efficient and guarantees zero token bloat. If you are using an LLM to summarize a document where the specific names are completely irrelevant (e.g., summarizing meeting minutes into action items), scrubbing saves tokens and maximizes privacy.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

@@ -46,3 +46,7 @@ A: You will have a dangling chain. The final log received by your SIEM (e.g., Sp
 
 **Q: Are the actual PII strings (like the real SSN) written to these logs?**
 A: Absolutely not. The proxy logs the *metadata* of the redaction (e.g., `entities_redacted: ["SSN", "CREDIT_CARD"]`) but never the sensitive strings themselves, ensuring the log aggregation platform does not become a toxic data lake.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

@@ -54,3 +54,7 @@ A: The Rust-backed zero-allocation lexer (`orjson`) is highly resilient. If it e
 
 **Q: Does this work for Anthropic's Claude as well?**
 A: Yes! The proxy's Multi-Provider Translator automatically normalizes Anthropic's complex `content_block_delta` SSE chunks into the standard sliding-window structure, de-masks them, and streams them out.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](../../../tests/test_streaming.py).

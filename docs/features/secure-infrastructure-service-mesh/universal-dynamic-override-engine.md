@@ -38,3 +38,7 @@ View diagram on GitHub mobile 📱 -->
 
 **Q: Can a client use this to override their rate limits?**
 A: No! The engine only allows overrides for explicitly whitelisted behaviors (like Masking Mode or Fallback URLs). Rate limits, API keys, and security scopes are tightly locked to the `policies.yaml` RBAC engine and cannot be overridden by client headers.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).

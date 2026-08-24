@@ -49,3 +49,7 @@ A: No. Existing users connected to the draining pod will see their streams finis
 
 **Q: How does this interact with HTTP/2 Connection Pooling?**
 A: When `SIGTERM` is received, the `httpx.AsyncClient` is instructed to close its idle `keep-alive` sockets immediately, retaining only the active sockets required to service the in-flight streams.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

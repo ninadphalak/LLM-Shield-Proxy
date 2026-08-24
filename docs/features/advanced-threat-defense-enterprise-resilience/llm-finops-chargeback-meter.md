@@ -47,3 +47,7 @@ A: No. The proxy acts as a Prometheus exporter. You configure your existing Prom
 
 **Q: Does this meter track the tokens saved by the PII redaction engine?**
 A: Yes! The proxy exposes a specific metric `shield_proxy_tokens_saved_total` which calculates the delta between the length of the original bracketed structural tags and the length of the highly-optimized synthetic masked entities, allowing you to calculate the exact ROI (Return on Investment) of the proxy.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](../../../tests/test_finops_meter.py).

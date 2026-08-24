@@ -44,3 +44,7 @@ View diagram on GitHub mobile 📱 -->
 
 **Q: Does it support AWS Secrets Manager or Azure Key Vault?**
 A: Currently, HashiCorp Vault is the natively supported provider for advanced dynamic leases and PKI (mTLS). However, basic secrets can be injected into the proxy's environment via standard Kubernetes Secrets integrations (like the External Secrets Operator) which bridge AWS/Azure into the pod.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](../../../tests/test_vault_mtls.py).

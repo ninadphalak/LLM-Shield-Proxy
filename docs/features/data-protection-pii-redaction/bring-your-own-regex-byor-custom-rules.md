@@ -54,3 +54,7 @@ A: Currently, regex compilation is performed at the FastAPI `lifespan` event for
 
 **Q: How do custom rules interact with Synthetic Masking?**
 A: Custom BYOR entities are currently treated as structural strings. If Synthetic Masking is enabled, custom entities will typically be masked using an anonymized hash or generic placeholder unless a specific Faker provider is mapped to the custom rule name.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

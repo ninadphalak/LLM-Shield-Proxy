@@ -48,3 +48,7 @@ A: Yes! By pointing the `OTEL_EXPORTER_OTLP_ENDPOINT` to your Datadog Agent or N
 
 **Q: Does this replace the WORM-Compliant Audit Logs?**
 A: No. OTel Traces are designed for developer observability, debugging, and performance monitoring (they are typically sampled and have short retention). WORM-Compliant logs are for strict legal compliance and are never sampled. The proxy runs both simultaneously.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

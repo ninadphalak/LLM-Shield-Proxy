@@ -47,3 +47,7 @@ A: If the agent calls a tool multiple times with *different* arguments (e.g., pa
 
 **Q: How does the proxy know what "session" an agent is in?**
 A: Client applications must pass a consistent `X-Session-ID` header. The proxy uses this header to isolate loop tracking.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_circuit_breaker.py`](../../../tests/test_circuit_breaker.py).

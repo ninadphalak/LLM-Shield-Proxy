@@ -45,3 +45,7 @@ A: Yes. Set `ENABLE_SYNTHETIC_SWAPPING=false` in your `.env`. The proxy will ins
 
 **Q: Does generating synthetic data slow down the request?**
 A: No. The proxy caches the generated synthetic entities in the active session's memory vault, meaning the `Faker` library is only invoked once per unique entity, keeping latency near zero.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

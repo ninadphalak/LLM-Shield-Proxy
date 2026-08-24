@@ -48,3 +48,7 @@ A: No. Because the `BatchSpanProcessor` offloads the HTTP/gRPC export to a separ
 
 **Q: Do I have to install a sidecar agent to use this?**
 A: No. The proxy supports direct OTLP/HTTP and OTLP/gRPC exports. While a sidecar (like the OpenTelemetry Collector) is recommended for production robustness, you can point the proxy directly to Datadog, Honeycomb, or New Relic ingestion endpoints.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_tracing.py`](../../../tests/test_tracing.py).

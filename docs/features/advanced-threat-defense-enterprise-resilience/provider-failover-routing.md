@@ -48,3 +48,7 @@ A: Yes. Because the proxy integrates the [Multi-Provider Translators](./multi-pr
 
 **Q: How do I test that this works in production?**
 A: You can force a failover by intentionally setting `UPSTREAM_BASE_URL` to a blackholed or invalid IP address (like `https://192.0.2.1`). The proxy will timeout on the primary and successfully route to the fallback.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

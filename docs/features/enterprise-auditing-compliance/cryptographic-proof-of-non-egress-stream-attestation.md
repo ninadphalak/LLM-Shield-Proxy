@@ -47,3 +47,7 @@ A: No. The text is passed through a one-way cryptographic hash function. It is i
 
 **Q: How do I rotate the `ATTESTATION_HMAC_KEY`?**
 A: The key can be safely rotated inside HashiCorp Vault. The proxy will seamlessly pick up the new key on restart. Receipts are always logged with a timestamp, allowing auditors to correlate which key version was active at the time of the signature.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_attestation.py`](../../../tests/test_attestation.py).

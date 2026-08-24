@@ -47,3 +47,7 @@ A: Yes! This is the "Bring Your Own Model" (BYOM) feature. You can export any Hu
 
 **Q: Does enabling this break the microsecond streaming latency?**
 A: It adds roughly 12ms of latency to chunks containing entities. While slightly slower than the microsecond Tier 1/2 engines, 12ms is entirely imperceptible to humans during a live Server-Sent Events (SSE) stream, maintaining the real-time UX.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

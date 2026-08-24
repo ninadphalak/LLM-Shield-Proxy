@@ -44,3 +44,7 @@ A: No, the proxy is engineered to reconstruct and redact payloads on the fly wit
 
 **Q: Where can I see the audit logs for this feature?**
 A: All decisions are exported via the Universal Decision Trace Exporter (OTel / OSCAL) for SOC 2 compliance.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](../../../tests/test_proxy.py).
