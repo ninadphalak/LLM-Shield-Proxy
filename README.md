@@ -591,7 +591,9 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 **LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**. 
 
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
-* **Patent Status:** Core architectural mechanisms—specifically including the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade—are protected under **U.S. Patent Pending** status (App. No. 64/126,730 and 64/139,263).
+* **Patent Status:** Core architectural mechanisms are protected under **U.S. Patent Pending** status:
+  * **App. No. 64/126,730**: Protects the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade.
+  * **App. No. 64/139,263**: Protects the stateless cryptographic JSON-RPC/MCP AST masking, HKDF subkey encryption, and generative AI metadata schema coercion.
 
 ---
 

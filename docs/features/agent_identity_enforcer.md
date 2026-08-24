@@ -32,11 +32,13 @@ sequenceDiagram
 
 ## Configuration
 
-To globally activate the Enforcer, set the environment variable:
+To globally configure the Enforcer, set the environment variable to one of the following 3 states:
 ```env
-AGENT_IDENTITY_ENFORCER=True
+AGENT_IDENTITY_ENFORCER="off"
 ```
-*(Note: This flag defaults to `False` to maintain drop-in compatibility with standard pipelines.)*
+* `"off"`: Identity verification is bypassed completely (Default).
+* `"lenient"`: Verifies the base JWT/Identity and signature, but skips the strict DPoP URI (htu) and Method (htm) validations.
+* `"strict"`: Fully secures the proxy by strictly validating the JWT, binding the DPoP key to the `cnf.jkt` claim, and enforcing HTTP Method and URI matches.
 
 For per-tenant enforcement, configure your `policies.yaml`:
 ```yaml
@@ -45,7 +47,7 @@ virtual_keys:
 
 roles:
   strict_agent_role:
-    agent_identity_enforcer: true
+    agent_identity_enforcer: "strict"
 ```
 
 ## Plainspeak
