@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     AIR_GAPPED_MODE: bool = Field(default=False, description="Enable strict Zero-Internet egress gateway mode")
     EGRESS_GATEWAY_URL: Optional[str] = Field(default=None, description="Internal proxy/gateway URL for Air-Gapped mode")
     FORWARD_CLIENT_AUTH: bool = Field(default=False, description="Forward client auth headers in air-gapped mode")
+    K8S_WEBHOOK_AUTH_TOKEN: Optional[str] = Field(default=None, description="Optional bearer token for K8s admission webhook")
 
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
@@ -191,6 +192,7 @@ class Settings(BaseSettings):
     METRICS_BEARER_TOKEN: Optional[str] = Field(
         default=None, description="Optional Bearer token protecting the /metrics Prometheus endpoint"
     )
+    ANONYMOUS_USAGE_TRACKING: bool = Field(default=True, description="Enable anonymous, opt-out volumetric telemetry")
 
     # FinOps & Chargeback Metering
     ENABLE_FINOPS_METERING: bool = Field(default=True, description="Enable token metering and FinOps telemetry")
@@ -203,6 +205,7 @@ class Settings(BaseSettings):
     _valid_virtual_keys_set: frozenset[str] = frozenset()
     _flattened_policies: Any = {}
     _policies_mtime: float = 0.0
+    _policies_path: str = ""  # Track last-seen path to invalidate mtime cache on path change
 
     model_config = SettingsConfigDict(env_file=(_ENV_FILE_PATH, ".env"), env_file_encoding="utf-8", extra="ignore")
 
@@ -307,15 +310,31 @@ class Settings(BaseSettings):
             else:
                 self._valid_virtual_keys_set = frozenset()
 
-    def reload_policies(self) -> None:
-        """Safely hot-swap the immutable RBAC policy dictionary on file changes."""
+    def reload_policies(self, force: bool = False) -> None:
+        """Safely hot-swap the immutable RBAC policy dictionary on file changes.
+
+        Args:
+            force: If True, bypasses the mtime/path staleness check and always reloads
+                   from disk. Use for explicit reloads (e.g., tests, admin triggers).
+                   The background polling loop uses force=False (default) to skip
+                   unchanged files efficiently.
+        """
         path = self.POLICIES_FILE_PATH
         if not os.path.exists(path):
             return
 
-        current_mtime = os.path.getmtime(path)
-        if current_mtime <= self._policies_mtime:
-            return
+        if not force:
+            current_mtime = os.path.getmtime(path)
+            # Invalidate mtime cache if the file path itself has changed (e.g., new temp file in tests)
+            if path != self._policies_path:
+                self._policies_mtime = 0.0
+                self._policies_path = path
+            if current_mtime < self._policies_mtime:
+                return
+        else:
+            # Force-reload: reset mtime so next polling call also picks up any subsequent changes
+            self._policies_path = path
+            self._policies_mtime = 0.0
 
         if not _config_reload_lock.acquire(blocking=False):
             return
