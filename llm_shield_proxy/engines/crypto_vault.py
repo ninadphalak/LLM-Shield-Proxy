@@ -55,9 +55,15 @@ def get_crypto_dek() -> bytes:
     raise ValueError("Valid 256-bit SHIELD_ENCRYPTION_KEY not found or invalid.")
 
 
+_AESGCM_INSTANCE = None
+
 def get_aesgcm() -> AESGCM:
-    """Returns a cached AESGCM instance."""
-    return AESGCM(get_crypto_dek())
+    global _AESGCM_INSTANCE
+    if _AESGCM_INSTANCE is not None:
+        return _AESGCM_INSTANCE
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    _AESGCM_INSTANCE = AESGCM(get_crypto_dek())
+    return _AESGCM_INSTANCE
 
 
 def encrypt_to_token(raw_pii: str) -> str:

@@ -2,12 +2,7 @@ import asyncio
 import logging
 import time
 from typing import Optional
-
-try:
-    pass
-except ImportError:
-    pass
-
+from cachetools import TTLCache
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.vault import RedisVaultStore, vault_store
@@ -73,7 +68,9 @@ class InMemoryBucket:
 
 class DistributedRateLimiter:
     def __init__(self):
-        self._in_memory_buckets: dict[str, InMemoryBucket] = {}
+        maxsize = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_MAXSIZE", 50_000)
+        ttl = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS", 3600)
+        self._in_memory_buckets: TTLCache[str, InMemoryBucket] = TTLCache(maxsize=maxsize, ttl=ttl)
         self._lua_sha: Optional[str] = None
         self._lock = asyncio.Lock()
 
@@ -120,7 +117,9 @@ class DistributedBlastRadiusLimiter:
     Acts as a fail-safe that halts compromised agents attempting bulk data exfiltration.
     """
     def __init__(self):
-        self._in_memory_buckets: dict[str, InMemoryBucket] = {}
+        maxsize = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_MAXSIZE", 50_000)
+        ttl = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS", 3600)
+        self._in_memory_buckets: TTLCache[str, InMemoryBucket] = TTLCache(maxsize=maxsize, ttl=ttl)
         self._lua_sha: Optional[str] = None
         self._lock = asyncio.Lock()
 

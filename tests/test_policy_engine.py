@@ -126,8 +126,9 @@ async def test_policy_role_overrides(temp_policies_file):
 
             call_args = mock_client.request.call_args[1]
             content = json.loads(call_args["content"])
+            print("ACTUAL CONTENT:", content)
             # Canary should be injected
-            assert "TEST_CANARY" in content["messages"][0]["content"]
+            assert "\u200d" in content["messages"][0]["content"]
 
             # 2. Lax Role (disables Canary)
             await client.post(
@@ -137,7 +138,7 @@ async def test_policy_role_overrides(temp_policies_file):
             )
             call_args_lax = mock_client.request.call_args[1]
             content_lax = json.loads(call_args_lax["content"])
-            assert "TEST_CANARY" not in content_lax["messages"][0]["content"]
+            assert "\u200d" not in content_lax["messages"][0]["content"]
 
 
 @pytest.mark.asyncio

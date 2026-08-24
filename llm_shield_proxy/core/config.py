@@ -58,6 +58,7 @@ class Settings(BaseSettings):
 
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
+    CORS_ALLOWED_ORIGINS: str = Field(default="", description="Comma-separated allowed CORS origins (empty allows same-origin / configured)")
     ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = Field(
         default=False, description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
     )
@@ -67,6 +68,14 @@ class Settings(BaseSettings):
     ENABLE_RATE_LIMITING: bool = Field(default=False, description="Enable distributed Token Bucket rate limiter")
     RATE_LIMIT_RPM: int = Field(default=6000, description="Requests per minute per virtual key")
     RATE_LIMIT_BURST: int = Field(default=200, description="Maximum burst size for rate limiter")
+    RATE_LIMIT_LOCAL_CACHE_MAXSIZE: int = Field(
+        default=50_000,
+        description="Maximum local in-memory fallback tenant buckets cached per process before LRU eviction (used when REDIS_URL is unset)",
+    )
+    RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS: int = Field(
+        default=3600,
+        description="TTL in seconds for local in-memory fallback tenant buckets (used when REDIS_URL is unset)",
+    )
 
     # Resilience & Failure Modes
     SHIELD_FAILURE_MODE: Literal["FAIL_CLOSED", "FAIL_OPEN"] = Field(
@@ -297,35 +306,38 @@ class Settings(BaseSettings):
         if current_mtime <= self._policies_mtime:
             return
 
-        with _config_reload_lock:
-            try:
-                import yaml
+        if not _config_reload_lock.acquire(blocking=False):
+            return
+        try:
+            import yaml
 
-                with open(path, "r", encoding="utf-8") as f:
-                    yaml_data = yaml.safe_load(f)
-                    if not isinstance(yaml_data, dict):
-                        return
+            with open(path, "r", encoding="utf-8") as f:
+                yaml_data = yaml.safe_load(f)
+                if not isinstance(yaml_data, dict):
+                    return
 
-                    roles = yaml_data.get("roles", {})
-                    virtual_keys = yaml_data.get("virtual_keys", {})
+                roles = yaml_data.get("roles", {})
+                virtual_keys = yaml_data.get("virtual_keys", {})
 
-                    new_policies = {}
+                new_policies = {}
 
-                    # Store default role if exists
-                    default_role_name = yaml_data.get("default_role")
-                    if default_role_name and default_role_name in roles:
-                        new_policies["default_role"] = roles[default_role_name]
+                # Store default role if exists
+                default_role_name = yaml_data.get("default_role")
+                if default_role_name and default_role_name in roles:
+                    new_policies["default_role"] = roles[default_role_name]
 
-                    # Flatten virtual keys
-                    for vk, role_name in virtual_keys.items():
-                        if role_name in roles:
-                            new_policies[vk] = roles[role_name]
+                # Flatten virtual keys
+                for vk, role_name in virtual_keys.items():
+                    if role_name in roles:
+                        new_policies[vk] = roles[role_name]
 
-                    self._flattened_policies = types.MappingProxyType(new_policies)
-                    self._policies_mtime = current_mtime
-                    logger.info("Successfully hot-reloaded policies.yaml")
-            except Exception as exc:
-                logger.error("Failed loading policies YAML configuration: %s", exc)
+                self._flattened_policies = types.MappingProxyType(new_policies)
+                self._policies_mtime = current_mtime
+                logger.info("Successfully hot-reloaded policies.yaml")
+        except Exception as exc:
+            logger.error("Failed loading policies YAML configuration: %s", exc)
+        finally:
+            _config_reload_lock.release()
 
 request_policy_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar("request_policy_ctx", default={})
 

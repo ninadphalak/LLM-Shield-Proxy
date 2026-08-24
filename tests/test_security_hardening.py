@@ -51,7 +51,8 @@ def test_vault_tenant_isolation(mock_send, mock_request):
         assert res_a.status_code == 200
 
         # Verify Tenant A's vault has the email mapped
-        hashed_key_a = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-A", b"llm_shield_salt", 600000).hex()[:12]
+        from llm_shield_proxy.api.main import get_virtual_key_id
+        hashed_key_a = get_virtual_key_id("sk-proxy-tenant-A")
         vault_a = vault_store.get_vault("shared_sess_123", hashed_key_a)
         assert "test@example.com" in vault_a.original_to_token
         token_id = vault_a.original_to_token["test@example.com"]
@@ -63,7 +64,7 @@ def test_vault_tenant_isolation(mock_send, mock_request):
         assert res_b.status_code == 200
 
         # Verify Tenant B gets a separate vault
-        hashed_key_b = hashlib.pbkdf2_hmac("sha256", b"sk-proxy-tenant-B", b"llm_shield_salt", 600000).hex()[:12]
+        hashed_key_b = get_virtual_key_id("sk-proxy-tenant-B")
         vault_b = vault_store.get_vault("shared_sess_123", hashed_key_b)
 
         # Verify Tenant B's vault is isolated and does not contain the email

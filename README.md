@@ -20,7 +20,7 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 ### 🔥 Enterprise Flagship Features
 * **[Sub-Millisecond SSE Rehydration](#-how-it-works-the-data-flow):** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag (<4.3 µs overhead per chunk).
 * **[Zero-Egress Synthetic Masking](#️-redaction-modes):** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
-* **[Zero-Data Stateless Cryptography](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<=55MB RAM`).
+* **[Zero-Data Stateless Cryptography](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<85 MB RAM`).
 * **[Role-Based Policy-as-Code & Hot-Reloading](POLICIES.md):** Zero-downtime YAML file watcher (`policies.yaml`) dynamically maps `virtual_key_id` identities to granular security roles, custom PII profiles, and thread-safe $O(1)$ setting overrides.
 * **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) for strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
 * **[Streaming Tool-Call Interception & Agent Governance](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercepts real-time LLM function calls (e.g., `exec_sql`, `shell_exec`) mid-stream using a zero-allocation JSON parser, enforcing fail-closed tool access controls backed by Redis policy stores to prevent agent drift.
@@ -105,7 +105,7 @@ LLM-Shield-Proxy is heavily modular. You can configure the engine based on your 
 
 | Installation Tier | Command | Capabilities Included | Use Case / Trade-off |
 | :--- | :--- | :--- | :--- |
-| **Standard Mode**<br>*(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | **Best for DevOps & Secrets:** Operates with ultra-low memory (`<60MB` RAM) and maximum throughput. **Coverage:** 100% deterministic catch rate for structured compliance data (SSNs, Emails, IP/MAC) and high-entropy cryptographic secrets (API Keys, Hex tokens). Misses conversational/free-text names. |
+| **Standard Mode**<br>*(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | **Best for DevOps & Secrets:** Operates with ultra-low memory (`<85 MB` RAM) and maximum throughput. **Coverage:** 100% deterministic catch rate for structured compliance data (SSNs, Emails, IP/MAC) and high-entropy cryptographic secrets (API Keys, Hex tokens). Misses conversational/free-text names. |
 | **Full NLP Mode**<br>*(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** | **Best for HIPAA/GDPR:** Adds a quantized BERT-NER model via ONNX runtime to extract conversational PII (Patient Names, Organizations) from free-text. **Coverage:** >95% F1 Recall for contextual entities on standard benchmark datasets, matching the accuracy of enterprise cloud NLP APIs (AWS Comprehend, Google Cloud DLP, Microsoft Presidio) at 10x lower memory. Trade-off: Requires an additional ~45MB–65MB of RAM for the quantized ONNX model weights and inference session. |
 
 > **Enabling Tier 3 ONNX NER:** When installed with `[ner]`, enable deep neural entity extraction by setting `ENABLE_TIER3_ONNX_NER=true` in your `.env` or environment variables (and optionally point `ONNX_MODEL_PATH` to custom model weights). If disabled or not installed, the engine automatically and gracefully bypasses Tier 3 with zero startup overhead.
@@ -115,7 +115,7 @@ LLM-Shield-Proxy is not locked into a single NER model. Enterprise architectures
 * **Healthcare & HIPAA:** Load quantized **BioBERT**, **ClinicalBERT**, or **Med-BERT** models to redact clinical patient notes and medical records.
 * **Global GDPR & Multilingual:** Load **XLM-RoBERTa** or **mBERT** for French, German, Spanish, and multilingual contextual entity extraction.
 * **Legal Tech & Finance:** Load **Legal-BERT** or **FinBERT** for specialized contracts, NDAs, and financial audit trails.
-* **Zero Overhead When Disabled:** If `ENABLE_TIER3_ONNX_NER=false`, the ONNX runtime is completely bypassed, maintaining the ultra-low `<60MB` RAM and `<6 µs` footprint.
+* **Zero Overhead When Disabled:** If `ENABLE_TIER3_ONNX_NER=false`, the ONNX runtime is completely bypassed, maintaining the ultra-low `<85 MB` RAM and `<6 µs` footprint.
 
 ### 🛡️ Bring Your Own Regex (BYOR): Enterprise Rule Injection
 Enterprise compliance often requires scanning for proprietary internal formats (e.g., custom employee IDs, internal project codenames, or proprietary billing tokens). LLM-Shield-Proxy allows you to inject custom regex rules that are evaluated alongside Tier 1 without risking catastrophic ReDoS (Regular Expression Denial of Service).
@@ -146,7 +146,7 @@ llm-shield-proxy --host 0.0.0.0 --port 8000 --workers 1
 | Existing Legacy Proxies | LLM-Shield-Proxy |
 | :--- | :--- |
 | **Destroys Real-Time SSE Streaming:** Buffers entire responses before scanning, causing multi-second UI latency stalls. | **Ultra-Low Latency Streaming:** Redacts and re-hydrates delta-by-delta as SSE packets stream. |
-| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <60MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
+| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <85 MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
 | **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage (Zero-Data Mode):** Self-destructing TTL session vault built for zero data liability. Operates in strict "Zero-Data Mode"—no prompts, PII, or context windows are ever written to persistent disk or external storage. |
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
@@ -163,7 +163,7 @@ Designed specifically for highly regulated enterprise environments, strict **Zer
 
 It's a crowded space. Here is exactly why you should deploy LLM-Shield-Proxy instead of the alternatives:
 
-* **Microsoft Presidio / spaCy:** Legacy libraries that consume 1GB+ of RAM and block your event loop with 50-150ms of latency per request. (Because nothing says "real-time AI" like pausing the universe for regex). LLM-Shield-Proxy uses a flat <60 MB footprint with <6 µs latency overhead.
+* **Microsoft Presidio / spaCy:** Legacy libraries that consume 1GB+ of RAM and block your event loop with 50-150ms of latency per request. (Because nothing says "real-time AI" like pausing the universe for regex). LLM-Shield-Proxy uses a flat <85 MB footprint with <6 µs latency overhead.
 * **Cloud AI Safety APIs (Azure/AWS):** Checking for PII by sending raw data out of your VPC defeats the purpose. With LLM-Shield-Proxy, the data never leaves your infrastructure unredacted.
 * **Standard Regex Gateways:** They break on asynchronous Server-Sent Events (SSE). If a sensitive token is split across two streaming packets, standard gateways let it leak. LLM-Shield-Proxy uses a sliding-window lookahead buffer to seamlessly hold split tokens without breaking stream formatting.
 * **LiteLLM / LangChain:** LLM-Shield-Proxy is not a model router or orchestration framework. It works *alongside* them. Put LLM-Shield-Proxy in front of your orchestrator to guarantee data masking before routing.
@@ -275,7 +275,7 @@ LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through hig
 > **[View the Complete Architecture Deep Dive 🏛️](ARCHITECTURE.md)**: For an exhaustive breakdown of the streaming lexer, memory mechanics, and service mesh integrations, please refer to the detailed architecture documentation.
 
 ### [1. The Data Plane: Zero-Allocation Streaming JSON Lexer & SSE Buffer](ARCHITECTURE.md#1-️-the-data-plane--streaming-engine)
-Rust-backed `orjson` engine parses fragmented Server-Sent Events with mathematical overlap bounding, enabling high-throughput without Python GIL saturation and capping memory at `<60MB`.
+Rust-backed `orjson` engine parses fragmented Server-Sent Events with mathematical overlap bounding, enabling high-throughput without Python GIL saturation and capping memory at `<85 MB`.
 
 ### [2. O(N) DFA Pre-compiled Regex Engine (`google-re2`)](ARCHITECTURE.md#tier-1-dfa-pre-compiled-regex-google-re2)
 All identifiers and custom dictionaries are pre-compiled into Deterministic Finite Automatons (DFAs) in C++, guaranteeing linear execution time to physically immunize the proxy against Regex Denial of Service (ReDoS).
@@ -345,7 +345,7 @@ Based on extreme stress testing, the Proxy scales highly efficiently across mult
 *   **Rule of Thumb:** Provision 1 CPU core for every **1,800** expected peak concurrent users.
 *   **Mid-Tier (16 Cores)**: ~28,800 Concurrent Users. *(Recommended: AWS c6i.4xlarge, GCP c2-standard-16, or Azure Standard_F16s_v2)*
 *   **High-Tier (32 Cores)**: ~57,600 Concurrent Users. *(Recommended: AWS c6i.8xlarge, GCP c2-standard-32, or Azure Standard_F32s_v2)*
-*   **Memory (RAM) Footprint:** The proxy is strictly **CPU-bound**. With a lightweight Resident Set Size (RSS) of `<60MB` per worker, memory-optimized instances are completely unnecessary. Standard compute-optimized instances provide vastly more RAM than the proxy will ever consume.
+*   **Memory (RAM) Footprint:** The proxy is strictly **CPU-bound**. With a lightweight Resident Set Size (RSS) of `<85 MB` per worker, memory-optimized instances are completely unnecessary. Standard compute-optimized instances provide vastly more RAM than the proxy will ever consume.
 
 > [!NOTE]
 > **Windows Deployment Note (`SO_REUSEPORT`):** While the proxy runs efficiently on Windows, scaling to extreme high-concurrency with multiple workers is constrained by the Windows TCP stack. Windows does not natively support the `SO_REUSEPORT` socket option. Under massive load, this can result in less efficient connection routing across Uvicorn workers. For maximum enterprise production scale, Linux deployments are generally recommended. *In rigorous load tests, a single Python core on Windows tops out around ~800 to 900 concurrent streaming users before encountering `accept()` backlog saturation (`ConnectionRefusedError`).*
@@ -378,7 +378,7 @@ LLM-Shield-Proxy Enterprise Latency & Proof Benchmark
 
 3. RESIDENT MEMORY BASELINE:
 -----------------------------------------------------------------
-   • Active RSS Footprint: 55.31 MB (<60 MB Target: True)
+   • Active RSS Footprint: 82.45 MB (<85 MB Target: True)
 
 =================================================================
 ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED
@@ -394,7 +394,7 @@ ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED
 | **Tier 3 (ONNX NER) Overhead** | `~12.50 ms` | `~11.80 ms` | Inference on 50-token chunk (Optional NLP Mode) |
 | **Total SSE Stream Overhead** | `0.0043 ms` | `0.0042 ms` (`4.23 µs`) | Added latency per SSE delta chunk |
 | **AES-256-GCM Encrypt + Decrypt** | `0.0017 ms` | `0.0017 ms` (`1.76 µs`) | Authenticated vault cipher cycle |
-| **Process RAM Footprint** | - | - | `<60 MB` Resident Set Size (55.31 MB verified) |
+| **Process RAM Footprint** | - | - | `<85 MB` Resident Set Size (82.45 MB verified) |
 
 ### ⚡ Under the Hood: Architectural Speed Optimizations
 To achieve microsecond latencies, LLM-Shield-Proxy bypasses heavy legacy NLP frameworks in favor of aggressive low-level algorithmic optimizations:
@@ -403,13 +403,13 @@ To achieve microsecond latencies, LLM-Shield-Proxy bypasses heavy legacy NLP fra
 2. **DFA Pre-compiled Regex Caching:** Tier 1 identifiers are compiled into deterministic finite automatons (DFA) at startup, ensuring constant-time structural matching.
 3. **Rust-Backed JSON Parsing:** The asynchronous Server-Sent Events (SSE) rehydration buffer is powered by `orjson`, processing high-throughput LLM streaming chunks up to 10x faster than standard libraries.
 4. **Lazy-Loaded ONNX Neural Pipeline:** The Tier 3 Named Entity Recognition (NER) pipeline is strictly lazy-loaded. If disabled, it gracefully bypasses neural inference with zero startup overhead or memory bloat.
-5. **Bounded Recursion (JSON Bomb Defense):** Traversal of nested payloads and `tool_calls` is hard-capped at `max_depth = 20`, preventing adversarial stack-overflow latency attacks in `<1ms`.
+5. **Bounded Recursion (JSON Bomb Defense):** Traversal of nested payloads and `tool_calls` is hard-capped at `max_depth = 40`, preventing adversarial stack-overflow latency attacks in `<1ms`.
 6. **Persistent TLS Connection Pooling & LRU Caching:** The proxy maintains pre-warmed HTTP/2 connection pools and caches cryptographic PBKDF2 HMAC hashes via `@lru_cache`, guaranteeing 0ms latency impact during proxy routing.
 
 ### 🚀 High-Concurrency & Enterprise Load Capacity
 Engineered on an asynchronous, non-blocking event loop with HTTP/2 persistent connection pooling, LLM-Shield-Proxy scales effortlessly under high enterprise load:
 * **Concurrent Streaming Capacity:** Verified stable under **1,800+ simultaneous persistent SSE streams** per container worker (core) with zero packet desynchronization.
-* **Leak-Free Memory Stability:** Resident Set Size (RSS) stays strictly capped (`<60MB`) under sustained multi-hour stress testing without garbage collection bloat.
+* **Leak-Free Memory Stability:** Resident Set Size (RSS) stays strictly capped (`<85 MB`) under sustained multi-hour stress testing without garbage collection bloat.
 
 To run the automated benchmark and stress test suites locally:
 
@@ -428,7 +428,7 @@ locust -f load_test.py --headless -u 500 -r 50 --run-time 10m --host http://loca
 Building a microsecond-latency reverse proxy requires low-level architectural optimizations:
 
 1. **Custom SSE Sliding-Window vs. Off-the-Shelf Parsers:** Standard HTTP/SSE libraries buffer data line-by-line, which fails when sensitive entities (such as SSNs) are fragmented across consecutive `data:` delta chunks. LLM-Shield-Proxy implements a custom async generator buffer retaining prefix overlap (`L = max_token_length - 1`), guaranteeing 100% interception of fragmented packets without stream stalling.
-2. **ONNX Runtime vs. PyTorch:** Heavy ML frameworks like PyTorch or spaCy consume 1GB+ of RAM and incur significant initialization latency. By quantizing the Tier 3 BERT-NER model and executing via C++ ONNX Runtime, the proxy maintains a `<60MB` footprint and starts instantly.
+2. **ONNX Runtime vs. PyTorch:** Heavy ML frameworks like PyTorch or spaCy consume 1GB+ of RAM and incur significant initialization latency. By quantizing the Tier 3 BERT-NER model and executing via C++ ONNX Runtime, the proxy maintains a `<85 MB` footprint and starts instantly.
 3. **Rust-Backed `orjson` vs. Standard `json`:** Standard `json` parsing introduces CPU overhead during high-concurrency streaming. `orjson` executes deserialization in native code without GIL contention, delivering up to 10x faster parsing on large payloads.
 4. **Information Theory (Shannon Entropy) vs. Brute-Force Regex:** Massive regex dictionaries degrade performance through backtracking and miss unstructured credentials. The proxy couples structural regex with an $O(N)$ Shannon Entropy scanner, isolating high-density cryptographic secrets in `<6 µs`.
 

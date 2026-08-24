@@ -11,19 +11,24 @@ from typing import Optional
 
 
 def get_identity(
-    authorization_header: Optional[str], x_virtual_key_header: Optional[str], client_ip: Optional[str]
+    virtual_key_id: Optional[str] = None,
+    client_ip: Optional[str] = None,
+    authorization_header: Optional[str] = None,
+    x_virtual_key_header: Optional[str] = None,
 ) -> str:
-    """Resolves identity in order of precedence: Authorization -> X-Virtual-Key -> Client_IP."""
-    if authorization_header:
-        # We might have "Bearer " prefix, strip it if necessary or just use the token
-        auth = authorization_header.replace("Bearer ", "").strip()
-        if auth:
-            return auth
+    """Resolves identity safely without leaking raw secret credentials into HMAC oracles."""
+    if virtual_key_id and virtual_key_id not in ("BYOK", "anonymous"):
+        return virtual_key_id
 
     if x_virtual_key_header:
         vk = x_virtual_key_header.strip()
         if vk:
             return vk
+
+    if authorization_header:
+        auth = authorization_header.replace("Bearer ", "").strip()
+        if auth:
+            return hashlib.sha256(auth.encode("utf-8")).hexdigest()[:12]
 
     if client_ip:
         ip = client_ip.strip()
@@ -60,13 +65,19 @@ def encode_steganography(hex_fingerprint: str) -> str:
 
 def generate_watermark_text(
     secret: str,
-    authorization_header: Optional[str],
-    x_virtual_key_header: Optional[str],
-    client_ip: Optional[str],
-    session_id: str,
+    authorization_header: Optional[str] = None,
+    x_virtual_key_header: Optional[str] = None,
+    client_ip: Optional[str] = None,
+    session_id: str = "unknown_session",
+    virtual_key_id: Optional[str] = None,
 ) -> str:
     """End-to-end generation of the invisible watermark string."""
-    identity = get_identity(authorization_header, x_virtual_key_header, client_ip)
+    identity = get_identity(
+        virtual_key_id=virtual_key_id,
+        client_ip=client_ip,
+        authorization_header=authorization_header,
+        x_virtual_key_header=x_virtual_key_header,
+    )
     epoch_minute = int(time.time() / 60)
     fingerprint = generate_fingerprint(secret, identity, session_id, epoch_minute)
     return encode_steganography(fingerprint)

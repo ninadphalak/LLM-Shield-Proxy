@@ -22,6 +22,10 @@ class BaseGRCTransport(abc.ABC):
     async def dispatch(self, oscal_payload: dict):
         pass
 
+    async def aclose(self) -> None:
+        """Closes any underlying network connections or open resources."""
+        pass
+
 
 class SidecarFileTransport(BaseGRCTransport):
     """
@@ -71,3 +75,8 @@ class AsyncWebhookTransport(BaseGRCTransport):
             logger.warning(f"WORM warning: Webhook transport failed sending to {self.webhook_url}: {e}")
         except Exception as e:
             logger.error(f"Unexpected error in Webhook transport: {e}")
+
+    async def aclose(self) -> None:
+        """Gracefully close the underlying HTTP client connection pool."""
+        if self.client and not self.client.is_closed:
+            await self.client.aclose()

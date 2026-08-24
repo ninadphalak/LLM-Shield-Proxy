@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import hashlib
 import logging
 import time
@@ -6,23 +7,12 @@ from typing import Any, Dict, Optional
 
 import orjson
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from .transport import BaseGRCTransport
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenTelemetry configuration
-resource = Resource(attributes={SERVICE_NAME: "llm-shield-proxy"})
-provider = TracerProvider(resource=resource)
-# Use gRPC Exporter by default for lower overhead
-processor = BatchSpanProcessor(OTLPSpanExporter())
-provider.add_span_processor(processor)
-trace.set_tracer_provider(provider)
-
+# Tracer retrieves the centralized TracerProvider configured in observability.tracing
 tracer = trace.get_tracer("llm_shield.compliance")
 
 
@@ -31,9 +21,9 @@ class MerkleTreeWORM:
     Append-only Merkle Tree for Cryptographic Decision Traceability.
     """
 
-    def __init__(self):
+    def __init__(self, max_records: int = 10_000):
         self.root_hash = hashlib.sha256(b"init").hexdigest()
-        self.records = []
+        self.records: collections.deque = collections.deque(maxlen=max_records)
 
     def append_record(self, record: dict) -> str:
         # Deterministic serialization to prevent log/schema injection

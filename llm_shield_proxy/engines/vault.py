@@ -96,7 +96,7 @@ class Vault:
 
             if self.synthetic:
                 seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
-                Faker.seed(seed)
+                fake.seed_instance(seed)
                 if "PERSON" in entity_type or "NAME" in entity_type:
                     token = fake.first_name()
                 elif "EMAIL" in entity_type:
@@ -370,7 +370,10 @@ class RedisVaultStore:
                 import asyncio
 
                 loop = asyncio.get_running_loop()
-                loop.run_in_executor(None, self.sync_client.setex, vault_key, self.ttl, json.dumps(payload))
+                asyncio.run_coroutine_threadsafe(
+                    self.async_client.setex(vault_key, self.ttl, json.dumps(payload)),
+                    loop,
+                )
             except RuntimeError:
                 # Fallback to sync if not running in an async event loop
                 self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
