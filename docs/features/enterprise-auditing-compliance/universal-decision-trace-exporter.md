@@ -50,5 +50,10 @@ A: Yes! By pointing the `OTEL_EXPORTER_OTLP_ENDPOINT` to your Datadog Agent or N
 A: No. OTel Traces are designed for developer observability, debugging, and performance monitoring (they are typically sampled and have short retention). WORM-Compliant logs are for strict legal compliance and are never sampled. The proxy runs both simultaneously.
 
 
+## Plainspeak
+This feature translates the proxy's complex security decisions into a standard format that corporate monitoring tools can easily understand.
+
+Instead of hiding its security actions in messy text files, this feature packages every decision (like why it blocked a specific word) into highly structured, government-standard data packets. It then broadcasts these packets so that your company's existing dashboards and monitoring screens can display the security data beautifully and clearly.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

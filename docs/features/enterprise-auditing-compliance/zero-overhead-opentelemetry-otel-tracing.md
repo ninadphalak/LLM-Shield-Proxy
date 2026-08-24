@@ -50,5 +50,10 @@ A: No. Because the `BatchSpanProcessor` offloads the HTTP/gRPC export to a separ
 A: No. The proxy supports direct OTLP/HTTP and OTLP/gRPC exports. While a sidecar (like the OpenTelemetry Collector) is recommended for production robustness, you can point the proxy directly to Datadog, Honeycomb, or New Relic ingestion endpoints.
 
 
+## Plainspeak
+This feature acts like an ultra-lightweight GPS tracker attached to every request, without slowing down the vehicle.
+
+To monitor the health of the system, we need to track exactly how many milliseconds a request spends in each part of the proxy. However, the act of tracking can sometimes accidentally slow down the system! This feature solves that by assigning the heavy lifting of tracking to a completely separate background worker, ensuring the main traffic flows at maximum speed without any tracking delays.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_tracing.py`](../../../tests/test_tracing.py).

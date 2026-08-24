@@ -56,5 +56,10 @@ A: The Rust-backed zero-allocation lexer (`orjson`) is highly resilient. If it e
 A: Yes! The proxy's Multi-Provider Translator automatically normalizes Anthropic's complex `content_block_delta` SSE chunks into the standard sliding-window structure, de-masks them, and streams them out.
 
 
+## Plainspeak
+This feature ensures the proxy can redact sensitive information without causing "choppy" or delayed text when you're watching an AI type out a response in real-time.
+
+When an AI streams text, it sends words in tiny, fragmented chunks (like sending "S-O-C-I-A-L" one letter at a time). Standard security filters get confused by this because they can't see the whole word. This feature creates a super-fast "waiting room" that briefly holds the letters together just long enough to read the full word, redacting it if necessary, before instantly passing it along to your screen.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](../../../tests/test_streaming.py).

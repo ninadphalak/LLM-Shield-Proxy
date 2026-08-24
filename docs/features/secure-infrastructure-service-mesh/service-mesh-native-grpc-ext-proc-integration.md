@@ -45,5 +45,10 @@ View diagram on GitHub mobile 📱 -->
 A: Absolutely. The default mode is the standalone HTTP FastAPI server. The gRPC `ext_proc` integration is an advanced feature explicitly for enterprise service mesh architectures.
 
 
+## Plainspeak
+This feature allows the proxy to operate like a high-speed internal organ of the network, rather than an external checkpoint.
+
+Normally, sending data out to a security proxy and back wastes precious milliseconds. This feature allows the proxy to "plug in" directly to the deep plumbing of an advanced network (a Service Mesh). The data flows straight through it natively without having to leave the fast lane, making the security checks almost entirely invisible to the network speed.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_grpc_ext_proc.py`](../../../tests/test_grpc_ext_proc.py).

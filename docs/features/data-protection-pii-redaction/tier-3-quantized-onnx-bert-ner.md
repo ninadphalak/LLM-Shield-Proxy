@@ -49,5 +49,10 @@ A: Yes! This is the "Bring Your Own Model" (BYOM) feature. You can export any Hu
 A: It adds roughly 12ms of latency to chunks containing entities. While slightly slower than the microsecond Tier 1/2 engines, 12ms is entirely imperceptible to humans during a live Server-Sent Events (SSE) stream, maintaining the real-time UX.
 
 
+## Plainspeak
+This feature is a highly efficient artificial intelligence reader. Instead of just looking for strict patterns like 9-digit numbers, it actually reads the surrounding sentence to understand the context. 
+
+For example, it can tell the difference between "Call Mr. Ford" (a person's name) and "I drive a Ford" (a car brand). To ensure it runs lightning-fast without slowing down your system, the AI model has been stripped down to its essential math (quantized) and runs directly in the computer's memory.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

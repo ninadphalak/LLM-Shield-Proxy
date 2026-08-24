@@ -51,5 +51,10 @@ A: The proxy actively refreshes the TTL of the session vault on every chunk rece
 A: The values are stored in Redis, but access is gated by the proxy's VPC perimeter. For extreme compliance (e.g., DoD workloads), you can enable at-rest encryption within your Redis deployment.
 
 
+## Plainspeak
+This feature provides a highly secure, temporary storage locker for sensitive information. 
+
+When a user shares a sensitive detail (like their medical condition), this vault locks it away and replaces it with a temporary placeholder token (like `TOKEN_123`). The AI only sees the placeholder token. The brilliant part is that the locker has an automatic self-destruct timer (TTL). Once the conversation is over, the vault automatically deletes the sensitive data forever, guaranteeing it isn't left sitting on a server indefinitely.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_vault.py`](../../../tests/test_vault.py).

@@ -47,5 +47,10 @@ A: The lookup takes microseconds. The `policies.yaml` file is flattened into an 
 A: No. The proxy's redaction scopes apply to the data *exiting* your VPC. The user's prompt is completely subjugated to the policy assigned to their virtual key, regardless of what instructions they pass to the LLM.
 
 
+## Plainspeak
+This feature ensures that different departments have exactly the right level of data security tailored to their needs, rather than using a one-size-fits-all approach.
+
+For example, the HR department's AI might be allowed to see employee names, but the Marketing department's AI should definitely not. This feature creates specific "ID badges" (profiles) for different teams. When a team uses the system, it instantly checks their badge and strictly applies their custom rules, defaulting to blocking everything if it's ever unsure.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](../../../tests/test_policy_scopes.py).

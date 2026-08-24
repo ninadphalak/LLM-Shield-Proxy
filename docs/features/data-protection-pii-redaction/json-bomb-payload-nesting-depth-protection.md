@@ -52,5 +52,10 @@ A: Depth protection handles recursion. For massive strings, the proxy relies on 
 A: After. The payload is only parsed if the client's `Authorization` header is successfully resolved to a valid `virtual_key_id`. This prevents unauthenticated attackers from expending CPU cycles on the parser.
 
 
+## Plainspeak
+This feature acts as a safety limit against overwhelming the system with overly complex data.
+
+Hackers sometimes try to crash servers by sending data that has layers inside layers inside layers (like a billion Russian nesting dolls). If the computer tries to open them all, it runs out of memory and crashes. This feature strictly enforces a limit on how many layers deep the data can go, instantly blocking any "data bombs" before they cause harm.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

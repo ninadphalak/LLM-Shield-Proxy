@@ -46,5 +46,10 @@ View diagram on GitHub mobile 📱 -->
 A: Currently, HashiCorp Vault is the natively supported provider for advanced dynamic leases and PKI (mTLS). However, basic secrets can be injected into the proxy's environment via standard Kubernetes Secrets integrations (like the External Secrets Operator) which bridge AWS/Azure into the pod.
 
 
+## Plainspeak
+This feature guarantees that the proxy never keeps passwords lying around where a hacker could find them.
+
+Normally, apps read their passwords from a simple file saved on the hard drive. If a hacker breaches the drive, they get the passwords. This feature forces the proxy to fetch passwords directly from an ultra-secure central vault (like HashiCorp Vault) directly into its active memory. The passwords are never saved to the hard drive, meaning there's nothing for a hacker to steal if they break in.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](../../../tests/test_vault_mtls.py).

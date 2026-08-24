@@ -47,5 +47,10 @@ A: Yes. Set `ENABLE_SYNTHETIC_SWAPPING=false` in your `.env`. The proxy will ins
 A: No. The proxy caches the generated synthetic entities in the active session's memory vault, meaning the `Faker` library is only invoked once per unique entity, keeping latency near zero.
 
 
+## Plainspeak
+This feature creates realistic fake data to replace sensitive information. 
+
+If you just replace a real name with "[CENSORED]", the AI reading it might get confused because the sentence structure is suddenly unnatural. Instead, this feature automatically swaps out a real name for a fake name (like replacing "John Doe" with "Alex Smith"), or a real credit card with a mathematically valid fake credit card. This keeps the AI completely oblivious to the fact that the data was redacted, allowing it to generate much better responses.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

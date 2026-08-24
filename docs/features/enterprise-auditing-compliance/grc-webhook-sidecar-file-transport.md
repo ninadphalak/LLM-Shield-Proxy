@@ -52,5 +52,10 @@ A: In highly secure, air-gapped environments (like FedRAMP High), pods are often
 A: Currently, the architecture supports a single primary transport mode for GRC artifacts to prevent redundant processing, though standard `stdout` JSON logs are always emitted concurrently.
 
 
+## Plainspeak
+This feature acts as an automated courier that delivers compliance reports directly to the platforms that manage your company's security audits.
+
+When the proxy makes security decisions, those logs are useless if they just sit on a server. This feature automatically bundles up the audit logs and instantly transmits them (via webhooks or sidecar files) straight into external audit software (like Vanta or Drata). This means your company's security score updates in real-time, completely automatically.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

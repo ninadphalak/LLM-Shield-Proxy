@@ -48,5 +48,10 @@ A: The proxy natively supports both! The `X-Request-ID` is used for application-
 A: Yes. It is appended as a custom header on the upstream HTTP/2 connection. While OpenAI doesn't natively expose this in their standard dashboards, it provides critical proof during enterprise support tickets when correlating proxy traffic with upstream provider logs.
 
 
+## Plainspeak
+This feature acts as a tracking number system for your data.
+
+When a user sends a message, it travels through a maze of different servers and programs. If something goes wrong, it's impossible to figure out where the error happened unless you can trace the message's exact path. This feature attaches a unique tracking ID to every single request. No matter where the data goes, IT engineers can use that tracking ID to find out exactly what happened to it.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

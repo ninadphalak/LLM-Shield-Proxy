@@ -50,5 +50,10 @@ A: Yes. Because the proxy integrates the [Multi-Provider Translators](./multi-pr
 A: You can force a failover by intentionally setting `UPSTREAM_BASE_URL` to a blackholed or invalid IP address (like `https://192.0.2.1`). The proxy will timeout on the primary and successfully route to the fallback.
 
 
+## Plainspeak
+This feature acts as an intelligent traffic cop for your AI requests.
+
+When an AI provider like OpenAI goes down, normally your users just get an error screen. With this feature, the system instantly notices the outage and automatically detours the traffic to a working backup provider (like Anthropic) in the blink of an eye. The user never even notices there was a problem.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

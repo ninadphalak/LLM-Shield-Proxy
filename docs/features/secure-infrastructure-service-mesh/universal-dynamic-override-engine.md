@@ -40,5 +40,10 @@ View diagram on GitHub mobile 📱 -->
 A: No! The engine only allows overrides for explicitly whitelisted behaviors (like Masking Mode or Fallback URLs). Rate limits, API keys, and security scopes are tightly locked to the `policies.yaml` RBAC engine and cannot be overridden by client headers.
 
 
+## Plainspeak
+This feature gives you the ultimate flexibility to change the proxy's behavior on the fly, for specific users, without rewriting the main code.
+
+Normally, the rules of a proxy (like "always block Social Security Numbers") apply equally to everyone. This engine allows a specific user or app to send a special instruction (an "override") that says, "For this one specific question, use a different rule." It applies this temporary override seamlessly without messing up the rules for anyone else using the system at the same time.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).

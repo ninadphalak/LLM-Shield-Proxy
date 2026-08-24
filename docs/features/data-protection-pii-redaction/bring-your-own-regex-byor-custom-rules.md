@@ -56,5 +56,10 @@ A: Currently, regex compilation is performed at the FastAPI `lifespan` event for
 A: Custom BYOR entities are currently treated as structural strings. If Synthetic Masking is enabled, custom entities will typically be masked using an anonymized hash or generic placeholder unless a specific Faker provider is mapped to the custom rule name.
 
 
+## Plainspeak
+This feature allows you to teach the system how to recognize your company's own unique sensitive data.
+
+Out of the box, the system knows what a credit card or email looks like. But what if your company uses a special internal ID format (like "EMP-XYZ-123")? This feature lets you add those custom rules in a simple configuration file. The proxy will then seamlessly learn to redact your custom IDs just as fast as it redacts standard credit card numbers.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).

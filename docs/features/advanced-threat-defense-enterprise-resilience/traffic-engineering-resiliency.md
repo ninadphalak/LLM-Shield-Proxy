@@ -50,5 +50,10 @@ A: Yes! Using `policies.yaml`, you can assign `rate_limit_rpm: 10000` to a `role
 A: No. The proxy fails *open* for rate limiting. If the Redis cluster is unreachable, the proxy logs a severe warning but allows the traffic to flow through, prioritizing availability over strict rate enforcement (unless configured to fail-closed via security policies).
 
 
+## Plainspeak
+This feature acts as a smart speed limit for incoming requests to prevent your infrastructure from being overwhelmed.
+
+If a massive spike of thousands of users suddenly tries to use the AI all at the same time, it could crash the entire system. This feature uses a specialized "token bucket" system to enforce a strict speed limit (like allowing a maximum of 6000 requests per minute). Anyone who exceeds this limit is gently told to slow down, ensuring the system stays online for everyone else.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

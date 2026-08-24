@@ -49,5 +49,10 @@ A: No. The proxy acts as a Prometheus exporter. You configure your existing Prom
 A: Yes! The proxy exposes a specific metric `shield_proxy_tokens_saved_total` which calculates the delta between the length of the original bracketed structural tags and the length of the highly-optimized synthetic masked entities, allowing you to calculate the exact ROI (Return on Investment) of the proxy.
 
 
+## Plainspeak
+This feature is a highly detailed billing meter that helps companies figure out exactly which team is spending money on AI.
+
+Instead of just getting one massive bill from OpenAI at the end of the month, this feature tracks every single chat message and tags it with the specific user or department who sent it. It then sends this usage data to a dashboard, so the finance team can accurately charge each department for the exact amount of AI computing power they used.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](../../../tests/test_finops_meter.py).

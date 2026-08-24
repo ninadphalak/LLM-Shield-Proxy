@@ -50,5 +50,10 @@ A: Possibly, depending on how aggressive your client's timeout settings are. If 
 A: No. The proxy executes retries *first*. Only if the `MAX_RETRIES` limit is entirely exhausted will the proxy escalate the failure to the Provider Failover Routing engine to attempt the secondary mirror.
 
 
+## Plainspeak
+This feature teaches the system how to be patient and polite when the internet is struggling.
+
+Sometimes a server gets overwhelmed and drops a connection. Instead of immediately hammering the server with a million retry requests (which just makes the crash worse), this feature forces the proxy to wait a little bit, then try again. If it fails again, it waits a little bit *longer*. This elegant, increasing delay gives the broken server time to recover.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](../../../tests/test_antifragile_dispatcher.py).

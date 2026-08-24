@@ -44,5 +44,10 @@ A: No. The firewall replaces PII with Format-Preserving Synthetic Masking (e.g.,
 A: This is the mechanism for stateless crypto. By injecting the AES-256-GCM encrypted original value into a sibling field, the proxy can re-hydrate the real value when the tool executes on your backend, completely eliminating the need for the proxy to store your data in a database.
 
 
+## Plainspeak
+This feature acts as a smart translator between an AI agent and the tools it uses (like a database or a calculator). 
+
+When an AI wants to use a tool, it sends instructions in a specific computer format (called JSON). If we just blindly blacked-out sensitive words in those instructions, it would break the formatting and cause the tool to crash. Instead, this firewall carefully unpackages the instructions, hides only the sensitive data while keeping the structure intact, and then seamlessly repackages it so the tool still works perfectly.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../../tests/test_tool_rbac_and_compliance.py).

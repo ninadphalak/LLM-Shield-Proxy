@@ -49,5 +49,10 @@ A: If the agent calls a tool multiple times with *different* arguments (e.g., pa
 A: Client applications must pass a consistent `X-Session-ID` header. The proxy uses this header to isolate loop tracking.
 
 
+## Plainspeak
+This feature acts as an emergency stop button for autonomous AI agents that get stuck in infinite loops.
+
+Sometimes, an AI agent is given a complex task and it gets confused, endlessly repeating the same useless actions (like searching for the same file over and over) without making progress. If left alone, this runs up a massive bill. This circuit breaker automatically detects when an AI is stuck in a repeating cycle and violently cuts the power, saving money and preventing server exhaustion.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_circuit_breaker.py`](../../../tests/test_circuit_breaker.py).

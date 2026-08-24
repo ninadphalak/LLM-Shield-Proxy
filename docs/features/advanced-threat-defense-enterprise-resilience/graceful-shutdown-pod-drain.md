@@ -51,5 +51,10 @@ A: No. Existing users connected to the draining pod will see their streams finis
 A: When `SIGTERM` is received, the `httpx.AsyncClient` is instructed to close its idle `keep-alive` sockets immediately, retaining only the active sockets required to service the in-flight streams.
 
 
+## Plainspeak
+This feature ensures no one gets cut off mid-sentence when the proxy server needs to restart or update.
+
+When IT engineers update the server, normally it instantly kills all active connections, resulting in broken half-written AI responses for users. With this feature, when the server is told to shut down, it stops accepting *new* users, but patiently waits for all *current* users to finish their active conversations before finally turning itself off.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

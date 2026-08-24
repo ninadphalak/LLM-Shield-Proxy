@@ -43,5 +43,10 @@ This feature is natively embedded in the logging and policy engines.
 A: SOC 2 requires proof of Logical Access Controls (who has access to what). If you just log "SSN Redacted", an auditor will ask *why* it was redacted. By logging the `applied_role_name`, you instantly prove that the redaction occurred because the user was assigned a specific, governed policy.
 
 
+## Plainspeak
+This feature acts as a strict "who authorized this?" tracker on the audit logs.
+
+If a file is redacted, the logs normally just say "file redacted". But an auditor will ask, "Wait, why was it redacted, and whose rules were we following?" This feature automatically tags every log with the exact name of the security policy (the "role") that caused the action, providing absolute clarity on why a decision was made.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).

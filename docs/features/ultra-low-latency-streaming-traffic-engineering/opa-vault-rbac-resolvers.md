@@ -58,5 +58,10 @@ A: Because the tenant is not in the cache, the request blocks for a strict 50ms 
 **Q: Are Vault tokens or OPA responses logged to the console?**
 A: No. The integration includes a `log_security_event` method that emits structured, tampered-proof WORM JSON logs for audit purposes without leaking raw payloads or secrets into standard output.
 
+## Plainspeak
+This feature connects the proxy's security checks to the massive, enterprise-grade permission databases that large companies already use (like HashiCorp Vault or Open Policy Agent).
+
+Instead of forcing a company to recreate all of their security rules from scratch inside the proxy, this feature acts as a lightning-fast bridge. It instantly asks the company's main security database, "Is this user allowed to do this?" and securely caches the answer so it doesn't slow down the chat.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

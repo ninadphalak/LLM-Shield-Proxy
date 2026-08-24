@@ -46,5 +46,10 @@ View diagram on GitHub mobile 📱 -->
 A: No. This specific hardening technique only applies when you are using the [Service Mesh Native gRPC ext_proc Integration](./service-mesh-native-grpc-ext-proc-integration.md) via Unix Domain Sockets, as TCP ports do not suffer from file-level permission race conditions.
 
 
+## Plainspeak
+This feature closes a tiny, split-second window of vulnerability when the proxy turns on.
+
+When a program creates a communication pipe (a socket), there is sometimes a millisecond delay between creating the pipe and locking it with a password. A very fast hacker on the same machine could jump into the pipe during that unprotected millisecond. This feature uses advanced operating system commands to ensure the pipe is born completely locked down from the very first nanosecond.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

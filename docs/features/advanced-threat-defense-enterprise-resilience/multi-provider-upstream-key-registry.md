@@ -52,5 +52,10 @@ A: Yes. While the global registry sets a baseline, you can define `upstream_api_
 A: The registry is schema-aware. If the target is an Azure OpenAI endpoint, it intelligently injects the key into the `api-key` HTTP header rather than formatting it as an `Authorization: Bearer` token.
 
 
+## Plainspeak
+This feature works like a smart keychain that automatically grabs the right key for the right door.
+
+If you use multiple AI providers (OpenAI, Anthropic, DeepSeek), developers usually have to write messy code to juggle all the different API passwords. With this feature, developers just send their request to the proxy, and the proxy automatically looks at the destination, pulls the correct password out of its secure keychain, and unlocks the door. Developers never have to worry about managing the keys.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](../../../tests/test_multi_tenant.py).

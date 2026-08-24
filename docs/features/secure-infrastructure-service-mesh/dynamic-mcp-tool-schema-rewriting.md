@@ -44,5 +44,10 @@ This engine operates natively alongside the v3 PII Firewall and does not require
 A: Usually, no. Most Pydantic models (and JSON parsers) default to `extra="ignore"`, meaning they will simply discard the injected `_ctx_hash` metadata when the tool call arrives. If your models are set to `extra="forbid"`, you must update them to allow the field.
 
 
+## Plainspeak
+This feature is a smart trick that allows encrypted data to seamlessly flow through external AI tools.
+
+If we encrypt a user's ID before sending it to an AI, the AI might try to pass that encrypted gibberish to an external tool (like a database search tool), causing the tool to crash because it expects a real ID. This feature secretly sneaks a hidden tracker into the data. When the AI uses the tool, the proxy catches the request mid-air, decrypts the gibberish back into the real ID, and hands it to the tool so everything works perfectly.
+
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../../tests/test_tool_rbac_and_compliance.py).
