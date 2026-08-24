@@ -47,3 +47,7 @@ A: No. You simply point the `base_url` to the proxy and keep writing standard Op
 
 **Q: How does this interact with PII redaction?**
 A: PII redaction happens *before* translation on the ingress, and *after* normalization on the egress. The translation layer is completely agnostic to whether the text is raw or synthetically masked.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](../../../tests/test_provider_adapters.py).

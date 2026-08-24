@@ -45,3 +45,7 @@ A: The lookup takes microseconds. The `policies.yaml` file is flattened into an 
 
 **Q: If a user sends a custom regex pattern in their prompt, does it bypass the scope?**
 A: No. The proxy's redaction scopes apply to the data *exiting* your VPC. The user's prompt is completely subjugated to the policy assigned to their virtual key, regardless of what instructions they pass to the LLM.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](../../../tests/test_policy_scopes.py).

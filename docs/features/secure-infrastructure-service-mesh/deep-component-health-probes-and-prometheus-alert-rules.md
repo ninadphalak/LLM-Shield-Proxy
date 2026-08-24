@@ -48,3 +48,7 @@ A: The repository includes a `prometheus-rules.yaml` file in the `/deploy/` dire
 
 **Q: Will the probe timeout if the upstream LLM (OpenAI) is down?**
 A: The readiness probe does not execute a full LLM completion. It only tests the TCP/TLS socket connection to the API gateway. If OpenAI is returning 503s but the network is reachable, the pod remains "Ready" to handle failover routing correctly.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](../../../tests/test_health_and_alerts.py).

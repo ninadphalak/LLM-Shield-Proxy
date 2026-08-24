@@ -47,3 +47,7 @@ A: The LLM will treat it as a unique ID. However, if your use case requires the 
 
 **Q: What happens if the AES key is lost or rotated while a request is in flight?**
 A: Because LLMs respond within seconds, key rotation is designed to maintain the previous key in a short-lived memory cache (TTL) until all in-flight streaming requests using that DEK have completed.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_stateless_crypto.py`](../../../tests/test_stateless_crypto.py).

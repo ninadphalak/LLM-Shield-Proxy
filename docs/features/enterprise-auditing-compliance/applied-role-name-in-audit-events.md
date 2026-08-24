@@ -41,3 +41,7 @@ This feature is natively embedded in the logging and policy engines.
 
 **Q: Why is this important for SOC 2?**
 A: SOC 2 requires proof of Logical Access Controls (who has access to what). If you just log "SSN Redacted", an auditor will ask *why* it was redacted. By logging the `applied_role_name`, you instantly prove that the redaction occurred because the user was assigned a specific, governed policy.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).

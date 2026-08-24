@@ -47,3 +47,7 @@ A: You can! But in large enterprises with hundreds of internal applications and 
 
 **Q: Do I get billed for the tokens used by the synthetic/masked names?**
 A: Yes, but it is vastly cheaper. Standard structural tags `[PERSON_1]` often consume 4 or 5 tokens via BPE. The proxy's synthetic masking ensures that a fake name like "Michael" only consumes 1 token, actively reducing your upstream LLM invoice.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](../../../tests/test_finops_meter.py).

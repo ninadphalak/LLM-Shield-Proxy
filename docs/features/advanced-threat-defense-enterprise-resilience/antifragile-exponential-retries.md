@@ -48,3 +48,7 @@ A: Possibly, depending on how aggressive your client's timeout settings are. If 
 
 **Q: Does this conflict with Provider Failover Routing?**
 A: No. The proxy executes retries *first*. Only if the `MAX_RETRIES` limit is entirely exhausted will the proxy escalate the failure to the Provider Failover Routing engine to attempt the secondary mirror.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](../../../tests/test_antifragile_dispatcher.py).

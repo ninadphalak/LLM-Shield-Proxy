@@ -47,3 +47,7 @@ A: No. It simply enforces cryptographic boundary checks and ensures that weak ci
 
 **Q: Why is RFC 6902 better than standard logging?**
 A: Because it is a deterministic, machine-readable standard. An auditor can write a script that takes the final payload, applies the RFC 6902 patch in reverse, and mathematically prove the sequence of operations the proxy executed on the payload.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_fips_and_audit_diff.py`](../../../tests/test_fips_and_audit_diff.py).

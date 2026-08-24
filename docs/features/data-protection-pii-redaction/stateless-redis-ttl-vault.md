@@ -49,3 +49,7 @@ A: The proxy actively refreshes the TTL of the session vault on every chunk rece
 
 **Q: Are the actual PII strings stored in plaintext in Redis?**
 A: The values are stored in Redis, but access is gated by the proxy's VPC perimeter. For extreme compliance (e.g., DoD workloads), you can enable at-rest encryption within your Redis deployment.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_vault.py`](../../../tests/test_vault.py).

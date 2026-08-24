@@ -47,3 +47,7 @@ A: Very few. `orjson` is strictly compliant with the JSON specification. The onl
 
 **Q: Does this help protect against Denial of Service?**
 A: Yes. Because memory allocation is the primary bottleneck during volumetric floods, utilizing a zero-allocation lexer ensures the proxy doesn't run Out Of Memory (OOM) and crash the Kubernetes pod when hit with massive payloads.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_streaming_json_lexer.py`](../../../tests/test_streaming_json_lexer.py).

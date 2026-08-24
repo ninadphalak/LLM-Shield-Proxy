@@ -47,3 +47,7 @@ A: No. The proxy automatically negotiates ALPN (Application-Layer Protocol Negot
 
 **Q: Does this help if I am using a local vLLM or Ollama instance?**
 A: Yes! Even on a local loopback interface, connection pooling eliminates TCP handshake overhead, increasing your total tokens-per-second (TPS) throughput dramatically.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_transport.py`](../../../tests/test_transport.py).

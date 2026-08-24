@@ -48,3 +48,7 @@ A: Yes! Using `policies.yaml`, you can assign `rate_limit_rpm: 10000` to a `role
 
 **Q: What happens if Redis goes down? Do all requests get rate-limited?**
 A: No. The proxy fails *open* for rate limiting. If the Redis cluster is unreachable, the proxy logs a severe warning but allows the traffic to flow through, prioritizing availability over strict rate enforcement (unless configured to fail-closed via security policies).
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

@@ -50,3 +50,7 @@ A: Yes. While the global registry sets a baseline, you can define `upstream_api_
 
 **Q: How does this work with Azure OpenAI's unique authentication?**
 A: The registry is schema-aware. If the target is an Azure OpenAI endpoint, it intelligently injects the key into the `api-key` HTTP header rather than formatting it as an `Authorization: Bearer` token.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](../../../tests/test_multi_tenant.py).

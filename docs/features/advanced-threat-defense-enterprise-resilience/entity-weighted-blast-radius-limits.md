@@ -47,3 +47,7 @@ A: If the proxy is running in single-node, stateless mode without Redis, it util
 
 **Q: Does it count entities on the request (ingress) or response (egress)?**
 A: Both. The proxy deducts tokens for sensitive data detected in the user's prompt, and actively tracks de-masked entities streaming back from the LLM, ensuring bi-directional blast radius protection.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_blast_radius.py`](../../../tests/test_blast_radius.py).

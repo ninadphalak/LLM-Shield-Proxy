@@ -50,3 +50,7 @@ A: In highly secure, air-gapped environments (like FedRAMP High), pods are often
 
 **Q: Can I use both modes at the same time?**
 A: Currently, the architecture supports a single primary transport mode for GRC artifacts to prevent redundant processing, though standard `stdout` JSON logs are always emitted concurrently.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

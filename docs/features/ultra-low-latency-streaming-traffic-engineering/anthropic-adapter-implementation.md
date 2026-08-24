@@ -47,3 +47,7 @@ A: Yes! Set the model string in your SDK to `claude-3-5-sonnet-20240620`, point 
 
 **Q: Does Anthropic's SSE stream break the sliding-window buffer?**
 A: No. The adapter normalizes Anthropic's stream into standard chunks *before* it passes them into the SSE Rehydration Buffer, ensuring that PII de-masking works flawlessly across providers.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](../../../tests/test_provider_adapters.py).

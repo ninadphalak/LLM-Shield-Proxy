@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import random
 import sys
+
 import atomics
 
 if sys.platform == "win32":
@@ -17,8 +18,6 @@ if sys.platform == "win32":
 import hashlib
 import hmac
 import ipaddress
-import json
-import orjson
 import logging
 import re
 import socket
@@ -31,6 +30,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
+import orjson
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -54,8 +54,8 @@ from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedExcep
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+from llm_shield_proxy.v3.ast_mutator import ASTDepthExceededException, StatelessASTVisitor
 from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.ast_mutator import StatelessASTVisitor, ASTDepthExceededException
 from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,26 @@ async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[
             resolved_ip = ip_candidate
 
     return True, resolved_ip
+
+
+async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
+    """Asynchronously resolves DNS records for trusted internal egress gateway."""
+    if not hostname:
+        return None
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.run_in_executor(None, socket.getaddrinfo, hostname, None)
+    except OSError:
+        return None
+
+    if not infos:
+        return None
+
+    # Return the first successfully resolved IP without SSRF restriction
+    for family, _, _, _, sockaddr in infos:
+        ip_candidate = sockaddr[0]
+        return ip_candidate
+    return None
 
 
 class ConfigHandler(FileSystemEventHandler):
@@ -302,6 +322,7 @@ app = FastAPI(
 app.include_router(health_router)
 
 from llm_shield_proxy.api.webhook import webhook_router
+
 app.include_router(webhook_router)
 
 
@@ -527,13 +548,27 @@ async def _proxy_catch_all_internal(
             },
         )
 
-    upstream_base = settings.UPSTREAM_BASE_URL
+    target_host = None
+
+    if settings.AIR_GAPPED_MODE and settings.EGRESS_GATEWAY_URL:
+        upstream_base = settings.EGRESS_GATEWAY_URL
+        parsed = urlparse(upstream_base)
+        if parsed.hostname:
+            target_host = parsed.netloc
+            resolved_ip = await _resolve_internal_hostname(parsed.hostname)
+            if resolved_ip:
+                ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+                port_str = f":{parsed.port}" if parsed.port else ""
+                upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
+    else:
+        upstream_base = settings.UPSTREAM_BASE_URL
 
     # SSRF Protection on Dynamic Client Upstream Override
     if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
         if x_upstream_base_url.startswith(("http://", "https://")):
             parsed = urlparse(x_upstream_base_url)
             hostname = parsed.hostname or ""
+            target_host = parsed.netloc
             is_safe, resolved_ip = await _resolve_and_validate_hostname(hostname)
             if not is_safe or not resolved_ip:
                 return JSONResponse(
@@ -550,6 +585,8 @@ async def _proxy_catch_all_internal(
     # Prepare forwarding headers
     headers = dict(request.headers)
     headers.pop("host", None)
+    if target_host:
+        headers["host"] = target_host
     headers.pop("content-length", None)
     headers.pop("accept-encoding", None)
 
@@ -619,6 +656,12 @@ async def _proxy_catch_all_internal(
             )
     elif settings.OVERRIDE_CLIENT_AUTH and settings.UPSTREAM_API_KEY:
         headers["authorization"] = f"Bearer {settings.UPSTREAM_API_KEY}"
+        headers.pop("x-api-key", None)
+        headers.pop("x-goog-api-key", None)
+        headers.pop("api-key", None)
+
+    if settings.AIR_GAPPED_MODE and not settings.FORWARD_CLIENT_AUTH:
+        headers.pop("authorization", None)
         headers.pop("x-api-key", None)
         headers.pop("x-goog-api-key", None)
         headers.pop("api-key", None)
@@ -768,10 +811,10 @@ async def _proxy_catch_all_internal(
                     # Derive a 32-byte key from the watermark secret or fallback
                     raw_secret = settings.SHIELD_WATERMARK_SECRET or "default_shield_secret_for_v3_engine"
                     key = hashlib.sha256(raw_secret.encode('utf-8')).digest()
-                    
+
                     v3_cipher = StatelessPIICipher(key=key, version=1, session_id=x_session_id)
                     mutator = StatelessASTVisitor(v3_cipher)
-                    
+
                     try:
                         # Augment schemas dynamically
                         payload = DynamicSchemaRewriter.rewrite(payload)

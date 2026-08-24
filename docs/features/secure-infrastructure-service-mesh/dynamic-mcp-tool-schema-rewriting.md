@@ -42,3 +42,7 @@ This engine operates natively alongside the v3 PII Firewall and does not require
 
 **Q: Do I need to update my Pydantic models on my backend to accept `_ctx_hash`?**
 A: Usually, no. Most Pydantic models (and JSON parsers) default to `extra="ignore"`, meaning they will simply discard the injected `_ctx_hash` metadata when the tool call arrives. If your models are set to `extra="forbid"`, you must update them to allow the field.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../../tests/test_tool_rbac_and_compliance.py).

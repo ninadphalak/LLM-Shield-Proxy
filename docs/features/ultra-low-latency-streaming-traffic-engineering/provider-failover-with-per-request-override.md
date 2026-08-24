@@ -48,3 +48,7 @@ A: Yes! Because the proxy features Multi-Provider Translators, you can set the p
 
 **Q: Does the client have to wait a long time during a failover?**
 A: The delay is equal to the configured timeout for the primary request. You can aggressively tune `HTTP_TIMEOUT_SECONDS` (e.g., to 3 seconds) to ensure failovers happen almost instantaneously if a provider hangs.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).

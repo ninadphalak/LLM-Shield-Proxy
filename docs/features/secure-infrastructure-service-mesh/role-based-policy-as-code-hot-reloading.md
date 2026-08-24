@@ -44,3 +44,7 @@ View diagram on GitHub mobile 📱 -->
 
 **Q: Can I use this to hot-reload my TLS certificates?**
 A: No. TLS certificates and core `google-re2` compilations (BYOR) operate at a lower C++ level and currently require a graceful pod restart to take effect. Hot-reloading strictly applies to the RBAC roles and routing settings in `policies.yaml`.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).

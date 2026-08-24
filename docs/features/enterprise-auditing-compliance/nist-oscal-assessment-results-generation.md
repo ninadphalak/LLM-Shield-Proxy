@@ -47,3 +47,7 @@ A: No! While OSCAL was designed by NIST, it is rapidly becoming the universal st
 
 **Q: Can I map custom policies to custom controls?**
 A: Yes. The `policies.yaml` file allows you to inject custom control IDs (e.g., `ACME-SEC-01`) alongside the standard NIST IDs, ensuring the generated OSCAL fits your company's proprietary risk framework.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).

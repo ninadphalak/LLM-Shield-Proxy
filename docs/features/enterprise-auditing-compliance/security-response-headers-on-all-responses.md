@@ -43,3 +43,7 @@ These headers are hardcoded into the security middleware to ensure baseline OWAS
 
 **Q: Do these headers affect Server-Sent Events (SSE)?**
 A: Yes. The headers are applied to the initial HTTP 200 OK response that establishes the SSE connection, securing the stream at the transport layer before the delta chunks begin arriving.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

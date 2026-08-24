@@ -42,3 +42,7 @@ A: No. The firewall replaces PII with Format-Preserving Synthetic Masking (e.g.,
 
 **Q: Why are `_ctx_hash_<prop>` fields injected into my schema?**
 A: This is the mechanism for stateless crypto. By injecting the AES-256-GCM encrypted original value into a sibling field, the proxy can re-hydrate the real value when the tool executes on your backend, completely eliminating the need for the proxy to store your data in a database.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../../tests/test_tool_rbac_and_compliance.py).

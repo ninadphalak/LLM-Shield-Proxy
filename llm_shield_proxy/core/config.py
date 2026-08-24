@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = Field(default=None, description="Centralized Anthropic API key")
     DEEPSEEK_API_KEY: Optional[str] = Field(default=None, description="Centralized DeepSeek API key")
 
+    # Egress Gateway Configuration
+    AIR_GAPPED_MODE: bool = Field(default=False, description="Enable strict Zero-Internet egress gateway mode")
+    EGRESS_GATEWAY_URL: Optional[str] = Field(default=None, description="Internal proxy/gateway URL for Air-Gapped mode")
+    FORWARD_CLIENT_AUTH: bool = Field(default=False, description="Forward client auth headers in air-gapped mode")
+
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
     CORS_ALLOWED_ORIGINS: str = Field(default="", description="Comma-separated allowed CORS origins (empty allows same-origin / configured)")
@@ -247,6 +252,12 @@ class Settings(BaseSettings):
             if key_bytes is None or len(key_bytes) != 32:
                 raise ValueError("SHIELD_ENCRYPTION_KEY must be a valid 256-bit (32 bytes) base64 or hex string.")
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_egress_gateway(self) -> "Settings":
+        if self.AIR_GAPPED_MODE and not self.EGRESS_GATEWAY_URL:
+            raise ValueError("EGRESS_GATEWAY_URL must be set if AIR_GAPPED_MODE is True.")
         return self
 
     @property

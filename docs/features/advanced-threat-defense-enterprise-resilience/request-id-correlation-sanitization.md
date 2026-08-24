@@ -46,3 +46,7 @@ A: The proxy natively supports both! The `X-Request-ID` is used for application-
 
 **Q: Is the Request ID passed to OpenAI/Anthropic?**
 A: Yes. It is appended as a custom header on the upstream HTTP/2 connection. While OpenAI doesn't natively expose this in their standard dashboards, it provides critical proof during enterprise support tickets when correlating proxy traffic with upstream provider logs.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

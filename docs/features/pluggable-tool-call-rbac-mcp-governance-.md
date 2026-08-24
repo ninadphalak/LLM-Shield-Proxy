@@ -47,3 +47,7 @@ A: The RBAC engine is explicitly designed as a `BasePolicyResolver` interface. W
 
 **Q: Does this secure Model Context Protocol (MCP) servers?**
 A: Absolutely. By deploying the proxy between your LLM and your MCP servers, you enforce a strict authorization boundary, preventing malicious prompts from leveraging your agent's MCP permissions to exfiltrate data.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../tests/test_tool_rbac_and_compliance.py).

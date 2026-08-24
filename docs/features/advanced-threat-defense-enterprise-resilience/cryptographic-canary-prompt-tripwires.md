@@ -41,3 +41,7 @@ A: No. A new, cryptographically random canary token is generated for every indiv
 
 **Q: Can this stop "jailbreaks" (e.g., DAN)?**
 A: Yes! While it won't stop the LLM from entering a jailbroken state, it prevents the attacker from utilizing the jailbreak to extract sensitive corporate data. If the jailbroken model attempts to output the protected context containing the tripwire, the connection is instantly killed.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).

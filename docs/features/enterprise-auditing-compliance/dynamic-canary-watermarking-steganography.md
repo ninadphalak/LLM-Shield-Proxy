@@ -50,3 +50,7 @@ A: Zero-width spaces (`U+200B`), non-joiners (`U+200C`), and joiners (`U+200D`) 
 
 **Q: Does this alter the actual AI output or meaning?**
 A: Not at all. The visible letters, punctuation, and markdown formatting remain 100% untouched. The text reads perfectly to the user.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_watermark.py`](../../../tests/test_watermark.py).

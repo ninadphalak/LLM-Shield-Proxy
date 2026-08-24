@@ -48,3 +48,7 @@ A: No, this mutates the *environment variables* of the pod. By changing the base
 
 **Q: Do I have to use this feature?**
 A: Not at all. If you prefer to manage environment variables via Helm, Kustomize, or Terraform, you can simply leave this disabled and point your apps to the proxy manually.
+
+
+## Related Tests
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).
