@@ -169,7 +169,9 @@ class Settings(BaseSettings):
     )
 
     # Security & Buffer Bounds
-    AGENT_IDENTITY_ENFORCER: bool = Field(default=False, description="Globally enable Agent Identity Enforcer")
+    AGENT_IDENTITY_ENFORCER: Literal["off", "lenient", "strict"] | bool = Field(default="off", description="Agent Identity Enforcer mode")
+    ALLOWED_ISSUERS: list[str] = Field(default_factory=list, description="List of allowed OpenID Connect Issuers")
+    ALLOWED_AUDIENCES: list[str] = Field(default_factory=list, description="List of allowed JWT Audiences")
     MAX_PAYLOAD_SIZE_BYTES: int = Field(
         default=10 * 1024 * 1024, description="Maximum allowed request payload size in bytes (10MB default)"
     )

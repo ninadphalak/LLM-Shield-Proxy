@@ -2,8 +2,7 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from types import MappingProxyType
-from typing import AsyncGenerator, Set
+from typing import Any, AsyncGenerator, Dict, Optional, Set
 
 import httpx
 import orjson
@@ -25,14 +24,109 @@ class ToolAccessForbiddenException(Exception):
 
 
 class BasePolicyResolver(ABC):
+    def __init__(self, shared_state: Optional[Dict[str, Any]] = None):
+        if shared_state is None:
+            shared_state = {
+                "cache": OrderedDict(),
+                "cache_lock": asyncio.Lock(),
+                "inflight": {},
+                "inflight_lock": asyncio.Lock()
+            }
+        self._cache = shared_state["cache"]
+        self._cache_lock = shared_state["cache_lock"]
+        self._inflight = shared_state["inflight"]
+        self._inflight_lock = shared_state["inflight_lock"]
+        self._max_cache_size = 1000
+
     @abstractmethod
     async def resolve_policy(self, virtual_key: str) -> dict:
         """Resolves the RBAC policy for a given virtual key."""
         pass
 
 
+class AbstractCachingPolicyResolver(BasePolicyResolver):
+    @abstractmethod
+    async def _fetch_policy(self, virtual_key: str) -> None:
+        """Fetch the policy from the upstream provider and populate the cache."""
+        pass
+
+    async def _safe_background_fetch(self, virtual_key: str) -> None:
+        async with self._inflight_lock:
+            if virtual_key in self._inflight:
+                return
+            event = asyncio.Event()
+            self._inflight[virtual_key] = event
+
+        try:
+            await self._fetch_policy(virtual_key)
+        except Exception as e:
+            AuditLogger.log_security_event(
+                event_type="rbac_background_fetch_critical_failure",
+                severity="CRITICAL",
+                details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
+                virtual_key_id=virtual_key
+            )
+            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            expiration = time.time() + 5.0
+            async with self._cache_lock:
+                if len(self._cache) >= self._max_cache_size and virtual_key not in self._cache:
+                    self._cache.popitem(last=False)
+                self._cache[virtual_key] = (policy, expiration)
+        finally:
+            async with self._inflight_lock:
+                evt = self._inflight.pop(virtual_key, None)
+            if evt:
+                evt.set()
+
+    async def resolve_policy(self, virtual_key: str) -> dict:
+        async with self._cache_lock:
+            entry = self._cache.get(virtual_key)
+        now = time.time()
+
+        if entry is not None:
+            policy, expiration = entry
+            if now > expiration:
+                asyncio.create_task(self._safe_background_fetch(virtual_key))
+            return policy
+
+        # Cache miss
+        async with self._inflight_lock:
+            event = self._inflight.get(virtual_key)
+            if event is None:
+                # We are the fetching coroutine
+                event = asyncio.Event()
+                self._inflight[virtual_key] = event
+                already_inflight = False
+            else:
+                already_inflight = True
+
+        if already_inflight:
+            await event.wait()
+            async with self._cache_lock:
+                entry = self._cache.get(virtual_key)
+            if entry is not None:
+                return entry[0]
+            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+
+        # We are the fetching coroutine
+        try:
+            await self._fetch_policy(virtual_key)
+        finally:
+            async with self._inflight_lock:
+                evt = self._inflight.pop(virtual_key, None)
+            if evt:
+                evt.set()
+
+        async with self._cache_lock:
+            entry = self._cache.get(virtual_key)
+        if entry is None:
+            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+        return entry[0]
+
+
 class RedisPolicyResolver(BasePolicyResolver):
-    def __init__(self, redis_client: redis.Redis):
+    def __init__(self, redis_client: redis.Redis, shared_state: Optional[Dict[str, Any]] = None):
+        super().__init__(shared_state)
         self.redis_client = redis_client
 
     async def resolve_policy(self, virtual_key: str) -> dict:
@@ -43,15 +137,11 @@ class RedisPolicyResolver(BasePolicyResolver):
         return {"allowed_tools": [], "blocked_tools": []}
 
 
-class OPAPolicyResolver(BasePolicyResolver):
-    def __init__(self, http_client: httpx.AsyncClient, opa_url: str):
+class OPAPolicyResolver(AbstractCachingPolicyResolver):
+    def __init__(self, http_client: httpx.AsyncClient, opa_url: str, shared_state: Optional[Dict[str, Any]] = None):
+        super().__init__(shared_state)
         self.http_client = http_client
         self.opa_url = opa_url
-        self._cache = OrderedDict()
-        self._cache_lock = asyncio.Lock()
-        self._inflight: Set[str] = set()
-        self._inflight_lock = asyncio.Lock()
-        self._max_cache_size = 1000
 
     async def _fetch_policy(self, virtual_key: str) -> None:
         try:
@@ -82,82 +172,13 @@ class OPAPolicyResolver(BasePolicyResolver):
                     self._cache.popitem(last=False)
                 self._cache[virtual_key] = (policy, expiration)
 
-    async def _safe_background_fetch(self, virtual_key: str) -> None:
-        async with self._inflight_lock:
-            if virtual_key in self._inflight:
-                return
-            self._inflight.add(virtual_key)
-        try:
-            await self._fetch_policy(virtual_key)
-        except Exception as e:
-            AuditLogger.log_security_event(
-                event_type="rbac_background_fetch_critical_failure",
-                severity="CRITICAL",
-                details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
-                virtual_key_id=virtual_key
-            )
-            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-            expiration = time.time() + 5.0
-            async with self._cache_lock:
-                if len(self._cache) >= self._max_cache_size and virtual_key not in self._cache:
-                    self._cache.popitem(last=False)
-                self._cache[virtual_key] = (policy, expiration)
-        finally:
-            async with self._inflight_lock:
-                self._inflight.discard(virtual_key)
 
-    async def resolve_policy(self, virtual_key: str) -> dict:
-        async with self._cache_lock:
-            entry = self._cache.get(virtual_key)
-        now = time.time()
-        
-        if entry is not None:
-            policy, expiration = entry
-            if now > expiration:
-                asyncio.create_task(self._safe_background_fetch(virtual_key))
-            return policy
-
-        # Cache miss
-        # To avoid thundering herd on first fetch, use inflight lock to check
-        async with self._inflight_lock:
-            already_inflight = virtual_key in self._inflight
-            if not already_inflight:
-                self._inflight.add(virtual_key)
-                
-        if already_inflight:
-            # Short poll to let the other coroutine finish first
-            for _ in range(10):
-                await asyncio.sleep(0.01)
-                async with self._cache_lock:
-                    entry = self._cache.get(virtual_key)
-                if entry is not None:
-                    return entry[0]
-            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-
-        # We are the fetching coroutine
-        try:
-            await self._fetch_policy(virtual_key)
-        finally:
-            async with self._inflight_lock:
-                self._inflight.discard(virtual_key)
-
-        async with self._cache_lock:
-            entry = self._cache.get(virtual_key)
-        if entry is None:
-            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-        return entry[0]
-
-
-class VaultPolicyResolver(BasePolicyResolver):
-    def __init__(self, http_client: httpx.AsyncClient, vault_url: str, vault_token: str):
+class VaultPolicyResolver(AbstractCachingPolicyResolver):
+    def __init__(self, http_client: httpx.AsyncClient, vault_url: str, vault_token: str, shared_state: Optional[Dict[str, Any]] = None):
+        super().__init__(shared_state)
         self.http_client = http_client
         self.vault_url = vault_url
         self.vault_token = vault_token
-        self._cache = OrderedDict()
-        self._cache_lock = asyncio.Lock()
-        self._inflight: Set[str] = set()
-        self._inflight_lock = asyncio.Lock()
-        self._max_cache_size = 1000
 
     async def _fetch_policy(self, virtual_key: str) -> None:
         try:
@@ -189,72 +210,11 @@ class VaultPolicyResolver(BasePolicyResolver):
                     self._cache.popitem(last=False)
                 self._cache[virtual_key] = (policy, expiration)
 
-    async def _safe_background_fetch(self, virtual_key: str) -> None:
-        async with self._inflight_lock:
-            if virtual_key in self._inflight:
-                return
-            self._inflight.add(virtual_key)
-        try:
-            await self._fetch_policy(virtual_key)
-        except Exception as e:
-            AuditLogger.log_security_event(
-                event_type="rbac_background_fetch_critical_failure",
-                severity="CRITICAL",
-                details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
-                virtual_key_id=virtual_key
-            )
-            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-            expiration = time.time() + 5.0
-            async with self._cache_lock:
-                if len(self._cache) >= self._max_cache_size and virtual_key not in self._cache:
-                    self._cache.popitem(last=False)
-                self._cache[virtual_key] = (policy, expiration)
-        finally:
-            async with self._inflight_lock:
-                self._inflight.discard(virtual_key)
-
-    async def resolve_policy(self, virtual_key: str) -> dict:
-        async with self._cache_lock:
-            entry = self._cache.get(virtual_key)
-        now = time.time()
-        
-        if entry is not None:
-            policy, expiration = entry
-            if now > expiration:
-                asyncio.create_task(self._safe_background_fetch(virtual_key))
-            return policy
-
-        # Cache miss
-        async with self._inflight_lock:
-            already_inflight = virtual_key in self._inflight
-            if not already_inflight:
-                self._inflight.add(virtual_key)
-                
-        if already_inflight:
-            for _ in range(10):
-                await asyncio.sleep(0.01)
-                async with self._cache_lock:
-                    entry = self._cache.get(virtual_key)
-                if entry is not None:
-                    return entry[0]
-            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-
-        # We are the fetching coroutine
-        try:
-            await self._fetch_policy(virtual_key)
-        finally:
-            async with self._inflight_lock:
-                self._inflight.discard(virtual_key)
-
-        async with self._cache_lock:
-            entry = self._cache.get(virtual_key)
-        if entry is None:
-            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-        return entry[0]
 
 class InMemoryPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
         return {"allowed_tools": [], "blocked_tools": []}
+
 
 QUOTE_BYTE = 0x22      # ord('"')
 BACKSLASH_BYTE = 0x5C  # ord('\\')

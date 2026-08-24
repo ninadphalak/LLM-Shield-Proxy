@@ -1,25 +1,35 @@
-import pytest
+import time
+
 import jwt
+import pytest
 from fastapi import HTTPException
+
+from llm_shield_proxy.core.config import agent_identity_ctx, request_policy_ctx, settings
 from llm_shield_proxy.security.identity import verify_agent_identity
-from llm_shield_proxy.core.config import request_policy_ctx, settings, agent_identity_ctx
+
 
 class MockRequest:
-    def __init__(self, headers=None):
+    def __init__(self, headers=None, method="POST", url="https://my-api"):
         self.headers = headers or {}
+        self.method = method
+        class URLStr(str):
+            def replace(self, *args, **kwargs):
+                return self
+        self.url = URLStr(url)
         class State:
             agent_identity_claim = None
         self.state = State()
 
 @pytest.fixture(autouse=True)
 def reset_config():
-    settings.AGENT_IDENTITY_ENFORCER = True
+    settings.AGENT_IDENTITY_ENFORCER = "strict"
+    settings.ALLOWED_ISSUERS = ["https://my-issuer.com"]
     request_policy_ctx.set({})
     agent_identity_ctx.set(None)
 
 @pytest.mark.asyncio
 async def test_identity_enforcer_disabled_by_default():
-    settings.AGENT_IDENTITY_ENFORCER = False
+    settings.AGENT_IDENTITY_ENFORCER = "off"
     req = MockRequest(headers={})
     await verify_agent_identity(req)
     assert req.state.agent_identity_claim is None
@@ -44,10 +54,10 @@ async def test_missing_dpop_header_fails():
 @pytest.mark.asyncio
 async def test_invalid_issuer_fails(monkeypatch):
     req = MockRequest(headers={"Authorization": "Bearer invalid_token", "DPoP": "my_dpop"})
-    
+
     def mock_decode(token, *args, **kwargs):
         return {} # missing iss
-        
+
     monkeypatch.setattr(jwt, "decode", mock_decode)
     monkeypatch.setattr(jwt, "get_unverified_header", lambda x: {})
 
@@ -59,31 +69,43 @@ async def test_invalid_issuer_fails(monkeypatch):
 @pytest.mark.asyncio
 async def test_successful_validation(monkeypatch):
     req = MockRequest(headers={"Authorization": "Bearer my_token", "DPoP": "my_dpop"})
-    
+
     # Mock jwt.get_unverified_header
-    monkeypatch.setattr(jwt, "get_unverified_header", lambda x: {"kid": "123"})
-    
+    monkeypatch.setattr(jwt, "get_unverified_header", lambda x: {"jwk": {"kty": "RSA"}})
+
+    # Mock jwt.PyJWK
+    class MockJWK:
+        def __init__(self, jwk_dict):
+            self.key = "dpop_key"
+            self.thumbprint = "mock_thumbprint"
+    monkeypatch.setattr(jwt, "PyJWK", MockJWK)
+
     # Mock jwt.decode
     def mock_decode(token, *args, **kwargs):
         if kwargs.get("options", {}).get("verify_signature") is False:
             if token == "my_token":
                 return {"iss": "https://my-issuer.com"}
             elif token == "my_dpop":
-                return {"htm": "POST", "htu": "https://my-api"}
-        return {"sub": "agent_007"}
-    
+                return {"htm": "POST", "htu": "https://my-api", "iat": time.time()}
+
+        if token == "my_token":
+            return {"sub": "agent_007", "cnf": {"jkt": "mock_thumbprint"}}
+        elif token == "my_dpop":
+            return {"htm": "POST", "htu": "https://my-api", "iat": time.time()}
+
+        return {}
+
     monkeypatch.setattr(jwt, "decode", mock_decode)
-    
-    # Mock fetch_jwks
+
+    # Mock _get_signing_key (because we changed it from fetch_jwks)
     class MockKey:
         key = "secret_key"
-    class MockClient:
-        def get_signing_key_from_jwt(self, token):
-            return MockKey()
-            
-    monkeypatch.setattr("llm_shield_proxy.security.identity.fetch_jwks", lambda iss: MockClient())
+    async def mock_get_signing_key(iss, token):
+        return MockKey()
+
+    monkeypatch.setattr("llm_shield_proxy.security.identity._get_signing_key", mock_get_signing_key)
 
     await verify_agent_identity(req)
-    
+
     assert req.state.agent_identity_claim == "agent_007"
     assert agent_identity_ctx.get() == "agent_007"
