@@ -155,7 +155,7 @@ def test_pii_synthetic_swapping():
 
 
 def test_dlp_redos_base64_obfuscation():
-    """Simulate attack passing massive Base64 strings to assert strict bounded execution."""
+    """Verifies that oversized Base64 blobs are skipped gracefully within bounded execution time without ReDoS."""
     engine = PIIEngine(enable_tier2=False, enable_tier3=False)
     vault = Vault(synthetic=False)
 
@@ -168,6 +168,7 @@ def test_dlp_redos_base64_obfuscation():
     duration = time.perf_counter() - start_time
 
     assert duration < 0.1, f"ReDoS detected! Execution took {duration} seconds"
+    # Oversized base64 blobs are deliberately skipped to prevent regex denial of service
     assert encoded_secret in redacted
 
 

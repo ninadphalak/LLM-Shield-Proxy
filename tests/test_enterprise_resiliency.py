@@ -17,21 +17,21 @@ def reset_state():
     orig_rate = settings.ENABLE_RATE_LIMITING
     orig_shield = settings.SHIELD_FAILURE_MODE
     orig_drain = app_state.is_draining
-    orig_req = app_state.active_requests
+    orig_req = app_state.active_requests.load()
 
     settings.OVERRIDE_CLIENT_AUTH = False
     settings.UPSTREAM_API_KEY = None
     settings.ENABLE_RATE_LIMITING = False
     settings.SHIELD_FAILURE_MODE = "FAIL_CLOSED"
     app_state.is_draining = False
-    app_state.active_requests = 0
+    app_state.active_requests.store(0)
     yield
     settings.OVERRIDE_CLIENT_AUTH = orig_override
     settings.UPSTREAM_API_KEY = orig_upstream
     settings.ENABLE_RATE_LIMITING = orig_rate
     settings.SHIELD_FAILURE_MODE = orig_shield
     app_state.is_draining = orig_drain
-    app_state.active_requests = orig_req
+    app_state.active_requests.store(orig_req)
 
 
 def test_enterprise_secret_injection():

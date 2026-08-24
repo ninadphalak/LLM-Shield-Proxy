@@ -1,7 +1,7 @@
 """Enterprise Structured Audit Logger Module.
 
 Provides SOC 2 and HIPAA compliant structured JSON audit logging with
-cryptographic SHA-256 hash chaining to ensure log tamper-proofing.
+Segmented Cryptographic Hash Chaining to ensure log tamper-proofing.
 Guarantees zero raw PII leakage in log sinks.
 """
 
@@ -43,10 +43,12 @@ if not audit_logger.handlers:
 
 
 class AuditLogger:
-    """Enterprise Structured Audit Logger with Cryptographic Hash Chaining.
+    """Enterprise Structured Audit Logger with Segmented Hash Chaining.
 
     Maintains a tamper-evident SHA-256 hash chain of all audit events.
-    Records metadata about redaction counts without storing or exposing raw sensitive data.
+    In zero-dependency mode, the chain is Segmented (per-process in RAM).
+    When a Pod restarts, a new Genesis Hash is created, and the WORM aggregator
+    reconstructs the global timeline using instance_id and timestamps.
     """
 
     _last_hash: str = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -283,6 +285,31 @@ class AuditLogger:
             "session_id": session_id or "ephemeral",
             "severity": "CRITICAL",
             "fallback_url": fallback_url,
+            "applied_role_name": applied_role_name,
+        }
+        AuditLogger._compute_and_append_hash(log_entry)
+        audit_logger.critical(json.dumps(log_entry))
+
+    @staticmethod
+    def log_circuit_breaker_tripped(
+        session_id: Optional[str],
+        request_id: Optional[str],
+        virtual_key_id: str,
+        consecutive_loops: int,
+        applied_role_name: str = "global_env",
+    ) -> None:
+        """Emits a structured JSON audit event when an agent loop circuit breaker trips."""
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "CIRCUIT_BREAKER_TRIPPED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "session_id": session_id or "ephemeral",
+            "severity": "CRITICAL",
+            "consecutive_loops": consecutive_loops,
             "applied_role_name": applied_role_name,
         }
         AuditLogger._compute_and_append_hash(log_entry)

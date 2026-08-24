@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Set
+import logging
 
 import orjson
 import redis.asyncio as redis
@@ -37,7 +38,8 @@ class RedisPolicyResolver(BasePolicyResolver):
 
 class OPAPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
-        raise NotImplementedError("OPA integration coming in v1.2")
+        logging.getLogger(__name__).warning("OPA integration coming in v1.2. Failing closed.")
+        return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
 
 
 class InMemoryPolicyResolver(BasePolicyResolver):
@@ -47,7 +49,14 @@ class InMemoryPolicyResolver(BasePolicyResolver):
 
 class VaultPolicyResolver(BasePolicyResolver):
     async def resolve_policy(self, virtual_key: str) -> dict:
-        raise NotImplementedError("Vault integration coming in v1.2")
+        logging.getLogger(__name__).warning("Vault integration coming in v1.2. Failing closed.")
+        return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+
+
+QUOTE_BYTE = 0x22      # ord('"')
+BACKSLASH_BYTE = 0x5C  # ord('\\')
+COLON_BYTE = 0x3A      # ord(':')
+WHITESPACE_BYTES = (0x20, 0x09, 0x0A, 0x0D)  # ord(' '), ord('\t'), ord('\n'), ord('\r')
 
 
 class StreamingToolParser:
@@ -70,24 +79,22 @@ class StreamingToolParser:
     def feed(self, chunk: bytes) -> list[str]:
         extracted = []
         for byte_int in chunk:
-            b = bytes([byte_int])
-
             if self.state == "SEARCHING":
-                if b == b'"':
+                if byte_int == QUOTE_BYTE:
                     self.state = "IN_STRING"
                     self.buffer.clear()
                     self.escape_next = False
 
             elif self.state == "IN_STRING":
                 if self.escape_next:
-                    self.buffer.extend(b)
+                    self.buffer.append(byte_int)
                     self.escape_next = False
                     if len(self.buffer) > self.MAX_TOOL_NAME_LEN:
                         self.state = "SEARCHING"
                         self.target_key_matched = False
-                elif b == b"\\":
+                elif byte_int == BACKSLASH_BYTE:
                     self.escape_next = True
-                elif b == b'"':
+                elif byte_int == QUOTE_BYTE:
                     val = bytes(self.buffer)
                     if self.target_key_matched:
                         extracted.append(val.decode("utf-8", errors="ignore"))
@@ -99,31 +106,27 @@ class StreamingToolParser:
                         else:
                             self.state = "SEARCHING"
                 else:
-                    self.buffer.extend(b)
+                    self.buffer.append(byte_int)
                     if len(self.buffer) > self.MAX_TOOL_NAME_LEN:
                         self.state = "SEARCHING"
                         self.target_key_matched = False
 
             elif self.state == "WAIT_COLON":
-                if b == b":":
+                if byte_int == COLON_BYTE:
                     self.state = "WAIT_VALUE"
-                elif b not in b" \t\n\r":
+                elif byte_int not in WHITESPACE_BYTES:
                     self.state = "SEARCHING"
-                    if b == b'"':
+                    if byte_int == QUOTE_BYTE:
                         self.state = "IN_STRING"
                         self.buffer.clear()
 
             elif self.state == "WAIT_VALUE":
-                if b == b'"':
+                if byte_int == QUOTE_BYTE:
                     self.state = "IN_STRING"
                     self.buffer.clear()
                     self.target_key_matched = True
-                elif b not in b" \t\n\r":
-                    # The value is not a string, ignore
+                elif byte_int not in WHITESPACE_BYTES:
                     self.state = "SEARCHING"
-                    if b == b'"':
-                        # edge case: if we hit a quote immediately, but wait, b != quote in this elif.
-                        pass
 
         return extracted
 

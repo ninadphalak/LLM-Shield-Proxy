@@ -31,6 +31,10 @@ def test_docker_standalone_happy_path():
                 last_error = e
                 time.sleep(1)
 
+        if not success:
+            print("--- DOCKER LOGS ---")
+            subprocess.run(["docker", "logs", container_name])
+            print("-------------------")
         assert success, f"Failed to get 200 OK from /healthz. Last error: {last_error}"
     finally:
         # 4. Tear down

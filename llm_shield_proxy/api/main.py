@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import random
 import sys
+import atomics
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore
@@ -17,7 +18,9 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import orjson
 import logging
+import re
 import socket
 import time
 import uuid
@@ -51,6 +54,9 @@ from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedExcep
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, RedisPolicyResolver
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+from llm_shield_proxy.v3.crypto import StatelessPIICipher
+from llm_shield_proxy.v3.ast_mutator import StatelessASTVisitor, ASTDepthExceededException
+from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
 
 logger = logging.getLogger(__name__)
 
@@ -59,20 +65,74 @@ APP_VERSION = "1.2.14"
 
 class AppState:
     is_draining: bool = False
-    active_requests: int = 0
+    active_requests = atomics.atomic(width=4, atype=atomics.INT)
     shutdown_event: Optional[asyncio.Event] = None
 
 
 app_state = AppState()
+app_state.active_requests.store(0)
 
 
-@lru_cache(maxsize=1024)
+_SAFE_REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-_.:]{1,64}$")
+
+
+@lru_cache(maxsize=4096)
+def _get_vkid_from_hash(key_hash: str) -> str:
+    return hmac.new(b"llm_shield_fingerprint_v2", key_hash.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
+
+
 def get_virtual_key_id(client_auth: str) -> str:
-    """Computes a cryptographically salted virtual key fingerprint.
+    """Computes a fast, cryptographically salted virtual key fingerprint using HMAC-SHA256.
 
-    Cached via LRU to guarantee 0ms latency impact during proxy routing.
+    Uses SHA-256 pre-hash as LRU cache key to avoid storing raw API keys in plaintext memory.
     """
-    return hashlib.pbkdf2_hmac("sha256", client_auth.encode("utf-8"), b"llm_shield_salt", 600000).hex()[:12]
+    if not client_auth:
+        return "anonymous"
+    key_hash = hashlib.sha256(client_auth.encode("utf-8")).hexdigest()
+    return _get_vkid_from_hash(key_hash)
+
+
+def _is_safe_ip(ip_str: str) -> bool:
+    """Validates that resolved IP address is strictly public and safe from SSRF."""
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+            ip_obj = ip_obj.ipv4_mapped
+        return not (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_multicast
+            or ip_obj.is_reserved
+            or ip_obj.is_unspecified
+            or str(ip_obj) in ("255.255.255.255", "0.0.0.0")
+        )
+    except ValueError:
+        return False
+
+
+async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[str]]:
+    """Asynchronously resolves A and AAAA DNS records in executor to avoid blocking ASGI loop."""
+    if not hostname:
+        return False, None
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.run_in_executor(None, socket.getaddrinfo, hostname, None)
+    except OSError:
+        return False, None
+
+    if not infos:
+        return False, None
+
+    resolved_ip = None
+    for family, _, _, _, sockaddr in infos:
+        ip_candidate = sockaddr[0]
+        if not _is_safe_ip(ip_candidate):
+            return False, None
+        if resolved_ip is None:
+            resolved_ip = ip_candidate
+
+    return True, resolved_ip
 
 
 class ConfigHandler(FileSystemEventHandler):
@@ -127,6 +187,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.error(f"Failed to fetch initial secrets from Vault: {e}")
             raise RuntimeError(f"Vault initialization failed: {e}")
+
+    if settings.WORKERS > 1:
+        logger.warning(
+            "SIGTERM graceful drain (active_requests counter) is process-local "
+            "and does not coordinate across %d worker processes. "
+            "For multi-worker drain, use an external load balancer health check.",
+            settings.WORKERS,
+        )
 
     verify = settings.SSL_CA_BUNDLE_PATH if settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH else True
     cert = None
@@ -195,7 +263,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     app_state.is_draining = True
-    if shutdown_ev is not None and app_state.active_requests > 0:
+    if shutdown_ev is not None and app_state.active_requests.load() > 0:
         try:
             await asyncio.wait_for(shutdown_ev.wait(), timeout=settings.DRAIN_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
@@ -208,7 +276,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pass
 
     observer.stop()
-    observer.join()
+    await asyncio.get_running_loop().run_in_executor(None, observer.join)
     await app.state.http_client.aclose()
 
     from llm_shield_proxy.security.vault_client import vault_provider
@@ -233,6 +301,9 @@ app = FastAPI(
 
 app.include_router(health_router)
 
+from llm_shield_proxy.api.webhook import webhook_router
+app.include_router(webhook_router)
+
 
 @app.middleware("http")
 async def security_and_tracing_middleware(request: Request, call_next: Any) -> Response:
@@ -242,9 +313,10 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
             status_code=503, content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}}
         )
 
-    app_state.active_requests += 1
+    app_state.active_requests.fetch_add(1)
     try:
-        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        raw_id = request.headers.get("x-request-id", "")
+        request_id = raw_id if (raw_id and _SAFE_REQUEST_ID_PATTERN.match(raw_id)) else str(uuid.uuid4())
         request.state.request_id = request_id
 
         response: Response = await call_next(request)
@@ -254,8 +326,8 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
     finally:
-        app_state.active_requests -= 1
-        if app_state.is_draining and app_state.active_requests == 0 and app_state.shutdown_event is not None:
+        app_state.active_requests.fetch_sub(1)
+        if app_state.is_draining and app_state.active_requests.load() == 0 and app_state.shutdown_event is not None:
             app_state.shutdown_event.set()
 
 
@@ -314,10 +386,13 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
         raise ValueError("Payload Too Large")
 
     body_bytes = bytearray()
+    cumulative_size = 0
     async for chunk in request.stream():
-        body_bytes.extend(chunk)
-        if len(body_bytes) > max_limit:
+        chunk_len = len(chunk)
+        if cumulative_size + chunk_len > max_limit:
             raise ValueError("Payload Too Large")
+        body_bytes.extend(chunk)
+        cumulative_size += chunk_len
     return bytes(body_bytes)
 
 
@@ -432,10 +507,20 @@ async def _proxy_catch_all_internal(
 
     # CORS Preflight
     if request.method == "OPTIONS":
+        origin = request.headers.get("origin", "")
+        allowed_origins = {o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()}
+        if "*" in allowed_origins or (origin and origin in allowed_origins):
+            allow_origin = origin or "*"
+        elif not settings.CORS_ALLOWED_ORIGINS:
+            allow_origin = origin or "*"
+        else:
+            allow_origin = "null"
+
         return Response(
             status_code=204,
             headers={
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": allow_origin,
+                "Vary": "Origin",
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
                 "Access-Control-Allow-Headers": "Authorization, Content-Type, x-api-key, x-goog-api-key, x-session-id",
                 "Access-Control-Max-Age": "86400",
@@ -445,28 +530,20 @@ async def _proxy_catch_all_internal(
     upstream_base = settings.UPSTREAM_BASE_URL
 
     # SSRF Protection on Dynamic Client Upstream Override
-    upstream_host_header = None
     if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
         if x_upstream_base_url.startswith(("http://", "https://")):
             parsed = urlparse(x_upstream_base_url)
             hostname = parsed.hostname or ""
-            try:
-                ip = socket.gethostbyname(hostname)
-                ip_obj = ipaddress.ip_address(ip)
-                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
-                    return JSONResponse(
-                        status_code=403,
-                        content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}},
-                    )
-                # Overwrite upstream base with the resolved IP to prevent DNS rebinding SSRF
-                port_str = f":{parsed.port}" if parsed.port else ""
-                upstream_base = f"{parsed.scheme}://{ip}{port_str}{parsed.path}"
-                upstream_host_header = hostname
-            except socket.gaierror:
+            is_safe, resolved_ip = await _resolve_and_validate_hostname(hostname)
+            if not is_safe or not resolved_ip:
                 return JSONResponse(
-                    status_code=400,
-                    content={"error": {"message": "Unresolvable upstream hostname", "type": "security_error"}},
+                    status_code=403,
+                    content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}},
                 )
+            # Overwrite upstream base with the resolved IP to prevent DNS rebinding SSRF
+            ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+            port_str = f":{parsed.port}" if parsed.port else ""
+            upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
 
     target_url = build_target_url(upstream_base, path)
 
@@ -475,9 +552,6 @@ async def _proxy_catch_all_internal(
     headers.pop("host", None)
     headers.pop("content-length", None)
     headers.pop("accept-encoding", None)
-
-    if upstream_host_header:
-        headers["host"] = upstream_host_header
 
     # Inject trace context into upstream HTTP request headers
     propagator.inject(headers)
@@ -515,27 +589,12 @@ async def _proxy_catch_all_internal(
             content={"error": {"message": "Invalid Proxy API Key", "type": "authentication_error"}},
         )
 
-    # Dynamic Virtual Key Resolution for FinOps
+    # Dynamic Virtual Key Resolution for FinOps & Tenant Scoping
     if virtual_key_id == "BYOK":
-        import re
-        vk = (
-            request.headers.get("x-virtual-key") or
-            request.headers.get("x-shield-virtual-key") or
-            request.headers.get("x-tenant-id")
-        )
-        if not vk:
-            baggage = request.headers.get("baggage", "")
-            if baggage:
-                match = re.search(r'(?:tenant_id|virtual_key)=([^,;]+)', baggage)
-                if match:
-                    vk = match.group(1)
-        if vk:
-            virtual_key_id = vk
+        if client_auth:
+            virtual_key_id = get_virtual_key_id(client_auth)
         else:
-            if client_auth:
-                virtual_key_id = get_virtual_key_id(client_auth)
-            else:
-                virtual_key_id = "default-tenant"
+            virtual_key_id = "anonymous"
 
     # Centralized Virtual Key Swapping
     if is_virtual_key:
@@ -572,9 +631,13 @@ async def _proxy_catch_all_internal(
     resolved_role = None
 
     if settings._flattened_policies:
+        tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-virtual-key")
         if virtual_key_id in settings._flattened_policies:
             resolved_role = settings._flattened_policies[virtual_key_id]
             applied_role_name = virtual_key_id
+        elif tenant_header and tenant_header in settings._flattened_policies:
+            resolved_role = settings._flattened_policies[tenant_header]
+            applied_role_name = tenant_header
         elif "default_role" in settings._flattened_policies:
             resolved_role = settings._flattened_policies["default_role"]
             applied_role_name = "default_role"
@@ -602,28 +665,18 @@ async def _proxy_catch_all_internal(
             headers={"Retry-After": "1"},
         )
 
-    # Vault resolution based on masking mode
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
-    from llm_shield_proxy.engines.masking import MaskingMode, resolve_masking_mode
+    from llm_shield_proxy.engines.masking import MaskingMode, ScrubVault, resolve_masking_mode
 
     masking_mode = resolve_masking_mode(x_shield_masking_mode)
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
         vault = StatelessCryptoVault()
     elif masking_mode == MaskingMode.SCRUB:
-
-        class ScrubVault:
-            def __init__(self) -> None:
-                self.type_counters: dict[str, int] = {}
-
-            def get_or_create_token(self, original_val: str, entity_type: str) -> str:
-                self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
-                return "[REDACTED]"
-
-            def rehydrate(self, text: str, retention_length: int = 0) -> str:
-                return text
-
         vault = ScrubVault()  # type: ignore
+    elif masking_mode == MaskingMode.HMAC:
+        from llm_shield_proxy.engines.masking import HmacVault
+        vault = HmacVault()  # type: ignore
     elif masking_mode == MaskingMode.STRUCTURAL_TAG:
         vault = await vault_store.get_vault_async(x_session_id, virtual_key_id)  # type: ignore
         vault.synthetic = False  # type: ignore
@@ -637,7 +690,7 @@ async def _proxy_catch_all_internal(
     if request.method == "POST":
         try:
             body_bytes = await read_body_with_limit(request)
-            payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            payload = orjson.loads(body_bytes) if body_bytes else {}
         except ValueError as ve:
             if str(ve) == "Payload Too Large":
                 return JSONResponse(
@@ -659,20 +712,25 @@ async def _proxy_catch_all_internal(
                 content={"error": {"message": "Malformed JSON payload", "type": "invalid_request_error"}},
             )
 
-        if isinstance(payload, dict):
-            # Circuit Breaker Logic
-            if settings.ENABLE_AGENT_BREAKER and x_session_id:
-                bypass_breaker = str(x_shield_bypass_breaker).lower() in ("true", "1", "yes")
-                if not bypass_breaker:
+        if isinstance(payload, (dict, list)):
+            if not x_shield_bypass_breaker:
+                if x_session_id:
                     try:
                         await check_circuit_breaker(x_session_id, payload)
-                    except CircuitBreakerTrippedException as cbe:
+                    except CircuitBreakerTrippedException as cb_exc:
+                        AuditLogger.log_circuit_breaker_tripped(
+                            session_id=x_session_id,
+                            request_id=request_id,
+                            virtual_key_id=virtual_key_id,
+                            consecutive_loops=cb_exc.consecutive_turns,
+                            applied_role_name=applied_role_name,
+                        )
                         return JSONResponse(
                             status_code=429,
                             content={
                                 "error": "circuit_breaker_tripped",
                                 "reason": "agent_loop_detected",
-                                "consecutive_turns": cbe.consecutive_turns,
+                                "consecutive_turns": cb_exc.consecutive_turns,
                             },
                             headers={"X-Shield-Circuit-Breaker": "TRIPPED", "Retry-After": "60"},
                         )
@@ -685,8 +743,7 @@ async def _proxy_catch_all_internal(
                 if "json" not in fmt_type.lower():
                     watermark_text = generate_watermark_text(
                         secret=settings.SHIELD_WATERMARK_SECRET,
-                        authorization_header=request.headers.get("authorization"),
-                        x_virtual_key_header=request.headers.get("x-virtual-key"),
+                        virtual_key_id=virtual_key_id,
                         client_ip=request.client.host if request.client else None,
                         session_id=x_session_id or "unknown_session",
                     )
@@ -700,46 +757,66 @@ async def _proxy_catch_all_internal(
                 elif isinstance(payload["stream_options"], dict):
                     payload["stream_options"]["include_usage"] = True
 
-            # Inject Canary Tripwire Token
-            if enable_canary_tripwire and settings.CANARY_TOKEN:
-                directive = f"\n\n[SYSTEM_GUARDRAIL_DO_NOT_REVEAL_OR_REPEAT: {settings.CANARY_TOKEN}]\n\n"
-                if "messages" in payload and isinstance(payload["messages"], list):
-                    if payload["messages"] and payload["messages"][0].get("role") == "system" and isinstance(payload["messages"][0].get("content"), str):
-                        payload["messages"][0]["content"] += directive
-                    else:
-                        payload["messages"].insert(0, {"role": "system", "content": directive})
-                elif "system" in payload:
-                    if isinstance(payload["system"], str):
-                        payload["system"] += directive
-                    elif isinstance(payload["system"], list):
-                        payload["system"].append({"type": "text", "text": directive})
 
+            is_v3 = False
+            v3_cipher = None
             try:
-                active_profile = pii_engine.get_profile(virtual_key_id)
-                if resolved_role and resolved_role.get("ENABLE_TIER3_ONNX_NER") is False:
-                    from llm_shield_proxy.engines.pii_engine import CompiledProfile
+                is_json_rpc = isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
+                if is_json_rpc:
+                    is_v3 = True
+                    # Initialize v3 Stateless Engine
+                    # Derive a 32-byte key from the watermark secret or fallback
+                    raw_secret = settings.SHIELD_WATERMARK_SECRET or "default_shield_secret_for_v3_engine"
+                    key = hashlib.sha256(raw_secret.encode('utf-8')).digest()
+                    
+                    v3_cipher = StatelessPIICipher(key=key, version=1, session_id=x_session_id)
+                    mutator = StatelessASTVisitor(v3_cipher)
+                    
+                    try:
+                        # Augment schemas dynamically
+                        payload = DynamicSchemaRewriter.rewrite(payload)
+                        # Process AST Mutator (orjson avoids GIL blocking)
+                        redacted_bytes = await mutator.mutate(orjson.dumps(payload))
+                        redacted_payload = orjson.loads(redacted_bytes)
+                        entities_detected = 0 # Handled statelessly
+                    except ASTDepthExceededException as ade:
+                        # RFC 7807 compliant HTTP 400 error
+                        return JSONResponse(
+                            status_code=400,
+                            content={
+                                "type": "about:blank",
+                                "title": "Bad Request",
+                                "status": 400,
+                                "detail": str(ade)
+                            },
+                            headers={"Content-Type": "application/problem+json"}
+                        )
+                else:
+                    active_profile = pii_engine.get_profile(virtual_key_id)
+                    if resolved_role and resolved_role.get("ENABLE_TIER3_ONNX_NER") is False:
+                        from llm_shield_proxy.engines.pii_engine import CompiledProfile
 
-                    active_profile = CompiledProfile(
-                        name=active_profile.name,
-                        tier1_patterns=active_profile.tier1_patterns,
-                        tier3_ner_entities=set(),
+                        active_profile = CompiledProfile(
+                            name=active_profile.name,
+                            tier1_patterns=active_profile.tier1_patterns,
+                            tier3_ner_entities=set(),
+                        )
+                    old_entities_count = sum(vault.type_counters.values())
+
+                    import contextvars
+                    ctx = contextvars.copy_context()
+
+                    redacted_payload = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        ctx.run,
+                        pii_engine.redact_payload,
+                        payload,
+                        vault,
+                        active_profile,  # type: ignore
                     )
-                old_entities_count = sum(vault.type_counters.values())
 
-                import contextvars
-                ctx = contextvars.copy_context()
-
-                redacted_payload = await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    ctx.run,
-                    pii_engine.redact_payload,
-                    payload,
-                    vault,
-                    active_profile,  # type: ignore
-                )
-
-                new_entities_count = sum(vault.type_counters.values())
-                entities_detected = new_entities_count - old_entities_count
+                    new_entities_count = sum(vault.type_counters.values())
+                    entities_detected = new_entities_count - old_entities_count
 
                 if enable_blast_radius_limits and entities_detected > 0:
                     from llm_shield_proxy.security.rate_limit import blast_radius_limiter
@@ -764,17 +841,36 @@ async def _proxy_catch_all_internal(
                             headers={"Retry-After": "60"},
                         )
 
+                # Inject Canary Tripwire Token after PII redaction to prevent stripping invisible Unicode
+                if enable_canary_tripwire and settings.CANARY_TOKEN:
+                    directive = generate_watermark_text(
+                        secret=settings.SHIELD_WATERMARK_SECRET or "default",
+                        session_id=x_session_id or "unknown_session",
+                        virtual_key_id=virtual_key_id,
+                    )
+                    if isinstance(redacted_payload, dict):
+                        if "messages" in redacted_payload and isinstance(redacted_payload["messages"], list):
+                            if redacted_payload["messages"] and redacted_payload["messages"][0].get("role") == "system" and isinstance(redacted_payload["messages"][0].get("content"), str):
+                                redacted_payload["messages"][0]["content"] += directive
+                            else:
+                                redacted_payload["messages"].insert(0, {"role": "system", "content": directive})
+                        elif "system" in redacted_payload:
+                            if isinstance(redacted_payload["system"], str):
+                                redacted_payload["system"] += directive
+                            elif isinstance(redacted_payload["system"], list):
+                                redacted_payload["system"].append({"type": "text", "text": directive})
+
                 # target_provider is refined with payload
                 target_provider = resolve_provider(dict(request.headers), redacted_payload)
                 if target_provider == "anthropic":
                     anthropic_payload = AnthropicAdapter.transform_request(redacted_payload)
-                    redacted_bytes = json.dumps(anthropic_payload).encode("utf-8")
+                    redacted_bytes = orjson.dumps(anthropic_payload)
                     target_url = "https://api.anthropic.com/v1/messages"
                     headers["anthropic-version"] = settings.ANTHROPIC_API_VERSION
                     headers["x-api-key"] = headers.get("authorization", "").replace("Bearer ", "").strip()
                     headers.pop("authorization", None)
                 else:
-                    redacted_bytes = json.dumps(redacted_payload).encode("utf-8")
+                    redacted_bytes = orjson.dumps(redacted_payload)
             except ValueError as ve:
                 if str(ve) == "Maximum payload nesting depth exceeded":
                     return JSONResponse(
@@ -814,6 +910,7 @@ async def _proxy_catch_all_internal(
                 is_fallback = False
 
                 while True:
+                    print("DEBUG REDACTED PAYLOAD:", type(redacted_payload), redacted_payload)
                     req = http_client.build_request(
                         method=request.method,
                         url=current_target_url,
@@ -855,6 +952,11 @@ async def _proxy_catch_all_internal(
                         break
 
                 if upstream_res is None or upstream_res.is_error:
+                    if upstream_res is not None:
+                        try:
+                            await upstream_res.aclose()
+                        except Exception:
+                            pass
                     status_code = upstream_res.status_code if (upstream_res and hasattr(upstream_res, 'status_code')) else 503
                     AuditLogger.log_redaction_event(
                         x_session_id,
@@ -894,15 +996,26 @@ async def _proxy_catch_all_internal(
                 async def wrapped_stream() -> AsyncGenerator[bytes, None]:
                     llm_shield_sse_active_streams.inc()
                     try:
-                        async for chunk in rehydrate_sse_stream(
-                            upstream_res.aiter_bytes(),
-                            vault,
-                            watermark_text=watermark_text,  # type: ignore
-                            path=path,
-                            request_id=request_id,
-                        ):
-                            yield chunk
-                    except asyncio.CancelledError:
+                        if is_v3 and v3_cipher:
+                            from llm_shield_proxy.v3.streaming_lexer import StatelessStreamingLexer
+                            lexer = StatelessStreamingLexer(v3_cipher)
+                            async for chunk in upstream_res.aiter_text():
+                                safe_chunk = lexer.feed_chunk(chunk)
+                                if safe_chunk:
+                                    yield safe_chunk.encode("utf-8")
+                            final_chunk = lexer.flush()
+                            if final_chunk:
+                                yield final_chunk.encode("utf-8")
+                        else:
+                            async for chunk in rehydrate_sse_stream(
+                                upstream_res.aiter_bytes(),
+                                vault,
+                                watermark_text=watermark_text,  # type: ignore
+                                path=path,
+                                request_id=request_id,
+                            ):
+                                yield chunk
+                    except (GeneratorExit, asyncio.CancelledError):
                         logger.info("Client disconnected mid-stream. Cleaning up SSE stream and upstream socket.")
                         if x_session_id:
                             if hasattr(vault_store, "clear_session_async"):
@@ -1015,11 +1128,16 @@ async def _proxy_catch_all_internal(
                     res_json = upstream_res.json()
                     loop = asyncio.get_running_loop()
 
-                    if target_provider == "anthropic":
-                        rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
-                        rehydrated_res = AnthropicAdapter.transform_response(rehydrated_res)
+                    if is_v3 and v3_cipher:
+                        from llm_shield_proxy.v3.streaming_lexer import NonStreamingRehydrator
+                        rehydrator = NonStreamingRehydrator(v3_cipher)
+                        rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, res_json)
                     else:
-                        rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                        if target_provider == "anthropic":
+                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                            rehydrated_res = AnthropicAdapter.transform_response(rehydrated_res)
+                        else:
+                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
 
                     if watermark_text:
                         if (
@@ -1131,6 +1249,7 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     if "choices" in res_copy and isinstance(res_copy["choices"], list):
         for choice in res_copy["choices"]:
             if isinstance(choice, dict):
+                print("DEBUG: Checking canary tripwire injection...")
                 message = choice.get("message", {})
                 if isinstance(message, dict):
                     if "content" in message and isinstance(message["content"], str):
