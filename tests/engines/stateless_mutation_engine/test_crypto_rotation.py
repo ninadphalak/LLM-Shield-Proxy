@@ -1,4 +1,4 @@
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
 
 
 def test_stateless_cipher_key_rotation():

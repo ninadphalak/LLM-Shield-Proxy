@@ -6,8 +6,8 @@ import psutil
 import pytest
 
 from llm_shield_proxy.engines.pii_engine import calculate_shannon_entropy, pii_engine
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.streaming_lexer import StatelessStreamingLexer
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
 
 DUMMY_KEY = b"0" * 32
 
@@ -26,7 +26,7 @@ def test_regex_overhead():
         pii_engine.detect_spans(test_str)
     elapsed = (time.perf_counter() - start) * 1e6 / iterations
     assert elapsed < 150.0  # Just a realistic upper bound for stability
-    print(f"\nVerified Tier 1 Regex Overhead: {elapsed:.2f} µs")
+    print(f"\nVerified Tier 1 Regex Overhead: {elapsed:.2f} Âµs")
 
 @pytest.mark.benchmark
 def test_shannon_entropy_overhead():
@@ -38,7 +38,7 @@ def test_shannon_entropy_overhead():
         calculate_shannon_entropy(test_secret)
     elapsed = (time.perf_counter() - start) * 1e6 / iterations
     assert elapsed < 15.0
-    print(f"\nVerified Tier 2 Shannon Entropy Overhead: {elapsed:.2f} µs")
+    print(f"\nVerified Tier 2 Shannon Entropy Overhead: {elapsed:.2f} Âµs")
 
 @pytest.mark.benchmark
 def test_int8_onnx_ner_overhead():
@@ -69,7 +69,7 @@ def test_sse_delta_chunk_latency(v3_cipher):
         lexer.feed_chunk(chunk)
     elapsed = (time.perf_counter() - start) * 1e6 / iterations
     assert elapsed < 50.0
-    print(f"\nVerified Total Added Latency per SSE Delta Chunk: {elapsed:.2f} µs")
+    print(f"\nVerified Total Added Latency per SSE Delta Chunk: {elapsed:.2f} Âµs")
 
 @pytest.mark.benchmark
 def test_aes_gcm_cycle(v3_cipher):
@@ -81,7 +81,7 @@ def test_aes_gcm_cycle(v3_cipher):
         v3_cipher.decrypt(token, "TEST")
     elapsed = (time.perf_counter() - start) * 1e6 / iterations
     assert elapsed < 50.0
-    print(f"\nVerified AES-256-GCM Authenticated Cipher Cycle: {elapsed:.2f} µs")
+    print(f"\nVerified AES-256-GCM Authenticated Cipher Cycle: {elapsed:.2f} Âµs")
 
 @pytest.mark.benchmark
 def test_memory_footprint():

@@ -5,8 +5,8 @@ import tracemalloc
 
 import orjson
 
-from llm_shield_proxy.v3.ast_mutator import StatelessASTVisitor
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import StatelessASTVisitor
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
 
 # 55 MB Limit
 MEMORY_LIMIT_BYTES = 55 * 1024 * 1024
