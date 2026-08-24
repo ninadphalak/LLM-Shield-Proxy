@@ -169,6 +169,7 @@ class Settings(BaseSettings):
     )
 
     # Security & Buffer Bounds
+    AGENT_IDENTITY_ENFORCER: bool = Field(default=False, description="Globally enable Agent Identity Enforcer")
     MAX_PAYLOAD_SIZE_BYTES: int = Field(
         default=10 * 1024 * 1024, description="Maximum allowed request payload size in bytes (10MB default)"
     )
@@ -372,6 +373,7 @@ class Settings(BaseSettings):
             _config_reload_lock.release()
 
 request_policy_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar("request_policy_ctx", default={})
+agent_identity_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("agent_identity_ctx", default=None)
 
 class DynamicSettingsProxy:
     """Zero-latency ContextVar proxy for per-tenant dynamic configuration overrides."""

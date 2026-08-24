@@ -61,9 +61,9 @@ from llm_shield_proxy.security.tool_rbac import (
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
-from llm_shield_proxy.v3.ast_mutator import ASTDepthExceededException, StatelessASTVisitor
-from llm_shield_proxy.v3.crypto import StatelessPIICipher
-from llm_shield_proxy.v3.schema_rewriter import DynamicSchemaRewriter
+from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import ASTDepthExceededException, StatelessASTVisitor
+from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +362,7 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         return response
     finally:
         # Lock wraps both the decrement and the drain-signal check to prevent a TOCTOU
-        # race where active_requests transitions 1→0 between the read and set() calls.
+        # race where active_requests transitions 1â†’0 between the read and set() calls.
         with app_state.active_requests_lock:
             app_state.active_requests -= 1
             if app_state.is_draining and app_state.active_requests == 0 and app_state.shutdown_event is not None:
@@ -711,6 +711,10 @@ async def _proxy_catch_all_internal(
                 status_code=403,
                 content={"error": {"message": "Unauthorized virtual key", "type": "security_error"}},
             )
+
+    # Agent Identity Enforcer (Edge-Level JWT/DPoP Validation)
+    from llm_shield_proxy.security.identity import verify_agent_identity
+    await verify_agent_identity(request, resolved_role)
 
     if resolved_role:
         request_policy_ctx.set(resolved_role)
@@ -1061,7 +1065,7 @@ async def _proxy_catch_all_internal(
                     llm_shield_sse_active_streams.inc()
                     try:
                         if is_v3 and v3_cipher:
-                            from llm_shield_proxy.v3.streaming_lexer import StatelessStreamingLexer
+                            from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
                             lexer = StatelessStreamingLexer(v3_cipher)
                             async for chunk in upstream_res.aiter_text():
                                 safe_chunk = lexer.feed_chunk(chunk)
@@ -1193,7 +1197,7 @@ async def _proxy_catch_all_internal(
                     loop = asyncio.get_running_loop()
 
                     if is_v3 and v3_cipher:
-                        from llm_shield_proxy.v3.streaming_lexer import NonStreamingRehydrator
+                        from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import NonStreamingRehydrator
                         rehydrator = NonStreamingRehydrator(v3_cipher)
                         rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, res_json)
                     else:

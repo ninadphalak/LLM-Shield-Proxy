@@ -58,11 +58,21 @@ class AuditLogger:
     @classmethod
     def _compute_and_append_hash(cls, log_entry: Dict[str, Any]) -> None:
         """Computes and attaches the cryptographic hash chain to a log record."""
-        event_str = json.dumps(log_entry, sort_keys=True)
+        from llm_shield_proxy.core.config import agent_identity_ctx
+        agent_id = agent_identity_ctx.get()
+        if agent_id:
+            log_entry["agent_identity_claim"] = agent_id
+
         with cls._hash_lock:
-            hash_payload = (event_str + cls._last_hash).encode("utf-8")
-            new_hash = hashlib.sha256(hash_payload).hexdigest()
             log_entry["previous_hash"] = cls._last_hash
+            try:
+                event_str = json.dumps(log_entry, sort_keys=True)
+            except Exception:
+                log_entry.pop("previous_hash", None)
+                raise
+            
+            hash_payload = event_str.encode("utf-8")
+            new_hash = hashlib.sha256(hash_payload).hexdigest()
             log_entry["hash"] = new_hash
             cls._last_hash = new_hash
 
