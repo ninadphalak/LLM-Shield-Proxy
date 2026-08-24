@@ -89,6 +89,7 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Secret for HMAC-SHA256 watermarking. |
 | **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry & WORM-Compliant Merkle Logging. |
 | **OTel & Tracing** | `TELEMETRY_ENDPOINT_URL` | `None` | Target webhook endpoint URL for audit telemetry. |
+| **OTel & Tracing** | `ANONYMOUS_USAGE_TRACKING` | `True` | Enable anonymous, opt-out volumetric telemetry. |
 | **Tripwire** | `ENABLE_CANARY_TRIPWIRE` | `False` | Enable deterministic prompt-extraction tripwire. |
 | **Tripwire** | `CANARY_TOKEN` | `None` | Cryptographic canary string, auto-generated if unset. |
 | **Blast Radius Limits** | `ENABLE_BLAST_RADIUS_LIMITS` | `False` | Enable Entity-Weighted Blast Radius Limits. |
