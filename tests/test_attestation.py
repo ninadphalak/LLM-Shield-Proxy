@@ -39,7 +39,8 @@ async def generate_mock_stream(num_chunks: int) -> AsyncGenerator[bytes, None]:
 
 
 @pytest.mark.asyncio
-async def test_attestation_log_and_signature(capture_audit_logs):
+async def test_attestation_log_and_signature(capture_audit_logs, monkeypatch):
+    monkeypatch.setattr(settings, "SHIELD_ENCRYPTION_KEY", "test-shield-key")
     vault = Vault(session_id="test_session_123")
     stream = generate_mock_stream(10)
 
@@ -66,17 +67,18 @@ async def test_attestation_log_and_signature(capture_audit_logs):
 
     # Signature Verification
     signature = attestation_log.pop("signature")
-    key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None) or "default-shield-key"
+    key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None)
     key = key_str.encode("utf-8")
 
     payload_bytes = orjson.dumps(attestation_log, option=orjson.OPT_SORT_KEYS)
     expected_sig = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
 
-    assert signature == expected_sig
+    assert hmac.compare_digest(signature, expected_sig)
 
 
 @pytest.mark.asyncio
-async def test_attestation_memory_footprint():
+async def test_attestation_memory_footprint(monkeypatch):
+    monkeypatch.setattr(settings, "SHIELD_ENCRYPTION_KEY", "test-shield-key")
     vault = Vault(session_id="test_session_mem")
     num_chunks = 100000
     stream = generate_mock_stream(num_chunks)

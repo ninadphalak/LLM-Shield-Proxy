@@ -125,8 +125,8 @@ class Settings(BaseSettings):
     SHIELD_DEFAULT_MASKING_MODE: str = Field(
         default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_CRYPTO)"
     )
-    SHIELD_ENCRYPTION_KEY: Optional[str] = Field(
-        default=None, description="256-bit AES-GCM encryption key for stateless crypto masking (base64 or hex)"
+    SHIELD_ENCRYPTION_KEY: str = Field(
+        description="256-bit AES-GCM encryption key for stateless crypto masking (base64 or hex)"
     )
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
         default=True, description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
@@ -184,7 +184,7 @@ class Settings(BaseSettings):
         description="Maximum allowed SSE line length in bytes to prevent Slowloris buffer poisoning (1MB default)",
     )
     ENABLE_WATERMARKING: bool = Field(default=False, description="Enable dynamic canary watermarking")
-    SHIELD_WATERMARK_SECRET: Optional[str] = Field(default=None, description="Secret for HMAC-SHA256 watermarking")
+    SHIELD_WATERMARK_SECRET: str = Field(description="Secret for HMAC-SHA256 watermarking")
 
     # Cryptographic Canary Prompt Tripwires
     ENABLE_CANARY_TRIPWIRE: bool = Field(default=False, description="Enable deterministic prompt-extraction tripwire")

@@ -56,6 +56,7 @@ class AuditLogger:
     _log_queue: "queue.Queue[tuple[str, Dict[str, Any]]]" = queue.Queue(-1)
     _worker_thread: Optional[threading.Thread] = None
     _worker_init_lock = threading.Lock()
+    _chain_lock = threading.Lock()
 
     @classmethod
     def _start_worker_if_needed(cls):
@@ -79,31 +80,37 @@ class AuditLogger:
                 # If we do it in the background thread, agent_identity_ctx.get() will be empty because it's a new thread!
                 # So we MUST extract agent_id in the caller and pass it in!
 
-                log_entry["previous_hash"] = cls._last_hash
+                with cls._chain_lock:
+                    log_entry["previous_hash"] = cls._last_hash
 
-                try:
-                    # Single-pass serialization for hashing
-                    event_str = json.dumps(log_entry, sort_keys=True)
-                except Exception:
-                    # Maintain chain continuity on serialization failures
-                    event_str = json.dumps({
-                        "event": "AUDIT_SERIALIZATION_FAILURE",
-                        "previous_hash": log_entry.get("previous_hash"),
-                        "severity": severity
-                    }, sort_keys=True)
+                    try:
+                        # Single-pass serialization for hashing
+                        event_str = json.dumps(log_entry, sort_keys=True)
+                    except Exception:
+                        # Maintain chain continuity on serialization failures
+                        event_str = json.dumps({
+                            "event": "AUDIT_SERIALIZATION_FAILURE",
+                            "previous_hash": log_entry.get("previous_hash"),
+                            "severity": severity
+                        }, sort_keys=True)
 
-                new_hash = hashlib.sha256(event_str.encode("utf-8")).hexdigest()
-                cls._last_hash = new_hash
+                    new_hash = hashlib.sha256(event_str.encode("utf-8")).hexdigest()
 
-                # Avoid double serialization by mutating the JSON string directly
-                final_str = f'{event_str[:-1]}, "hash": "{new_hash}"}}'
+                    # Avoid double serialization by mutating the JSON string directly
+                    final_str = f'{event_str[:-1]}, "hash": "{new_hash}"}}'
 
-                if severity == "CRITICAL":
-                    audit_logger.critical(final_str)
-                elif severity == "WARNING":
-                    audit_logger.warning(final_str)
-                else:
-                    audit_logger.info(final_str)
+                    if severity == "CRITICAL":
+                        audit_logger.critical(final_str)
+                    elif severity == "WARNING":
+                        audit_logger.warning(final_str)
+                    else:
+                        audit_logger.info(final_str)
+
+                    for handler in audit_logger.handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+
+                    cls._last_hash = new_hash
 
             except Exception:
                 # Silently drop failed logs to prevent worker crash

@@ -66,6 +66,13 @@ def get_aesgcm() -> AESGCM:
     return _AESGCM_INSTANCE
 
 
+def zeroize_crypto_material() -> None:
+    """Explicit memory zeroization for FIPS 140-3 KAT memory-dump protections."""
+    global _AESGCM_INSTANCE, _DEK
+    _AESGCM_INSTANCE = None
+    _DEK = None
+
+
 def encrypt_to_token(raw_pii: str) -> str:
     """Encrypts a string to a Base64URL token.
 
