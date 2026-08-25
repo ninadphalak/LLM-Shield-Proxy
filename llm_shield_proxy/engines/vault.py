@@ -7,6 +7,7 @@ and namespace isolation across tenants.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import logging
@@ -14,6 +15,7 @@ import random
 import re
 import threading
 import time
+import unicodedata
 from collections import OrderedDict
 from typing import Callable, Dict, Optional
 
@@ -31,7 +33,7 @@ except ImportError:
     aioredis = None  # type: ignore
     redis = None  # type: ignore
 
-fake = Faker()
+_faker_ctx: contextvars.ContextVar[Faker] = contextvars.ContextVar("faker_ctx")
 _PROCESS_DEK: Optional[bytes] = None
 
 
@@ -95,7 +97,13 @@ class Vault:
             self.type_counters[entity_type] = current_count
 
             if self.synthetic:
-                seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest(), 16) % (2**32)
+                seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest(), 16)
+                try:
+                    fake = _faker_ctx.get()
+                except LookupError:
+                    fake = Faker()
+                    _faker_ctx.set(fake)
+
                 fake.seed_instance(seed)
                 if "PERSON" in entity_type or "NAME" in entity_type:
                     token = fake.first_name()
@@ -130,9 +138,12 @@ class Vault:
 
             return token
 
-    def _is_ascii_word_char(self, c: str) -> bool:
-        """Determines if character is an ASCII alphanumeric word character."""
-        return ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or (c == "_")
+    def _is_word_char(self, c: str) -> bool:
+        """Determines if character is an alphanumeric word character, including NFKC normalized Unicode."""
+        if not c:
+            return False
+        c = unicodedata.normalize("NFKC", c)
+        return c.isalnum() or c == "_"
 
     def _is_boundary_safe(self, text: str, start: int, end: int, token: str) -> bool:
         """Ensures token match occurs at word boundaries to prevent sub-word collisions.
@@ -140,11 +151,11 @@ class Vault:
         Supports multi-lingual and CJK (Chinese, Japanese, Korean) contexts without
         falsely requiring whitespace between logographic characters.
         """
-        if self._is_ascii_word_char(token[0]) and start > 0:
-            if self._is_ascii_word_char(text[start - 1]):
+        if self._is_word_char(token[0]) and start > 0:
+            if self._is_word_char(text[start - 1]):
                 return False
-        if self._is_ascii_word_char(token[-1]) and end < len(text):
-            if self._is_ascii_word_char(text[end]):
+        if self._is_word_char(token[-1]) and end < len(text):
+            if self._is_word_char(text[end]):
                 return False
         return True
 

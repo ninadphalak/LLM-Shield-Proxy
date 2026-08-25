@@ -82,6 +82,11 @@ class StatelessStreamingLexer:
         # 4. Flush safe buffer
         # We retain up to 256 characters of the trailing buffer to avoid breaking JSON keys across chunks.
         # If the buffer is smaller than 256, we don't emit yet.
+
+        # Defend against whitespace padding attacks by stripping excessive trailing whitespace
+        # before computing the flush point, keeping memory strictly bounded.
+        content = re.sub(r'\s{256,}', ' ', content)
+
         flush_point = max(0, len(content) - 256)
 
         self.buffer = io.StringIO()
