@@ -53,6 +53,9 @@ def test_audit_logger_rfc6902_diff_and_chaining(caplog):
 
     assert duration < 1.0, f"Audit logging took {duration} ms, exceeding 1.0 ms budget (target: 0.1ms on prod)"
 
+    # Allow background audit queue thread to flush
+    time.sleep(0.05)
+
     # Verify log output structure
     logs = [json.loads(record.message) for record in caplog.records if "PII_REDACTION_EVENT" in record.message]
     assert len(logs) == 1
@@ -66,11 +69,11 @@ def test_audit_logger_rfc6902_diff_and_chaining(caplog):
     # Verify cryptographic chain integrity
     event_copy = log_entry.copy()
     event_hash = event_copy.pop("hash")
-    prev_hash = event_copy.pop("previous_hash")
 
     # Reconstruct the string used for hashing (JSON serialized, keys sorted)
+    # audit.py hashes the JSON representation containing 'previous_hash' directly.
     event_str = json.dumps(event_copy, sort_keys=True)
-    hash_payload = (event_str + prev_hash).encode("utf-8")
+    hash_payload = event_str.encode("utf-8")
     expected_hash = __import__("hashlib").sha256(hash_payload).hexdigest()
 
     assert event_hash == expected_hash

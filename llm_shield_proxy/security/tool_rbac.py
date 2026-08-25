@@ -23,19 +23,35 @@ class ToolAccessForbiddenException(Exception):
         )
 
 
+
+class BoundedLockMap:
+    def __init__(self, maxsize=1000):
+        self.cache = OrderedDict()
+        self.maxsize = maxsize
+        self._global_lock = asyncio.Lock()
+
+    async def get_lock(self, key):
+        async with self._global_lock:
+            if key not in self.cache:
+                if len(self.cache) >= self.maxsize:
+                    self.cache.popitem(last=False) # Evict oldest
+                self.cache[key] = asyncio.Lock()
+            self.cache.move_to_end(key)
+            return self.cache[key]
+
 class BasePolicyResolver(ABC):
     def __init__(self, shared_state: Optional[Dict[str, Any]] = None):
         if shared_state is None:
             shared_state = {
                 "cache": OrderedDict(),
                 "cache_lock": asyncio.Lock(),
-                "inflight": {},
-                "inflight_lock": asyncio.Lock()
+                "inflight_locks": BoundedLockMap(maxsize=1000),
+                "background_tasks": set()
             }
         self._cache = shared_state["cache"]
         self._cache_lock = shared_state["cache_lock"]
-        self._inflight = shared_state["inflight"]
-        self._inflight_lock = shared_state["inflight_lock"]
+        self._inflight_locks = shared_state["inflight_locks"]
+        self._background_tasks = shared_state["background_tasks"]
         self._max_cache_size = 1000
 
     @abstractmethod
@@ -51,32 +67,23 @@ class AbstractCachingPolicyResolver(BasePolicyResolver):
         pass
 
     async def _safe_background_fetch(self, virtual_key: str) -> None:
-        async with self._inflight_lock:
-            if virtual_key in self._inflight:
-                return
-            event = asyncio.Event()
-            self._inflight[virtual_key] = event
-
-        try:
-            await self._fetch_policy(virtual_key)
-        except Exception as e:
-            AuditLogger.log_security_event(
-                event_type="rbac_background_fetch_critical_failure",
-                severity="CRITICAL",
-                details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
-                virtual_key_id=virtual_key
-            )
-            policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-            expiration = time.time() + 5.0
-            async with self._cache_lock:
-                if len(self._cache) >= self._max_cache_size and virtual_key not in self._cache:
-                    self._cache.popitem(last=False)
-                self._cache[virtual_key] = (policy, expiration)
-        finally:
-            async with self._inflight_lock:
-                evt = self._inflight.pop(virtual_key, None)
-            if evt:
-                evt.set()
+        lock = await self._inflight_locks.get_lock(virtual_key)
+        async with lock:
+            try:
+                await self._fetch_policy(virtual_key)
+            except Exception as e:
+                AuditLogger.log_security_event(
+                    event_type="rbac_background_fetch_critical_failure",
+                    severity="CRITICAL",
+                    details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
+                    virtual_key_id=virtual_key
+                )
+                policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+                expiration = time.time() + 5.0
+                async with self._cache_lock:
+                    if len(self._cache) >= self._max_cache_size and virtual_key not in self._cache:
+                        self._cache.popitem(last=False)
+                    self._cache[virtual_key] = (policy, expiration)
 
     async def resolve_policy(self, virtual_key: str) -> dict:
         async with self._cache_lock:
@@ -86,42 +93,29 @@ class AbstractCachingPolicyResolver(BasePolicyResolver):
         if entry is not None:
             policy, expiration = entry
             if now > expiration:
-                asyncio.create_task(self._safe_background_fetch(virtual_key))
+                task = asyncio.create_task(self._safe_background_fetch(virtual_key))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             return policy
 
         # Cache miss
-        async with self._inflight_lock:
-            event = self._inflight.get(virtual_key)
-            if event is None:
-                # We are the fetching coroutine
-                event = asyncio.Event()
-                self._inflight[virtual_key] = event
-                already_inflight = False
-            else:
-                already_inflight = True
-
-        if already_inflight:
-            await event.wait()
+        lock = await self._inflight_locks.get_lock(virtual_key)
+        async with lock:
             async with self._cache_lock:
                 entry = self._cache.get(virtual_key)
             if entry is not None:
                 return entry[0]
-            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
 
-        # We are the fetching coroutine
-        try:
-            await self._fetch_policy(virtual_key)
-        finally:
-            async with self._inflight_lock:
-                evt = self._inflight.pop(virtual_key, None)
-            if evt:
-                evt.set()
+            try:
+                await self._fetch_policy(virtual_key)
+            except Exception:
+                pass
 
-        async with self._cache_lock:
-            entry = self._cache.get(virtual_key)
-        if entry is None:
-            return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
-        return entry[0]
+            async with self._cache_lock:
+                entry = self._cache.get(virtual_key)
+            if entry is None:
+                return {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
+            return entry[0]
 
 
 class RedisPolicyResolver(BasePolicyResolver):
@@ -253,8 +247,7 @@ class StreamingToolParser:
                     self.buffer.append(byte_int)
                     self.escape_next = False
                     if len(self.buffer) > self.MAX_TOOL_NAME_LEN:
-                        self.state = "SEARCHING"
-                        self.target_key_matched = False
+                        raise ValueError("Security Exception: Tool name exceeds 256 bytes. Potential truncation bypass detected.")
                 elif byte_int == BACKSLASH_BYTE:
                     self.escape_next = True
                 elif byte_int == QUOTE_BYTE:
@@ -271,8 +264,7 @@ class StreamingToolParser:
                 else:
                     self.buffer.append(byte_int)
                     if len(self.buffer) > self.MAX_TOOL_NAME_LEN:
-                        self.state = "SEARCHING"
-                        self.target_key_matched = False
+                        raise ValueError("Security Exception: Tool name exceeds 256 bytes. Potential truncation bypass detected.")
 
             elif self.state == "WAIT_COLON":
                 if byte_int == COLON_BYTE:

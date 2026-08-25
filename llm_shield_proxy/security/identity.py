@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
-from functools import lru_cache
+from collections import defaultdict
 from typing import Any, Dict, Optional
 
 import jwt
@@ -19,24 +20,22 @@ from llm_shield_proxy.core.config import agent_identity_ctx, settings
 
 logger = logging.getLogger(__name__)
 
-# O(1) Memory Cache for JWKS to guarantee < 1ms validation
-# In a real environment, this would fetch from an OIDC provider like Google/Azure
-@lru_cache(maxsize=128)
-def fetch_jwks(issuer: str) -> jwt.PyJWKClient:
-    """Heavily cached JWKS client factory."""
-    # Note: For production this URL must be dynamically resolved or configured.
-    jwks_url = f"{issuer.rstrip('/')}/.well-known/jwks.json"
-    return jwt.PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
+# Global state for coalescing fetches
+_jwks_clients: Dict[str, jwt.PyJWKClient] = {}
+_jwks_locks = defaultdict(threading.Lock)
 
 async def _get_signing_key(issuer: str, token: str):
     def _fetch():
-        jwks_client = fetch_jwks(issuer)
-        return jwks_client.get_signing_key_from_jwt(token)
+        with _jwks_locks[issuer]:
+            if issuer not in _jwks_clients:
+                jwks_url = f"{issuer.rstrip('/')}/.well-known/jwks.json"
+                _jwks_clients[issuer] = jwt.PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
+            return _jwks_clients[issuer].get_signing_key_from_jwt(token)
     return await asyncio.to_thread(_fetch)
 
 async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[str, Any]] = None) -> None:
     """FastAPI Dependency for Agent Identity Enforcement.
-    
+
     1. Checks if enforcement is globally enabled or per-tenant enabled.
     2. Validates DPoP and Workload Identity JWTs.
     3. Drops connection (401) immediately if invalid.
@@ -91,18 +90,24 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         if not allowed_issuers or issuer not in allowed_issuers:
             raise jwt.InvalidIssuerError("Unauthorized issuer")
 
+        allowed_audiences = tenant_policy.get("allowed_audiences", []) if tenant_policy else getattr(settings, "ALLOWED_AUDIENCES", [])
+
+        # Finding 1: Check audience before fetching JWKS over network
+        if allowed_audiences and unverified_claims.get("aud") not in allowed_audiences:
+            raise jwt.InvalidAudienceError("Unauthorized audience")
+
         # Step 2: Fetch JWKS (cached) and get signing key non-blockingly
         signing_key = await _get_signing_key(issuer, token)
 
         # Step 3: Verify the token signature and claims
-        allowed_audiences = tenant_policy.get("allowed_audiences", []) if tenant_policy else getattr(settings, "ALLOWED_AUDIENCES", [])
-
         options_dict = {
             "verify_exp": True,
             "verify_aud": bool(allowed_audiences),
         }
 
-        decoded_token = jwt.decode(
+        # Finding 2: Offload CPU-bound PyJWT signature verification to avoid loop starvation
+        decoded_token = await asyncio.to_thread(
+            jwt.decode,
             token,
             signing_key.key,
             algorithms=["RS256", "ES256", "PS256"],
@@ -117,32 +122,46 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             raise jwt.InvalidTokenError("Missing jwk in DPoP header")
 
         dpop_jwk = jwt.PyJWK(jwk_dict)
-        dpop_claims = jwt.decode(
+
+        # Offload DPoP signature verification as well
+        dpop_claims = await asyncio.to_thread(
+            jwt.decode,
             dpop_header,
             dpop_jwk.key,
-            algorithms=["RS256", "ES256", "PS256"]
+            algorithms=["RS256", "ES256", "PS256"],
+            options={"verify_exp": True, "leeway": 60}
         )
 
-        # DPoP Expiry and Freshness with clock skew (5 seconds)
+        # DPoP Expiry and Freshness with clock skew (60 seconds leeway)
         iat = dpop_claims.get("iat")
         if not iat:
             raise jwt.InvalidTokenError("DPoP proof missing iat")
 
         now = time.time()
-        if iat > now + 5:
+        if iat > now + 60:
             raise jwt.InvalidTokenError("DPoP proof iat is in the future")
-        if now - iat > 300:
+        if now - iat > 360:
             raise jwt.InvalidTokenError("DPoP proof expired (older than 5 minutes)")
 
-        # Replay validation (Strict Mode only)
-        if enforce_identity == "strict":
-            if dpop_claims.get("htm") != request.method:
-                raise jwt.InvalidTokenError("DPoP htm mismatch")
+        # Finding 3: 3-Tier Replay validation (Strict vs Lenient vs None)
+        expected_htu = str(request.url.replace(query=""))
+        is_dpop_valid = True
+        dpop_error_msg = ""
 
-            # RFC9449 typically compares against the HTTP URI without query parameters
-            expected_htu = str(request.url.replace(query=""))
-            if dpop_claims.get("htu") != expected_htu:
-                raise jwt.InvalidTokenError("DPoP htu mismatch")
+        if dpop_claims.get("htm") != request.method:
+            is_dpop_valid = False
+            dpop_error_msg = "DPoP htm mismatch"
+        elif dpop_claims.get("htu") != expected_htu:
+            is_dpop_valid = False
+            dpop_error_msg = "DPoP htu mismatch"
+
+        if not is_dpop_valid:
+            if enforce_identity == "strict":
+                raise jwt.InvalidTokenError(dpop_error_msg)
+            elif enforce_identity == "lenient":
+                logger.warning(f"DPoP Validation Warning (lenient mode): {dpop_error_msg}")
+                # For prometheus metric and admin review telemetry (and tests)
+                request.state.dpop_warning = dpop_error_msg
 
         # Ensure the DPoP token's thumbprint matches the access token's 'cnf' (Confirmation) claim
         cnf = decoded_token.get("cnf", {})

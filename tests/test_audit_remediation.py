@@ -6,9 +6,12 @@ and cryptographic isolation guarantees identified during the codebase audit.
 
 import asyncio
 import hashlib
+import time
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException, Request
 
 from llm_shield_proxy.api.main import (
     _SAFE_REQUEST_ID_PATTERN,
@@ -235,11 +238,101 @@ def test_scrub_vault_top_level_redaction():
     vault = ScrubVault()
     t1 = vault.get_or_create_token("john@example.com", "EMAIL")
     t2 = vault.get_or_create_token("jane@example.com", "EMAIL")
-    t3 = vault.get_or_create_token("123-45-6789", "SSN")
+    vault.get_or_create_token("123-45-6789", "SSN")
 
     assert t1 == "[REDACTED]"
     assert t2 == "[REDACTED]"
     assert vault.type_counters["EMAIL"] == 2
     assert vault.type_counters["SSN"] == 1
     assert vault.rehydrate("Output with [REDACTED]") == "Output with [REDACTED]"
+
+
+@pytest.mark.asyncio
+async def test_dpop_enforcement_tiers():
+    from llm_shield_proxy.security.identity import verify_agent_identity
+
+    request = MagicMock(spec=Request)
+    request.method = "POST"
+    request.url = "https://example.com/api"
+    request.headers = {"Authorization": "Bearer tok", "DPoP": "dpop"}
+    request.state = MagicMock()
+
+    with patch("llm_shield_proxy.security.identity.jwt.decode") as mock_decode, \
+         patch("llm_shield_proxy.security.identity._get_signing_key", new_callable=AsyncMock), \
+         patch("llm_shield_proxy.security.identity.jwt.get_unverified_header") as mock_unverified_header, \
+         patch("llm_shield_proxy.security.identity.jwt.PyJWK") as mock_jwk, \
+         patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread:
+
+        mock_decode.return_value = {"iss": "https://issuer.com", "aud": "shield"}
+        mock_unverified_header.return_value = {"jwk": {"kty": "RSA"}}
+
+        mock_to_thread.side_effect = [
+            {"cnf": {"jkt": "thumbprint"}, "sub": "agent1"},
+            {"htm": "GET", "htu": "https://example.com/api", "iat": time.time(), "jti": "123"}
+        ]
+
+        mock_jwk.return_value.thumbprint = "thumbprint"
+
+        # Test Lenient Mode (should pass and set warning)
+        tenant_policy_lenient = {"agent_identity_enforcer": "lenient", "allowed_issuers": ["https://issuer.com"]}
+        await verify_agent_identity(request, tenant_policy=tenant_policy_lenient)
+        assert request.state.dpop_warning == "DPoP htm mismatch"
+
+        # Test Strict Mode (should fail with 401)
+        mock_to_thread.side_effect = [
+            {"cnf": {"jkt": "thumbprint"}, "sub": "agent1"},
+            {"htm": "GET", "htu": "https://example.com/api", "iat": time.time(), "jti": "123"}
+        ]
+        tenant_policy_strict = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"]}
+        with pytest.raises(HTTPException) as exc:
+            await verify_agent_identity(request, tenant_policy=tenant_policy_strict)
+        assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_slowloris_chunk_timeout():
+    from fastapi import HTTPException
+
+    from llm_shield_proxy.api.main import read_body_with_limit
+
+    request = MagicMock(spec=Request)
+    request.headers = {}
+
+    async def slow_generator():
+        yield b"a"
+        await asyncio.sleep(6)
+        yield b"b"
+
+    request.stream = slow_generator
+
+    with pytest.raises(HTTPException) as exc:
+        await read_body_with_limit(request)
+
+    assert exc.value.status_code == 408
+    assert "Slowloris" in exc.value.detail
+
+
+def test_tool_name_length_limit():
+    from llm_shield_proxy.security.tool_rbac import StreamingToolParser
+
+    parser = StreamingToolParser()
+    parser.feed(b'{"name": "')
+
+    long_name = b'A' * 260
+    with pytest.raises(ValueError, match="Security Exception: Tool name exceeds 256 bytes"):
+        parser.feed(long_name)
+
+
+@pytest.mark.asyncio
+async def test_bounded_lock_eviction():
+    from llm_shield_proxy.security.tool_rbac import BoundedLockMap
+
+    lock_map = BoundedLockMap(maxsize=1000)
+
+    for i in range(1500):
+        await lock_map.get_lock(f"key_{i}")
+
+    assert len(lock_map.cache) == 1000
+    assert "key_0" not in lock_map.cache
+    assert "key_1499" in lock_map.cache
 
