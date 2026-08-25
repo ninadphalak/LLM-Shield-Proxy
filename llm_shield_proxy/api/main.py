@@ -41,6 +41,7 @@ from watchdog.observers import Observer
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
 from llm_shield_proxy.adapters.provider_factory import resolve_provider
 from llm_shield_proxy.api.health import health_router
+from llm_shield_proxy.api.webhook import webhook_router
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
@@ -61,6 +62,7 @@ from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
 from llm_shield_proxy.security.tool_rbac import (
     BasePolicyResolver,
+    BoundedLockMap,
     InMemoryPolicyResolver,
     OPAPolicyResolver,
     RedisPolicyResolver,
@@ -337,9 +339,6 @@ app = FastAPI(
 
 
 app.include_router(health_router)
-
-from llm_shield_proxy.api.webhook import webhook_router
-
 app.include_router(webhook_router)
 
 
@@ -429,12 +428,25 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
 
     body_bytes = bytearray()
     cumulative_size = 0
-    async for chunk in request.stream():
-        chunk_len = len(chunk)
-        if cumulative_size + chunk_len > max_limit:
-            raise ValueError("Payload Too Large")
-        body_bytes.extend(chunk)
-        cumulative_size += chunk_len
+
+    stream_iter = request.stream()
+    while True:
+        try:
+            async with asyncio.timeout(5.0):
+                try:
+                    chunk = await anext(stream_iter)
+                except StopAsyncIteration:
+                    break
+
+            chunk_len = len(chunk)
+            if cumulative_size + chunk_len > max_limit:
+                raise ValueError("Payload Too Large")
+            body_bytes.extend(chunk)
+            cumulative_size += chunk_len
+        except TimeoutError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=408, detail="Request Timeout: Slowloris prevention")
+
     return bytes(body_bytes)
 
 
@@ -461,8 +473,8 @@ async def get_policy_resolver(request: Request) -> BasePolicyResolver:
         request.app.state.rbac_state = {
             "cache": OrderedDict(),
             "cache_lock": asyncio.Lock(),
-            "inflight": {},
-            "inflight_lock": asyncio.Lock()
+            "inflight_locks": BoundedLockMap(maxsize=1000),
+            "background_tasks": set()
         }
     shared_state = request.app.state.rbac_state
 
@@ -520,7 +532,6 @@ async def proxy_catch_all(
     x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
     x_upstream_base_url: Optional[str] = Header(None, alias="X-Upstream-Base-Url"),
     x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
-    x_shield_bypass_breaker: Optional[str] = Header(None, alias="X-Shield-Bypass-Breaker"),
     background_tasks: BackgroundTasks = None,
     policy_resolver: BasePolicyResolver = Depends(get_policy_resolver),
 ) -> Response:
@@ -535,7 +546,6 @@ async def proxy_catch_all(
                 x_session_id,
                 x_upstream_base_url,
                 x_shield_masking_mode,
-                x_shield_bypass_breaker,
                 background_tasks,
                 policy_resolver,
             )
@@ -554,7 +564,6 @@ async def _proxy_catch_all_internal(
     x_session_id: Optional[str],
     x_upstream_base_url: Optional[str],
     x_shield_masking_mode: Optional[str] = None,
-    x_shield_bypass_breaker: Optional[str] = None,
     background_tasks: Optional[BackgroundTasks] = None,
     policy_resolver: Optional[BasePolicyResolver] = None,
 ) -> Response:
@@ -709,13 +718,9 @@ async def _proxy_catch_all_internal(
     resolved_role = None
 
     if settings._flattened_policies:
-        tenant_header = request.headers.get("x-tenant-id") or request.headers.get("x-virtual-key")
         if virtual_key_id in settings._flattened_policies:
             resolved_role = settings._flattened_policies[virtual_key_id]
             applied_role_name = virtual_key_id
-        elif tenant_header and tenant_header in settings._flattened_policies:
-            resolved_role = settings._flattened_policies[tenant_header]
-            applied_role_name = tenant_header
         elif "default_role" in settings._flattened_policies:
             resolved_role = settings._flattened_policies["default_role"]
             applied_role_name = "default_role"
@@ -795,27 +800,26 @@ async def _proxy_catch_all_internal(
             )
 
         if isinstance(payload, (dict, list)):
-            if not x_shield_bypass_breaker:
-                if x_session_id:
-                    try:
-                        await check_circuit_breaker(x_session_id, payload)
-                    except CircuitBreakerTrippedException as cb_exc:
-                        AuditLogger.log_circuit_breaker_tripped(
-                            session_id=x_session_id,
-                            request_id=request_id,
-                            virtual_key_id=virtual_key_id,
-                            consecutive_loops=cb_exc.consecutive_turns,
-                            applied_role_name=applied_role_name,
-                        )
-                        return JSONResponse(
-                            status_code=429,
-                            content={
-                                "error": "circuit_breaker_tripped",
-                                "reason": "agent_loop_detected",
-                                "consecutive_turns": cb_exc.consecutive_turns,
-                            },
-                            headers={"X-Shield-Circuit-Breaker": "TRIPPED", "Retry-After": "60"},
-                        )
+            if x_session_id:
+                try:
+                    await check_circuit_breaker(x_session_id, payload)
+                except CircuitBreakerTrippedException as cb_exc:
+                    AuditLogger.log_circuit_breaker_tripped(
+                        session_id=x_session_id,
+                        request_id=request_id,
+                        virtual_key_id=virtual_key_id,
+                        consecutive_loops=cb_exc.consecutive_turns,
+                        applied_role_name=applied_role_name,
+                    )
+                    return JSONResponse(
+                        status_code=429,
+                        content={
+                            "error": "circuit_breaker_tripped",
+                            "reason": "agent_loop_detected",
+                            "consecutive_turns": cb_exc.consecutive_turns,
+                        },
+                        headers={"X-Shield-Circuit-Breaker": "TRIPPED", "Retry-After": "60"},
+                    )
 
             # Pre-flight Watermark Check
             watermark_text = ""

@@ -55,12 +55,16 @@ class AuditLogger:
     _instance_id: str = socket.gethostname()
     _log_queue: "queue.Queue[tuple[str, Dict[str, Any]]]" = queue.Queue(-1)
     _worker_thread: Optional[threading.Thread] = None
+    _worker_init_lock = threading.Lock()
 
     @classmethod
     def _start_worker_if_needed(cls):
         if cls._worker_thread is None or not cls._worker_thread.is_alive():
-            cls._worker_thread = threading.Thread(target=cls._worker, daemon=True, name="AuditWORMHashWorker")
-            cls._worker_thread.start()
+            with cls._worker_init_lock:
+                # Double-checked locking
+                if cls._worker_thread is None or not cls._worker_thread.is_alive():
+                    cls._worker_thread = threading.Thread(target=cls._worker, daemon=True, name="AuditWORMHashWorker")
+                    cls._worker_thread.start()
 
     @classmethod
     def _worker(cls):
@@ -81,7 +85,12 @@ class AuditLogger:
                     # Single-pass serialization for hashing
                     event_str = json.dumps(log_entry, sort_keys=True)
                 except Exception:
-                    continue
+                    # Maintain chain continuity on serialization failures
+                    event_str = json.dumps({
+                        "event": "AUDIT_SERIALIZATION_FAILURE",
+                        "previous_hash": log_entry.get("previous_hash"),
+                        "severity": severity
+                    }, sort_keys=True)
 
                 new_hash = hashlib.sha256(event_str.encode("utf-8")).hexdigest()
                 cls._last_hash = new_hash

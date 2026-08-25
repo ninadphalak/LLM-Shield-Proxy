@@ -84,17 +84,16 @@ async def test_policy_zero_trust_block(temp_policies_file):
         yaml.dump(policies, f)
     settings.reload_policies(force=True)
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        # Using a tenant ID that is not in the virtual_keys map
-        response = await client.post(
-            "/v1/chat/completions",
-            headers={"x-tenant-id": "unknown-tenant", "authorization": "Bearer test"},
-            json={"messages": [{"role": "user", "content": "Hello"}]}
-        )
-        assert response.status_code == 403
-        assert response.json()["error"]["message"] == "Unauthorized virtual key"
-
-
+    with patch("llm_shield_proxy.api.main.get_virtual_key_id", return_value="unknown-tenant"):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            # Using a tenant ID that is not in the virtual_keys map
+            response = await client.post(
+                "/v1/chat/completions",
+                headers={"authorization": "Bearer unknown-tenant"},
+                json={"messages": [{"role": "user", "content": "Hello"}]}
+            )
+            assert response.status_code == 403
+            assert response.json()["error"]["message"] == "Unauthorized virtual key"
 
 @pytest.mark.asyncio
 async def test_policy_role_overrides(temp_policies_file):
@@ -116,29 +115,30 @@ async def test_policy_role_overrides(temp_policies_file):
     print(f"Mock client request return type: {type(mock_client.request.return_value)}")
 
     with patch("llm_shield_proxy.api.main.get_http_client", return_value=mock_client):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            # 1. Strict Role (enables Canary)
-            await client.post(
-                "/v1/chat/completions",
-                headers={"x-tenant-id": "strict-tenant-id", "authorization": "Bearer test"},
-                json={"messages": [{"role": "user", "content": "Hello"}]}
-            )
+        with patch("llm_shield_proxy.api.main.get_virtual_key_id", side_effect=lambda k: "strict-tenant-id" if "strict" in k else "lax-tenant-id"):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+                # 1. Strict Role (enables Canary)
+                await client.post(
+                    "/v1/chat/completions",
+                    headers={"authorization": "Bearer strict-tenant-id"},
+                    json={"messages": [{"role": "user", "content": "Hello"}]}
+                )
 
-            call_args = mock_client.request.call_args[1]
-            content = json.loads(call_args["content"])
-            print("ACTUAL CONTENT:", content)
-            # Canary should be injected
-            assert "\u200d" in content["messages"][0]["content"]
+                call_args = mock_client.request.call_args[1]
+                content = json.loads(call_args["content"])
+                print("ACTUAL CONTENT:", content)
+                # Canary should be injected
+                assert "\u200d" in content["messages"][0]["content"]
 
-            # 2. Lax Role (disables Canary)
-            await client.post(
-                "/v1/chat/completions",
-                headers={"x-tenant-id": "lax-tenant-id", "authorization": "Bearer test"},
-                json={"messages": [{"role": "user", "content": "Hello"}]}
-            )
-            call_args_lax = mock_client.request.call_args[1]
-            content_lax = json.loads(call_args_lax["content"])
-            assert "\u200d" not in content_lax["messages"][0]["content"]
+                # 2. Lax Role (disables Canary)
+                await client.post(
+                    "/v1/chat/completions",
+                    headers={"authorization": "Bearer lax-tenant-id"},
+                    json={"messages": [{"role": "user", "content": "Hello"}]}
+                )
+                call_args_lax = mock_client.request.call_args[1]
+                content_lax = json.loads(call_args_lax["content"])
+                assert "\u200d" not in content_lax["messages"][0]["content"]
 
 
 @pytest.mark.asyncio
@@ -173,13 +173,14 @@ async def test_audit_log_applied_role_name(temp_policies_file):
     mock_client.build_request.return_value = httpx.Request("POST", "http://upstream")
 
     with patch("llm_shield_proxy.api.main.get_http_client", return_value=mock_client):
-        with patch.object(AuditLogger, 'log_redaction_event') as mock_log:
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-                await client.post(
-                    "/v1/chat/completions",
-                    headers={"x-tenant-id": "strict-tenant-id", "authorization": "Bearer test"},
-                    json={"messages": [{"role": "user", "content": "Hello"}]}
-                )
+        with patch("llm_shield_proxy.api.main.get_virtual_key_id", return_value="strict-tenant-id"):
+            with patch.object(AuditLogger, 'log_redaction_event') as mock_log:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+                    await client.post(
+                        "/v1/chat/completions",
+                        headers={"authorization": "Bearer strict-tenant-id"},
+                        json={"messages": [{"role": "user", "content": "Hello"}]}
+                    )
 
                 # Check that applied_role_name was passed
                 found = False
