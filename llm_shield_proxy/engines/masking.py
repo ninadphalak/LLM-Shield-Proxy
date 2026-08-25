@@ -61,8 +61,10 @@ class HmacVault:
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
-        secret = settings.SHIELD_WATERMARK_SECRET or "default_shield_secret"
-        hashed = hmac.new(secret.encode("utf-8"), original_val.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
+        secret = getattr(settings, "SHIELD_WATERMARK_SECRET", None)
+        if not secret:
+            raise ValueError("SHIELD_WATERMARK_SECRET is required for HMAC vault")
+        hashed = hmac.new(secret.encode("utf-8"), original_val.encode("utf-8"), hashlib.sha256).hexdigest()
         return f"[{entity_type}_{hashed}]"
 
     def rehydrate(self, text: str, retention_length: int = 0) -> str:

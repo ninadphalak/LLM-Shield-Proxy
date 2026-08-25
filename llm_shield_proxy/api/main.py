@@ -330,6 +330,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if os.path.exists(sock_path):
             os.unlink(sock_path)
 
+    from llm_shield_proxy.engines.crypto_vault import zeroize_crypto_material
+    zeroize_crypto_material()
+    logger.info("Zeroized cryptographic keys and AES-GCM material.")
+
 
 app = FastAPI(
     title="LLM-Shield Proxy",

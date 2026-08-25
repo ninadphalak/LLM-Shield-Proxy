@@ -56,7 +56,9 @@ class MerkleAttestationStream:
 
         # Sign the payload using SHIELD_ENCRYPTION_KEY or fallback
         # Sort keys to ensure deterministic JSON structure for HMAC verification
-        key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None) or "default-shield-key"
+        key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None)
+        if not key_str:
+            raise ValueError("SHIELD_ENCRYPTION_KEY is required for cryptographic attestation")
         key = key_str.encode("utf-8")
         payload_bytes = json.dumps(payload, option=json.OPT_SORT_KEYS)
 
