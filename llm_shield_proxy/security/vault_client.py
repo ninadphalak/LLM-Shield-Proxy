@@ -137,6 +137,9 @@ class AsyncVaultSecretProvider:
             await asyncio.sleep(interval)
             try:
                 await self.fetch_secrets()
+            except asyncio.CancelledError:
+                logger.info("Vault refresh loop gracefully cancelled.")
+                break
             except Exception as e:
                 # Log but do not overwrite cached secrets
                 logger.error(f"Background Vault refresh failed: {e}. Retaining previously cached secrets.")

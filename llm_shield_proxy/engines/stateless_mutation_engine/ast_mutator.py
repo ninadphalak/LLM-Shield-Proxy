@@ -1,19 +1,21 @@
 
 import orjson
 
+from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
 
 from .crypto import StatelessPIICipher
 
 
 class ASTDepthExceededException(Exception):
-    """Raised when the AST depth exceeds the circuit breaker limit (40)."""
+    """Raised when the AST depth exceeds the circuit breaker limit."""
     pass
 
 class StatelessASTVisitor:
     def __init__(self, cipher: StatelessPIICipher):
         self.cipher = cipher
-        self.max_depth = 40
+        self.max_depth = settings.AST_MAX_DEPTH
+        self.bracket_multiplier = settings.AST_BRACKET_MULTIPLIER
 
     async def _detect_pii(self, value: str) -> bool:
         # Unified 3-Tier detection cascade (Regex + Shannon Entropy + NER / ONNX)
@@ -21,6 +23,11 @@ class StatelessASTVisitor:
         return len(spans) > 0
 
     async def mutate(self, payload: bytes) -> bytes:
+        # 1. Pre-FFI JSON Bomb Defense: Fast heuristic checking structural depth
+        # If there are more total brackets than our absolute limit allows, reject early.
+        if payload.count(b"{") + payload.count(b"[") > (self.max_depth * self.bracket_multiplier):
+            raise ValueError("Security Exception: Payload structural complexity exceeds bounded limits.")
+
         data = orjson.loads(payload)
 
         # Iterative stack tracking (node, path, depth)
