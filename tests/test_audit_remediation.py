@@ -253,7 +253,15 @@ async def test_dpop_enforcement_tiers():
 
     request = MagicMock(spec=Request)
     request.method = "POST"
-    request.url = "https://example.com/api"
+    class MockURL:
+        def __init__(self, s):
+            self.s = s
+        def replace(self, **kwargs):
+            return self.s
+        def __str__(self):
+            return self.s
+
+    request.url = MockURL("https://example.com/api")
     request.headers = {"Authorization": "Bearer tok", "DPoP": "dpop"}
     request.state = MagicMock()
 

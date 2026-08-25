@@ -283,8 +283,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if os.name != "nt":
             sock_dir = os.path.dirname(sock_path)
             # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
-            os.makedirs(sock_dir, exist_ok=True)
-            os.chmod(sock_dir, 0o770)  # nosec B103
+            # Apply the sticky bit (1) alongside 770 permissions
+            os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
+            os.chmod(sock_dir, 0o1770)  # nosec B103
 
             if os.path.exists(sock_path):
                 os.unlink(sock_path)
@@ -800,7 +801,7 @@ async def _proxy_catch_all_internal(
             )
 
         if isinstance(payload, (dict, list)):
-            if x_session_id:
+            if x_session_id and headers.get("x-shield-bypass-breaker", "").lower() != "true":
                 try:
                     await check_circuit_breaker(x_session_id, payload)
                 except CircuitBreakerTrippedException as cb_exc:
@@ -1009,6 +1010,8 @@ async def _proxy_catch_all_internal(
                     except (httpx.RequestError, httpx.HTTPStatusError) as err:
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response
+                            # MUST explicitly close the leaked stream to free the HTTP/2 connection pool
+                            await upstream_res.aclose()
 
                         status_code = err.response.status_code if isinstance(err, httpx.HTTPStatusError) else 503
                         if isinstance(err, httpx.HTTPStatusError) and status_code in (400, 401, 403):

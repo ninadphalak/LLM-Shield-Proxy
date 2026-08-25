@@ -32,6 +32,14 @@ async def test_ext_proc_redacts_request_body():
                 raise StopAsyncIteration
             return self.requests.pop(0)
 
+        async def recv_message(self):
+            if not self.requests:
+                return None
+            return self.requests.pop(0)
+
+        def cancel(self):
+            pass
+
         async def send_message(self, response: ProcessingResponse):
             self.responses.append(response)
 

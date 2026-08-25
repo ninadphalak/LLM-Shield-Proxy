@@ -50,7 +50,18 @@ class ExtProcService(ExternalProcessorBase):
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         try:
-            async for request in stream:
+            while True:
+                try:
+                    # Enforce application-layer timeouts on UDS gRPC streams
+                    async with asyncio.timeout(5.0):
+                        request = await stream.recv_message()
+                        if request is None:
+                            break
+                except asyncio.TimeoutError:
+                    logger.error("gRPC Stream Timeout: Terminating degraded IPC connection.")
+                    stream.cancel()
+                    break
+
                 if request.request_body.body:
                     # Request Body Phase (Prompt)
                     # Offload the 3-Tier cascade to threadpool

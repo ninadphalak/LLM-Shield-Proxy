@@ -27,6 +27,10 @@ _ENV_FILE_PATH: str = str(_REPO_ROOT / ".env")
 class Settings(BaseSettings):
     """Centralized, validated runtime configuration schema for LLM-Shield-Proxy."""
 
+    # AST Parser Protections
+    AST_MAX_DEPTH: int = Field(default=40, description="Max allowed depth of JSON payload")
+    AST_BRACKET_MULTIPLIER: int = Field(default=10, description="Heuristic multiplier for total brackets vs depth to prevent JSON bombs")
+
     # Server Configuration
     HOST: str = Field(default="0.0.0.0", description="Proxy listen host")
     PORT: int = Field(default=8000, description="Proxy listen port")
