@@ -47,6 +47,9 @@ View diagram on GitHub mobile 📱 -->
 **Q: Will users notice when a pod is draining?**
 A: No. Existing users connected to the draining pod will see their streams finish flawlessly. New requests from the frontend will be routed by the Kubernetes Service to a different, healthy pod.
 
+**Q: Why does the proxy return a `429 Too Many Requests` instead of a `503 Service Unavailable` when draining?**
+A: Returning a `503` often causes load balancers and upstream gateways to aggressively penalize or kill the node entirely, thinking it has catastrophically failed. Furthermore, from a Red Team security perspective, emitting `503` errors can leak internal network topology and infrastructure state to attackers. Returning a `429` safely signals standard backpressure, obfuscating the deployment event while ensuring the upstream load balancer simply retries the request against a healthy pod.
+
 **Q: How does this interact with HTTP/2 Connection Pooling?**
 A: When `SIGTERM` is received, the `httpx.AsyncClient` is instructed to close its idle `keep-alive` sockets immediately, retaining only the active sockets required to service the in-flight streams.
 

@@ -10,7 +10,7 @@ Traditional API gateways query policy engines synchronously. If a policy engine 
 ## How It Works
 The OPA and Vault resolvers operate on a deterministic architecture designed for zero synchronous blocking:
 
-1. **$O(1)$ Atomic Dictionary Swaps:** Resolved tenant policies are stored in a local `MappingProxyType` dictionary, ensuring zero-locking read access and microsecond lookup speeds.
+1. **O(1) Atomic Dictionary Swaps:** Resolved tenant policies are stored in a local `MappingProxyType` dictionary, ensuring zero-locking read access and microsecond lookup speeds.
 2. **Asynchronous Background Refresh:** When an incoming stream requests a policy, the proxy checks the cache TTL. If expired, it immediately returns the *stale* policy from cache (0ms latency penalty) while spawning an asynchronous background task (`_safe_background_fetch`) to query the external policy server.
 3. **Strict Network Deadlines:** Uncached queries to external providers use a strict `<50ms` timeout to ensure the event loop is never stalled.
 
@@ -30,7 +30,7 @@ flowchart TD
 ```
 
 ## Performance Profile
-- **Execution Speed:** $O(1)$ memory lookup when cached, resulting in `0ms` network latency penalty on the hot path.
+- **Execution Speed:** O(1) memory lookup when cached, resulting in `0ms` network latency penalty on the hot path.
 - **Overhead:** Maintains zero local file descriptor leaks during high-volume background polling by utilizing HTTP/2 persistent connection pooling (`httpx.AsyncClient`) via the FastAPI application lifespan.
 
 ## Configuration Flags

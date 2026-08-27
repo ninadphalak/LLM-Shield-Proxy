@@ -53,7 +53,7 @@ A: Unlike standard Python or Node.js proxies which will instantly crash (CPU spi
 A: Currently, regex compilation is performed at the FastAPI `lifespan` event for maximum performance. To apply new regex rules, the proxy pod must be restarted. (Note: `policies.yaml` RBAC rules *can* be hot-reloaded, but core regex compilation requires a restart).
 
 **Q: How do custom rules interact with Synthetic Masking?**
-A: Custom BYOR entities are currently treated as structural strings. If Synthetic Masking is enabled, custom entities will typically be masked using an anonymized hash or generic placeholder unless a specific Faker provider is mapped to the custom rule name.
+A: Custom BYOR entities are currently treated as structural strings. If Synthetic Masking is enabled, custom entities will typically be masked using an anonymized hash or generic placeholder unless a specific canonical locale provider is mapped to the custom rule name.
 
 
 ## Plainspeak

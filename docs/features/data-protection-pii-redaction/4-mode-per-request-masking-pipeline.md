@@ -9,7 +9,7 @@ The **4-Mode Per-Request Masking Pipeline** empowers client applications to dyna
 The proxy intercepts the `X-Shield-Masking-Mode` header and dynamically overrides the global `.env` configuration for the duration of that specific request using thread-safe `contextvars`.
 
 The available modes are:
-1. **`SYNTHETIC` (Default):** Replaces entities with mathematically coherent Faker substitutes (e.g., fake SSNs, fake names) to preserve downstream LLM attention weights and syntax.
+1. **`SYNTHETIC` (Default):** Replaces entities with mathematically coherent canonical locale substitutes (e.g., fake SSNs, fake names) to preserve downstream LLM attention weights and syntax.
 2. **`STRUCTURAL_TAG`:** Replaces entities with explicit, bracketed placeholder tokens (e.g., `[PERSON_1]`, `[EMAIL_1]`). Ideal for legacy compliance pipelines or explicit regex auditing.
 3. **`SCRUB`:** Performs a hard redaction, completely removing the text or replacing it with `***`. Useful when the context of the sensitive data is entirely irrelevant to the LLM's task.
 4. **`STATELESS_CRYPTO`:** Secures data in-transit using AES-256-GCM envelope encryption directly within the payload, bypassing the need for Redis storage.
