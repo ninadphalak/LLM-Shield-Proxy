@@ -91,6 +91,14 @@ It's a crowded space. Here is exactly why you should deploy LLM-Shield-Proxy ins
 
 LLM-Shield-Proxy is **not** a model router (like LiteLLM or LangChain). It works *alongside* them. Put LLM-Shield-Proxy directly in front of your orchestrator to guarantee deterministic data masking before routing.
 
+### 🤝 The Orchestrators (What we complement)
+LLM-Shield-Proxy is **not** a model router. It is designed to deploy as a transparent edge proxy directly in front of industry-standard orchestration tools. It stacks with your existing AI routing infrastructure, requires zero code changes, and is compatible out-of-the-box with:
+
+* **Orchestration Frameworks:** LangChain, LlamaIndex, Semantic Kernel, AutoGen, CrewAI.
+* **AI Gateways & Routers:** LiteLLM, Cloudflare AI Gateway, Kong AI Gateway, Portkey. *(Note: You can seamlessly stack LLM-Shield-Proxy in front of LiteLLM to combine multi-model routing with strict zero-egress PII redaction and AES-256-GCM encryption).*
+* **Local & Open-Source Inference:** vLLM, Ollama, NVIDIA NIM, Hugging Face TGI.
+* **Upstream Providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral.
+
 ---
 
 ## 🛡️ Dual-Pipeline Redaction Modes
@@ -110,6 +118,75 @@ flowchart TD
     Text -->|STATELESS_CRYPTO| InBand[AES-256-GCM]
     Redis --> LLM
     InBand --> LLM
+```
+
+---
+
+## 🏢 Enterprise Hardware Sizing Guide
+
+Based on extreme stress testing, the Proxy scales highly efficiently across multi-core architectures. The proxy engine is fully asynchronous and achieves its highest throughput on Linux environments utilizing `epoll`.
+
+### Production Sizing (Enterprise Linux)
+*   **Rule of Thumb:** Provision 1 CPU core for every **1,800** expected peak concurrent users.
+*   **Mid-Tier (16 Cores)**: ~28,800 Concurrent Users. *(Recommended: AWS c6i.4xlarge, GCP c2-standard-16, or Azure Standard_F16s_v2)*
+*   **High-Tier (32 Cores)**: ~57,600 Concurrent Users. *(Recommended: AWS c6i.8xlarge, GCP c2-standard-32, or Azure Standard_F32s_v2)*
+*   **Memory (RAM) Footprint:** The proxy is strictly **CPU-bound**. With a lightweight Resident Set Size (RSS) of `<85 MB` per worker, memory-optimized instances are completely unnecessary. Standard compute-optimized instances provide vastly more RAM than the proxy will ever consume.
+
+> [!NOTE]
+> **Windows Deployment Note (`SO_REUSEPORT`):** While the proxy runs efficiently on Windows, scaling to extreme high-concurrency with multiple workers is constrained by the Windows TCP stack. Windows does not natively support the `SO_REUSEPORT` socket option. Under massive load, this can result in less efficient connection routing across Uvicorn workers. For maximum enterprise production scale, Linux deployments are generally recommended. *In rigorous load tests, a single Python core on Windows tops out around ~800 to 900 concurrent streaming users before encountering `accept()` backlog saturation (`ConnectionRefusedError`).*
+
+---
+
+## 🌍 Open Source Roadmap & Contributions
+
+I am committed to maintaining LLM-Shield-Proxy as the fastest ultra-low latency redaction engine for LLMs. I am actively looking for open-source contributors and collaborators to help execute the following technical roadmap. If you submit a PR, I will personally review and merge your architecture contributions:
+
+1. **Cythonize the Sliding-Window Buffer:** Compile the pure-Python async generator (`streaming.py`) into a C-extension binary to aggressively drive down tail latencies for high-throughput enterprise deployments.
+2. **Upstream Integration:** Track upstream discussions and context for resolving SSE stream fragmentation in enterprise sandboxes, such as the [NVIDIA/OpenShell #2763](https://github.com/NVIDIA/OpenShell/issues/2763) proposal.
+
+If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md](CONTRIBUTING.md) and claim an issue (e.g., [Help Cythonize the proxy! #15](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/15))!
+
+---
+
+## 🏢 Enterprise Support & Community
+
+If your organization is evaluating, benchmarking, or deploying LLM-Shield-Proxy to unblock LLM streaming and meet strict compliance requirements (like SOC 2/HIPAA), I encourage you to engage with the community:
+
+* **Architecture Discussions:** Open a GitHub Discussion to share your feedback on high-throughput deployments, custom proxy pipelines, or benchmark results.
+* **Enterprise Case Studies:** If your startup or enterprise is using the proxy in production, let me know! I highlight production architectures and feature enterprise teams in my community benchmarks.
+* **Bug Reports & Features:** Submit technical issues or feature requests via the GitHub Issue tracker.
+
+LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, and Cybersecurity professionals to shape the open-source compliance roadmap.
+
+---
+
+## 📄 Intellectual Property & Licensing
+
+**LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**. 
+
+* **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
+* **Patent Status:** Core architectural mechanisms are protected under **U.S. Patent Pending** status:
+  * **App. No. 64/126,730**: Protects the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade.
+  * **App. No. 64/139,263**: Protects the stateless cryptographic JSON-RPC/MCP AST masking, HKDF subkey encryption, and generative AI metadata schema coercion.
+
+---
+
+## Citation
+
+If you reference this architecture, benchmark methodology, or sliding-window buffer implementation, please cite:
+
+Phalak, N. (2026). Quantifying Latency and Token Overhead in Real-Time LLM Stream Sanitization: A Tiered Detection Approach (Version 1.0.0). Zenodo. https://doi.org/10.5281/zenodo.21955770
+
+```bibtex
+@misc{phalak2026quantifying,
+  author       = {Phalak, Ninad},
+  title        = {Quantifying Latency and Token Overhead in Real-Time LLM Stream Sanitization: A Tiered Detection Approach},
+  month        = aug,
+  year         = 2026,
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.21955770},
+  url          = {https://doi.org/10.5281/zenodo.21955770}
+}
 ```
 
 ---
