@@ -14,17 +14,33 @@ When enabled, the proxy performs AES-256-GCM envelope encryption on the fly.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
 ```mermaid
-flowchart LR
-    A[PII Payload] --> B(AES-256-GCM Cipher)
-    B --> C[Base62 Ciphertext]
-    C --> D[Egress to LLM]
-    D -.-> E(Re-hydration Buffer)
-    E --> F[Decrypted Output]
+flowchart TD
+    subgraph VPC
+        LB[Load Balancer]
+        P1[Proxy Replica A<br/>Key: Master]
+        P2[Proxy Replica B<br/>Key: Master]
+    end
+    
+    User[Client] -->|1. Prompt w/ PII| LB
+    LB -->|2. Route| P1
+    P1 -->|3. Encrypt & Append Nonce| LLM[Cloud LLM]
+    LLM -->|4. Stream Response| LB
+    LB -->|5. Route| P2
+    P2 -->|6. Extract Nonce & Decrypt| User
 ```
 -->
 
 View diagram on GitHub mobile 📱 -->
 ![In-Band Crypto Architecture](../images/in-band-stateless-cryptographic-masking.svg)
+
+## Multi-Instance Stateful Independence (Load Balancing)
+
+A critical advantage of this architecture is its infinite horizontal scalability. 
+
+**How it works in Multi-Instance Deployments:**
+The encryption is completely stateless. All proxy replicas share a master symmetric key injected securely (e.g., via HashiCorp Vault). During encryption, the cryptographic nonce/Initialization Vector (IV) is generated and embedded *directly* within the base62 cipher-token itself. 
+
+Because the nonce travels with the data, the returning SSE stream from the LLM can be routed by a load balancer to a completely different proxy replica (e.g., Replica B). Replica B simply extracts the nonce from the cipher-token and uses the shared master key in memory to decrypt it instantly. This eliminates the need for sticky sessions or a synchronized state store like Redis.
 
 ## Performance Profile
 - **Execution Speed:** `~1.76 µs` per encrypt/decrypt cycle.
@@ -49,10 +65,15 @@ A: The LLM will treat it as a unique ID. However, if your use case requires the 
 A: Because LLMs respond within seconds, key rotation is designed to maintain the previous key in a short-lived memory cache (TTL) until all in-flight streaming requests using that DEK have completed.
 
 
-## Plainspeak
-This feature allows you to securely hide sensitive data and retrieve it later, without ever having to save it to a database.
+## Plainspeak: The "Safe"
+This feature acts as a mathematical **"Safe"** for your data. It allows you to securely hide sensitive data and retrieve it later, without ever having to save it to a database.
 
-Normally, to hide a name and restore it later, you have to store the real name in a secure vault somewhere. Instead, this feature mathematically scrambles the real name using a master password and replaces the text directly in the message with the scrambled version. When the message comes back, it uses the master password to unscramble it. This means there is zero risk of a database being hacked, because no database is used!
+Normally, to hide a name and restore it later, you have to store the real name in a secure vault somewhere. Instead, this feature takes the sensitive text and mathematically scrambles it into a secure token (using AES-256-GCM authenticated encryption, which inherently guarantees the ciphertext hasn't been tampered with, similar to an HMAC). It stores the decryption key directly in that string so you don't need a Redis database. When the message comes back, the proxy uses the master password to unscramble it. This means there is zero risk of a database being hacked, because no database is used!
+
+## How It Works with Other Proxy Modes
+Because In-Band Cryptographic Masking is a core mathematical mechanism, it serves as the foundational "Safe" that other structural proxy modes rely on:
+- **Standard Text Prompts:** It scans and replaces conversational text directly.
+- **AST-Aware Semantic Firewall:** When autonomous AI agents communicate using complex machine-to-machine JSON code (like JSON-RPC or MCP), the AST Firewall acts as a "Robotic Arm" that parses the code and uses this Cryptographic Masking mode to encrypt just the specific values without breaking the JSON structure.
 
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_stateless_crypto.py`](../../../tests/test_stateless_crypto.py).
