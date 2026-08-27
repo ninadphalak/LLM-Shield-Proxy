@@ -98,10 +98,19 @@ class Settings(BaseSettings):
     FALLBACK_API_KEY: Optional[str] = Field(default=None, description="Fallback provider API key")
 
     # mTLS & Custom CA Support
-    ENABLE_MTLS: bool = Field(default=False, description="Enable mutual TLS")
-    SSL_CA_BUNDLE_PATH: Optional[str] = Field(default=None, description="Path to custom CA bundle")
-    SSL_CLIENT_CERT_PATH: Optional[str] = Field(default=None, description="Path to mTLS client certificate")
-    SSL_CLIENT_KEY_PATH: Optional[str] = Field(default=None, description="Path to mTLS client key")
+    ENABLE_MTLS: bool = Field(default=False, description="Enable mutual TLS (legacy)")
+    SSL_CA_BUNDLE_PATH: Optional[str] = Field(default=None, description="Path to custom CA bundle (legacy)")
+    SSL_CLIENT_CERT_PATH: Optional[str] = Field(default=None, description="Path to mTLS client certificate (legacy)")
+    SSL_CLIENT_KEY_PATH: Optional[str] = Field(default=None, description="Path to mTLS client key (legacy)")
+
+    # Standardized TLS/SSL Configuration
+    TLS_CERT_FILE: Optional[str] = Field(default=None, description="Path to server public certificate for inbound TLS")
+    TLS_KEY_FILE: Optional[str] = Field(default=None, description="Path to server private key for inbound TLS")
+    CLIENT_CA_FILE: Optional[str] = Field(default=None, description="Path to CA bundle to verify inbound mTLS clients")
+    CA_BUNDLE_FILE: Optional[str] = Field(default=None, description="Path to custom CA bundle for outbound upstream verification")
+    INSECURE_SKIP_VERIFY: bool = Field(default=False, description="Bypass outbound upstream certificate validation")
+    OUTBOUND_CLIENT_CERT: Optional[str] = Field(default=None, description="Path to client certificate for outbound mTLS")
+    OUTBOUND_CLIENT_KEY: Optional[str] = Field(default=None, description="Path to client private key for outbound mTLS")
 
     # HashiCorp Vault Integration
     ENABLE_VAULT_SECRETS: bool = Field(default=False, description="Enable HashiCorp Vault dynamic secrets")

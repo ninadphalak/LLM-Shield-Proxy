@@ -18,6 +18,11 @@ def test_environment_setup():
     settings.VALID_VIRTUAL_KEYS = ""
     settings.SHIELD_ENCRYPTION_KEY = "00" * 32
 
+    # Ensure telemetry endpoint is None during tests to prevent httpx_mock AssertionError
+    # on unexpected background POST requests. ANONYMOUS_USAGE_TRACKING remains True
+    # to ensure the proxy behaves correctly and swallows errors as expected.
+    settings.TELEMETRY_ENDPOINT_URL = None
+
     from llm_shield_proxy.security.circuit_breaker import circuit_breaker_cache
 
     circuit_breaker_cache.clear()

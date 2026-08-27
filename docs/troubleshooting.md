@@ -1,51 +1,46 @@
-# Troubleshooting LLM-Shield-Proxy
+[⬅️ Back to README](../README.md)
 
-This document provides solutions to common issues you might encounter while developing, testing, or running LLM-Shield-Proxy.
+# 🚑 Troubleshooting & Configuration Guide
 
-## The Fail-Closed Security Posture
+This guide helps you resolve common configuration errors and understand the proxy's "Fail Closed" design principles when deploying LLM-Shield-Proxy locally or in production.
 
-LLM-Shield-Proxy is designed for enterprise environments handling highly sensitive data (e.g., HIPAA, SOC 2, DoD workloads). Because of this, it fundamentally operates on a **"Fail-Closed"** principle. 
+## Why is my proxy failing to start or dropping traffic?
 
-**What does this mean?**
-If any sub-component of the proxy fails—such as the Redis vault disconnecting, the OpenTelemetry endpoint becoming unreachable, or a PII inspection engine crashing—the proxy will immediately block traffic and return an error (like a `503 Service Unavailable`). 
+LLM-Shield-Proxy is engineered as **Critical Compliance Infrastructure**. By design, it operates on a strict **Fail Closed** principle. This means if any configuration is missing, incorrect, or if a backend dependency (like Redis) goes down, the proxy will aggressively drop traffic rather than risking a data leak by failing open.
 
-**Why is this important?**
-In a production environment, if the DLP engine crashes and the proxy were to "Fail Open," sensitive PII would instantly leak to external third-party LLMs unredacted. Failing closed guarantees that **zero data leakage** occurs during a system failure.
+### Common Fail Closed Configurations
 
-## Testing and Local Proof-of-Concept (POC) Configuration
+#### 1. `TELEMETRY_ENDPOINT_URL`
+If you have configured a telemetry endpoint for shipping Merkle logs and the endpoint becomes unreachable, the proxy will halt traffic. 
+*   **Production:** This ensures that no traffic is processed without an immutable audit trail.
+*   **Local/POC Testing:** If you are just testing the proxy locally, you can disable this by unsetting `TELEMETRY_ENDPOINT_URL` or setting `FAIL_OPEN_ON_TELEMETRY_ERROR=True` (NOT RECOMMENDED for production).
 
-While Fail-Closed is critical for production, it can cause "developer pain" when running locally or executing test suites without a full infrastructure setup.
+#### 2. Redis Connection Drops
+If `SHIELD_DEFAULT_MASKING_MODE=STATEFUL` and the Redis vault goes offline, the proxy cannot map synthetic entities. It will return a `503 Service Unavailable` or `429 Too Many Requests` (to trigger client retries) rather than passing unmasked PII.
+*   **Fix:** Ensure `REDIS_URL` is correct and network policies allow traffic. If you don't want to use Redis for testing, switch to `SHIELD_DEFAULT_MASKING_MODE=STATELESS_CRYPTO` to use AES-256-GCM entirely in-memory.
 
-To seamlessly run the proxy locally, you can safely switch to a "Fail-Open" posture.
+#### 3. Missing `UPSTREAM_API_KEY`
+The proxy intercepts the stream but does not hold the ultimate LLM API key. If `UPSTREAM_API_KEY` is not provided in the environment or passed via the Authorization header, it drops the request immediately.
 
-### 1. Disabling Telemetry Assertion Errors in Tests
+---
 
-**Symptom:**
-When running the `pytest` suite, you might encounter failures with `AssertionError` messages that look like this:
-```
-AssertionError: The following requests were not expected:
-- POST request on https://your-telemetry-endpoint.example.com/rest/v1/telemetry_logs
-```
+## 📈 Anonymous Usage Tracking
 
-**Resolution:**
-The proxy spins up background threads to dispatch telemetry logs. During testing, strict HTTP mocks (like `pytest_httpx`) will intercept and block these network calls. To resolve this for local testing, disable the telemetry endpoint by setting it to `None`:
+By default, the proxy includes an `ENABLE_ANONYMOUS_USAGE_TRACKING` flag (defaults to `True`). This sends basic, non-identifying heartbeat metrics (like version number and uptime) to help us understand open-source adoption.
 
-```python
-# In tests/conftest.py
-@pytest.fixture(autouse=True)
-def test_environment_setup():
-    settings.TELEMETRY_ENDPOINT_URL = None
-```
+**Important Note on Errors:**
+If the telemetry ping fails (e.g., due to an outbound firewall or network partition), **it will silently swallow the error and log a warning.** It will *never* crash the proxy or drop traffic. We do not want this non-critical flag to interfere with your production workloads. You can safely leave it `True` without risking SLA degradation.
 
-### 2. Bypassing Redis and Engine Crashes (Fail-Open)
+---
 
-If you are running a local POC and don't want to spin up a Redis cluster, or if you want to ensure the proxy continues routing traffic even if the DLP inspection engine throws an exception, you can explicitly configure the proxy to Fail Open.
+## 🏗️ Kubernetes & Helm Chart Troubleshooting
 
-**Resolution:**
-Set the following environment variable in your `.env` or Docker configuration:
+### The `readOnlyRootFilesystem` Warning
 
-```env
-SHIELD_FAILURE_MODE="FAIL_OPEN"
-```
+> [!WARNING]
+> **Production Hardening Note:** Our official Helm chart sets `readOnlyRootFilesystem: true` in the pod `securityContext` by default. This is a critical production hardening step to prevent container breakouts or malicious file drops.
 
-When this flag is active, any catastrophic failure in the redaction engine or state vault will be logged, but the raw payload will be allowed to egress to the upstream LLM. **Do not use this in production.**
+Because LLM-Shield-Proxy uses strictly in-memory processing and writes all logs to `stdout`, it natively supports a read-only filesystem.
+
+**If you encounter `Read-only file system` errors:**
+This only happens if you have modified the proxy to write local files (like SQLite databases or temporary file logs). If you implement custom local logging, you must mount an `emptyDir` or Persistent Volume to `/tmp` or `/app/logs` in your deployment, or disable `readOnlyRootFilesystem` in the `values.yaml` (not recommended).

@@ -50,17 +50,56 @@ def main() -> None:
         choices=["critical", "error", "warning", "info", "debug", "trace"],
         help=f"Logging level (default: {settings.LOG_LEVEL.lower()})",
     )
+    parser.add_argument(
+        "--tls-cert-file",
+        type=str,
+        default=settings.TLS_CERT_FILE,
+        help="Path to server public certificate for inbound TLS",
+    )
+    parser.add_argument(
+        "--tls-key-file",
+        type=str,
+        default=settings.TLS_KEY_FILE,
+        help="Path to server private key for inbound TLS",
+    )
+    parser.add_argument(
+        "--client-ca-file",
+        type=str,
+        default=settings.CLIENT_CA_FILE,
+        help="Path to CA bundle to verify inbound mTLS clients",
+    )
+    parser.add_argument(
+        "--ca-bundle-file",
+        type=str,
+        default=settings.CA_BUNDLE_FILE,
+        help="Path to custom CA bundle for outbound upstream verification",
+    )
+    parser.add_argument(
+        "--insecure-skip-verify",
+        action="store_true",
+        default=settings.INSECURE_SKIP_VERIFY,
+        help="Bypass outbound upstream certificate validation",
+    )
 
     args = parser.parse_args()
 
-    uvicorn.run(
-        "llm_shield_proxy.api.main:app",
-        host=args.host,
-        port=args.port,
-        workers=args.workers,
-        reload=args.reload,
-        log_level=args.log_level,
-    )
+    kwargs = {
+        "host": args.host,
+        "port": args.port,
+        "workers": args.workers,
+        "reload": args.reload,
+        "log_level": args.log_level,
+    }
+
+    if args.tls_cert_file and args.tls_key_file:
+        kwargs["ssl_certfile"] = args.tls_cert_file
+        kwargs["ssl_keyfile"] = args.tls_key_file
+        if args.client_ca_file:
+            kwargs["ssl_ca_certs"] = args.client_ca_file
+            import ssl
+            kwargs["ssl_cert_reqs"] = ssl.CERT_REQUIRED
+
+    uvicorn.run("llm_shield_proxy.api.main:app", **kwargs)
 
 
 if __name__ == "__main__":

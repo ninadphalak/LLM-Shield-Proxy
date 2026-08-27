@@ -182,6 +182,12 @@ async def rehydrate_sse_stream(
 
         try:
             async for chunk in raw_stream:
+                from llm_shield_proxy.api.main import app_state
+                if app_state.is_draining:
+                    import logging
+                    logging.getLogger("llm_shield").warning("Pod is draining. Aborting stalled stream to emit WORM receipt.")
+                    break
+
                 if failed_open:
                     yield chunk
                     continue

@@ -2,61 +2,54 @@
 
 # 📜 Compliance: Audit, Forensics & Legal
 
-LLM-Shield-Proxy is an enterprise **AI Gateway** and **LLM Firewall** designed specifically to help engineering teams adopt Generative AI and maintain continuous **AI Governance** without violating data privacy regulations. Operating as a zero-egress, stateless middleware proxy deployed entirely within your own Virtual Private Cloud (VPC), it inherently bypasses the major compliance risks associated with third-party SaaS security tools and enforces robust **LLM Security Posture Management (LLM SPM)**.
+As enterprises rapidly operationalize Generative AI, they face an unprecedented regulatory tension: the necessity to innovate via LLMs versus the draconian legal liabilities of exposing sensitive data. Traditional cloud AI gateways fail to resolve this tension—they introduce severe streaming latency, rely on heavy memory-bound architectures, and persist data, thereby creating their own data privacy liabilities.
 
-This document maps LLM-Shield's architectural features directly to standard enterprise compliance frameworks and strict forensic controls.
+### The Article 12 Paradox
+A critical systemic contradiction exists between the **EU AI Act's Article 12** (which mandates rigorous, immutable event logging and traceability for high-risk AI systems) and **GDPR's Article 5(1)(c) & Article 17** (which mandate strict data minimization and the right to erasure). Traditional proxy architectures cannot satisfy both; they either log too much (violating GDPR) or log too little (violating the EU AI Act).
 
-## 🛡️ SOC 2 Type II & HITRUST Audit Capabilities
+**The Solution:** The LLM-Shield-Proxy resolves this paradox through an in-VPC mathematical sanitization layer. By combining SHA-256 sequential Merkle hash chaining (for immutable, WORM-compliant event sequencing) with RFC 6902 JSON patch differential logging (recording *what* categories were redacted, not the raw PII), the proxy achieves perfect traceability without retaining a single byte of sensitive user data. 
 
-To satisfy the strict Privacy, Security, and Confidentiality criteria required by B2B SaaS and healthcare SOC 2 audits, LLM-Shield-Proxy employs military-grade cryptographic logging and availability controls.
+Coupled with a Sub-millisecond SSE sliding buffer and C++ google-re2 DFA regex engine, the LLM-Shield-Proxy provides the foundation for global compliance with zero compromise on enterprise engineering performance.
 
-### 🛡️ SOC 2 Compliance for AI & ISO 42001 AI Management System
-If you are deploying LLM-Shield to satisfy a compliance audit for **SOC 2 Compliance for AI** or the **ISO 42001 AI Management System**, map the proxy's features directly to your Trust Services Criteria:
-* **CC6.1 (Logical Access):** Satisfied by [Pluggable Tool-Call RBAC](docs/PLUGGABLE_RBAC_ENGINE.md).
-* **CC6.6 (Boundary Protection):** Satisfied by Zero-Egress Synthetic Masking.
-* **CC7.2 (Security Monitoring):** Satisfied by the Merkle-Attested OTel Trace Exporter.
+---
 
-### Cryptographic Audit & Tamper Evidence
-* **WORM-Compliant Merkle Attestation & Audit Logging**: Emits structured compliance events containing precise timestamps, tenant IDs, and session metadata into write-once-read-many (WORM) storage.
-* **Cryptographic SHA-256 Hash Chaining**: Every log entry cryptographically signs and chains to the previous record's hash (`current_hash = SHA256(prev_hash + timestamp + tenant_id + payload_diff)`). This guarantees tamper-evidence; any post-facto modification instantly invalidates the chain.
-* **Cryptographic Proof of Non-Egress Merkle Attestation**: Constructs runtime Merkle trees over redacted streaming chunks. This provides mathematical proof that no unredacted chunks escaped the VPC boundary, satisfying strict auditor verification requirements.
-* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
+## 🗂️ Universal Regulatory Mapping & Deep Dives
 
-### Availability, Reliability, and Resiliency (SOC 2 Security Principles)
-* **Composite Agent Loop Circuit Breaker (Autonomous Agent Security)**: Actively tracks `tool_calls` array depths and initiates a deterministic circuit break against runaway autonomous agents, ensuring strict **Autonomous Agent Security** by preventing API billing exhaustion and DoS attacks.
-* **Zero-Allocation Streaming JSON Lexer**: Defends against memory ballooning and Slowloris attacks by using a Rust-backed `orjson` lexer, strictly bounding memory utilization below 60MB.
-* **Traffic Engineering & Resiliency**: Employs a Redis `evalsha` Token-Bucket Rate Limiter (6000 RPM / 200 Burst) alongside Kubernetes 25s SIGTERM connection draining to ensure high availability and graceful degradation.
-* **Deep Component Health Probes**: Integrates `/healthz`, `/livez`, and `/readyz` probes with Prometheus Alert Rules to constantly monitor Redis and Vault connectivity.
-* **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_RATE_LIMITING`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`MAX_SSE_LINE_LENGTH`](DEPLOYMENT.md#core-configuration-flags)
+The following matrix maps the LLM-Shield-Proxy's cryptographic and systems engineering mechanics directly to major global regulatory mandates. **Click the framework name for a detailed compliance guide.**
 
-### Data-in-Transit Encryption & FIPS Integrity
-* **FIPS 140-3 KAT**: All cryptographic modules run FIPS 140-3 Known Answer Tests (KAT) at startup to verify integrity.
-* **Centralized Enterprise Secrets & mTLS**: Features native HashiCorp Vault (AppRole / K8s / Token) integration with non-blocking TTL caching. Enforces strict X.509 mTLS transport for backend secret retrieval.
-* **Flags**: [`FIPS_STRICT_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
+| Regulatory Framework & Article | Specific Legal / Audit Mandate | Non-Compliance Risk & Penalty | LLM-Shield-Proxy Technical Mechanism |
+| :--- | :--- | :--- | :--- |
+| **[EU AI Act (Art. 12 & 14)](docs/compliance/eu_ai_act.md)** | Automated, immutable event logging & human oversight for high-risk AI systems. | Up to 7% of global annual turnover or €35M. | WORM Merkle chaining; Streaming tool-call RBAC. |
+| **[GDPR (Art. 5, 17, 25, 32)](docs/compliance/gdpr.md)** | Data minimization, privacy by design, right to erasure, and state-of-the-art security. | Up to 4% of global annual turnover or €20M. | Ephemeral TTL memory eviction (<85 MB RAM); RFC 6902 differential logs; Zero-Data Mode. |
+| **[HIPAA (45 CFR § 164.312)](docs/compliance/hipaa.md)** | Transmission security and access controls to safeguard ePHI in transit. | Tiered fines up to $1.5M/year per violation; Criminal penalties. | Tier-3 Quantized ONNX ClinicalBERT NER; In-Band stateless envelope cryptography. |
+| **[SOC 2 Type II (CC6.1, CC6.6, CC7.2)](docs/compliance/soc2.md)** | Logical access, boundary protection, and anomaly detection/response. | Loss of enterprise contracts; reputational damage. | Pluggable streaming RBAC; Composite Agent Loop Circuit Breakers; HashiCorp Vault resolvers. |
+| **[ISO/IEC 42001 & NIST SP 800-53 Rev. 5](docs/compliance/nist_iso_fips.md)** | Continuous AI risk management and systemic assessment artifact generation. | Disqualification from federal/DoD contracts; operational halting. | Universal Decision Trace Exporter generating automated NIST OSCAL compliance artifacts. |
+| **[FIPS 140-3](docs/compliance/nist_iso_fips.md)** | Cryptographic module integrity and validated algorithm implementation. | Ineligibility for US Government and regulated sector deployment. | Cryptographic Known Answer Tests (KAT) for SHA-256 and AES-256-GCM. |
 
-## 🕵️ Insider Forensics & Tracing
+*(For a detailed breakdown of the internal proxy mechanics, review the [Architecture & Cryptographic Data Flow](ARCHITECTURE.md) document).*
 
-### Dynamic Canary Watermarking & Steganography
-* **Implementation Details**: Injects cryptographically verifiable, invisible canary tokens (via zero-width Unicode characters representing `HMAC_SHA256(Tenant_ID + Timestamp + Virtual_Key)`) into the output stream. This allows exact forensic tracing and attribution of leaked screenshots or text payloads, prosecuting insider model leaks.
-* **Flags**: [`ENABLE_WATERMARKING`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_WATERMARK_SECRET`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
+---
 
-### Lightweight OpenTelemetry (OTel) Tracing
-* **Implementation Details**: Implements zero-overhead W3C `traceparent` distributed tracing propagation via a dedicated asynchronous background thread, allowing SOC analysts to track complete request lifecycles without degrading LLM response latency.
-* **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`TELEMETRY_ENDPOINT_URL`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
+## ❓ Compliance Officer & CISO FAQ
 
-## 🌐 Secure Mesh Architecture
-To ensure the proxy itself cannot be bypassed by malicious internal developers, LLM-Shield leverages natively secure infrastructure patterns:
-* **Zero-Dependency Kubernetes Mutating Webhook**: Transparently intercepts Pod deployment manifests to inject the LLM-Shield sidecar container, ensuring coverage without developer opt-in.
-* **Service Mesh Native gRPC ext_proc Integration**: Operates over Zero HTTP network hops by streaming buffers directly via UDS (Unix Domain Sockets) within Envoy's `ExternalProcessor` filter.
-* **Anthropic Adapter Implementation**: Employs Zero-SDK OpenAI-to-Anthropic request transformations with SSE stream normalization directly at the network edge, ensuring consistent security controls regardless of the backend provider.
+**Q1: Will our software engineering team need to rewrite existing applications?**
+No. The LLM-Shield-Proxy is designed for drop-in OpenAI API compatibility. Deploying the sanitization layer requires exactly zero application code changes—engineers only need to perform a 1-line `base_url` change in their existing SDKs (e.g., pointing the OpenAI Python client to the local in-VPC proxy endpoint). The proxy handles multi-provider translation (OpenAI schemas to Anthropic, Gemini, or vLLM) transparently at the network edge.
 
-## 🏥 Appendix: HIPAA (Health Insurance Portability and Accountability Act)
+**Q2: How do we prove zero PII egress to SOC 2 or EU regulators without logging the personal data itself?**
+We utilize cryptographic WORM (Write Once, Read Many) Audit Logging via SHA-256 sequential Merkle hash chaining. The proxy generates an RFC 6902 JSON patch differential log that records the *metadata* of the redaction (e.g., "Redacted `[CREDIT_CARD]` at token offset 42") rather than the data itself. We emit a rolling SHA-256 digest over the SSE stream, producing an HMAC-signed attestation proof (Proof of Non-Egress Receipt) that guarantees to auditors no PII was transmitted to the external LLM.
 
-For healthcare organizations and digital health startups, streaming Protected Health Information (PHI) to external LLM APIs (like OpenAI or Anthropic) without a Business Associate Agreement (BAA) is a direct HIPAA violation. LLM-Shield allows organizations to utilize LLMs safely by deterministically removing PHI before it leaves the hospital's network.
+**Q3: Does redacting sensitive data degrade LLM reasoning or cause streaming latency lag?**
+No. To preserve LLM reasoning, we utilize a 4-Mode Pipeline. The `SYNTHETIC` mode employs canonical locale swapping to generate structurally valid synthetic data that precisely preserves BPE token counts and LLM attention weights. 
+For latency, the proxy utilizes a highly optimized C++ `google-re2` DFA regex engine (O(N) linear time) and a sub-millisecond sliding-window SSE lookahead buffer (<4.3 µs overhead per chunk). This allows us to rehydrate fragmented tokens across Server-Sent Events without UI stalls or noticeable lag.
 
-| HIPAA Requirement | Architectural Defense |
-| :--- | :--- |
-| **Transmission Security**<br>*(45 CFR § 164.312(e)(1))* | **Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)**: The proxy intercepts outbound payloads locally. Utilizing a math-bound O(N) Tier-2 Shannon Entropy scanner, it performs **Data Loss Prevention (DLP) for LLMs** by detecting unstructured secrets and deterministically substituting them with realistic Faker-based synthetic entities. No raw PHI traverses the public internet.<br>Flags: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md#core-configuration-flags) |
-| **Audit Controls**<br>*(45 CFR § 164.312(b))* | **RFC 6902 Differential Audit Logging**: Generates exact RFC 6902 compliant JSON patch differential logs detailing redacted string indices without ever persisting raw PHI to disk, compatible with SIEMs like Splunk.<br>Flags: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering) |
-| **Data Integrity & Storage** | **In-Band Stateless Cryptographic Masking**: Avoids permanent databases entirely. Sensitive entities are either encrypted directly in the LLM context using **AES-256-GCM**, or held temporarily in a volatile Redis Vault with strict rolling TTLs and Deterministic HMAC masking.<br>Flags: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md#core-configuration-flags) |
-| **Person or Entity Authentication** | **Granular Entity Policy Scopes**: Enforces O(1) in-memory tenant profile mapping. Binds incoming requests to department-level profiles via Virtual Keys, defaulting to `FAIL_CLOSED` **Zero Trust AI** policies to prevent unauthorized lateral access and enforce strict **AI Governance**.<br>Flags: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md#core-configuration-flags) |
+**Q4: How does the proxy prevent autonomous agents from running unauthorized database or shell commands?**
+By utilizing Pluggable Streaming Tool-Call RBAC. The proxy intercepts JSON-RPC 2.0 and MCP (Model Context Protocol) function calls (like `exec_sql` or `shell_exec`) mid-stream. It validates these against OPA (Open Policy Agent) and HashiCorp Vault resolvers. If an agent attempts an unauthorized action or enters a runaway state, our Composite Agent Loop Circuit Breakers atomatically halt the execution.
+
+**Q5: How does the proxy handle AI agents talking to other AI agents or tools?**
+Traditional proxies break when AI agents send complex, nested commands to each other. Our proxy features a specialized "Agent-to-Agent AI Firewall" (stateless PII synthesis and rehydration) that can instantly parse and secure machine-to-machine traffic without breaking the underlying code structure. This is the proxy's "secret sauce" for securing the next generation of autonomous AI.
+
+**Q6: Can the proxy scan text embedded inside images or multimodal vision payloads?**
+This capability is not natively supported out of the box in standard mode. Currently, our deterministic engines (google-re2, Shannon Entropy) are optimized for ultra-low latency text and SSE streams. However, domain-specific extensions or custom integrations for multimodal OCR payloads can be added on a best-effort basis upon request, or extended via BYOM (Bring Your Own Model) and BYOR (Bring Your Own Regex) configurations.
+
+**Q7: How does our IT/DevOps department deploy and monitor this?**
+The system is deployed as an Envoy gRPC `ext_proc` sidecar over Unix Domain Sockets (UDS) with strict umask policies, or as a zero-dependency Kubernetes Mutating Webhook. Monitoring is natively supported via the GRC Dispatcher, which exports OpenTelemetry `gen_ai.*` spans and NIST OSCAL assessment results directly to enterprise GRC platforms like Vanta, Drata, and Datadog. Leveraging Linux `epoll`, the proxy effortlessly supports 1,800+ concurrent streams per CPU core.

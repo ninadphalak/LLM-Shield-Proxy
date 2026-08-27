@@ -219,6 +219,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         f"  Failure Mode: {settings.SHIELD_FAILURE_MODE}\n"
         f"--------------------------------------------"
     )
+
+    if settings.SHIELD_FAILURE_MODE == "FAIL_OPEN":
+        logger.warning(
+            "\n" + "=" * 50 + "\n"
+            "🚨 WARNING: SHIELD_FAILURE_MODE IS SET TO 'FAIL_OPEN' 🚨\n"
+            "If the proxy engine crashes or fails to reach Redis, PII WILL LEAK to the LLM.\n"
+            "DO NOT USE THIS MODE IN PRODUCTION!\n"
+            + "=" * 50
+        )
+
     if settings.ENABLE_VAULT_SECRETS:
         try:
             await vault_provider.fetch_secrets()
@@ -235,9 +245,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             settings.WORKERS,
         )
 
-    verify = settings.SSL_CA_BUNDLE_PATH if settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH else True
+    verify: bool | str = True
+    if settings.INSECURE_SKIP_VERIFY:
+        verify = False
+    elif settings.CA_BUNDLE_FILE:
+        verify = settings.CA_BUNDLE_FILE
+    elif settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH:
+        verify = settings.SSL_CA_BUNDLE_PATH
+
     cert = None
-    if settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
+    if settings.OUTBOUND_CLIENT_CERT and settings.OUTBOUND_CLIENT_KEY:
+        cert = (settings.OUTBOUND_CLIENT_CERT, settings.OUTBOUND_CLIENT_KEY)
+    elif settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
         cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
 
     limits = httpx.Limits(
@@ -352,7 +371,9 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
     """Attaches correlation request IDs and enterprise HTTP security headers."""
     if app_state.is_draining:
         return JSONResponse(
-            status_code=503, content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}}
+            status_code=429,
+            content={"error": {"message": "Service Unavailable: Pod Draining", "type": "server_error"}},
+            headers={"Retry-After": "5"}
         )
 
     with app_state.active_requests_lock:
@@ -398,9 +419,18 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
             timeout=settings.HTTP_TIMEOUT_SECONDS,
             connect=settings.HTTP_CONNECT_TIMEOUT_SECONDS,
         )
-        verify = settings.SSL_CA_BUNDLE_PATH if settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH else True
+        verify: bool | str = True
+        if settings.INSECURE_SKIP_VERIFY:
+            verify = False
+        elif settings.CA_BUNDLE_FILE:
+            verify = settings.CA_BUNDLE_FILE
+        elif settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH:
+            verify = settings.SSL_CA_BUNDLE_PATH
+
         cert = None
-        if settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
+        if settings.OUTBOUND_CLIENT_CERT and settings.OUTBOUND_CLIENT_KEY:
+            cert = (settings.OUTBOUND_CLIENT_CERT, settings.OUTBOUND_CLIENT_KEY)
+        elif settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
             cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
 
         client = httpx.AsyncClient(
@@ -1032,6 +1062,7 @@ async def _proxy_catch_all_internal(
                             fallback_url = x_shield_fallback_url or settings.FALLBACK_BASE_URL
                             if fallback_url:
                                 is_fallback = True
+                                attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"

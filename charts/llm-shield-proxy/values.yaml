@@ -1,22 +1,17 @@
 replicaCount: 1
-
 image:
   repository: llm-shield-proxy
   pullPolicy: IfNotPresent
-  tag: "latest"
-
+  tag: latest
 service:
   type: ClusterIP
   port: 8000
-
 env:
-  UPSTREAM_BASE_URL: "https://api.openai.com"
-  UPSTREAM_API_KEY: ""
-  METRICS_BEARER_TOKEN: ""
-
+  UPSTREAM_BASE_URL: https://api.openai.com
+  UPSTREAM_API_KEY: ''
+  METRICS_BEARER_TOKEN: ''
 config:
-  VALID_VIRTUAL_KEYS: ""
-
+  VALID_VIRTUAL_KEYS: ''
 resources:
   limits:
     cpu: 500m
@@ -24,3 +19,16 @@ resources:
   requests:
     cpu: 250m
     memory: 256Mi
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1

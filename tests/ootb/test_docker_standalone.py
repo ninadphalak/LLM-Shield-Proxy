@@ -14,7 +14,7 @@ def test_docker_standalone_happy_path():
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
 
     # 2. Run the container
-    subprocess.run(["docker", "run", "-d", "--name", container_name, "-p", "8000:8000", image_name], check=True)
+    subprocess.run(["docker", "run", "-d", "--name", container_name, "-p", "8000:8000", "-e", "SHIELD_ENCRYPTION_KEY=" + "00" * 32, "-e", "SHIELD_WATERMARK_SECRET=test-watermark", image_name], check=True)
 
     try:
         # 3. Ping healthz

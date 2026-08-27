@@ -40,7 +40,7 @@
 DevOps teams can now mount a `policies.yaml` file to dynamically map `virtual_key_id` client identities to distinct security roles. The proxy features a zero-downtime hot-reloading mechanism that continuously polls the file (defaulting to every 5 seconds) and applies modifications immediately without dropping active Server-Sent Event (SSE) streams. Unknown identifiers strictly enforce a Zero-Trust `FAIL_CLOSED` default.
 
 **Universal Dynamic Override Engine:**
-DevOps teams are no longer limited to basic security toggles; they can now dynamically override any of the 30+ `.env` properties (like `MAX_PAYLOAD_SIZE_BYTES` or `RATE_LIMIT_RPM`) natively per `virtual_key_id` inside `policies.yaml`. This is powered by an ASGI-native `contextvars.ContextVar` architecture to achieve strictly isolated, $O(1)$ thread-safe tenant configurations without global state leakage.
+DevOps teams are no longer limited to basic security toggles; they can now dynamically override any of the 30+ `.env` properties (like `MAX_PAYLOAD_SIZE_BYTES` or `RATE_LIMIT_RPM`) natively per `virtual_key_id` inside `policies.yaml`. This is powered by an ASGI-native `contextvars.ContextVar` architecture to achieve strictly isolated, O(1) thread-safe tenant configurations without global state leakage.
 
 > **[View the Complete Policy-as-Code Guide & Templates 📜](POLICIES.md)**: For detailed Role-Based Access Control (RBAC) templates, feature support matrices, and FAQs.
 
@@ -101,7 +101,7 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **gRPC ext_proc Mesh** | `EXT_PROC_SOCK_PATH` | `/var/run/llm-shield/ext_proc.sock` | Path to the ext_proc UDS socket. |
 | **Policy-as-Code (RBAC)** | `POLICIES_FILE_PATH` | `policies.yaml` | Path to the hierarchical RBAC YAML policy definitions. |
 | **Policy-as-Code (RBAC)** | `POLICIES_RELOAD_INTERVAL_SECONDS` | `5` | File modification polling interval for zero-downtime hot-reloads. |
-| **Fail-Safe Policy** | `SHIELD_FAILURE_MODE` | `FAIL_CLOSED` | Enforces Zero-Trust default ($O(1)$ in-memory mapping FAIL_CLOSED). |
+| **Fail-Safe Policy** | `SHIELD_FAILURE_MODE` | `FAIL_CLOSED` | Enforces Zero-Trust default (O(1) in-memory mapping FAIL_CLOSED). |
 | **Anthropic Adapter** | `DEFAULT_UPSTREAM_PROVIDER` | `openai` | Set to `anthropic` for native OpenAI-to-Anthropic request transformation. |
 | **Anthropic Adapter** | `ANTHROPIC_API_VERSION` | `2023-06-01` | Anthropic API version header for SSE stream normalization. |
 | **Traffic Engineering** | `ENABLE_RATE_LIMITING` | `False` | Enable distributed Redis evalsha Token Bucket rate limiter. |
@@ -120,3 +120,36 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **Vault Secrets & mTLS** | `VAULT_REFRESH_INTERVAL_SECONDS`| `300` | Non-blocking TTL cache refresh interval. |
 | **Vault Secrets & mTLS** | `ENABLE_MTLS` | `False` | Enable mutual TLS X.509 transport. |
 | **Vault Secrets & mTLS** | `SSL_CLIENT_CERT_PATH` | `None` | Path to mTLS client certificate. |
+| **TLS/SSL (Inbound)** | `TLS_CERT_FILE` | `None` | Server public certificate. |
+| **TLS/SSL (Inbound)** | `TLS_KEY_FILE` | `None` | Server private key. |
+| **TLS/SSL (Inbound mTLS)** | `CLIENT_CA_FILE` | `None` | CA bundle for verifying incoming clients. |
+| **TLS/SSL (Outbound)** | `CA_BUNDLE_FILE` | `None` | CA bundle for verifying upstream LLM API gateways. |
+| **TLS/SSL (Outbound)** | `INSECURE_SKIP_VERIFY` | `False` | Bypass upstream certificate verification. |
+| **TLS/SSL (Outbound mTLS)** | `OUTBOUND_CLIENT_CERT` | `None` | Client certificate for proxy outbound mTLS. |
+| **TLS/SSL (Outbound mTLS)** | `OUTBOUND_CLIENT_KEY` | `None` | Client key for proxy outbound mTLS. |
+
+> [!WARNING]
+> **Zero-Trust Default (`SHIELD_FAILURE_MODE`)**: The proxy is hardcoded to default to `FAIL_CLOSED`. This ensures that if the engine faults, a Redis connection drops, or a policy cannot be resolved, the connection is instantly severed to prevent PII egress. If you must set `SHIELD_FAILURE_MODE=FAIL_OPEN` for local development or a POC, be aware that **PII may leak** if the engine encounters an error. Never use `FAIL_OPEN` in production.
+## 8. 🔐 TLS and mTLS Deployment (Docker/Kubernetes)
+
+When deploying LLM-Shield-Proxy in production, you should mount TLS certificates securely. 
+In Kubernetes, use `Secrets` mounted as volumes. 
+
+**Example Docker Compose with TLS:**
+```yaml
+services:
+  llm-shield:
+    image: llm-shield-proxy:latest
+    ports:
+      - "8443:8000"
+    volumes:
+      - ./certs:/etc/ssl/llm-shield:ro
+    environment:
+      - TLS_CERT_FILE=/etc/ssl/llm-shield/server.crt
+      - TLS_KEY_FILE=/etc/ssl/llm-shield/server.key
+      - CLIENT_CA_FILE=/etc/ssl/llm-shield/client-ca.pem
+      - CA_BUNDLE_FILE=/etc/ssl/llm-shield/upstream-ca.pem
+      - OUTBOUND_CLIENT_CERT=/etc/ssl/llm-shield/proxy-client.crt
+      - OUTBOUND_CLIENT_KEY=/etc/ssl/llm-shield/proxy-client.key
+```
+This configuration secures the listener with HTTPS, mandates inbound mTLS (`CLIENT_CA_FILE`), and enables outbound mTLS towards the upstream provider.
