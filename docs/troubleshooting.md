@@ -24,14 +24,7 @@ The proxy intercepts the stream but does not hold the ultimate LLM API key. If `
 
 ---
 
-## 📈 Anonymous Usage Tracking
 
-By default, the proxy includes an `ENABLE_ANONYMOUS_USAGE_TRACKING` flag (defaults to `True`). This sends basic, non-identifying heartbeat metrics (like version number and uptime) to help us understand open-source adoption.
-
-**Important Note on Errors:**
-If the telemetry ping fails (e.g., due to an outbound firewall or network partition), **it will silently swallow the error and log a warning.** It will *never* crash the proxy or drop traffic. We do not want this non-critical flag to interfere with your production workloads. You can safely leave it `True` without risking SLA degradation.
-
----
 
 ## 🏗️ Kubernetes & Helm Chart Troubleshooting
 

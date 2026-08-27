@@ -12,7 +12,7 @@ LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** criti
 | **LLM01: Prompt Injection** | Mitigated by `INDIRECT_PROMPT_INJECTION_PATTERN` and AST-Aware Semantic Firewall. |
 | **LLM02: Insecure Output Handling** | Mitigated by JSON Recursion Bomb Defense and XSS/Markdown Exfiltration blockers. |
 | **LLM04: Model Denial of Service** | Mitigated by Slowloris Buffer limits, `64KB` Backpressure Guards, and `max_tokens` limits. |
-| **LLM05: Supply Chain Vulnerabilities** | Addressed by WORM-Compliant Merkle Attestation for all outbound requests, proving un-tampered egress. |
+| **LLM05: Supply Chain Vulnerabilities** | Addressed by WORM-Compliant Cryptographic Attestation for all outbound requests, proving un-tampered egress. |
 | **LLM06: Sensitive Information Disclosure** | Mitigated by 3-Tier Redaction Cascade (DFA Regex, Shannon Entropy, ONNX NER) and Stateless Crypto. |
 | **LLM07: Insecure Plugin Design** | Mitigated by the Edge-Level Agent Identity Enforcer (JWT/DPoP) and Autonomous Agent Circuit Breakers. |
 | **LLM08: Excessive Agency** | Mitigated by Granular Entity Policy Scopes (Role-Based Access Controls) restricting tool calls deterministically. |
@@ -37,9 +37,9 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 | **Timing Attacks on API Keys** | Key length and character leakage via string comparison timing. | Constant-time authentication verification using `hmac.compare_digest()`. | ✅ **PASSED** (`test_inbound_auth_validation`) |
 | **SSRF & Network Boundary** | Requests targeting `127.0.0.1`, AWS metadata (`169.254.169.254`), or private LANs. | Dynamic DNS resolution + IP blacklist rejecting loopback, link-local, and multicast IPs. | ✅ **PASSED** (`test_ssrf_rejection`) |
 | **Agent-Driven Infinite Loops** | Autonomous agents getting stuck in costly self-reflective loops. | Composite Agent Loop Circuit Breaker (`AGENT_BREAKER_THRESHOLD`). | ✅ **PASSED** (`test_composite_agent_loop_breaker`) |
-| **Audit Log Tampering** | Malicious actor modifies logs to cover up PII leak. | WORM-Compliant Merkle Attestation & SHA-256 Hash Chaining. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`) |
+| **Audit Log Tampering** | Malicious actor modifies logs to cover up PII leak. | WORM-Compliant Cryptographic SHA-256 Hash Chaining. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`) |
 | **Insider Model Leaks** | Employees copying redacted/synthetic data to train local shadow IT models. | Dynamic Canary Watermarking & Steganography. | ✅ **PASSED** (`test_dynamic_canary_watermark_injection`) |
-| **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Merkle Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
+| **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Cryptographic Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
 | **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Cryptographic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_crypto_masking_vault_bypass`) |
 
 ## Deep Dive: Enterprise Security Features & Implementation
@@ -82,7 +82,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 
 ### 📜 Audit, Forensics, and Compliance
 
-#### WORM-Compliant Merkle Attestation & Audit Logging
+#### WORM-Compliant Cryptographic Attestation & Audit Logging
 * **Implementation Details**: Emits structured compliance events containing timestamps, tenant IDs, redacted entity types, and session metadata. The logs are Write-Once-Read-Many (WORM) compliant, generating mathematical proof that specific data never egressed the VPC boundaries.
 * **Flags**: [`TELEMETRY_ENABLED`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
@@ -90,7 +90,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Implementation Details**: Every emitted audit log entry cryptographically signs and chains to the previous record's hash. This guarantees tamper-evidence; any post-facto modification or deletion of a log entry (e.g., to cover up a leak) will instantly invalidate the entire cryptographic chain, satisfying strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** requirements, and HIPAA audit controls.
 * **Flags**: [`AUDIT_LOG_FORMAT`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
-#### Cryptographic Proof of Non-Egress Merkle Attestation
+#### Cryptographic Proof of Non-Egress Cryptographic Attestation
 * **Implementation Details**: Constructs a Merkle Tree of all redacted tokens per session. The proxy provides a cryptographic root hash confirming exactly what was stripped, allowing third-party auditors to verify non-egress without ever seeing the raw sensitive data.
 
 #### FIPS 140-3 KAT & RFC 6902 Differential Audit Logging
