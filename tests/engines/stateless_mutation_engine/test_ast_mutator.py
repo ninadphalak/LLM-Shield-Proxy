@@ -70,11 +70,14 @@ async def test_heterogeneous_array_structural_parity(mutator):
 
     # String PII mutated to array proxy object
     assert isinstance(arr[3], dict)
-    assert arr[3]["_shield_val"] == "[REDACTED]"
+    assert arr[3]["_shield_val"] != "[REDACTED]"
+    assert isinstance(arr[3]["_shield_val"], str)
+    assert len(arr[3]["_shield_val"]) > 0
 
     # Nested dictionary in array mutated
     assert isinstance(arr[4]["sub_key"], dict)
-    assert arr[4]["sub_key"]["_shield_val"] == "[REDACTED]"
+    assert arr[4]["sub_key"]["_shield_val"] != "[REDACTED]"
+    assert isinstance(arr[4]["sub_key"]["_shield_val"], str)
 
 
 @pytest.mark.asyncio
@@ -119,7 +122,8 @@ async def test_sibling_injection_and_schema_rewriting(mutator, cipher):
     args = mutated["params"]["arguments"]
     assert args["age"] == 30
     assert "_shield_val" in args["customer_ssn"]
-    assert args["customer_ssn"]["_shield_val"] == "[REDACTED]"
+    assert args["customer_ssn"]["_shield_val"] != "[REDACTED]"
+    assert isinstance(args["customer_ssn"]["_shield_val"], str)
     assert "_shield_ctx" in args["customer_ssn"]
 
     # Verify crypto context binding
@@ -151,4 +155,5 @@ async def test_key_immutability_and_stateless(mutator):
 
     # Values containing PII are mutated
     assert isinstance(mutated["params"]["safe_key"], dict)
-    assert mutated["params"]["safe_key"]["_shield_val"] == "[REDACTED]"
+    assert mutated["params"]["safe_key"]["_shield_val"] != "[REDACTED]"
+    assert isinstance(mutated["params"]["safe_key"]["_shield_val"], str)

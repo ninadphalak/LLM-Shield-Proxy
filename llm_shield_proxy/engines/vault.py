@@ -143,7 +143,17 @@ class Vault:
         if not c:
             return False
         c = unicodedata.normalize("NFKC", c)
-        return c.isalnum() or c == "_"
+        if not (c.isalnum() or c == "_"):
+            return False
+
+        val = ord(c)
+        # Exclude CJK ideographs, Hiragana, Katakana, and Hangul which don't use space boundaries
+        if (0x3040 <= val <= 0x309F) or (0x30A0 <= val <= 0x30FF) or \
+           (0x4E00 <= val <= 0x9FFF) or (0x3400 <= val <= 0x4DBF) or \
+           (0x20000 <= val <= 0x2A6DF) or (0xAC00 <= val <= 0xD7AF):
+            return False
+
+        return True
 
     def _is_boundary_safe(self, text: str, start: int, end: int, token: str) -> bool:
         """Ensures token match occurs at word boundaries to prevent sub-word collisions.
@@ -322,7 +332,12 @@ class RedisVaultStore:
         if self._async_client is None:
             if not aioredis:
                 raise ImportError("redis.asyncio required for async Redis vault. Run `pip install redis`.")
-            self._async_client = aioredis.from_url(self.redis_url, decode_responses=True)
+            self._async_client = aioredis.from_url(
+                self.redis_url,
+                decode_responses=True,
+                socket_timeout=5.0,
+                socket_connect_timeout=2.0
+            )
         return self._async_client
 
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:

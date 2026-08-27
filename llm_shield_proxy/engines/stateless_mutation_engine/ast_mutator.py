@@ -53,7 +53,14 @@ class StatelessASTVisitor:
                         if await self._detect_pii(v):
                             aad = f"{path}.{k}"
                             cipher_text = self.cipher.encrypt(v, aad)
-                            node[k] = {"_shield_val": "[REDACTED]", "_shield_ctx": cipher_text}
+
+                            # Substitute the visible string with Faker values (or tags based on config)
+                            # rather than hardcoding [REDACTED]
+                            from llm_shield_proxy.engines.vault import Vault
+                            ephemeral_vault = Vault(synthetic=settings.ENABLE_SYNTHETIC_SWAPPING)
+                            faked_v = pii_engine.redact_text(v, ephemeral_vault)
+
+                            node[k] = {"_shield_val": faked_v, "_shield_ctx": cipher_text}
 
             elif isinstance(node, list):
                 for i in range(len(node)):
@@ -66,6 +73,11 @@ class StatelessASTVisitor:
                         if await self._detect_pii(v):
                             aad = f"{path}[{i}]"
                             cipher_text = self.cipher.encrypt(v, aad)
-                            node[i] = {"_shield_val": "[REDACTED]", "_shield_ctx": cipher_text}
+
+                            from llm_shield_proxy.engines.vault import Vault
+                            ephemeral_vault = Vault(synthetic=settings.ENABLE_SYNTHETIC_SWAPPING)
+                            faked_v = pii_engine.redact_text(v, ephemeral_vault)
+
+                            node[i] = {"_shield_val": faked_v, "_shield_ctx": cipher_text}
 
         return orjson.dumps(data)

@@ -1,0 +1,17 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "llm-shield-proxy.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "llm-shield-proxy.name" . }}
+    helm.sh/chart: {{ include "llm-shield-proxy.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "llm-shield-proxy.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

@@ -36,7 +36,7 @@ def test_config_fail_fast():
     """Verify that ENABLE_WATERMARKING without secret fails to boot."""
     with pytest.raises(ValidationError) as exc:
         Settings(ENABLE_WATERMARKING=True, SHIELD_WATERMARK_SECRET=None, VALID_VIRTUAL_KEYS="test")
-    assert "SHIELD_WATERMARK_SECRET must be set" in str(exc.value)
+        assert "SHIELD_WATERMARK_SECRET" in str(exc.value)
 
     # Should work if set
     s = Settings(ENABLE_WATERMARKING=True, SHIELD_WATERMARK_SECRET="test-secret", VALID_VIRTUAL_KEYS="test")

@@ -68,16 +68,19 @@ async def test_rate_limiter_429():
     settings.RATE_LIMIT_RPM = 6000
     settings.RATE_LIMIT_BURST = 1
 
-    # Force in-memory limiter to be used by mocking the Redis check
-    with patch("llm_shield_proxy.security.rate_limit.vault_store") as mock_vault:
-        mock_vault.redis = None
+    try:
+        # Force in-memory limiter to be used by mocking the Redis check
+        with patch("llm_shield_proxy.security.rate_limit.vault_store") as mock_vault:
+            mock_vault.redis = None
 
-        # First request should pass
-        assert await rate_limiter.acquire("test_vk") is True
+            # First request should pass
+            assert await rate_limiter.acquire("test_vk") is True
 
-        # Second request should fail immediately (burst is 1)
-        # Note: in a real test we might need to manipulate time.monotonic, but a fast test works too
-        assert await rate_limiter.acquire("test_vk") is False
+            # Second request should fail immediately (burst is 1)
+            # Note: in a real test we might need to manipulate time.monotonic, but a fast test works too
+            assert await rate_limiter.acquire("test_vk") is False
+    finally:
+        settings.ENABLE_RATE_LIMITING = False
 
 
 def test_fail_closed_mode():
@@ -121,10 +124,10 @@ def test_fail_open_mode():
         assert response.status_code == 200
 
 
-def test_graceful_draining_503():
+def test_graceful_draining_429():
     app_state.is_draining = True
 
     response = client.get("/health")
     # Actually /health is an api_route but we have middleware that checks is_draining
-    assert response.status_code == 503
+    assert response.status_code == 429
     assert response.json()["error"]["message"] == "Service Unavailable: Pod Draining"

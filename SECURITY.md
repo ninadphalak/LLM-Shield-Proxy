@@ -2,6 +2,22 @@
 
 # 🔐 Security: Threat Model & Defenses
 
+
+## 🛡️ OWASP Top 10 for LLMs (v1.1) Mapping
+
+LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** critical vulnerabilities identified by OWASP for Large Language Model applications. (Training Data Poisoning and Supply Chain Vulnerabilities are handled at the model deployment layer).
+
+| OWASP Threat | LLM-Shield-Proxy Mitigation |
+| :--- | :--- |
+| **LLM01: Prompt Injection** | Mitigated by `INDIRECT_PROMPT_INJECTION_PATTERN` and AST-Aware Semantic Firewall. |
+| **LLM02: Insecure Output Handling** | Mitigated by JSON Recursion Bomb Defense and XSS/Markdown Exfiltration blockers. |
+| **LLM04: Model Denial of Service** | Mitigated by Slowloris Buffer limits, `64KB` Backpressure Guards, and `max_tokens` limits. |
+| **LLM05: Supply Chain Vulnerabilities** | Addressed by WORM-Compliant Merkle Attestation for all outbound requests, proving un-tampered egress. |
+| **LLM06: Sensitive Information Disclosure** | Mitigated by 3-Tier Redaction Cascade (DFA Regex, Shannon Entropy, ONNX NER) and Stateless Crypto. |
+| **LLM07: Insecure Plugin Design** | Mitigated by the Edge-Level Agent Identity Enforcer (JWT/DPoP) and Autonomous Agent Circuit Breakers. |
+| **LLM08: Excessive Agency** | Mitigated by Granular Entity Policy Scopes (Role-Based Access Controls) restricting tool calls deterministically. |
+| **LLM10: Model Theft** | Mitigated by Dynamic Canary Watermarking & Steganography to track stolen outputs back to the source. |
+
 ## 18-Vector Threat Matrix
 LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests** to ensure continuous **LLM Security Posture Management (LLM SPM)**.
 
@@ -31,7 +47,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 ### 🛡️ Core Cryptographic Masking & Defenses
 
 #### Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)
-* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound $O(N)$ **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic Faker-based synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
+* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound O(N) **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic canonical locale synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
 * **Flags**: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md#core-configuration-flags)
 
 #### In-Band Stateless Cryptographic Masking
@@ -57,7 +73,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Flags**: [`ENABLE_AGENT_BREAKER`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Granular Entity Policy Scopes & Zero Trust AI Defaults
-* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes $O(1)$ in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default—if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
+* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes O(1) in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default—if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
 * **Flags**: [`VALID_VIRTUAL_KEYS`](DEPLOYMENT.md#core-configuration-flags), [`SHIELD_FAILURE_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Zero-Allocation Streaming JSON Lexer
@@ -83,9 +99,9 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 
 ### 🏗️ Secure Infrastructure & Service Mesh
 
-#### Centralized Enterprise Secrets & mTLS
-* **Implementation Details**: Features native HashiCorp Vault integration supporting AppRole, Kubernetes Service Accounts, and Token authentication. Provides a non-blocking TTL cache and enforces strict X.509 mutual TLS (mTLS) transport for backend secret retrieval, ensuring data-in-transit security.
-* **Flags**: [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
+#### Centralized Enterprise Secrets & Comprehensive mTLS
+* **Implementation Details**: Features native HashiCorp Vault integration supporting AppRole, Kubernetes Service Accounts, and Token authentication with a non-blocking TTL cache. Enforces strict X.509 mutual TLS (mTLS) for backend secret retrieval. Additionally, the proxy natively terminates inbound TLS (HTTPS), mandates inbound mTLS at the TCP/socket layer (`ssl.CERT_REQUIRED`), and can present outbound mTLS client certificates when routing to internal enterprise API gateways. See the [Deep Dive Feature Document](docs/features/secure-infrastructure-service-mesh/tls-mtls-support.md) for full configuration details.
+* **Flags**: [`ENABLE_VAULT_SECRETS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), `TLS_CERT_FILE`, `CLIENT_CA_FILE`, `OUTBOUND_CLIENT_CERT`.
 
 #### Service Mesh Native gRPC ext_proc Integration
 * **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks. By implementing Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`), it achieves Zero HTTP network hops, streaming buffers directly over highly secure UDS (Unix Domain Sockets).
