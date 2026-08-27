@@ -17,7 +17,7 @@ The proxy natively exposes OpenTelemetry/Prometheus metrics at `/metrics` (or on
 
 ## 💾 2. Empirical Redis Vault Sizing Guide
 
-If you are using the Stateful Redis Vault (`REDIS_URL`) instead of Stateless AES-256-GCM, you must provision enough Redis RAM to hold the deterministic session mappings.
+If you are using the Stateful Redis Vault (`REDIS_URL`), you must provision enough RAM on your **external Redis server**. (Note: This is completely separate from the proxy's internal `<85 MB` application memory footprint).
 
 **The Empirical Formula:**
 Redis dictionary overhead per mapped entity (UUID string -> synthetic tag string) is empirically ~150-200 bytes in memory. Assuming an average of 10 sensitive entities per user session, each active session consumes roughly `~2 KB` of RAM.
@@ -36,6 +36,6 @@ Redis dictionary overhead per mapped entity (UUID string -> synthetic tag string
 If a data leak is suspected, Security Analysts must trace the payload without the proxy actually logging the sensitive data (which would violate compliance). 
 
 1.  **Extract the Canary:** Check the leaked output for the Dynamic Canary Watermark (injected via zero-width characters or specific deterministic synthetics).
-2.  **Query the Merkle Tree:** Query your centralized log aggregator (e.g., Splunk, Datadog) for the WORM-Compliant Merkle logs emitted by the proxy. 
+2.  **Query the Merkle Tree:** Query your centralized log aggregator (e.g., Splunk, Datadog) for the WORM-Compliant Hash-Chained logs emitted by the proxy. 
 3.  **Correlate the Hash:** Search for the `_ctx_hash_prop` or the HMAC-SHA256 hash found in the watermark. 
 4.  **Identify the Actor:** The structured log will reveal the exact `WorkloadIdentity` (JWT sub), Timestamp, and IP that originated the request, proving egress provenance without ever revealing the plaintext PII in the logs.
