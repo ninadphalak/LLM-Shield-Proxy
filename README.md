@@ -16,55 +16,13 @@ LLM-Shield-Proxy is a hyper-fast, FastAPI-based streaming gateway designed speci
 By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy applies guardrails at the microsecond level, keeping your AI applications compliant with strict InfoSec mandates (GLBA, PCI-DSS, HIPAA) while maintaining zero-perceived-latency.
 
 **Option 1: Standard Egress**
-```mermaid
-flowchart LR
-    subgraph VPC [Corporate VPC / Secure Boundary]
-        direction LR
-        App(Browser / IDE / LangChain)
-        Proxy[LLM-Shield-Proxy 🛡️🔒]
-        App == "Prompt with PII" ==> Proxy
-    end
-
-    LLM(("OpenAI, Claude, Gemini..."))
-
-    Proxy == "Sanitized Prompt (Zero Egress)" ==> LLM
-    LLM -. "Streaming Reply" .-> Proxy
-    Proxy -. "Rehydrated Stream" .-> App
-
-    linkStyle default stroke:#3b82f6,stroke-width:3px;
-
-    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0284c7
-    style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
-    style LLM fill:#1e293b,stroke:#e2e8f0,color:#fff
-```
+<br>
+<img src="docs/assets/diagram-standard.svg" alt="Standard Egress Diagram" width="800" />
 
 **Option 2: Zero-Internet Air-Gapped Mode**
-```mermaid
-flowchart LR
-    subgraph VPC [Air-Gapped Corporate VPC]
-        direction LR
-        App(Browser / IDE / LangChain)
-        Proxy[LLM-Shield-Proxy 🛡️🔒]
-        Egress{"Egress Gateway *"}
-        
-        App == "Prompt with PII" ==> Proxy
-        Proxy == "Sanitized Prompt" ==> Egress
-    end
-
-    Out(("To OpenAI, Claude, Gemini..."))
-
-    Egress == "Forwarded Request" ==> Out
-    Out -. "Streaming Reply" .-> Egress
-    Egress -. "Streaming Reply" .-> Proxy
-    Proxy -. "Rehydrated Stream" .-> App
-
-    linkStyle default stroke:#3b82f6,stroke-width:3px;
-
-    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0284c7
-    style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
-    style Egress fill:#fef9c3,stroke:#eab308,stroke-width:2px,color:#854d0e
-    style Out fill:#1e293b,stroke:#e2e8f0,color:#fff
-```
+<br>
+<img src="docs/assets/diagram-airgapped.svg" alt="Air-Gapped Egress Diagram" width="800" />
+<br>
 *\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
 
 > **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
