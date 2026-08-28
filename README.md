@@ -176,71 +176,62 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 
 LLM-Shield-Proxy supports two configurable tokenization strategies out of the box:
 
+<br>
+<img src="docs/assets/diagram-redaction-modes.svg" alt="Redaction Modes Diagram" width="850" />
+<br>
+
 | Mode | Configuration | Description | Best For |
 | :--- | :--- | :--- | :--- |
 | **Synthetic Swapping (Default)** | `ENABLE_SYNTHETIC_SWAPPING=true` | Deterministically substitutes PII with realistic, unbracketed entities (e.g., `Maya`, `Springfield`) to eliminate Byte-Pair Encoding (BPE) token bloat and preserve LLM attention weight distributions. | Modern LLMs, cost & latency optimization |
 | **Structural Tagging** | `ENABLE_SYNTHETIC_SWAPPING=false` | Substitutes PII with explicit bracketed type tags (e.g., `[PERSON_1]`, `[EMAIL_1]`). | Legacy compliance pipelines, deterministic regex auditing |
 
-<details>
-<summary><b>▶ Click to view Structural Tagging Demo (Bracketed Tag Stream)</b></summary>
-
-<br>
-
-![Structural Tagging Demo](docs/LLM-Shield-Proxy-patent-v1.gif)
-
-*Demonstration of microsecond streaming rehydration using explicit bracketed tags (`[PERSON_1]`, `[EMAIL_1]`).*
-
-</details>
 
 ---
 
 ## 🏗️ Architecture Diagram
 
 ```mermaid
-%%{init: {'themeVariables': {'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
-    classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1,font-weight:bold;
-    classDef proxyEngine fill:#f8fafc,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold;
-    classDef piiSecurity fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b,font-weight:bold;
-    classDef vault fill:#fffbebe,stroke:#f59e0b,stroke-width:2px,color:#92400e,font-weight:bold;
-    classDef upstream fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#6b21a8,font-weight:bold;
+    %% Node Styles (Theme Adaptive)
+    classDef client stroke-width:2px,stroke-dasharray: 5 5
+    classDef proxy stroke-width:2px,font-weight:bold
+    classDef security stroke-width:2px,font-weight:bold
+    classDef dualMode stroke-width:2px,stroke-dasharray: 4 4
 
-    UserApp["👤 Client Application\n(OpenAI / LangChain SDK)"]:::client
+    UserApp["👤 Client App"]:::client
+    UpstreamLLM["☁️ Upstream LLM"]:::client
 
-    subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy VPC Security Gateway"]
+    subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy VPC"]
         direction TD
-        InboundAuth["🔑 Inbound Auth & Virtual Key Swapping\n(Constant-Time Verification)"]:::proxyEngine
+        InboundAuth["🔑 Inbound Auth & Virtual Key"]:::proxy
 
-        subgraph CascadeEngine ["🔒 3-Tier Multi-Modal & CJK Redaction Engine"]
-            Tier1["Tier 1: Pre-compiled DFA Regex\n(<0.03ms Pattern Matching)"]:::piiSecurity
-            Tier2["Tier 2: Shannon Entropy Secret Filter\n(Base64 >= 4.5, Hex >= 3.4 bits/char)"]:::piiSecurity
-            Tier3["Tier 3: Contextual ONNX NER Pipeline\n(Script-Aware CJK & Multi-Modal Unwrapping)"]:::piiSecurity
+        subgraph CascadeEngine ["🔒 3-Tier Redaction Engine"]
+            Tier1["Tier 1: O(N) DFA Regex"]:::security
+            Tier2["Tier 2: Shannon Entropy"]:::security
+            Tier3["Tier 3: ONNX NER Pipeline"]:::security
             Tier1 --> Tier2 --> Tier3
         end
 
-        VaultStore[("🔐 AES-256-GCM Vault Store\n(Session-Scoped TTL Eviction)")]:::vault
-        LookaheadBuffer["⏱️ Sliding-Window Streaming Buffer\n(Chunk-Split & Slowloris Protection)"]:::proxyEngine
-        Rehydrator["🔄 Real-Time SSE Re-hydrator\n(Synthetic Entity / Tag De-masking)"]:::proxyEngine
+        subgraph CryptoState ["🔐 Dual-Mode State Cryptography"]
+            direction LR
+            Mode1["Mode A: Redis TTL Vault"]:::dualMode
+            Mode2["Mode B: Stateless AES-GCM (In-Band)"]:::dualMode
+        end
+
+        LookaheadBuffer["⏱️ Sliding-Window Buffer"]:::proxy
+        Rehydrator["🔄 SSE Re-hydrator"]:::proxy
     end
 
-    UpstreamLLM["☁️ Upstream LLM Provider\n(OpenAI / Anthropic / Gemini / vLLM)"]:::upstream
+    %% Flow
+    UserApp -->|1. Prompt (Raw PII)| InboundAuth
+    InboundAuth -->|2. Validated| Tier1
+    Tier3 -->|3. Encrypt / Store Mappings| CryptoState
+    Tier3 -->|4. Sanitized Payload| UpstreamLLM
 
-    %% Inbound Request Flow
-    UserApp -- "<b>1. Inbound Request (Raw PII / Secrets)</b>" --> InboundAuth
-    InboundAuth -- "<b>2. Authenticated Payload</b>" --> Tier1
-    Tier3 -- "<b>3. Encrypt & Store Token Mappings</b>" --> VaultStore
-    Tier3 -- "<b>4. Sanitized Zero-PII Payload</b>" --> UpstreamLLM
-
-    %% Outbound Response Flow
-    UpstreamLLM -. "<b>5. Raw SSE Stream Deltas</b>" .-> LookaheadBuffer
-    LookaheadBuffer -- "<b>6. Prefix-Safe Rehydration</b>" --> Rehydrator
-    Rehydrator <--> VaultStore
-    Rehydrator -. "<b>7. Sanitized Real-Time Stream</b>" .-> UserApp
-
-    style SecurityMoat fill:#f8fafc,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0f172a
-    style CascadeEngine fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#263238,font-weight:bold
-
-    linkStyle default stroke:#0f172a,stroke-width:2px;
+    UpstreamLLM -.->|5. SSE Stream Deltas| LookaheadBuffer
+    LookaheadBuffer -->|6. Prefix-Safe Chunk| Rehydrator
+    Rehydrator <--> CryptoState
+    Rehydrator -.->|7. Real-Time Rehydrated Stream| UserApp
 ```
 
 ### How It Works (The Data Flow)
