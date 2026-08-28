@@ -41,24 +41,26 @@ flowchart TD
     classDef stateless fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
     classDef router fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
 
-    Client[Client App] --> Router{JSON-RPC / Tool Call?}:::router
+    Client["Client App<br/><i>'My SSN is 000-00-0000'</i>"] --> Router{"JSON-RPC?"}:::router
     
-    %% Path A: Human Traffic
-    Router -->|No: Standard Text| PathA[A. Human-to-LLM Prompt]
-    PathA --> Syn[SYNTHETIC]:::stateful
-    PathA --> Tag[STRUCTURAL_TAG]:::stateful
-    PathA --> Scrub[SCRUB]:::stateless
-    PathA --> CryptoA[STATELESS_CRYPTO]:::stateless
+    Router -->|No: Text| SubA
+    Router -->|Yes: Agent| SubB
     
-    %% Path B: Machine Traffic
-    Router -->|Yes: Structured Code| PathB[B. Machine-to-Machine]
-    PathB --> CryptoB[Strict STATELESS_CRYPTO]:::stateless
+    subgraph SubA [A. Human-to-LLM (Choose One Config)]
+        direction TB
+        Syn["1. SYNTHETIC<br/><i>'...is 111-11-1111'</i>"]:::stateful
+        Tag["2. STRUCTURAL_TAG<br/><i>'...is [SSN_1]'</i>"]:::stateful
+        Scrub["3. SCRUB<br/><i>'...is ***'</i>"]:::stateless
+        CryptoA["4. STATELESS_CRYPTO<br/><i>'...is [enc_3x9kL]'</i>"]:::stateless
+    end
+
+    subgraph SubB [B. Machine-to-Machine]
+        direction TB
+        CryptoB["Strictly Forces<br/>STATELESS_CRYPTO"]:::stateless
+    end
     
-    Syn -.-> Redis[(Redis Vault)]:::stateful
+    Syn -.-> Redis[("Redis Vault")]:::stateful
     Tag -.-> Redis
-    
-    CryptoA -.-> AES[In-Band AES-256-GCM]:::stateless
-    CryptoB -.-> AES
 ```
 
 ### A. Human-to-LLM (Text Prompts)
