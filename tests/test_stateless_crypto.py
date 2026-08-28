@@ -110,7 +110,7 @@ async def test_zero_redis_calls_in_stateless_synthetic_mode():
                 response = await client.post(
                     "/v1/chat/completions",
                     json={"messages": [{"role": "user", "content": "Hello"}]},
-                    headers={"X-Shield-Masking-Mode": "STATELESS_SYNTHETIC", "Authorization": "Bearer sk-proj-123"},
+                    headers={"X-Shield-Masking-Mode": "STATELESS_CRYPTO", "Authorization": "Bearer sk-proj-123"},
                 )
 
                 assert response.status_code == 200

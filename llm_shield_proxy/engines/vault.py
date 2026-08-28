@@ -97,7 +97,7 @@ class Vault:
             self.type_counters[entity_type] = current_count
 
             if self.synthetic:
-                seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest(), 16)
+                seed = int(hashlib.md5(original_val.encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
                 try:
                     fake = _faker_ctx.get()
                 except LookupError:
@@ -118,7 +118,7 @@ class Vault:
                 elif "CREDIT_CARD" in entity_type:
                     token = fake.credit_card_number()
                 elif "KEY" in entity_type or "SECRET" in entity_type or "TOKEN" in entity_type or "PAT" in entity_type:
-                    token = f"AKIA{''.join(random.Random(seed).choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=16))}"  # nosec B311
+                    token = f"AKIA{''.join(random.Random(seed).choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=16))}"  # nosec B311 noqa: S311
                 elif "GPE" in entity_type or "LOC" in entity_type:
                     token = fake.city()
                 else:

@@ -19,7 +19,7 @@ flowchart TD
     A[Agent Tool Call JSON] --> B{Is jsonrpc: 2.0?}
     B -->|Yes| C(AST-Aware Lexer)
     C --> D{Is String Value?}
-    D -->|Yes| E[Apply STATELESS_SYNTHETIC]
+    D -->|Yes| E[Apply STATELESS_CRYPTO]
     E --> F[Dynamic Schema Rewriter]
     F -->|Inject as 'required'| G[Forward Safe JSON to LLM]
     G -->|LLM Forced to Echo| H[Stateless Decryption]

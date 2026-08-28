@@ -118,7 +118,7 @@ def _is_safe_ip(ip_str: str) -> bool:
             or ip_obj.is_multicast
             or ip_obj.is_reserved
             or ip_obj.is_unspecified
-            or str(ip_obj) in ("255.255.255.255", "0.0.0.0")
+            or str(ip_obj) in ("255.255.255.255", "0.0.0.0")  # nosec B104 # noqa: S104
         )
     except ValueError:
         return False
@@ -304,7 +304,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
             # Apply the sticky bit (1) alongside 770 permissions
             os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
-            os.chmod(sock_dir, 0o1770)  # nosec B103
+            os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
 
             if os.path.exists(sock_path):
                 os.unlink(sock_path)
@@ -792,7 +792,7 @@ async def _proxy_catch_all_internal(
 
     masking_mode = resolve_masking_mode(x_shield_masking_mode)
 
-    if masking_mode == MaskingMode.STATELESS_SYNTHETIC:
+    if masking_mode == MaskingMode.STATELESS_CRYPTO:
         vault = StatelessCryptoVault()
     elif masking_mode == MaskingMode.SCRUB:
         vault = ScrubVault()  # type: ignore
@@ -1052,7 +1052,7 @@ async def _proxy_catch_all_internal(
                             break
 
                         if attempt < max_retries:
-                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311
+                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311 noqa: S311
                             AuditLogger.log_upstream_retry_attempt(x_session_id, request_id, virtual_key_id, attempt + 1, current_target_url, applied_role_name=applied_role_name)
                             await asyncio.sleep(sleep_time)
                             attempt += 1
@@ -1078,7 +1078,7 @@ async def _proxy_catch_all_internal(
                     if upstream_res is not None:
                         try:
                             await upstream_res.aclose()
-                        except Exception:  # nosec B110
+                        except Exception:  # nosec B110 noqa: S110
                             pass
                     status_code = upstream_res.status_code if (upstream_res and hasattr(upstream_res, 'status_code')) else 503
                     AuditLogger.log_redaction_event(
@@ -1188,7 +1188,7 @@ async def _proxy_catch_all_internal(
                             break
 
                         if attempt < max_retries:
-                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311
+                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311 noqa: S311
                             AuditLogger.log_upstream_retry_attempt(x_session_id, request_id, virtual_key_id, attempt + 1, current_target_url, applied_role_name=applied_role_name)
                             await asyncio.sleep(sleep_time)
                             attempt += 1
