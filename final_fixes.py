@@ -1,4 +1,24 @@
-<svg width="900" height="450" viewBox="0 0 900 450" xmlns="http://www.w3.org/2000/svg">
+import re
+
+# 1. Update README.md
+with open('README.md', 'r', encoding='utf-8') as f:
+    readme = f.read()
+
+# Fix text
+readme = readme.replace(
+    "[Format-Preserving Synthetic Masking & Entropy (Shannon entropy with faker Tier 2)]",
+    "[Format-Preserving Synthetic Masking & Entropy (Shannon entropy)]"
+)
+
+# Remove Architecture Diagram
+arch_pattern = r"## 🏗️ Architecture Diagram\n\n```mermaid\nflowchart LR\n.*?```\n"
+readme = re.sub(arch_pattern, "", readme, flags=re.DOTALL)
+
+with open('README.md', 'w', encoding='utf-8') as f:
+    f.write(readme)
+
+# 2. Update SVG
+svg_content = """<svg width="900" height="450" viewBox="0 0 900 450" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
       .text { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 500; fill: #1e293b; }
@@ -90,3 +110,7 @@
   <path d="M 620 138 L 705 130" class="arrow-dashed" marker-end="url(#arrow)" />
 
 </svg>
+"""
+svg_path = r"c:\git_repo\LLM-Shield-Proxy\docs\assets\diagram-dual-pipeline.svg"
+with open(svg_path, "w", encoding="utf-8") as f:
+    f.write(svg_content)

@@ -194,46 +194,6 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 
 ---
 
-## 🏗️ Architecture Diagram
-
-```mermaid
-flowchart LR
-    %% Nodes
-    Client["Browser / IDE"]
-    LLM["OpenAI / Claude"]
-    
-    subgraph Proxy ["🛡️ LLM-Shield-Proxy (VPC)"]
-        direction LR
-        
-        subgraph Inbound ["Sanitization (Inbound)"]
-            direction TB
-            Engine["3-Tier Redaction Engine"]
-            Vault["Vault (Redis / AES)"]
-            Engine --> Vault
-        end
-        
-        subgraph Outbound ["Rehydration (Outbound)"]
-            direction TB
-            Buffer["SSE Sliding-Window Buffer"]
-            Rehydrator["Stream Rehydrator"]
-            Buffer --> Rehydrator
-        end
-        
-        Vault -.->|State Lookup| Rehydrator
-    end
-    
-    %% Flows
-    Client == "1. Raw Prompt" ==> Engine
-    Vault == "2. Sanitized Egress" ==> LLM
-    LLM == "3. SSE Stream" ==> Buffer
-    Rehydrator == "4. Rehydrated Return" ==> Client
-    
-    %% Styles
-    classDef default fill:transparent,stroke:#888,stroke-width:1px
-    style Proxy fill:transparent,stroke:#888,stroke-width:2px,stroke-dasharray: 5 5
-    style Inbound fill:transparent,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
-    style Outbound fill:transparent,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
-```
 
 ### How It Works (The Data Flow)
 
@@ -516,7 +476,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 ## 📚 Enterprise Documentation Hub & Feature Matrix
 
 * **[ARCHITECTURE.md](ARCHITECTURE.md) - Engine & Data Plane**
-  * [Format-Preserving Synthetic Masking & Entropy (Shannon entropy with faker Tier 2)](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
+  * [Format-Preserving Synthetic Masking & Entropy (Shannon entropy)](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
   * [In-Band Stateless Syntheticgraphic Masking](ARCHITECTURE.md#in-band-stateless-cryptographic-masking)
   * [Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Anthropic Adapter Implementation](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
