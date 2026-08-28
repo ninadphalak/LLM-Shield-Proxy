@@ -13,7 +13,7 @@ LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** criti
 | **LLM02: Insecure Output Handling** | Mitigated by JSON Recursion Bomb Defense and XSS/Markdown Exfiltration blockers. |
 | **LLM04: Model Denial of Service** | Mitigated by Slowloris Buffer limits, `64KB` Backpressure Guards, and `max_tokens` limits. |
 | **LLM05: Supply Chain Vulnerabilities** | Addressed by WORM-Compliant Cryptographic Attestation for all outbound requests, proving un-tampered egress. |
-| **LLM06: Sensitive Information Disclosure** | Mitigated by 3-Tier Redaction Cascade (DFA Regex, Shannon Entropy, ONNX NER) and Stateless Crypto. |
+| **LLM06: Sensitive Information Disclosure** | Mitigated by 3-Tier Redaction Cascade (DFA Regex, Shannon Entropy, ONNX NER) and Stateless Synthetic. |
 | **LLM07: Insecure Plugin Design** | Mitigated by the Edge-Level Agent Identity Enforcer (JWT/DPoP) and Autonomous Agent Circuit Breakers. |
 | **LLM08: Excessive Agency** | Mitigated by Granular Entity Policy Scopes (Role-Based Access Controls) restricting tool calls deterministically. |
 | **LLM10: Model Theft** | Mitigated by Dynamic Canary Watermarking & Steganography to track stolen outputs back to the source. |
@@ -40,7 +40,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 | **Audit Log Tampering** | Malicious actor modifies logs to cover up PII leak. | WORM-Compliant Cryptographic SHA-256 Hash Chaining. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`) |
 | **Insider Model Leaks** | Employees copying redacted/synthetic data to train local shadow IT models. | Dynamic Canary Watermarking & Steganography. | ✅ **PASSED** (`test_dynamic_canary_watermark_injection`) |
 | **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Cryptographic Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
-| **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Cryptographic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_crypto_masking_vault_bypass`) |
+| **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Syntheticgraphic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_synthetic_masking_vault_bypass`) |
 
 ## Deep Dive: Enterprise Security Features & Implementation
 
@@ -50,7 +50,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound O(N) **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic canonical locale synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
 * **Flags**: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md#core-configuration-flags)
 
-#### In-Band Stateless Cryptographic Masking
+#### In-Band Stateless Syntheticgraphic Masking
 * **Implementation Details**: Eliminates the need for external session vaults by encrypting sensitive entities directly in the LLM context using **AES-256-GCM** with a 256-bit Data Encryption Key (DEK). The encrypted payload remains mathematically unbreakable upstream and is decrypted seamlessly during the SSE stream return, guaranteeing zero state-leakage.
 * **Flags**: [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_ENCRYPTION_KEY`](DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering)
 

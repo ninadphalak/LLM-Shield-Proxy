@@ -57,12 +57,12 @@ Upon ingress, payloads are intercepted by a highly optimized redaction engine:
 
 ### Stage 2: Stateless Envelope Encryption & Masking
 To prevent PII egress to third-party LLMs without breaking token counts or attention weights:
-- **In-Band Stateless Crypto:** Entities are masked using AES-256-GCM envelope cryptography directly within the payload.
+- **In-Band Stateless Synthetic:** Entities are masked using AES-256-GCM envelope cryptography directly within the payload.
 - **4-Mode Pipeline:** Dynamic per-request masking via headers supports:
   - `SYNTHETIC`: Canonical locale swapping to preserve BPE token lengths.
   - `STRUCTURAL_TAG`: Replacements like `[PERSON_1]`.
   - `SCRUB`: Hard deletion of offending tokens.
-  - `STATELESS_CRYPTO`: Fully reversible encrypted envelopes.
+  - `STATELESS_SYNTHETIC`: Fully reversible encrypted envelopes.
 
 ### Stage 3: WORM Merkle Chaining & Traceability
 To satisfy non-repudiation and traceability without retaining prompt data:
@@ -133,7 +133,7 @@ Because LLM-Shield is a strict Zero-Data proxy, PII to Tag mappings must be main
 * **Implementation Mechanics:** When scaling horizontally across Kubernetes pods, rehydration maps are written to `redis.asyncio` using Deterministic HMAC-SHA256 hashed keys. Keys are issued with hard rolling TTLs. If the stream disconnects, the vault automatically self-destructs the session, maintaining zero persistence.
 * **Flags:** [`REDIS_URL`](DEPLOYMENT.md), [`SESSION_TTL_SECONDS`](DEPLOYMENT.md)
 
-### In-Band Stateless Cryptographic Masking
+### In-Band Stateless Syntheticgraphic Masking
 * **Implementation Mechanics:** For organizations without Redis, the proxy operates in 100% stateless mode. Entities are encrypted using AES-256-GCM envelope encryption. The encrypted ciphertext is converted to Base62 and passed *into* the LLM prompt. The downstream SSE stream returns the ciphertext, and the proxy decrypts it on the fly using a 256-bit DEK, eliminating the need for state completely.
 * **Flags:** [`SHIELD_DEFAULT_MASKING_MODE`](DEPLOYMENT.md)
 

@@ -1,4 +1,4 @@
-"""Stateless Cryptographic Vault Module.
+"""Stateless Syntheticgraphic Vault Module.
 
 Provides AES-GCM authenticated envelope encryption for in-band masking.
 """
@@ -118,7 +118,7 @@ def decrypt_from_token(token: str) -> str:
 
 
 class StatelessCryptoVault:
-    """Duck-types Vault to provide stateless crypto integration."""
+    """Duck-types Vault to provide stateless synthetic integration."""
 
     # Strict Base64URL extraction regex
     TOKEN_REGEX = re.compile(r"\[ENC_v1_[A-Za-z0-9\-_=]+\]")

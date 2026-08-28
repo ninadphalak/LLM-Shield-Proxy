@@ -26,11 +26,11 @@ flowchart TD
     PathA --> Syn[SYNTHETIC]:::stateful
     PathA --> Tag[STRUCTURAL_TAG]:::stateful
     PathA --> Scrub[SCRUB]:::stateless
-    PathA --> CryptoA[STATELESS_CRYPTO]:::stateless
+    PathA --> CryptoA[STATELESS_SYNTHETIC]:::stateless
     
     %% Path B: Machine Traffic
     Router -->|Yes: Structured Code| PathB[B. Machine-to-Machine]
-    PathB --> CryptoB[Strict STATELESS_CRYPTO]:::stateless
+    PathB --> CryptoB[Strict STATELESS_SYNTHETIC]:::stateless
     
     Syn -.-> Redis[(Redis Vault)]:::stateful
     Tag -.-> Redis
@@ -44,10 +44,10 @@ For standard conversational text, the proxy respects your configured masking mod
 1. **SYNTHETIC (Stateful):** Swaps PII with canonical locale fakes (e.g., `John` -> `Maya`). Preserves LLM attention weights and token counts. Requires Redis.
 2. **STRUCTURAL_TAG (Stateful):** Swaps PII with explicit bracketed tags (e.g., `[PERSON_1]`). Requires Redis.
 3. **SCRUB (Stateless):** Destructive one-way redaction (`***`). Cannot be rehydrated.
-4. **STATELESS_CRYPTO (Stateless):** Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
+4. **STATELESS_SYNTHETIC (Stateless):** Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
 
 ### B. Machine-to-Machine (JSON-RPC / Tool Calls)
-When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces **STATELESS_CRYPTO**. 
+When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces **STATELESS_SYNTHETIC**. 
 * **Why?** Substituting data with synthetic fakes or changing string lengths inside strict JSON payloads frequently breaks the JSON syntax tree, causing agent crashes.
 * **The Solution:** By forcing in-band AES encryption for machine traffic, the proxy guarantees mathematically reversible masking without mutating the JSON structure or relying on Redis.
 

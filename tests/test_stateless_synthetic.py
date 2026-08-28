@@ -8,7 +8,7 @@ from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer
 
 
 @pytest.mark.asyncio
-async def test_stateless_crypto_encryption_decryption():
+async def test_stateless_synthetic_encryption_decryption():
     raw_pii = "test_user@example.com"
     token = encrypt_to_token(raw_pii)
 
@@ -22,7 +22,7 @@ async def test_stateless_crypto_encryption_decryption():
 
 
 @pytest.mark.asyncio
-async def test_stateless_crypto_invalid_decryption():
+async def test_stateless_synthetic_invalid_decryption():
     # Invalid token (should return unmodified)
     invalid_token = "[ENC_v1_invalid_base64_payload]"
     decrypted = decrypt_from_token(invalid_token)
@@ -86,7 +86,7 @@ async def test_split_token_rehydration_buffer_with_surrounding_text():
 
 
 @pytest.mark.asyncio
-async def test_zero_redis_calls_in_stateless_crypto_mode():
+async def test_zero_redis_calls_in_stateless_synthetic_mode():
     from llm_shield_proxy.api.main import app
 
     # Mock vault_store.get_vault to raise an error if it's called
@@ -110,7 +110,7 @@ async def test_zero_redis_calls_in_stateless_crypto_mode():
                 response = await client.post(
                     "/v1/chat/completions",
                     json={"messages": [{"role": "user", "content": "Hello"}]},
-                    headers={"X-Shield-Masking-Mode": "STATELESS_CRYPTO", "Authorization": "Bearer sk-proj-123"},
+                    headers={"X-Shield-Masking-Mode": "STATELESS_SYNTHETIC", "Authorization": "Bearer sk-proj-123"},
                 )
 
                 assert response.status_code == 200

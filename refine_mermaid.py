@@ -21,12 +21,12 @@ flowchart TD
         Syn["1. SYNTHETIC<br/><i>'...is 111-11-1111'</i>"]:::stateful
         Tag["2. STRUCTURAL_TAG<br/><i>'...is [SSN_1]'</i>"]:::stateful
         Scrub["3. SCRUB<br/><i>'...is ***'</i>"]:::stateless
-        CryptoA["4. STATELESS_CRYPTO<br/><i>'...is [enc_3x9kL]'</i>"]:::stateless
+        CryptoA["4. STATELESS_SYNTHETIC<br/><i>'...is [enc_3x9kL]'</i>"]:::stateless
     end
 
     subgraph SubB [B. Machine-to-Machine]
         direction TB
-        CryptoB["Strictly Forces<br/>STATELESS_CRYPTO"]:::stateless
+        CryptoB["Strictly Forces<br/>STATELESS_SYNTHETIC"]:::stateless
     end
     
     Syn -.-> Redis[("Redis Vault")]:::stateful

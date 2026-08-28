@@ -5,12 +5,12 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 # 1. Fix the Machine-to-Machine explanation
 old_b_section = """### B. Machine-to-Machine (JSON-RPC / Tool Calls)
-When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces **STATELESS_CRYPTO**. 
+When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces **STATELESS_SYNTHETIC**. 
 * **Why?** Replacing text with synthetic names often breaks JSON syntax and crashes agents. 
 * **The Solution:** To fix this, the proxy uses in-band AES encryption for machine traffic—protecting the data without changing string lengths or relying on Redis."""
 
 new_b_section = """### B. Machine-to-Machine (JSON-RPC / Tool Calls)
-When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_CRYPTO**. 
+When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_SYNTHETIC**. 
 * **Why?** Blindly running regex over raw JSON strings can corrupt syntax (e.g., matching a JSON key or injecting unescaped characters), causing agent crashes.
 * **The Solution:** The proxy parses the payload into an Abstract Syntax Tree (AST). It safely replaces sensitive leaf values with synthetic fakes and bundles them with an in-band AES-256-GCM cipher (e.g., `{"_shield_val": "Maya", "_shield_ctx": "aesgcm..."}`). This guarantees 100% valid JSON syntax without relying on Redis state."""
 
