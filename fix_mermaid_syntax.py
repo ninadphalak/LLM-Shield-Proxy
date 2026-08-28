@@ -18,12 +18,12 @@ flowchart TD
         Syn["1. SYNTHETIC<br/>'...is 111-11-1111'"]:::stateful
         Tag["2. STRUCTURAL_TAG<br/>'...is [SSN_1]'"]:::stateful
         Scrub["3. SCRUB<br/>'...is ***'"]:::stateless
-        CryptoA["4. STATELESS_CRYPTO<br/>'...is [enc_3x9kL]'"]:::stateless
+        CryptoA["4. STATELESS_SYNTHETIC<br/>'...is [enc_3x9kL]'"]:::stateless
     end
 
     subgraph SubB [B. Machine-to-Machine]
         direction TB
-        CryptoB["Strictly Forces<br/>STATELESS_CRYPTO"]:::stateless
+        CryptoB["Strictly Forces<br/>STATELESS_SYNTHETIC"]:::stateless
     end
     
     Router -->|No: Text| SubA

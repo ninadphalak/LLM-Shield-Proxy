@@ -37,23 +37,29 @@ LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pip
 
 ```mermaid
 flowchart TD
-    classDef stateful fill:#fffbeb,stroke:#f59e0b,stroke-width:2px,color:#92400e
-    classDef stateless fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
-    classDef router fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
+    classDef stateful stroke:#f59e0b,stroke-width:2px,color:#d97706
+    classDef stateless stroke:#3b82f6,stroke-width:2px,color:#2563eb
+    classDef router stroke:#64748b,stroke-width:2px,color:#475569
 
-    Client["User Browser/IDE/App<br/>'My SSN is 000-00-0000'"] --> Router{"JSON-RPC?"}:::router
+    Client["User Browser/IDE/App<br/><i>'My SSN is 000-00-0000'</i>"] --> Router{"JSON-RPC?"}:::router
     
-    subgraph SubA [A. Human-to-LLM - Choose One Config]
+    subgraph SubA [A. Human-to-LLM]
         direction TB
+        Or["[OR]"]:::router
         Syn["1. SYNTHETIC<br/>'...is 111-11-1111'"]:::stateful
         Tag["2. STRUCTURAL_TAG<br/>'...is [SSN_1]'"]:::stateful
         Scrub["3. SCRUB<br/>'...is ***'"]:::stateless
-        CryptoA["4. STATELESS_CRYPTO<br/>'...is [enc_3x9kL]'"]:::stateless
+        CryptoA["4. STATELESS_SYNTHETIC<br/>'...is [enc_3x9kL]'"]:::stateless
+        
+        Or --- Syn
+        Or --- Tag
+        Or --- Scrub
+        Or --- CryptoA
     end
 
     subgraph SubB [B. Machine-to-Machine]
         direction TB
-        CryptoB["Strictly Forces<br/>STATELESS_CRYPTO"]:::stateless
+        CryptoB["Strictly Forces<br/>STATELESS_SYNTHETIC"]:::stateless
     end
     
     Router -->|No: Text| SubA
@@ -68,10 +74,10 @@ For standard conversational text, the proxy respects your configured masking mod
 1. **SYNTHETIC (Stateful):** Swaps PII with canonical locale fakes (e.g., `John` -> `Maya`). Preserves LLM attention weights and token counts. Requires Redis.
 2. **STRUCTURAL_TAG (Stateful):** Swaps PII with explicit bracketed tags (e.g., `[PERSON_1]`). Requires Redis.
 3. **SCRUB (Stateless):** Destructive one-way redaction (`***`). Cannot be rehydrated.
-4. **STATELESS_CRYPTO (Stateless):** Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
+4. **STATELESS_SYNTHETIC (Stateless):** Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
 
 ### B. Machine-to-Machine (JSON-RPC / Tool Calls)
-When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_CRYPTO**. 
+When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_SYNTHETIC**. 
 * **Why?** Blindly running regex over raw JSON strings can corrupt syntax (e.g., matching a JSON key or injecting unescaped characters), causing agent crashes.
 * **The Solution:** The proxy parses the payload into an Abstract Syntax Tree (AST). It safely replaces sensitive leaf values with synthetic fakes and bundles them with an in-band AES-256-GCM cipher (e.g., `{"_shield_val": "Maya", "_shield_ctx": "aesgcm..."}`). This guarantees 100% valid JSON syntax without relying on Redis state.
 
@@ -81,7 +87,7 @@ When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it *
 * **[Sub-Millisecond SSE Rehydration](#-how-it-works-the-data-flow):** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag (<4.3 µs overhead per chunk).
 * **[Zero-Egress Synthetic Masking](#️-dual-pipeline-redaction-architecture):** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
 * **[Air-Gapped Egress Gateway Mode](docs/features/air-gapped-egress.md):** Allows operation in strict Zero-Internet corporate subnets by securely routing all upstream traffic through an internal egress gateway, optionally stripping auth headers for internal mTLS architectures.
-* **[Zero-Data Stateless Cryptography](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<85 MB RAM`).
+* **[Zero-Data Stateless Syntheticgraphy](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<85 MB RAM`).
 * **[Role-Based Policy-as-Code & Hot-Reloading](POLICIES.md):** Zero-downtime YAML file watcher (`policies.yaml`) dynamically maps `virtual_key_id` identities to granular security roles, custom PII profiles, and thread-safe $O(1)$ setting overrides.
 * **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) for strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
 * **[Streaming Tool-Call Interception & Agent Governance](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercepts real-time LLM function calls (e.g., `exec_sql`, `shell_exec`) mid-stream using a zero-allocation JSON parser, enforcing fail-closed tool access controls backed by Redis, OPA, or Vault policy stores to prevent agent drift.
@@ -214,9 +220,7 @@ LLM-Shield-Proxy is **not** a model router. It is designed to deploy as a transp
 
 Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, SOC 2-compliant data masking before the payload ever reaches the orchestrator.
 
---- | :--- | :--- | :--- |
-| **Synthetic Swapping (Default)** | `ENABLE_SYNTHETIC_SWAPPING=true` | Deterministically substitutes PII with realistic, unbracketed entities (e.g., `Maya`, `Springfield`) to eliminate Byte-Pair Encoding (BPE) token bloat and preserve LLM attention weight distributions. | Modern LLMs, cost & latency optimization |
-| **Structural Tagging** | `ENABLE_SYNTHETIC_SWAPPING=false` | Substitutes PII with explicit bracketed type tags (e.g., `[PERSON_1]`, `[EMAIL_1]`). | Legacy compliance pipelines, deterministic regex auditing |
+
 
 
 ---
@@ -225,46 +229,49 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 
 ```mermaid
 flowchart TD
-    classDef client fill:#f8fafc,stroke:#cbd5e1,stroke-width:2px,color:#0f172a
-    classDef proxy fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
-    classDef vault fill:#fffbeb,stroke:#f59e0b,stroke-width:2px,color:#92400e
+    classDef default stroke:#64748b,stroke-width:2px
+    classDef proxy stroke:#3b82f6,stroke-width:2px
+    classDef vault stroke:#f59e0b,stroke-width:2px
+    classDef engine stroke:#10b981,stroke-width:2px,stroke-dasharray: 5 5
 
-    UserApp["👤 Client App"]:::client
-    UpstreamLLM["☁️ Upstream LLM"]:::client
+    UserApp["👤 Client App"]
+    UpstreamLLM["☁️ Upstream LLM"]
 
     subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy (Zero-Egress VPC)"]
         direction TD
         Auth["🔑 Inbound Auth"]:::proxy
         Router{"JSON-RPC?"}:::proxy
         
-        Redaction["🔒 3-Tier Redaction Engine"]:::proxy
+        subgraph CascadeEngine ["🔒 3-Tier Redaction Engine"]
+            direction TB
+            Tier1["Tier 1: Regex (Patterns)"]:::engine
+            Tier2["Tier 2: Shannon Entropy (Secrets)"]:::engine
+            Tier3["Tier 3: ONNX NER [Optional NLP Model]"]:::engine
+            Tier1 --> Tier2 --> Tier3
+        end
         
         Redis[("Redis (Stateful)")]:::vault
         AES["AES-GCM (Stateless)"]:::vault
         
-        Buffer["⏱️ SSE Sliding-Window Buffer"]:::proxy
-        Rehydrator["🔄 Stream Re-hydrator"]:::proxy
     end
 
     %% Inbound Flow
     UserApp -->|1. Prompt| Auth
     Auth --> Router
     
-    Router -->|No: Text| Redaction
+    Router -->|No: Text| CascadeEngine
     Router -->|Yes: Agent| AES
     
-    Redaction -->|Store mapping| Redis
-    Redaction -->|Encrypt| AES
+    CascadeEngine -->|Store mapping| Redis
+    CascadeEngine -->|Encrypt| AES
     
     Redis -->|2. Sanitized| UpstreamLLM
     AES -->|2. Sanitized| UpstreamLLM
 
     %% Outbound Flow
-    UpstreamLLM -.->|3. SSE Stream| Buffer
-    Buffer -.->|4. Safe Chunk| Rehydrator
-    Rehydrator <-.->|5. Restore| Redis
-    Rehydrator <-.->|5. Decrypt| AES
-    Rehydrator -.->|6. Original Text| UserApp
+    UpstreamLLM -.->|3. Rehydrated SSE Stream| UserApp
+    Redis -.->|Rehydrate| UpstreamLLM
+    AES -.->|Decrypt| UpstreamLLM
 ```
 
 ### How It Works (The Data Flow)
@@ -297,7 +304,7 @@ All identifiers and custom dictionaries are pre-compiled into Deterministic Fini
 ### [3. Dual-Mode Shannon Entropy Secret Scanner](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
 Vectorized O(N) math loop evaluating H(S) bit density to instantly intercept unstructured 64-char cryptographic keys in `<6 µs`.
 
-### [4. Stateless Cryptographic Rehydration (JSON-RPC)](ARCHITECTURE.md#3--cryptographic-memory-vaults)
+### [4. Stateless Syntheticgraphic Rehydration (JSON-RPC)](ARCHITECTURE.md#3--cryptographic-memory-vaults)
 Dynamically intercepts OpenAI/MCP tool schemas on the fly, injecting cryptographic hidden fields (like `_ctx_hash_prop`) into the JSON Schema `required` array. This mathematically forces the LLM to echo back the reversible cipher, enabling infinite horizontal scalability without any Redis dependency.
 
 ---
@@ -310,7 +317,7 @@ Below is a high-level summary of our defense architecture. For the complete **18
 
 | Security Domain | Defense Mechanisms & Capabilities |
 | :--- | :--- |
-| **🛡️ Core Cryptographic Masking & Defenses** | 1. [Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)](SECURITY.md#data-loss-prevention-dlp-for-llms-synthetic-masking--entropy)<br>2. [In-Band Stateless Cryptographic Masking](SECURITY.md#in-band-stateless-cryptographic-masking)<br>3. [Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)<br>4. [Dynamic Canary Watermarking & Steganography (Leak Forensics)](SECURITY.md#dynamic-canary-watermarking--steganography-leak-forensics) |
+| **🛡️ Core Cryptographic Masking & Defenses** | 1. [Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)](SECURITY.md#data-loss-prevention-dlp-for-llms-synthetic-masking--entropy)<br>2. [In-Band Stateless Syntheticgraphic Masking](SECURITY.md#in-band-stateless-cryptographic-masking)<br>3. [Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)<br>4. [Dynamic Canary Watermarking & Steganography (Leak Forensics)](SECURITY.md#dynamic-canary-watermarking--steganography-leak-forensics) |
 | **🛑 Threat Prevention & Isolation** | 1. [Autonomous Agent Security (Composite Agent Loop Circuit Breaker)](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)<br>2. [Granular Entity Policy Scopes & Zero Trust AI Defaults (O(1) mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)<br>3. [Zero-Allocation Streaming JSON Lexer](SECURITY.md#zero-allocation-streaming-json-lexer)<br>4. [Cryptographic Canary Prompt Tripwires](SECURITY.md#cryptographic-canary-prompt-tripwires)<br>5. [Entity-Weighted Blast Radius Limits](SECURITY.md#entity-weighted-blast-radius-limits) |
 | **📜 Audit, Forensics, and Compliance** | 1. [WORM-Compliant Audit Logging & SHA-256 Hash Chaining](SECURITY.md#worm-compliant-merkle-attestation--audit-logging)<br>2. [Cryptographic SHA-256 Hash Chaining](SECURITY.md#cryptographic-sha-256-hash-chaining)<br>3. [Cryptographic Proof of Non-Egress Cryptographic Attestation](SECURITY.md#cryptographic-proof-of-non-egress-merkle-attestation)<br>4. [FIPS 140-3 KAT & RFC 6902 Differential Audit Logging](SECURITY.md#fips-140-3-kat--rfc-6902-differential-audit-logging) |
 | **🏗️ Secure Infrastructure & Service Mesh** | 1. [Centralized Enterprise Secrets & mTLS](SECURITY.md#centralized-enterprise-secrets--mtls)<br>2. [Service Mesh Native gRPC ext_proc Integration](SECURITY.md#service-mesh-native-grpc-ext_proc-integration)<br>3. [Zero-Dependency Kubernetes Mutating Webhook](SECURITY.md#zero-dependency-kubernetes-mutating-webhook)<br>4. [Traffic Engineering & Resiliency](SECURITY.md#traffic-engineering--resiliency)<br>5. [Provider Failover Routing & Exponential Retries](ARCHITECTURE.md#provider-failover-routing) |
@@ -549,7 +556,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 
 * **[ARCHITECTURE.md](ARCHITECTURE.md) - Engine & Data Plane**
   * [Format-Preserving Synthetic Masking & Entropy (Shannon entropy with faker Tier 2)](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
-  * [In-Band Stateless Cryptographic Masking](ARCHITECTURE.md#in-band-stateless-cryptographic-masking)
+  * [In-Band Stateless Syntheticgraphic Masking](ARCHITECTURE.md#in-band-stateless-cryptographic-masking)
   * [Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Anthropic Adapter Implementation](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Zero-Allocation Streaming JSON Lexer](ARCHITECTURE.md#zero-allocation-streaming-json-lexer-orjson--rust)
@@ -590,7 +597,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
 * **Patent Status:** Core architectural mechanisms are protected under **U.S. Patent Pending** status:
   * **App. No. 64/126,730**: Protects the asynchronous Server-Sent Event (SSE) sliding-window lookahead buffer and the memory-bounded two-tier inference routing cascade.
-  * **App. No. 64/139,263**: Protects the stateless cryptographic JSON-RPC/MCP AST masking, HKDF subkey encryption, and generative AI metadata schema coercion.
+  * **App. No. 64/139,263**: Protects the stateless syntheticgraphic JSON-RPC/MCP AST masking, HKDF subkey encryption, and generative AI metadata schema coercion.
 
 ---
 

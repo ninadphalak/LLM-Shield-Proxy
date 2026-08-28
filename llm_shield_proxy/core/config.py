@@ -132,10 +132,10 @@ class Settings(BaseSettings):
 
     # Redaction & Detection Cascade Settings
     SHIELD_DEFAULT_MASKING_MODE: str = Field(
-        default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_CRYPTO)"
+        default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_SYNTHETIC)"
     )
     SHIELD_ENCRYPTION_KEY: Optional[str] = Field(
-        default=None, description="256-bit AES-GCM encryption key for stateless crypto masking (base64 or hex)"
+        default=None, description="256-bit AES-GCM encryption key for stateless synthetic masking (base64 or hex)"
     )
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
         default=True, description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
@@ -248,12 +248,12 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_stateless_crypto_key(self) -> "Settings":
-        if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_CRYPTO":
+    def validate_stateless_synthetic_key(self) -> "Settings":
+        if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_SYNTHETIC":
             key_src = self.SHIELD_ENCRYPTION_KEY
             if not key_src:
                 raise ValueError(
-                    "SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_CRYPTO."
+                    "SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_SYNTHETIC."
                 )
 
             import base64

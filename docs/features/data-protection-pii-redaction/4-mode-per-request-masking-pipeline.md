@@ -12,7 +12,7 @@ The available modes are:
 1. **`SYNTHETIC` (Default):** Replaces entities with mathematically coherent canonical locale substitutes (e.g., fake SSNs, fake names) to preserve downstream LLM attention weights and syntax.
 2. **`STRUCTURAL_TAG`:** Replaces entities with explicit, bracketed placeholder tokens (e.g., `[PERSON_1]`, `[EMAIL_1]`). Ideal for legacy compliance pipelines or explicit regex auditing.
 3. **`SCRUB`:** Performs a hard redaction, completely removing the text or replacing it with `***`. Useful when the context of the sensitive data is entirely irrelevant to the LLM's task.
-4. **`STATELESS_CRYPTO`:** Secures data in-transit using AES-256-GCM envelope encryption directly within the payload, bypassing the need for Redis storage.
+4. **`STATELESS_SYNTHETIC`:** Secures data in-transit using AES-256-GCM envelope encryption directly within the payload, bypassing the need for Redis storage.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
 ```mermaid
@@ -21,7 +21,7 @@ flowchart TD
     B -->|SYNTHETIC| C[John -> Michael]
     B -->|STRUCTURAL_TAG| D[John -> PERSON_1]
     B -->|SCRUB| E[John -> ***]
-    B -->|STATELESS_CRYPTO| F[John -> enc_9f...]
+    B -->|STATELESS_SYNTHETIC| F[John -> enc_9f...]
 ```
 -->
 
@@ -32,12 +32,12 @@ View diagram on GitHub mobile 📱 -->
 
 | Header / Override | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `X-Shield-Masking-Mode` | HTTP header to dynamically set the mode (`SYNTHETIC`, `STRUCTURAL_TAG`, `SCRUB`, `STATELESS_CRYPTO`). | [View in POLICIES.md](../../POLICIES.md) |
+| `X-Shield-Masking-Mode` | HTTP header to dynamically set the mode (`SYNTHETIC`, `STRUCTURAL_TAG`, `SCRUB`, `STATELESS_SYNTHETIC`). | [View in POLICIES.md](../../POLICIES.md) |
 | `SHIELD_DEFAULT_MASKING_MODE` | The global default mode if the client does not specify the header. | [View in DEPLOYMENT.md](../../DEPLOYMENT.md) |
 
 ## Critical Logic & Edge Cases
 * **Thread-Safety:** Because the proxy processes thousands of concurrent streaming requests, overriding a setting via a header must not affect other active streams. The proxy uses Python's `contextvars.ContextVar` and `copy_context().run()` to ensure the mode override is strictly isolated to the specific asyncio task handling the request.
-* **Vault Interoperability:** If a request switches to `STATELESS_CRYPTO`, the proxy intelligently bypasses the Redis TTL Vault for that specific payload, avoiding unnecessary network calls.
+* **Vault Interoperability:** If a request switches to `STATELESS_SYNTHETIC`, the proxy intelligently bypasses the Redis TTL Vault for that specific payload, avoiding unnecessary network calls.
 
 ## FAQ
 

@@ -792,7 +792,7 @@ async def _proxy_catch_all_internal(
 
     masking_mode = resolve_masking_mode(x_shield_masking_mode)
 
-    if masking_mode == MaskingMode.STATELESS_CRYPTO:
+    if masking_mode == MaskingMode.STATELESS_SYNTHETIC:
         vault = StatelessCryptoVault()
     elif masking_mode == MaskingMode.SCRUB:
         vault = ScrubVault()  # type: ignore

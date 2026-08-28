@@ -38,7 +38,7 @@ View diagram on GitHub mobile 📱 -->
 | `PROBE_REDIS_TIMEOUT` | Maximum time to wait for a Redis PING before failing the readiness check. | [View in DEPLOYMENT.md](../../DEPLOYMENT.md) |
 
 ## Critical Logic & Edge Cases
-* **Graceful Degradation Tolerances:** Depending on your enterprise configuration, losing Redis might *not* be fatal if you are primarily relying on Stateless Crypto. The health probe logic dynamically adjusts its strictness based on the active `SHIELD_DEFAULT_MASKING_MODE`.
+* **Graceful Degradation Tolerances:** Depending on your enterprise configuration, losing Redis might *not* be fatal if you are primarily relying on Stateless Synthetic. The health probe logic dynamically adjusts its strictness based on the active `SHIELD_DEFAULT_MASKING_MODE`.
 * **Pod Draining Synchronization:** When a `SIGTERM` is received, the readiness probe is instantly forced to return `503`. This signals Kubernetes to stop sending new traffic while the proxy finishes draining its active streams.
 
 ## FAQ

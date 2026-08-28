@@ -21,7 +21,7 @@ Medical data is often conversational and unstructured (e.g., doctor's notes). Th
 
 ## Transmission Security (45 CFR § 164.312)
 
-If a use case requires the LLM to reference a specific patient entity without knowing who the patient is, the proxy employs **In-Band Stateless Crypto**.
+If a use case requires the LLM to reference a specific patient entity without knowing who the patient is, the proxy employs **In-Band Stateless Synthetic**.
 
 ### Encrypted In-Transit Envelopes
 - Detected ePHI is masked using **AES-256-GCM envelope encryption** directly within the payload. 

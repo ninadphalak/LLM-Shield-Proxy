@@ -36,7 +36,7 @@ View diagram on GitHub mobile 📱 -->
 | `SESSION_TTL_SECONDS` | Duration before the vault automatically evicts session data (default 3600). | [View in DEPLOYMENT.md](../../DEPLOYMENT.md) |
 
 ## Critical Logic & Edge Cases
-* **Graceful Degradation:** If the Redis cluster experiences a network partition, the proxy's deep component health probes will immediately flag the cluster as unhealthy, and the proxy will gracefully fail-closed or fall back to stateless crypto depending on the active policy.
+* **Graceful Degradation:** If the Redis cluster experiences a network partition, the proxy's deep component health probes will immediately flag the cluster as unhealthy, and the proxy will gracefully fail-closed or fall back to stateless synthetic depending on the active policy.
 * **Namespace Isolation:** Keys are inherently isolated by tenant namespaces, meaning Tenant A cannot accidentally decrypt Tenant B's synthetic tokens.
 
 ## FAQ

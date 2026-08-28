@@ -21,7 +21,7 @@ Instead of logging raw PII for audit purposes (which violates minimization), the
 
 ### In-Band AES-256-GCM Envelope Encryption
 Privacy is engineered directly into the data payload before it ever leaves the VPC. 
-- When PII must be recoverable for the user but hidden from the external LLM, the proxy utilizes **In-Band Stateless Crypto**. 
+- When PII must be recoverable for the user but hidden from the external LLM, the proxy utilizes **In-Band Stateless Synthetic**. 
 - Detected entities are encrypted using **AES-256-GCM envelope cryptography** within the payload. The external LLM receives an encrypted cipher-token, processes the prompt, and the proxy decrypts the cipher-token upon the LLM's response.
 
 ### Text-Prompt Masking Pipeline (Human-to-LLM)
@@ -29,10 +29,10 @@ For standard text prompts, the proxy supports dynamic per-request masking via he
 - `SYNTHETIC`: Uses canonical locale swapping to inject synthetic realistic data that preserves BPE token counts and LLM attention weights.
 - `STRUCTURAL_TAG`: Replaces PII with tags like `[PERSON_1]`.
 - `SCRUB`: Executes a permanent hard deletion. On the outbound request to the LLM, the PII is replaced with a static `[REDACTED]` marker. On the inbound response back to the user, because the original data was completely destroyed, it cannot be rehydrated.
-- `STATELESS_CRYPTO`: Encrypts entities using fully reversible AES-256-GCM envelopes, allowing the downstream system to recover the PII while hiding it from the LLM (no Redis required).
+- `STATELESS_SYNTHETIC`: Encrypts entities using fully reversible AES-256-GCM envelopes, allowing the downstream system to recover the PII while hiding it from the LLM (no Redis required).
 
 ### Autonomous Agent Pipeline (Machine-to-Machine)
-When the proxy detects structured AI tool invocations (like `jsonrpc: 2.0`), it completely bypasses the Text-Prompt pipeline. Standard masking (like `SYNTHETIC`) corrupts JSON code. Therefore, for Machine-to-Machine traffic, the proxy **always** strictly enforces the AST-Aware Semantic Firewall. It parses the syntax tree and applies `STATELESS_CRYPTO` directly to the JSON values, guaranteeing no structural breakage and zero Redis dependency.
+When the proxy detects structured AI tool invocations (like `jsonrpc: 2.0`), it completely bypasses the Text-Prompt pipeline. Standard masking (like `SYNTHETIC`) corrupts JSON code. Therefore, for Machine-to-Machine traffic, the proxy **always** strictly enforces the AST-Aware Semantic Firewall. It parses the syntax tree and applies `STATELESS_SYNTHETIC` directly to the JSON values, guaranteeing no structural breakage and zero Redis dependency.
 
 ## Article 32: Security of Processing
 
