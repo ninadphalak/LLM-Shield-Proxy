@@ -37,44 +37,34 @@ LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pip
 
 ```mermaid
 flowchart TD
-    classDef stateful stroke:#f59e0b,stroke-width:2px,color:#d97706
-    classDef stateless stroke:#3b82f6,stroke-width:2px,color:#2563eb
-    classDef router stroke:#64748b,stroke-width:2px,color:#475569
-
-    Client["User Browser/IDE/App<br/><i>'My SSN is 000-00-0000'</i>"] --> Router{"JSON-RPC?"}:::router
-    
-    subgraph SubA [A. Human-to-LLM]
-        direction TB
-        Or["[OR]"]:::router
-        Syn["1. SYNTHETIC<br/>'...is 111-11-1111'"]:::stateful
-        Tag["2. STRUCTURAL_TAG<br/>'...is [SSN_1]'"]:::stateful
-        Scrub["3. SCRUB<br/>'...is ***'"]:::stateless
-        CryptoA["4. STATELESS_SYNTHETIC<br/>'...is [enc_3x9kL]'"]:::stateless
-        
-        Or --- Syn
-        Or --- Tag
-        Or --- Scrub
-        Or --- CryptoA
-    end
-
-    subgraph SubB [B. Machine-to-Machine]
-        direction TB
-        CryptoB["Strictly Forces<br/>STATELESS_SYNTHETIC"]:::stateless
-    end
+    Client["Browser / IDE / LangChain"] --> Router{"JSON-RPC?"}
     
     Router -->|No: Text| SubA
     Router -->|Yes: Agent| SubB
     
-    Syn -.-> Redis[(Redis Vault)]:::stateful
+    subgraph SubA [A. Human-to-LLM]
+        direction TB
+        Syn["1. SYNTHETIC"]
+        Tag["2. STRUCTURAL_TAG"]
+        Scrub["3. SCRUB"]
+        CryptoA["4. STATELESS_SYNTHETIC"]
+    end
+
+    subgraph SubB [B. Machine-to-Machine]
+        direction TB
+        CryptoB["STATELESS_SYNTHETIC"]
+    end
+    
+    Syn -.-> Redis[(Redis Vault)]
     Tag -.-> Redis
 ```
 
 ### A. Human-to-LLM (Text Prompts)
 For standard conversational text, the proxy respects your configured masking mode. You can choose from four strategies:
-1. **SYNTHETIC (Stateful):** Swaps PII with canonical locale fakes (e.g., `John` -> `Maya`). Preserves LLM attention weights and token counts. Requires Redis.
-2. **STRUCTURAL_TAG (Stateful):** Swaps PII with explicit bracketed tags (e.g., `[PERSON_1]`). Requires Redis.
-3. **SCRUB (Stateless):** Destructive one-way redaction (`***`). Cannot be rehydrated.
-4. **STATELESS_SYNTHETIC (Stateless):** Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
+1. **SYNTHETIC (Stateful):** (e.g. replacing *'My SSN is 000-00-0000'* with *'My SSN is 111-11-1111'*). Swaps PII with canonical locale fakes (e.g., `John` -> `Maya`). Preserves LLM attention weights and token counts. Requires Redis.
+2. **STRUCTURAL_TAG (Stateful):** (e.g. replacing *'My SSN is 000-00-0000'* with *'My SSN is [SSN_1]'*). Swaps PII with explicit bracketed tags (e.g., `[PERSON_1]`). Requires Redis.
+3. **SCRUB (Stateless):** (e.g. replacing *'My SSN is 000-00-0000'* with *'My SSN is ***'*). Destructive one-way redaction (`***`). Cannot be rehydrated.
+4. **STATELESS_SYNTHETIC (Stateless):** (e.g. replacing *'My SSN is 000-00-0000'* with *'My SSN is [enc_3x9kL]'*). Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
 
 ### B. Machine-to-Machine (JSON-RPC / Tool Calls)
 When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_SYNTHETIC**. 
@@ -228,50 +218,42 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 ## 🏗️ Architecture Diagram
 
 ```mermaid
-flowchart TD
-    classDef default stroke:#64748b,stroke-width:2px
-    classDef proxy stroke:#3b82f6,stroke-width:2px
-    classDef vault stroke:#f59e0b,stroke-width:2px
-    classDef engine stroke:#10b981,stroke-width:2px,stroke-dasharray: 5 5
-
-    UserApp["👤 Client App"]
-    UpstreamLLM["☁️ Upstream LLM"]
-
-    subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy (Zero-Egress VPC)"]
-        direction TD
-        Auth["🔑 Inbound Auth"]:::proxy
-        Router{"JSON-RPC?"}:::proxy
+flowchart LR
+    Client["Browser / IDE / LangChain"]
+    LLM["OpenAI / Claude / Gemini"]
+    
+    subgraph Proxy ["🛡️ LLM-Shield-Proxy (VPC)"]
+        Auth["🔑 Auth"]
+        Router{"JSON-RPC?"}
         
-        subgraph CascadeEngine ["🔒 3-Tier Redaction Engine"]
+        subgraph Engine ["🔒 Redaction Engine"]
             direction TB
-            Tier1["Tier 1: Regex (Patterns)"]:::engine
-            Tier2["Tier 2: Shannon Entropy (Secrets)"]:::engine
-            Tier3["Tier 3: ONNX NER [Optional NLP Model]"]:::engine
-            Tier1 --> Tier2 --> Tier3
+            T1["Tier 1: Regex"]
+            T2["Tier 2: Entropy"]
+            T3["Tier 3: ONNX NER"]
+            T1 --> T2 --> T3
         end
         
-        Redis[("Redis (Stateful)")]:::vault
-        AES["AES-GCM (Stateless)"]:::vault
-        
+        Redis[("Redis Vault")]
+        AES["Stateless AES"]
     end
-
-    %% Inbound Flow
-    UserApp -->|1. Prompt| Auth
+    
+    Client -->|1. Prompt| Auth
     Auth --> Router
+    Router -->|Text| Engine
+    Router -->|Agent| AES
     
-    Router -->|No: Text| CascadeEngine
-    Router -->|Yes: Agent| AES
+    Engine --> Redis
+    Engine --> AES
     
-    CascadeEngine -->|Store mapping| Redis
-    CascadeEngine -->|Encrypt| AES
+    Redis -->|2. Sanitized| LLM
+    AES -->|2. Sanitized| LLM
     
-    Redis -->|2. Sanitized| UpstreamLLM
-    AES -->|2. Sanitized| UpstreamLLM
-
-    %% Outbound Flow
-    UpstreamLLM -.->|3. Rehydrated SSE Stream| UserApp
-    Redis -.->|Rehydrate| UpstreamLLM
-    AES -.->|Decrypt| UpstreamLLM
+    LLM -.->|3. Stream| Redis
+    LLM -.->|3. Stream| AES
+    
+    Redis -.->|4. Rehydrated| Client
+    AES -.->|4. Rehydrated| Client
 ```
 
 ### How It Works (The Data Flow)
