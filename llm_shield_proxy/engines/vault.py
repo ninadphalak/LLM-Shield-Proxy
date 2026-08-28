@@ -97,7 +97,7 @@ class Vault:
             self.type_counters[entity_type] = current_count
 
             if self.synthetic:
-                seed = int(hashlib.md5(original_val.encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
+                seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest()[:16], 16)
                 try:
                     fake = _faker_ctx.get()
                 except LookupError:
