@@ -96,7 +96,7 @@ class DistributedRateLimiter:
 
                 result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
                 return bool(result)
-            except Exception:  # nosec B110
+            except Exception:  # nosec B110 noqa: S110
                 # Fallback to in-memory on Redis failure
                 pass
 

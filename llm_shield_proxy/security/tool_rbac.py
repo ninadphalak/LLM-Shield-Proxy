@@ -108,7 +108,7 @@ class AbstractCachingPolicyResolver(BasePolicyResolver):
 
             try:
                 await self._fetch_policy(virtual_key)
-            except Exception:  # nosec B110
+            except Exception:  # nosec B110 noqa: S110
                 pass
 
             async with self._cache_lock:

@@ -82,7 +82,7 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 
 | Feature / System | Environment Variable | Default | Description |
 | :--- | :--- | :--- | :--- |
-| **In-Band Stateless Synthetic** | `SHIELD_DEFAULT_MASKING_MODE` | `SYNTHETIC` | Set to `STATELESS_SYNTHETIC` to enable AES-256-GCM masking. |
+| **In-Band Stateless Synthetic** | `SHIELD_DEFAULT_MASKING_MODE` | `SYNTHETIC` | Set to `STATELESS_CRYPTO` to enable AES-256-GCM masking. |
 | **In-Band Stateless Synthetic** | `SHIELD_ENCRYPTION_KEY` | `None` | 256-bit AES-GCM encryption key for stateless masking. |
 | **Audit, Forensics & Legal** | `AUDIT_LOG_FORMAT` | `STANDARD` | Set to `RFC6902_DIFF` for RFC 6902 Differential Audit Logging. |
 | **Audit, Forensics & Legal** | `FIPS_STRICT_MODE` | `True` | Strict fail-closed validation for FIPS 140-3 KAT tests. |

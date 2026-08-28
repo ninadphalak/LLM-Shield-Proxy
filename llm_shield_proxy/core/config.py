@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     AST_BRACKET_MULTIPLIER: int = Field(default=10, description="Heuristic multiplier for total brackets vs depth to prevent JSON bombs")
 
     # Server Configuration
-    HOST: str = Field(default="0.0.0.0", description="Proxy listen host")
+    HOST: str = Field(default="0.0.0.0", description="Proxy listen host")  # nosec B104 # noqa: S104
     PORT: int = Field(default=8000, description="Proxy listen port")
     WORKERS: int = Field(default=1, description="Number of uvicorn worker processes")
     LOG_LEVEL: str = Field(default="INFO", description="Standard logging level")
@@ -132,10 +132,10 @@ class Settings(BaseSettings):
 
     # Redaction & Detection Cascade Settings
     SHIELD_DEFAULT_MASKING_MODE: str = Field(
-        default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_SYNTHETIC)"
+        default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_CRYPTO)"
     )
     SHIELD_ENCRYPTION_KEY: Optional[str] = Field(
-        default=None, description="256-bit AES-GCM encryption key for stateless synthetic masking (base64 or hex)"
+        default=None, description="256-bit AES-GCM encryption key for stateless cryptographic masking (base64 or hex)"
     )
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
         default=True, description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
@@ -248,12 +248,12 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_stateless_synthetic_key(self) -> "Settings":
-        if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_SYNTHETIC":
+    def validate_stateless_crypto_key(self) -> "Settings":
+        if self.SHIELD_DEFAULT_MASKING_MODE == "STATELESS_CRYPTO":
             key_src = self.SHIELD_ENCRYPTION_KEY
             if not key_src:
                 raise ValueError(
-                    "SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_SYNTHETIC."
+                    "SHIELD_ENCRYPTION_KEY must be set if SHIELD_DEFAULT_MASKING_MODE is STATELESS_CRYPTO."
                 )
 
             import base64
@@ -261,13 +261,13 @@ class Settings(BaseSettings):
             key_bytes = None
             try:
                 key_bytes = base64.b64decode(key_src)
-            except Exception:  # nosec B110
+            except Exception:  # nosec B110 noqa: S110
                 pass
 
             if key_bytes is None or len(key_bytes) != 32:
                 try:
                     key_bytes = bytes.fromhex(key_src)
-                except Exception:  # nosec B110
+                except Exception:  # nosec B110 noqa: S110
                     pass
 
             if key_bytes is None or len(key_bytes) != 32:
