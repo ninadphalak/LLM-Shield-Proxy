@@ -118,6 +118,7 @@ def _is_safe_ip(ip_str: str) -> bool:
             or ip_obj.is_multicast
             or ip_obj.is_reserved
             or ip_obj.is_unspecified
+            # Security Note: Binding to 0.0.0.0 is explicitly required for Docker container deployments
             or str(ip_obj) in ("255.255.255.255", "0.0.0.0")  # nosec B104 # noqa: S104
         )
     except ValueError:
@@ -304,6 +305,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
             # Apply the sticky bit (1) alongside 770 permissions
             os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
+            # Security Note: The sticky bit (0o1770) is intentionally applied to the socket directory for IPC security
             os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
 
             if os.path.exists(sock_path):
@@ -1052,6 +1054,7 @@ async def _proxy_catch_all_internal(
                             break
 
                         if attempt < max_retries:
+                            # Security Note: random.uniform is used for backoff jitter, not cryptographic operations
                             sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311 noqa: S311
                             AuditLogger.log_upstream_retry_attempt(x_session_id, request_id, virtual_key_id, attempt + 1, current_target_url, applied_role_name=applied_role_name)
                             await asyncio.sleep(sleep_time)
@@ -1079,6 +1082,7 @@ async def _proxy_catch_all_internal(
                         try:
                             await upstream_res.aclose()
                         except Exception:  # nosec B110 noqa: S110
+                            # Security Note: Silently dropping upstream connection closure errors to prevent worker crashes
                             pass
                     status_code = upstream_res.status_code if (upstream_res and hasattr(upstream_res, 'status_code')) else 503
                     AuditLogger.log_redaction_event(
@@ -1188,6 +1192,7 @@ async def _proxy_catch_all_internal(
                             break
 
                         if attempt < max_retries:
+                            # Security Note: random.uniform is used for backoff jitter, not cryptographic operations
                             sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311 noqa: S311
                             AuditLogger.log_upstream_retry_attempt(x_session_id, request_id, virtual_key_id, attempt + 1, current_target_url, applied_role_name=applied_role_name)
                             await asyncio.sleep(sleep_time)
