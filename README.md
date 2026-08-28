@@ -37,6 +37,8 @@ LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pip
 
 ```mermaid
 flowchart TD
+    classDef default fill:transparent,stroke:#888,stroke-width:1px
+
     Client["Browser / IDE / LangChain"] --> Router{"JSON-RPC?"}
     
     Router -->|No: Text| SubA
@@ -57,6 +59,9 @@ flowchart TD
     
     Syn -.-> Redis[(Redis Vault)]
     Tag -.-> Redis
+
+    style SubA fill:transparent,stroke:#888,stroke-width:1px,stroke-dasharray: 5 5
+    style SubB fill:transparent,stroke:#888,stroke-width:1px,stroke-dasharray: 5 5
 ```
 
 ### A. Human-to-LLM (Text Prompts)
@@ -218,34 +223,39 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 ## 🏗️ Architecture Diagram
 
 ```mermaid
-flowchart LR
+flowchart TD
+    classDef default fill:transparent,stroke:#888,stroke-width:1px
+
     Client["Browser / IDE / LangChain"]
-    LLM["OpenAI / Claude / Gemini"]
     
     subgraph Proxy ["🛡️ LLM-Shield-Proxy (VPC)"]
+        direction TD
+        
         Auth["🔑 Auth"]
         Router{"JSON-RPC?"}
         
         subgraph Engine ["🔒 Redaction Engine"]
-            direction TB
-            T1["Tier 1: Regex"]
-            T2["Tier 2: Entropy"]
-            T3["Tier 3: ONNX NER"]
-            T1 --> T2 --> T3
+            direction LR
+            T1["Tier 1: Regex"] --> T2["Tier 2: Entropy"] --> T3["Tier 3: ONNX NER"]
         end
         
         Redis[("Redis Vault")]
         AES["Stateless AES"]
+        
+        Auth --> Router
+        Router -->|Text| Engine
+        Router -->|Agent| AES
+        
+        Engine --> Redis
+        Engine --> AES
     end
     
+    LLM["OpenAI / Claude / Gemini"]
+    
+    style Proxy fill:transparent,stroke:#888,stroke-width:2px,stroke-dasharray: 5 5
+    style Engine fill:transparent,stroke:#888,stroke-width:1px,stroke-dasharray: 5 5
+
     Client -->|1. Prompt| Auth
-    Auth --> Router
-    Router -->|Text| Engine
-    Router -->|Agent| AES
-    
-    Engine --> Redis
-    Engine --> AES
-    
     Redis -->|2. Sanitized| LLM
     AES -->|2. Sanitized| LLM
     
