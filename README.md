@@ -46,7 +46,7 @@ For standard conversational text, the proxy respects your configured masking mod
 4. **STATELESS_SYNTHETIC (Stateless):** (e.g. replacing *'My SSN is 000-00-0000'* with *'My SSN is [enc_3x9kL]'*). Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
 
 ### B. Machine-to-Machine (JSON-RPC / Tool Calls)
-When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_SYNTHETIC**. 
+When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_SYNTHETIC**.
 * **Why?** Blindly running regex over raw JSON strings can corrupt syntax (e.g., matching a JSON key or injecting unescaped characters), causing agent crashes.
 * **The Solution:** The proxy parses the payload into an Abstract Syntax Tree (AST). It safely replaces sensitive leaf values with synthetic fakes and bundles them with an in-band AES-256-GCM cipher (e.g., `{"_shield_val": "Maya", "_shield_ctx": "aesgcm..."}`). This guarantees 100% valid JSON syntax without relying on Redis state.
 
@@ -162,7 +162,7 @@ LLM-Shield-Proxy is highly extensible without risking latency or ReDoS.
 | **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
 
 ### 🏛️ Built for Trust & Transparency
-Designed specifically for highly regulated enterprise environments, strict **Zero Trust AI** network architectures, and security-first engineering teams implementing **LLM Security Posture Management (LLM SPM)**. 
+Designed specifically for highly regulated enterprise environments, strict **Zero Trust AI** network architectures, and security-first engineering teams implementing **LLM Security Posture Management (LLM SPM)**.
 1. **Keeps data in your VPC:** The shield runs 100% inside your corporate boundary without transmitting unredacted data to external third parties.
 2. **Zero-Data Storage:** Sensitive prompts are never persisted. The proxy utilizes self-destructing in-memory vaults with deterministic TTL eviction. To help quantify open-source adoption, the proxy optionally transmits anonymous, zero-payload volumetric request counts (opt-out via ANONYMOUS_USAGE_TRACKING=False).
 3. **Continuous Stability:** Validated under high-concurrency stress testing to maintain consistent throughput and sub-millisecond latency.
@@ -212,7 +212,7 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 
 ## 🧠 Core Architecture & Technical Innovations
 
-LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through highly optimized architectural breakthroughs. 
+LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through highly optimized architectural breakthroughs.
 
 > **[View the Complete Architecture Deep Dive 🏛️](ARCHITECTURE.md)**: For an exhaustive breakdown of the streaming lexer, memory mechanics, and service mesh integrations.
 
@@ -398,10 +398,10 @@ Built-in liveness, readiness, and metrics endpoints explicitly support enterpris
 
 ```bash
 $ curl -X GET "http://localhost:8000/health"
-# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.3.0"}
+# Output: {"status":"ok","service":"llm-shield-proxy","version":"1.3.1"}
 
 $ curl -X GET "http://localhost:8000/readyz"
-# Output: {"status":"ready","service":"llm-shield-proxy","version":"1.3.0","redis_connected":false}
+# Output: {"status":"ready","service":"llm-shield-proxy","version":"1.3.1","redis_connected":false}
 
 curl -X OPTIONS http://localhost:8000/v1/chat/completions
 # Returns 204 No Content with Access-Control-Allow-* headers
@@ -437,7 +437,7 @@ Every published release includes automated SHA-256 checksums (`checksums.txt`) a
 sha256sum -c checksums.txt
 
 # On Windows (PowerShell):
-Get-FileHash llm-shield-proxy-source-v1.3.0.zip -Algorithm SHA256
+Get-FileHash llm-shield-proxy-source-v1.3.1.zip -Algorithm SHA256
 
 # 2. Verify Cryptographic GPG Signature:
 gpg --verify checksums.txt.asc checksums.txt
@@ -513,7 +513,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 
 ## 📄 Intellectual Property & Licensing
 
-**LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**. 
+**LLM-Shield-Proxy** is an original engineering work authored and maintained by **Ninad Phalak**.
 
 * **Open-Source License:** The core engine, proxy middleware, and streaming buffers are licensed under the **Apache 2.0 License** (see [LICENSE](LICENSE) for details).
 * **Patent Status:** Core architectural mechanisms are protected under **U.S. Patent Pending** status:

@@ -4,7 +4,7 @@
 
 ## 🏗️ Architecture & Cryptographic Data Flow (Executive Summary)
 
-This document details the underlying technical mechanics and data flow of the LLM-Shield-Proxy, establishing the mathematical and systemic foundation for our global regulatory compliance posture. 
+This document details the underlying technical mechanics and data flow of the LLM-Shield-Proxy, establishing the mathematical and systemic foundation for our global regulatory compliance posture.
 
 ## Architectural Traffic Flow
 
@@ -78,7 +78,7 @@ For sub-millisecond streaming latency and seamless user experiences:
 ### Stage 5: Ephemeral Memory Eviction
 To achieve a true Zero-Data state:
 - **Zero-Data Mode:** Employs ephemeral, self-destructing in-memory vaults.
-- **Instant TTL:** Deterministic short-lived TTL eviction limits the proxy's memory footprint to <85 MB RAM. 
+- **Instant TTL:** Deterministic short-lived TTL eviction limits the proxy's memory footprint to <85 MB RAM.
 - **Zero Persistence:** Absolutely no prompt or PII data is ever written or persisted to local disk storage, eliminating data at rest liabilities.
 
 
@@ -86,7 +86,7 @@ To achieve a true Zero-Data state:
 
 ## 🔬 Deep Dive Mechanics
 
-LLM-Shield-Proxy is engineered as a stateless, asynchronous middleware data plane. It sits transparently between your enterprise applications and upstream Large Language Models, optimizing for microsecond latency overhead while performing heavy cryptographic and heuristic operations. 
+LLM-Shield-Proxy is engineered as a stateless, asynchronous middleware data plane. It sits transparently between your enterprise applications and upstream Large Language Models, optimizing for microsecond latency overhead while performing heavy cryptographic and heuristic operations.
 
 This document details the exact architectural mechanics of the underlying C++ and Rust-backed engines, demonstrating why LLM-Shield achieves unprecedented <6ms end-to-end token latency.
 
@@ -95,7 +95,7 @@ This document details the exact architectural mechanics of the underlying C++ an
 To process millions of tokens per minute without saturating the Python Global Interpreter Lock (GIL), the proxy abandons traditional standard libraries in favor of aggressively optimized native extensions.
 
 ### Zero-Allocation Streaming JSON Lexer (`orjson` / Rust)
-* **Implementation Mechanics:** The `streaming/buffer.py` engine leverages `orjson` (a Rust-backed serializer). It parses fragmented Server-Sent Events (SSE) directly from raw TCP frames in-band. By bypassing intermediate Python dictionary allocations, the engine maps JSON directly to memory, guaranteeing that the Resident Set Size (RSS) remains strictly below `<60MB` even under massive volumetric floods. 
+* **Implementation Mechanics:** The `streaming/buffer.py` engine leverages `orjson` (a Rust-backed serializer). It parses fragmented Server-Sent Events (SSE) directly from raw TCP frames in-band. By bypassing intermediate Python dictionary allocations, the engine maps JSON directly to memory, guaranteeing that the Resident Set Size (RSS) remains strictly below `<60MB` even under massive volumetric floods.
 * **Flags:** [`MAX_SSE_LINE_LENGTH`](DEPLOYMENT.md)
 
 ### Resilient SSE Sliding-Window Buffer
@@ -118,7 +118,7 @@ The engine pipelines payload text through three consecutive filters, balancing c
 ### Tier 2: Shannon Entropy
 
 ### Step 2: Format-Preserving Synthetic Masking
-* **Implementation Mechanics:** Regular expressions fail on unstructured data (e.g., 64-character raw cryptographic keys). The Tier 2 engine computes Shannon entropy $H(S) = -\sum p(c) \log_2 p(c)$ across a sliding window. It targets base64 strings with entropy $\ge 4.5$ bits/char and hex strings $\ge 3.4$ bits/char. 
+* **Implementation Mechanics:** Regular expressions fail on unstructured data (e.g., 64-character raw cryptographic keys). The Tier 2 engine computes Shannon entropy $H(S) = -\sum p(c) \log_2 p(c)$ across a sliding window. It targets base64 strings with entropy $\ge 4.5$ bits/char and hex strings $\ge 3.4$ bits/char.
 * **Format-Preserving Masking:** Instead of returning bracketed `[API_KEY_1]`, the engine uses `canonical locale substitution` to generate synthetic equivalents (e.g., swapping a real SSN for a valid but fake SSN format). This preserves LLM token-attention weights and eliminates Byte-Pair Encoding (BPE) bloat.
 * **Flags:** [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md)
 
@@ -140,7 +140,7 @@ Because LLM-Shield is a strict Zero-Data proxy, PII to Tag mappings must be main
 ## 4. 🌐 Service Mesh & Multi-Provider Translation
 
 ### Multi-Provider Translators & Anthropic Adapter
-* **Implementation Mechanics:** The proxy operates as a "Zero-SDK" translation layer. An application sends standard OpenAI `messages` JSON. The proxy intercepts it, performs PII redaction, and seamlessly translates the schema into an Anthropic Claude Messages API format before network egress. 
+* **Implementation Mechanics:** The proxy operates as a "Zero-SDK" translation layer. An application sends standard OpenAI `messages` JSON. The proxy intercepts it, performs PII redaction, and seamlessly translates the schema into an Anthropic Claude Messages API format before network egress.
 * **SSE Normalization:** Anthropic's divergent `content_block_delta` SSE chunks are re-serialized on the fly back into standard OpenAI `choices[0].delta.content` formatting, allowing drop-in compatibility for any LangChain or LiteLLM backend.
 
 ### Service Mesh Native gRPC `ext_proc` Integration
@@ -161,7 +161,7 @@ LLM-Shield actively manages API quotas and prevents adversarial resource exhaust
 
 ## 6. ⚔️ Adversarial Defenses & Normalization
 
-Attackers frequently use invisible Unicode characters and encoding tricks to bypass standard regex filters or overwhelm the processing engine. 
+Attackers frequently use invisible Unicode characters and encoding tricks to bypass standard regex filters or overwhelm the processing engine.
 
 ### Adversarial Desmuggling & Normalization Pipeline
 * **Zero-Width Character Stripping:** Filters zero-width spaces (`\u200B`), joiners (`\u200D`), byte order marks, and soft hyphens.

@@ -6,7 +6,7 @@
 The **Antifragile Exponential Retries** feature shields client applications from transient network instability and API throttling. When an upstream provider returns a recoverable error (like a `429 Too Many Requests` or a brief `502 Bad Gateway`), the proxy automatically absorbs the failure and retries the request using an exponential backoff algorithm before giving up.
 
 ## How It Works
-If a client app simply retries immediately after a `429`, it contributes to a "thundering herd" problem, causing the API provider to throttle them further. 
+If a client app simply retries immediately after a `429`, it contributes to a "thundering herd" problem, causing the API provider to throttle them further.
 
 1. **Jittered Backoff:** The proxy uses the `tenacity` library to implement `wait_exponential_jitter`. If the first request fails, the proxy waits ~1 second. If the second fails, it waits ~2 seconds, then ~4 seconds, up to a configurable maximum.
 2. **Randomized Jitter:** A random millisecond "jitter" is added to every sleep cycle. This ensures that if 1,000 proxy pods get throttled simultaneously, they don't all wake up and retry at the exact same millisecond.

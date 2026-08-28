@@ -10,7 +10,7 @@ Standard HTTP proxies fail on streaming responses because LLMs generate text one
 
 LLM-Shield-Proxy solves this using a prefix-safe sliding window:
 1. **Dynamic Chunk Interception:** As raw TCP frames arrive from OpenAI, the buffer parses the SSE `data:` payloads.
-2. **Mathematical Overlap Retention:** The buffer evaluates the chunk against the Vault mappings, but *retains* a trailing overlap equal to $L = \max(0, \text{max\_token\_length} - 1)$. 
+2. **Mathematical Overlap Retention:** The buffer evaluates the chunk against the Vault mappings, but *retains* a trailing overlap equal to $L = \max(0, \text{max\_token\_length} - 1)$.
 3. **Prefix-Safe Rehydration:** This ensures that if a token is split across chunks, the trailing piece is held in memory and concatenated with the next chunk before evaluation.
 4. **Instant Stream Release:** Safe tokens are immediately flushed to the client socket, resulting in zero perceived latency.
 

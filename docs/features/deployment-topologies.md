@@ -51,7 +51,7 @@ flowchart LR
         App[Enterprise AI App]
         Proxy[LLM-Shield-Proxy 🛡️🔒]
         Egress[Internal Egress Gateway]
-        
+
         App -- "Prompt with PII" --> Proxy
         Proxy -- "Sanitized Prompt" --> Egress
     end

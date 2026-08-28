@@ -1,6 +1,6 @@
 # Zero-Egress PII Redaction for Open-WebUI & LangChain
 
-If you are building an enterprise chatbot using **Open-WebUI** or an agentic workflow using **LangChain**, passing SOC 2 or HIPAA audits is notoriously difficult. 
+If you are building an enterprise chatbot using **Open-WebUI** or an agentic workflow using **LangChain**, passing SOC 2 or HIPAA audits is notoriously difficult.
 
 The biggest bottleneck is the UI. Chat interfaces rely on Server-Sent Events (SSE) to create that real-time "typewriter" effect. Because network protocols are oblivious to semantic boundaries, standard PII proxies routinely fracture redaction placeholders across multiple TCP packets (e.g., sending `[PER` in chunk 1, and `SON_1]` in chunk 2). When this happens, raw bracket tags leak onto the user's screen, ruining the application.
 
@@ -21,7 +21,7 @@ OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1
 OPENAI_API_KEY=sk-proxy-local  # The proxy will swap this for your real upstream key
 ```
 
-Now, any time an employee pastes sensitive customer data into the Open-WebUI chat window, the proxy intercepts it, strips the PII locally, and routes the clean payload to OpenAI/vLLM. 
+Now, any time an employee pastes sensitive customer data into the Open-WebUI chat window, the proxy intercepts it, strips the PII locally, and routes the clean payload to OpenAI/vLLM.
 
 ## Integration 2: LangChain (Python)
 

@@ -1,7 +1,7 @@
 # Implementation Reference: Pluggable Policy Resolution Engine
 
 ## Architectural Overview
-To satisfy enterprise constraints, the Tool-Call RBAC Engine in LLM-Shield-Proxy decouples the **Control Plane** (where policies are stored) from the **Data Plane** (where policies are enforced). 
+To satisfy enterprise constraints, the Tool-Call RBAC Engine in LLM-Shield-Proxy decouples the **Control Plane** (where policies are stored) from the **Data Plane** (where policies are enforced).
 
 Because the proxy uses a Zero-Allocation Streaming Pushdown Automaton to parse SSE chunks in `<1.0µs`, the policy resolution engine must be strictly asynchronous, non-blocking, and pluggable.
 

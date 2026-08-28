@@ -6,7 +6,7 @@
 The **LLM FinOps Chargeback Meter** provides enterprise-grade observability into AI consumption. It actively intercepts token usage statistics from upstream providers (like OpenAI and Anthropic) and streams them asynchronously as Prometheus metrics. This allows organizations to build strict, multi-tenant chargeback models, billing individual departments or users down to the exact fraction of a cent.
 
 ## How It Works
-Without the proxy, an enterprise using a single corporate OpenAI key has no idea if the Marketing department is burning \$10,000 a month on GPT-4 while HR uses \$100. 
+Without the proxy, an enterprise using a single corporate OpenAI key has no idea if the Marketing department is burning \$10,000 a month on GPT-4 while HR uses \$100.
 
 1. **Usage Interception:** The proxy monitors the final chunk of Server-Sent Events (SSE) or the JSON root of non-streaming responses for the `usage` object (e.g., `prompt_tokens`, `completion_tokens`).
 2. **Metadata Tagging:** It enriches this raw usage data with critical metadata: the `virtual_key_id`, the `applied_role_name`, the selected `model`, and the target `upstream_provider`.

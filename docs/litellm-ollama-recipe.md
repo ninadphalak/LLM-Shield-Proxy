@@ -1,6 +1,6 @@
 # How to use LLM-Shield-Proxy with LiteLLM & Ollama in 3 Lines of YAML
 
-If you are running **LiteLLM** for enterprise routing or **Ollama** for local inference, you already have the infrastructure to serve models. But if your team is processing sensitive customer data, medical records, or developer secrets, you need a way to sanitize those prompts before they hit your logs or upstream cloud models. 
+If you are running **LiteLLM** for enterprise routing or **Ollama** for local inference, you already have the infrastructure to serve models. But if your team is processing sensitive customer data, medical records, or developer secrets, you need a way to sanitize those prompts before they hit your logs or upstream cloud models.
 
 The problem? Most compliance proxies destroy streaming Server-Sent Events (SSE) by buffering the entire chunk, or they demand heavy NLP frameworks that consume 1GB+ of RAM.
 
@@ -31,7 +31,7 @@ services:
       # 2. Point it to your existing service
       - UPSTREAM_BASE_URL=http://litellm:4000/v1
       # 3. (Optional) Pass your provider API keys through the proxy
-      - OPENAI_API_KEY=sk-your-key 
+      - OPENAI_API_KEY=sk-your-key
 ```
 
 ## Testing the Flow
@@ -48,7 +48,7 @@ curl http://localhost:8000/v1/chat/completions \
 ```
 
 **What happens?**
-LiteLLM only ever sees: `"My name is [PERSON_1] and my SSN is [SSN_1]. Summarize my account."` 
+LiteLLM only ever sees: `"My name is [PERSON_1] and my SSN is [SSN_1]. Summarize my account."`
 When the response streams back, LLM-Shield-Proxy uses its lookahead buffer to dynamically re-hydrate the placeholders back into the raw stream without breaking your UI latency.
 
 **🔗 View the full architecture and source code on GitHub:** [LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy)

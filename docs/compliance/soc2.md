@@ -2,7 +2,7 @@
 
 ## Overview: Trust Services Criteria for GenAI
 
-Service Organization Control 2 (SOC 2) Type II compliance evaluates the operating effectiveness of a system's security, availability, processing integrity, confidentiality, and privacy controls over a prolonged period. 
+Service Organization Control 2 (SOC 2) Type II compliance evaluates the operating effectiveness of a system's security, availability, processing integrity, confidentiality, and privacy controls over a prolonged period.
 
 For AI gateways, standard Trust Services Criteria (TSC) such as Logical Access (CC6.1), Boundary Protection (CC6.6), and System Operations/Anomaly Detection (CC7.2) require advanced cryptographic and systemic guardrails.
 

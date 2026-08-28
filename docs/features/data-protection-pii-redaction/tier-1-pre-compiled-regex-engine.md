@@ -6,10 +6,10 @@
 The **Tier 1 Pre-Compiled Regex Engine** is the foundational layer of the LLM-Shield-Proxy's 3-Tier Redaction Cascade. It is designed to rapidly and deterministically identify structured sensitive data (e.g., SSNs, Emails, Credit Card Numbers, and Custom Corporate Identifiers) using pre-compiled regular expressions, ensuring they are redacted before they leave your VPC.
 
 ## How It Works
-Unlike traditional proxies that evaluate regular expressions dynamically at runtime using standard backtracking engines (like Python's `re` module), LLM-Shield-Proxy utilizes the **`google-re2` C++ engine**. 
+Unlike traditional proxies that evaluate regular expressions dynamically at runtime using standard backtracking engines (like Python's `re` module), LLM-Shield-Proxy utilizes the **`google-re2` C++ engine**.
 
 1. **Startup Compilation:** During the FastAPI `lifespan` startup event, all predefined PII patterns and user-supplied custom regexes are compiled down into Deterministic Finite Automatons (DFAs).
-2. **Linear Execution O(N):** Because the regexes are DFAs, they guarantee linear execution time (O(N)) relative to the size of the payload. 
+2. **Linear Execution O(N):** Because the regexes are DFAs, they guarantee linear execution time (O(N)) relative to the size of the payload.
 3. **ReDoS Immunity:** By eliminating backtracking, the engine is mathematically immune to Regular Expression Denial of Service (ReDoS) attacks, meaning adversarial prompts (like `(a+)+$`) cannot spike CPU usage or stall the event loop.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
@@ -30,7 +30,7 @@ View diagram on GitHub mobile 📱 -->
 - **Overhead:** Adds virtually zero latency to the streaming data plane.
 
 ## Configuration Flags
-The engine operates automatically, but can be extended via the Bring-Your-Own-Regex (BYOR) feature. 
+The engine operates automatically, but can be extended via the Bring-Your-Own-Regex (BYOR) feature.
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
@@ -57,7 +57,7 @@ A: No. Because `google-re2` guarantees O(N) performance by strictly using DFAs, 
 A: No. The `re2` engine compiles them into a highly optimized state machine. While startup time might marginally increase, runtime matching remains practically constant-time and ultra-low latency.
 
 ## Plainspeak
-This feature quickly scans text for sensitive information like Social Security Numbers and email addresses using pre-defined search patterns (like a highly advanced "CTRL+F"). 
+This feature quickly scans text for sensitive information like Social Security Numbers and email addresses using pre-defined search patterns (like a highly advanced "CTRL+F").
 
 Unlike standard search engines that can get stuck or crash if a hacker sends a tricky "bomb" of confusing text (known as backtracking), this engine uses a specialized, math-based search method. This guarantees the search moves straight through the text at a fast, predictable speed and can never be tricked into freezing the system.
 

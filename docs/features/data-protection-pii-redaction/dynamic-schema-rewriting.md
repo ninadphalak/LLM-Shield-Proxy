@@ -11,7 +11,7 @@ By dynamically intercepting and rewriting the function schemas (e.g., OpenAI Too
 
 When an AI agent's traffic passes through the proxy, the AST Firewall extracts sensitive PII using **Shannon Entropy** and standard Regex rules. The proxy then replaces the PII with a synthetic `canonical locale` substitute (e.g. swapping a real SSN for a fake SSN) to preserve JSON structure and LLM attention weights. Simultaneously, it generates a stateless AES-256-GCM encrypted envelope (the ciphertext) of the original string.
 
-However, if the proxy just sends this synthetic data to the LLM, the LLM will never send the encrypted context back, breaking the session when the tool returns. 
+However, if the proxy just sends this synthetic data to the LLM, the LLM will never send the encrypted context back, breaking the session when the tool returns.
 
 To solve this, the **DynamicSchemaRewriter** steps in:
 
@@ -74,5 +74,5 @@ When the LLM eventually decides to call the `fetch_profile` tool, the proxy rece
 
 When the LLM calls the tool, it echoes back the AES-256-GCM cipher-text. The proxy intercepts the tool call, decrypts the `_ctx_hash` (`enc_v1_GCM_a7f9...`), and restores the original PII *instantly* with zero database lookups, granting infinite horizontal scalability.
 
-> **Visual Demonstration:** 
+> **Visual Demonstration:**
 > ![Stateless Rehydration](../../../LLM-Shield-Proxy-paper-v2.gif)

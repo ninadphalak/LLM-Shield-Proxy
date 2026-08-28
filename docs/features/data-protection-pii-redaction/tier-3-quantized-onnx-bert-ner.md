@@ -9,7 +9,7 @@ The **Tier 3 Quantized ONNX BERT-NER** is the final, most sophisticated layer of
 Traditional NLP libraries (like spaCy, PyTorch, or Transformers) consume 1GB+ of RAM and add 100ms+ of latency, destroying real-time AI streaming. LLM-Shield-Proxy solves this by utilizing the **C++ ONNX Runtime**.
 
 1. **Quantization:** The BERT-NER transformer weights are heavily quantized, drastically reducing memory footprint while maintaining >95% F1 Recall.
-2. **Native Execution:** The model executes natively in-memory via the ONNX runtime, entirely bypassing the Python Global Interpreter Lock (GIL). 
+2. **Native Execution:** The model executes natively in-memory via the ONNX runtime, entirely bypassing the Python Global Interpreter Lock (GIL).
 3. **Lazy-Loading:** The neural pipeline is strictly lazy-loaded. If disabled, it gracefully bypasses neural inference with zero startup overhead, keeping the proxy's baseline memory strictly under `<85 MB`.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
@@ -50,7 +50,7 @@ A: It adds roughly 12ms of latency to chunks containing entities. While slightly
 
 
 ## Plainspeak
-This feature is a highly efficient artificial intelligence reader. Instead of just looking for strict patterns like 9-digit numbers, it actually reads the surrounding sentence to understand the context. 
+This feature is a highly efficient artificial intelligence reader. Instead of just looking for strict patterns like 9-digit numbers, it actually reads the surrounding sentence to understand the context.
 
 For example, it can tell the difference between "Call Mr. Ford" (a person's name) and "I drive a Ford" (a car brand). To ensure it runs lightning-fast without slowing down your system, the AI model has been stripped down to its essential math (quantized) and runs directly in the computer's memory.
 

@@ -47,7 +47,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 ### 🛡️ Core Cryptographic Masking & Defenses
 
 #### Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)
-* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound O(N) **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic canonical locale synthetic entities, preserving LLM attention weights while destroying the original sensitive payload. 
+* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound O(N) **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic canonical locale synthetic entities, preserving LLM attention weights while destroying the original sensitive payload.
 * **Flags**: [`ENABLE_TIER2_ENTROPY`](DEPLOYMENT.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](DEPLOYMENT.md#core-configuration-flags)
 
 #### In-Band Stateless Syntheticgraphic Masking
@@ -111,7 +111,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Implementation Details**: Intercepts Pod deployment manifests directly via a standalone Mutating Webhook to seamlessly inject the LLM-Shield sidecar container and mTLS certificates, requiring zero external dependencies or elevated cluster privileges.
 
 #### Traffic Engineering & Resiliency
-* **Implementation Details**: 
+* **Implementation Details**:
   * **Redis Token-Bucket**: Pre-loaded Lua scripts (`evalsha`) handle high-throughput rate limiting to prevent noisy-neighbor DoS.
   * **SIGTERM Draining**: Kubernetes 25s SIGTERM connection draining ensures active SSE streams finish transmission securely during pod termination.
   * **Upstream Key Overriding**: Strips vulnerable client keys and injects internal load-balanced provider API keys dynamically.
@@ -139,7 +139,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 LLM-Shield-Proxy is engineered for extreme zero-egress data privacy and enterprise compliance (SOC 2 / HIPAA). Security and confidentiality are core to the architecture.
 
 ## Supported Versions
-As an open-source project, **only the absolute latest release version** is actively supported with security updates. 
+As an open-source project, **only the absolute latest release version** is actively supported with security updates.
 
 We do not backport security patches to older versions. If a vulnerability is found and patched (e.g., in `1.x.y`), users on older versions are expected to upgrade to the latest release to secure their environment. The onus is entirely on the user to ensure they are pulling the latest Docker image or PyPI package.
 

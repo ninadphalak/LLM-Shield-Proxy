@@ -9,7 +9,7 @@ The **Stateless Redis TTL Vault** provides a high-performance, distributed memor
 The vault uses `redis.asyncio` to manage ephemeral state without blocking the Python event loop.
 
 1. **Deterministic Hashing:** When PII is identified (e.g., "John Doe"), the vault generates a deterministic HMAC-SHA256 hash using the session's Virtual Key. This hash acts as the Redis lookup key.
-2. **TTL Eviction (Self-Destruct):** Every mapping inserted into Redis is assigned a strict Time-To-Live (TTL). Once the LLM stream concludes or the user session times out, Redis automatically purges the data. 
+2. **TTL Eviction (Self-Destruct):** Every mapping inserted into Redis is assigned a strict Time-To-Live (TTL). Once the LLM stream concludes or the user session times out, Redis automatically purges the data.
 3. **Cross-Pod Synchronization:** Because the mappings are stored in Redis, an LLM request can hit Pod A, and the streaming response can theoretically be intercepted by Pod B, with Pod B successfully de-masking the data using the shared Vault.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
@@ -52,7 +52,7 @@ A: The values are stored in Redis, but access is gated by the proxy's VPC perime
 
 
 ## Plainspeak
-This feature provides a highly secure, temporary storage locker for sensitive information. 
+This feature provides a highly secure, temporary storage locker for sensitive information.
 
 When a user shares a sensitive detail (like their medical condition), this vault locks it away and replaces it with a temporary placeholder token (like `TOKEN_123`). The AI only sees the placeholder token. The brilliant part is that the locker has an automatic self-destruct timer (TTL). Once the conversation is over, the vault automatically deletes the sensitive data forever, guaranteeing it isn't left sitting on a server indefinitely.
 

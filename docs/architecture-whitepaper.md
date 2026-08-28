@@ -36,7 +36,7 @@ To meet the strict constraint of `<55MB` RAM footprint, the proxy employs a cust
                     |  RBACValidator                     | <--- [Virtual Key Policy]
                     |  (Fail-Closed Execution)           |
                     +------------------------------------+
-                                      | 
+                                      |
                     +-----------------+------------------+
                     |                                    |
                [ALLOWED]                             [BLOCKED]
@@ -78,7 +78,7 @@ To provide WORM (Write Once, Read Many) compliance, each decision record is appe
           |
           v
 +-----------------------+        [OTLPSpanExporter] -> (gRPC) -> [Datadog/Jaeger]
-|  MerkleTreeWORM       | -----> 
+|  MerkleTreeWORM       | ----->
 |  root = H(root + new) | -----> [OSCAL Artifact] -> (JSON) -> [Audit System]
 +-----------------------+
 ```

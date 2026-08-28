@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](../../../FEATURES.md)
 
 ## What It Does
-**Format-Preserving Synthetic Masking** is the proxy's default Data Loss Prevention (DLP) substitution strategy. Instead of replacing sensitive data with structural tags (e.g., turning a name into `[PERSON_1]`), it deterministically replaces the data with a realistic, unbracketed synthetic entity (e.g., turning "John Doe" into "Michael Smith", or a real SSN into a validly formatted fake SSN). 
+**Format-Preserving Synthetic Masking** is the proxy's default Data Loss Prevention (DLP) substitution strategy. Instead of replacing sensitive data with structural tags (e.g., turning a name into `[PERSON_1]`), it deterministically replaces the data with a realistic, unbracketed synthetic entity (e.g., turning "John Doe" into "Michael Smith", or a real SSN into a validly formatted fake SSN).
 
 > [!TIP]
 > **Wondering what specific types of data are detected?** Check out the [Supported PII & Sensitive Data Types](supported-pii-types.md) feature guide for an exhaustive list.
@@ -18,7 +18,7 @@ LLM-Shield-Proxy solves this utilizing robust canonical locale substitution comb
 2. **Coherent Substitution:** Rather than generic structural strings, the underlying generation logic respects mathematical formats and regional locales:
    - **Credit Cards:** A real Visa card number is swapped with a validly checksummed (Luhn algorithm) synthetic Visa card number.
    - **Emails:** A real email like `alex.smith@company.com` is swapped with a syntactically correct placeholder like `johndoe@fictional.net`.
-   - **SSNs / Phone Numbers:** A real 9-digit SSN is swapped for a mathematically valid 9-digit synthetic SSN, preserving its dashes and spatial footprint. 
+   - **SSNs / Phone Numbers:** A real 9-digit SSN is swapped for a mathematically valid 9-digit synthetic SSN, preserving its dashes and spatial footprint.
    *(Note: While high-entropy entities like Credit Cards and SSNs are automatically detected by Tier 1/2, detecting and substituting semantic entities like Personal Names requires enabling the [Tier 3 NLP Engine](../../DEPLOYMENT.md#advanced-feature-flags-compliance-security-and-engineering), which seamlessly hooks into this same canonical substitution pipeline).*
 3. **Seamless Rehydration:** When the LLM streams the synthetic token back ("Michael"), the SSE sliding window detects it and swaps it back to the original value ("John") before sending it to the user.
 
@@ -55,7 +55,7 @@ A: No. The proxy caches the generated synthetic entities in the active session's
 
 
 ## Plainspeak
-This feature creates realistic fake data to replace sensitive information. 
+This feature creates realistic fake data to replace sensitive information.
 
 If you just replace a real name with "[CENSORED]", the AI reading it might get confused because the sentence structure is suddenly unnatural. Instead, this feature automatically swaps out a real name for a fake name (like replacing "John Doe" with "Alex Smith"), or a real credit card with a mathematically valid fake credit card. This keeps the AI completely oblivious to the fact that the data was redacted, allowing it to generate much better responses.
 

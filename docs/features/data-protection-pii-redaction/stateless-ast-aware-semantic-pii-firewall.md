@@ -34,9 +34,9 @@ View diagram on GitHub mobile 📱 -->
 - **Overhead:** Hard-capped max depth traversal guarantees latency remains flat even against adversarial payloads.
 
 ## Plainspeak: The "Robotic Arm"
-This feature is the structural parser for *machine-to-machine* code. 
+This feature is the structural parser for *machine-to-machine* code.
 
-When autonomous AI agents communicate with each other or use tools (via MCP or JSON-RPC), they don't send plain text. They send deeply nested JSON code (e.g., `{"tool_calls": [{"arguments": "{\"cc_num\": \"1234\"}"}]}`). If you use a standard proxy to blindly search and replace text inside that raw JSON string, you will accidentally break quotation marks or escape characters, causing a fatal error and crashing the AI agent. 
+When autonomous AI agents communicate with each other or use tools (via MCP or JSON-RPC), they don't send plain text. They send deeply nested JSON code (e.g., `{"tool_calls": [{"arguments": "{\"cc_num\": \"1234\"}"}]}`). If you use a standard proxy to blindly search and replace text inside that raw JSON string, you will accidentally break quotation marks or escape characters, causing a fatal error and crashing the AI agent.
 
 The Semantic Firewall acts like a surgical **"Robotic Arm"**. It perfectly parses the JSON code, reaches deep into the nested layers to find the sensitive data, and *then* it applies the redaction (like Cryptographic Masking) to just that specific value. It does all of this without corrupting the underlying JSON structure.
 
@@ -54,7 +54,7 @@ A: This is the mechanism for stateless synthetic. By injecting the AES-256-GCM e
 
 
 ## Plainspeak
-This feature acts as a smart translator between an AI agent and the tools it uses (like a database or a calculator). 
+This feature acts as a smart translator between an AI agent and the tools it uses (like a database or a calculator).
 
 When an AI wants to use a tool, it sends instructions in a specific computer format (called JSON). If we just blindly blacked-out sensitive words in those instructions, it would break the formatting and cause the tool to crash. Instead, this firewall carefully unpackages the instructions, hides only the sensitive data while keeping the structure intact, and then seamlessly repackages it so the tool still works perfectly.
 

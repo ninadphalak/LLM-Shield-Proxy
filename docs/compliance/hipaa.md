@@ -16,7 +16,7 @@ Before any prompt is dispatched to a third-party cloud LLM, it is processed loca
 - **Tier 2 (Unstructured Data):** A vectorized Shannon Entropy scanner operates at <6 µs to detect and redact unstructured high-entropy identifiers.
 
 ### Clinical Context Awareness (Tier-3 ONNX BERT-NER)
-Medical data is often conversational and unstructured (e.g., doctor's notes). The proxy utilizes a **Quantized ONNX BERT-NER** model executing natively in-memory. 
+Medical data is often conversational and unstructured (e.g., doctor's notes). The proxy utilizes a **Quantized ONNX BERT-NER** model executing natively in-memory.
 - **Bring Your Own Model (BYOM):** The architecture natively supports the ingestion of specialized healthcare models such as **BioBERT** and **ClinicalBERT**. This allows the proxy to achieve high-accuracy, context-aware entity extraction for medical conditions, patient names, and pharmaceutical regimens without relying on external NLP APIs.
 
 ## Transmission Security (45 CFR § 164.312)
@@ -24,7 +24,7 @@ Medical data is often conversational and unstructured (e.g., doctor's notes). Th
 If a use case requires the LLM to reference a specific patient entity without knowing who the patient is, the proxy employs **In-Band Stateless Synthetic**.
 
 ### Encrypted In-Transit Envelopes
-- Detected ePHI is masked using **AES-256-GCM envelope encryption** directly within the payload. 
+- Detected ePHI is masked using **AES-256-GCM envelope encryption** directly within the payload.
 - The external LLM receives a cryptographically secure cipher-token (e.g., `[[AES:GCM:8f7a9...]]`). It processes the clinical reasoning based on the surrounding text, and the proxy decrypts the cipher-token dynamically as the SSE stream returns to the clinician.
 - This guarantees that no usable ePHI is transmitted to or stored by the external LLM provider, perfectly aligning with transmission security rules.
 

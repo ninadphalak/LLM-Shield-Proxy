@@ -10,7 +10,7 @@ When Kubernetes wants to scale down a pod or deploy a new version, it sends a `S
 
 1. **Signal Interception:** The proxy catches the `SIGTERM` signal at the FastAPI lifecycle level.
 2. **Readiness Toggle:** It instantly marks its internal health check as `Unhealthy`. Kubernetes sees this and stops routing *new* HTTP traffic to this specific pod.
-3. **Drain Window:** The proxy enters a waiting loop, allowing all currently active `asyncio` streaming tasks to finish naturally. 
+3. **Drain Window:** The proxy enters a waiting loop, allowing all currently active `asyncio` streaming tasks to finish naturally.
 4. **Clean Exit:** Once the active connection count hits 0, or the `DRAIN_TIMEOUT_SECONDS` limit is reached, it safely closes the HTTP/2 upstream connection pools, closes Redis sockets, and terminates the process.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
@@ -30,7 +30,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Execution Speed:** Triggers instantaneously upon signal receipt.
-- **Overhead:** Zero overhead during normal operation. 
+- **Overhead:** Zero overhead during normal operation.
 
 ## Configuration Flags
 

@@ -6,7 +6,7 @@
 The **Tier 2 Shannon Entropy Scanner** is the second defensive layer in the LLM-Shield-Proxy. While regex (Tier 1) excels at structured data like SSNs, it completely fails to detect unstructured, proprietary cryptographic secrets (e.g., custom JWTs, internal API tokens, Database connection passwords). The Tier 2 engine automatically flags and redacts these unstructured secrets by evaluating the mathematical information density (entropy) of incoming token streams.
 
 ## How It Works
-Instead of relying on massive, slow dictionaries of potential secret formats, the proxy applies Information Theory. 
+Instead of relying on massive, slow dictionaries of potential secret formats, the proxy applies Information Theory.
 
 1. **Sliding Window Evaluation:** The engine runs a vectorized O(N) math loop that evaluates the bit density of text using Shannon's Entropy formula: $H(S) = -\sum p(c) \log_2 p(c)$.
 2. **Algorithmic Thresholds:** It isolates high-density character strings and evaluates them against strict thresholds. It targets Base64 strings with an entropy $\ge 4.5$ bits/char and Hexadecimal strings with $\ge 3.4$ bits/char.
@@ -46,7 +46,7 @@ View diagram on GitHub mobile 📱 -->
 A: Regex dictionaries for secrets require evaluating hundreds of patterns (AWS keys, GCP keys, Stripe keys, etc.). This introduces severe latency and backtracking overhead, and it will still miss internal, proprietary keys. Entropy instantly catches *any* high-density secret mathematically, regardless of the vendor.
 
 **Q: Will this accidentally redact normal words or long URLs?**
-A: No. Standard English and typical URLs do not contain the random character distribution required to trip the $\ge 4.5$ bits/char Base64 threshold. 
+A: No. Standard English and typical URLs do not contain the random character distribution required to trip the $\ge 4.5$ bits/char Base64 threshold.
 
 
 ## Plainspeak

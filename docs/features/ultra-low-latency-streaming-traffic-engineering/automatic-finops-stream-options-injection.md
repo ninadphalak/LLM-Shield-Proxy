@@ -6,7 +6,7 @@
 **Automatic FinOps `stream_options` Injection** ensures that enterprise chargeback mechanisms have 100% accurate token accounting during Server-Sent Events (SSE) streaming, without requiring developer teams to modify a single line of client application code.
 
 ## How It Works
-By default, the OpenAI API does not return token usage statistics (input/output counts) on streaming requests unless specifically requested. 
+By default, the OpenAI API does not return token usage statistics (input/output counts) on streaming requests unless specifically requested.
 
 1. **Transparent Mutation:** When a client initiates a `stream: true` request, the proxy intercepts the JSON body.
 2. **FinOps Injection:** The proxy automatically injects or ensures the presence of the `stream_options: {"include_usage": true}` parameter in the root payload.

@@ -20,7 +20,7 @@ flowchart TD
         P1[Proxy Replica A<br/>Key: Master]
         P2[Proxy Replica B<br/>Key: Master]
     end
-    
+
     User[Client] -->|1. Prompt w/ PII| LB
     LB -->|2. Route| P1
     P1 -->|3. Encrypt & Append Nonce| LLM[Cloud LLM]
@@ -35,10 +35,10 @@ View diagram on GitHub mobile 📱 -->
 
 ## Multi-Instance Stateful Independence (Load Balancing)
 
-A critical advantage of this architecture is its infinite horizontal scalability. 
+A critical advantage of this architecture is its infinite horizontal scalability.
 
 **How it works in Multi-Instance Deployments:**
-The encryption is completely stateless. All proxy replicas share a master symmetric key injected securely (e.g., via HashiCorp Vault). During encryption, the cryptographic nonce/Initialization Vector (IV) is generated and embedded *directly* within the base62 cipher-token itself. 
+The encryption is completely stateless. All proxy replicas share a master symmetric key injected securely (e.g., via HashiCorp Vault). During encryption, the cryptographic nonce/Initialization Vector (IV) is generated and embedded *directly* within the base62 cipher-token itself.
 
 Because the nonce travels with the data, the returning SSE stream from the LLM can be routed by a load balancer to a completely different proxy replica (e.g., Replica B). Replica B simply extracts the nonce from the cipher-token and uses the shared master key in memory to decrypt it instantly. This eliminates the need for sticky sessions or a synchronized state store like Redis.
 

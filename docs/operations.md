@@ -33,9 +33,9 @@ Redis dictionary overhead per mapped entity (UUID string -> synthetic tag string
 
 ## 🔍 3. Incident Response & Log Forensics
 
-If a data leak is suspected, Security Analysts must trace the payload without the proxy actually logging the sensitive data (which would violate compliance). 
+If a data leak is suspected, Security Analysts must trace the payload without the proxy actually logging the sensitive data (which would violate compliance).
 
 1.  **Extract the Canary:** Check the leaked output for the Dynamic Canary Watermark (injected via zero-width characters or specific deterministic synthetics).
-2.  **Query the Merkle Tree:** Query your centralized log aggregator (e.g., Splunk, Datadog) for the WORM-Compliant Hash-Chained logs emitted by the proxy. 
-3.  **Correlate the Hash:** Search for the `_ctx_hash_prop` or the HMAC-SHA256 hash found in the watermark. 
+2.  **Query the Merkle Tree:** Query your centralized log aggregator (e.g., Splunk, Datadog) for the WORM-Compliant Hash-Chained logs emitted by the proxy.
+3.  **Correlate the Hash:** Search for the `_ctx_hash_prop` or the HMAC-SHA256 hash found in the watermark.
 4.  **Identify the Actor:** The structured log will reveal the exact `WorkloadIdentity` (JWT sub), Timestamp, and IP that originated the request, proving egress provenance without ever revealing the plaintext PII in the logs.

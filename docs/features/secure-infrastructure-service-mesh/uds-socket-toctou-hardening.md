@@ -9,7 +9,7 @@
 A common vulnerability when creating Unix Domain Sockets in Linux is the TOCTOU race condition. If an application creates a socket at `/var/run/shield.sock` and *then* calls `chmod` to restrict access, there is a split-second window where a malicious local process can connect to the socket before the permissions are tightened.
 
 1. **Pre-Emptive Umask:** Before the proxy instructs the OS to create the UDS file, it explicitly executes `os.umask(0o117)`.
-2. **Atomic Creation:** The kernel uses the umask to atomically create the socket file with strict `rw-rw----` (660) permissions natively. 
+2. **Atomic Creation:** The kernel uses the umask to atomically create the socket file with strict `rw-rw----` (660) permissions natively.
 3. **Race Condition Eliminated:** Because the file is created with restricted permissions from the very first CPU cycle, the TOCTOU window is physically impossible.
 4. **Context Restoration:** The proxy immediately restores the original umask so that subsequent file operations (like audit logging) behave normally.
 
@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Execution Speed:** Executed once at startup; takes `0ms`.
-- **Overhead:** Zero. 
+- **Overhead:** Zero.
 
 ## Configuration Flags
 
