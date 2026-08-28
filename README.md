@@ -31,9 +31,53 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance (**SOC 2 Compliance for AI**, HIPAA, HITRUST without breaking real-time streaming latency).
 
+## 🛡️ Dual-Pipeline Redaction Architecture
+
+LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pipelines based on the payload structure. This ensures that autonomous agents don't crash from broken syntax trees, while human prompts get the highest quality contextual masking.
+
+```mermaid
+flowchart TD
+    classDef stateful fill:#fffbeb,stroke:#f59e0b,stroke-width:2px,color:#92400e
+    classDef stateless fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
+    classDef router fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
+
+    Client[Client App] --> Router{JSON-RPC / Tool Call?}:::router
+    
+    %% Path A: Human Traffic
+    Router -->|No: Standard Text| PathA[A. Human-to-LLM Prompt]
+    PathA --> Syn[SYNTHETIC]:::stateful
+    PathA --> Tag[STRUCTURAL_TAG]:::stateful
+    PathA --> Scrub[SCRUB]:::stateless
+    PathA --> CryptoA[STATELESS_CRYPTO]:::stateless
+    
+    %% Path B: Machine Traffic
+    Router -->|Yes: Structured Code| PathB[B. Machine-to-Machine]
+    PathB --> CryptoB[Strict STATELESS_CRYPTO]:::stateless
+    
+    Syn -.-> Redis[(Redis Vault)]:::stateful
+    Tag -.-> Redis
+    
+    CryptoA -.-> AES[In-Band AES-256-GCM]:::stateless
+    CryptoB -.-> AES
+```
+
+### A. Human-to-LLM (Text Prompts)
+For standard conversational text, the proxy respects your configured masking mode. You can choose from four strategies:
+1. **SYNTHETIC (Stateful):** Swaps PII with canonical locale fakes (e.g., `John` -> `Maya`). Preserves LLM attention weights and token counts. Requires Redis.
+2. **STRUCTURAL_TAG (Stateful):** Swaps PII with explicit bracketed tags (e.g., `[PERSON_1]`). Requires Redis.
+3. **SCRUB (Stateless):** Destructive one-way redaction (`***`). Cannot be rehydrated.
+4. **STATELESS_CRYPTO (Stateless):** Encrypts PII in-band via AES-256-GCM. Zero Redis dependency.
+
+### B. Machine-to-Machine (JSON-RPC / Tool Calls)
+When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces **STATELESS_CRYPTO**. 
+* **Why?** Substituting data with synthetic fakes or changing string lengths inside strict JSON payloads frequently breaks the JSON syntax tree, causing agent crashes.
+* **The Solution:** By forcing in-band AES encryption for machine traffic, the proxy guarantees mathematically reversible masking without mutating the JSON structure or relying on Redis.
+
+---
+
 ### 🔥 Enterprise Flagship Features
 * **[Sub-Millisecond SSE Rehydration](#-how-it-works-the-data-flow):** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag (<4.3 µs overhead per chunk).
-* **[Zero-Egress Synthetic Masking](#️-redaction-modes):** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
+* **[Zero-Egress Synthetic Masking](#️-dual-pipeline-redaction-architecture):** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
 * **[Air-Gapped Egress Gateway Mode](docs/features/air-gapped-egress.md):** Allows operation in strict Zero-Internet corporate subnets by securely routing all upstream traffic through an internal egress gateway, optionally stripping auth headers for internal mTLS architectures.
 * **[Zero-Data Stateless Cryptography](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<85 MB RAM`).
 * **[Role-Based Policy-as-Code & Hot-Reloading](POLICIES.md):** Zero-downtime YAML file watcher (`policies.yaml`) dynamically maps `virtual_key_id` identities to granular security roles, custom PII profiles, and thread-safe $O(1)$ setting overrides.
@@ -168,20 +212,7 @@ LLM-Shield-Proxy is **not** a model router. It is designed to deploy as a transp
 
 Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, SOC 2-compliant data masking before the payload ever reaches the orchestrator.
 
----
-
-## 🛡️ Redaction Modes
-
-> **[View Security Documentation for DLP & Entropy 🛡️](SECURITY.md#data-loss-prevention-dlp-for-llms-synthetic-masking--entropy)**
-
-LLM-Shield-Proxy supports two configurable tokenization strategies out of the box:
-
-<br>
-<img src="docs/assets/diagram-redaction-modes.svg" alt="Redaction Modes Diagram" width="850" />
-<br>
-
-| Mode | Configuration | Description | Best For |
-| :--- | :--- | :--- | :--- |
+--- | :--- | :--- | :--- |
 | **Synthetic Swapping (Default)** | `ENABLE_SYNTHETIC_SWAPPING=true` | Deterministically substitutes PII with realistic, unbracketed entities (e.g., `Maya`, `Springfield`) to eliminate Byte-Pair Encoding (BPE) token bloat and preserve LLM attention weight distributions. | Modern LLMs, cost & latency optimization |
 | **Structural Tagging** | `ENABLE_SYNTHETIC_SWAPPING=false` | Substitutes PII with explicit bracketed type tags (e.g., `[PERSON_1]`, `[EMAIL_1]`). | Legacy compliance pipelines, deterministic regex auditing |
 
