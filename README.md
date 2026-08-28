@@ -36,7 +36,7 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pipelines based on the payload structure. This ensures that autonomous agents don't crash from broken syntax trees, while human prompts get the highest quality contextual masking.
 
 <br>
-<img src="docs/assets/diagram-dual-pipeline.svg?v=1" alt="Dual-Pipeline Redaction Architecture" width="800" />
+<img src="docs/assets/diagram-dual-pipeline.svg?v=2" alt="Dual-Pipeline Redaction Architecture" width="800" />
 
 ### A. Human-to-LLM (Text Prompts)
 For standard conversational text, the proxy respects your configured masking mode. You can choose from four strategies:
