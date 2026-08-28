@@ -118,7 +118,7 @@ class Vault:
                 elif "CREDIT_CARD" in entity_type:
                     token = fake.credit_card_number()
                 elif "KEY" in entity_type or "SECRET" in entity_type or "TOKEN" in entity_type or "PAT" in entity_type:
-                    token = f"AKIA{''.join(random.Random(seed).choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=16))}"
+                    token = f"AKIA{''.join(random.Random(seed).choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=16))}"  # nosec B311
                 elif "GPE" in entity_type or "LOC" in entity_type:
                     token = fake.city()
                 else:

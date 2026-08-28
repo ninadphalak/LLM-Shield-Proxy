@@ -10,7 +10,7 @@ def extract_section(text, header_start, next_header_start=None):
     # Find the start
     start_idx = text.find(header_start)
     if start_idx == -1: return ""
-    
+
     # Find the end
     if next_header_start:
         end_idx = text.find(next_header_start, start_idx + len(header_start))
@@ -28,7 +28,7 @@ def extract_section(text, header_start, next_header_start=None):
                 end_idx = len(text)
         else:
             end_idx = len(text)
-            
+
     return text[start_idx:end_idx].strip()
 
 # Extract sections

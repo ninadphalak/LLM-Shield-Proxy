@@ -1,6 +1,6 @@
 import asyncio
 import hashlib
-from typing import Any, Awaitable, Callable, Optional, Set
+from typing import Any, Callable, Coroutine, Optional, Set
 
 import httpx
 import orjson
@@ -23,9 +23,9 @@ class MCPDiscoveryPrunerMiddleware:
         # Strict <85 MB limit bounds checking
         self.MAX_PAYLOAD_SIZE = 15 * 1024 * 1024
 
-    def _create_task(self, coro: Awaitable) -> asyncio.Task:
+    def _create_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         """Manage asyncio.Task strong references to prevent Python 3.11+ GC drops."""
-        task = asyncio.create_task(coro)
+        task: asyncio.Task[Any] = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
         return task

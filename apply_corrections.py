@@ -1,5 +1,5 @@
-import re
 import os
+import re
 
 # 1. Update README.md (OWASP wording & Merkle -> Hash Chaining)
 with open("README.md", "r", encoding="utf-8") as f:
@@ -33,11 +33,11 @@ with open("SECURITY.md", "w", encoding="utf-8") as f:
 if os.path.exists("COMPLIANCE.md"):
     with open("COMPLIANCE.md", "r", encoding="utf-8") as f:
         compliance_text = f.read()
-    
+
     compliance_text = compliance_text.replace("Merkle Attestation & SHA-256 Hash Chaining", "Cryptographic SHA-256 Hash Chaining")
     compliance_text = compliance_text.replace("Merkle Attestation", "Cryptographic Attestation")
     compliance_text = compliance_text.replace("Merkle logs", "Hash-Chained logs")
-    
+
     with open("COMPLIANCE.md", "w", encoding="utf-8") as f:
         f.write(compliance_text)
 

@@ -14,7 +14,7 @@ def test_docker_standalone_happy_path():
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
 
     # 2. Run the container
-    subprocess.run(["docker", "run", "-d", "--name", container_name, "-p", "8000:8000", "-e", "SHIELD_ENCRYPTION_KEY=" + "00" * 32, "-e", "SHIELD_WATERMARK_SECRET=test-watermark", image_name], check=True)
+    subprocess.run(["docker", "run", "-d", "--name", container_name, "-p", "8001:8000", "-e", "SHIELD_ENCRYPTION_KEY=" + "00" * 32, "-e", "SHIELD_WATERMARK_SECRET=test-watermark", image_name], check=True)
 
     try:
         # 3. Ping healthz
@@ -23,7 +23,7 @@ def test_docker_standalone_happy_path():
         last_error = None
         for _ in range(max_retries):
             try:
-                response = urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=2)
+                response = urllib.request.urlopen("http://127.0.0.1:8001/healthz", timeout=2)
                 if response.getcode() == 200:
                     success = True
                     break

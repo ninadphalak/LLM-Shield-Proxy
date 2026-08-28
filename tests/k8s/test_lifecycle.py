@@ -55,16 +55,21 @@ async def test_sigterm_graceful_shutdown():
 
         await asyncio.sleep(0.5)
 
-        # Verify new connections are rejected (503 Service Unavailable or connection dropped)
         try:
-            new_req = await client.get("/healthz")
-            assert new_req.status_code == 503
-        except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError):
-            pass  # Socket closed completely is also acceptable post-SIGTERM
+            # Verify new connections are rejected (503 Service Unavailable or connection dropped)
+            try:
+                new_req = await client.get("/healthz")
+                assert new_req.status_code == 503
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError):
+                pass  # Socket closed completely is also acceptable post-SIGTERM
 
-        # Verify the in-flight stream finishes or terminates cleanly
-        try:
-            res = await req_task
-            assert res.status_code in [200, 502, 503, 504]
-        except Exception:
-            pass  # Stream terminated cleanly via connection drop
+            # Verify the in-flight stream finishes or terminates cleanly
+            try:
+                res = await req_task
+                assert res.status_code in [200, 502, 503, 504]
+            except Exception:
+                pass  # Stream terminated cleanly via connection drop
+        finally:
+            # Restart the container so subsequent tests don't fail
+            subprocess.run(["docker", "start", "llm-shield-proxy"], check=True)
+            await asyncio.sleep(5)  # wait for healthcheck to pass

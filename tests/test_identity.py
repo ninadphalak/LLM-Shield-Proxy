@@ -77,8 +77,8 @@ async def test_successful_validation(monkeypatch):
     class MockJWK:
         def __init__(self, jwk_dict):
             self.key = "dpop_key"
-            self.thumbprint = "mock_thumbprint"
     monkeypatch.setattr(jwt, "PyJWK", MockJWK)
+    monkeypatch.setattr("llm_shield_proxy.security.identity._get_jwk_thumbprint", lambda x: "mock_thumbprint")
 
     # Mock jwt.decode
     def mock_decode(token, *args, **kwargs):

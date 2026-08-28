@@ -22,7 +22,26 @@ logger = logging.getLogger(__name__)
 
 # Global state for coalescing fetches
 _jwks_clients: Dict[str, jwt.PyJWKClient] = {}
-_jwks_locks = defaultdict(threading.Lock)
+_jwks_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+
+import hashlib
+import json
+
+from jwt.utils import base64url_encode
+
+
+def _get_jwk_thumbprint(jwk_dict: dict) -> str:
+    kty = jwk_dict.get("kty")
+    if kty == "RSA":
+        req = {"e": jwk_dict["e"], "kty": "RSA", "n": jwk_dict["n"]}
+    elif kty == "EC":
+        req = {"crv": jwk_dict["crv"], "kty": "EC", "x": jwk_dict["x"], "y": jwk_dict["y"]}
+    elif kty == "oct":
+        req = {"k": jwk_dict["k"], "kty": "oct"}
+    else:
+        req = {k: jwk_dict[k] for k in sorted(jwk_dict.keys()) if k not in ["use", "key_ops", "alg", "kid", "x5u", "x5c", "x5t", "x5t#S256"]}
+    json_str = json.dumps(req, separators=(",", ":"), sort_keys=True)
+    return base64url_encode(hashlib.sha256(json_str.encode("utf-8")).digest()).decode("utf-8")
 
 async def _get_signing_key(issuer: str, token: str):
     def _fetch():
@@ -112,7 +131,7 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             signing_key.key,
             algorithms=["RS256", "ES256", "PS256"],
             audience=allowed_audiences if allowed_audiences else None,
-            options=options_dict
+            options=options_dict  # type: ignore
         )
 
         # Step 4: Validate DPoP signature and claims (RFC 9449)
@@ -129,7 +148,7 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             dpop_header,
             dpop_jwk.key,
             algorithms=["RS256", "ES256", "PS256"],
-            options={"verify_exp": True, "leeway": 60}
+            options={"verify_exp": True, "leeway": 60}  # type: ignore
         )
 
         # DPoP Expiry and Freshness with clock skew (60 seconds leeway)
@@ -169,7 +188,7 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         if not expected_jkt:
             raise jwt.InvalidTokenError("Missing cnf.jkt in access token")
 
-        actual_jkt = dpop_jwk.thumbprint
+        actual_jkt = _get_jwk_thumbprint(jwk_dict)
         if actual_jkt != expected_jkt:
             raise jwt.InvalidTokenError("DPoP jkt thumbprint mismatch")
 

@@ -112,7 +112,7 @@ class AuditLogger:
 
                     cls._last_hash = new_hash
 
-            except Exception:
+            except Exception:  # nosec B110
                 # Silently drop failed logs to prevent worker crash
                 pass
 

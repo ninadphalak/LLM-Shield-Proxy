@@ -155,10 +155,12 @@ async def check_circuit_breaker(session_id: str, payload: dict) -> None:
         else:
             metrics = SessionMetrics()
     else:
-        metrics = circuit_breaker_cache.get(session_id)
-        if metrics is None:
+        cached_metrics = circuit_breaker_cache.get(session_id)
+        if cached_metrics is None:
             metrics = SessionMetrics()
             circuit_breaker_cache[session_id] = metrics
+        else:
+            metrics = cached_metrics
 
     # Serialize payload to string, bounded to 4096 chars to prevent O(N^2) CPU spikes
     try:
