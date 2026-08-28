@@ -60,7 +60,7 @@
   <text x="415" y="335" class="title">B. Machine-to-Machine</text>
 
   <rect x="420" y="350" width="200" height="36" class="router-node" rx="6" />
-  <text x="520" y="373" text-anchor="middle" class="text">STATELESS_SYNTHETIC</text>
+  <text x="520" y="373" text-anchor="middle" class="text">STATELESS_CRYPTO</text>
 
   <!-- Redis (Cylinder) -->
   <g class="vault-node" transform="translate(710, 80)">
