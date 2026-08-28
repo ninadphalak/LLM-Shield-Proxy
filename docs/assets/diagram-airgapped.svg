@@ -4,7 +4,7 @@
       .text { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; font-weight: 500; fill: #1e293b; }
       .text-light { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; font-weight: 500; fill: #ffffff; }
       .title { font-family: system-ui, -apple-system, sans-serif; font-size: 16px; font-weight: 700; fill: #0f172a; }
-      .vpc-box { fill: #f4f4f9; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 6 6; rx: 12; }
+      .vpc-box { fill: transparent; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 6 6; rx: 12; }
       .app-node { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; rx: 8; }
       .proxy-node { fill: #f0fdf4; stroke: #22c55e; stroke-width: 2; rx: 8; }
       .egress-node { fill: #fffbeb; stroke: #f59e0b; stroke-width: 2; rx: 8; }
@@ -12,7 +12,18 @@
       .arrow-line { stroke: #3b82f6; stroke-width: 2.5; fill: none; }
       .arrow-head { fill: #3b82f6; }
       .arrow-dashed { stroke: #3b82f6; stroke-width: 2.5; fill: none; stroke-dasharray: 4 4; }
-      .label-text { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; fill: #475569; font-weight: 600; }
+      .label-text { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; fill: #334155; font-weight: 700; }
+
+      @media (prefers-color-scheme: dark) {
+        .text { fill: #f8fafc; }
+        .title { fill: #f1f5f9; }
+        .vpc-box { stroke: #475569; }
+        .app-node { fill: #0f172a; stroke: #334155; }
+        .proxy-node { fill: #022c22; stroke: #10b981; }
+        .egress-node { fill: #451a03; stroke: #f59e0b; }
+        .llm-node { fill: #0f172a; stroke: #334155; }
+        .label-text { fill: #cbd5e1; }
+      }
     </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-head" />
