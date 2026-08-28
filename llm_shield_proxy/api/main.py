@@ -139,7 +139,7 @@ async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[
 
     resolved_ip = None
     for family, _, _, _, sockaddr in infos:
-        ip_candidate = sockaddr[0]
+        ip_candidate = str(sockaddr[0])
         if not _is_safe_ip(ip_candidate):
             return False, None
         if resolved_ip is None:
@@ -163,7 +163,7 @@ async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
 
     # Return the first successfully resolved IP without SSRF restriction
     for family, _, _, _, sockaddr in infos:
-        ip_candidate = sockaddr[0]
+        ip_candidate = str(sockaddr[0])
         return ip_candidate
     return None
 
@@ -564,10 +564,10 @@ def resolve_upstream_key(hostname: str) -> Optional[str]:
 async def proxy_catch_all(
     request: Request,
     path: str,
+    background_tasks: BackgroundTasks,
     x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
     x_upstream_base_url: Optional[str] = Header(None, alias="X-Upstream-Base-Url"),
     x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
-    background_tasks: BackgroundTasks = None,
     policy_resolver: BasePolicyResolver = Depends(get_policy_resolver),
 ) -> Response:
     """Main reverse-proxy catch-all endpoint handling redaction and rehydration."""
@@ -834,7 +834,7 @@ async def _proxy_catch_all_internal(
                 content={"error": {"message": "Malformed JSON payload", "type": "invalid_request_error"}},
             )
 
-        if isinstance(payload, (dict, list)):
+        if isinstance(payload, dict):
             if x_session_id and headers.get("x-shield-bypass-breaker", "").lower() != "true":
                 try:
                     await check_circuit_breaker(x_session_id, payload)
@@ -929,12 +929,12 @@ async def _proxy_catch_all_internal(
 
                     redacted_payload = await asyncio.get_running_loop().run_in_executor(
                         None,
-                        ctx.run,
+                        ctx.run,  # type: ignore
                         pii_engine.redact_payload,
                         payload,
                         vault,
-                        active_profile,  # type: ignore
-                    )
+                        active_profile,
+                    )  # type: ignore
 
                     new_entities_count = sum(vault.type_counters.values())
                     entities_detected = new_entities_count - old_entities_count
@@ -1052,7 +1052,7 @@ async def _proxy_catch_all_internal(
                             break
 
                         if attempt < max_retries:
-                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)
+                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311
                             AuditLogger.log_upstream_retry_attempt(x_session_id, request_id, virtual_key_id, attempt + 1, current_target_url, applied_role_name=applied_role_name)
                             await asyncio.sleep(sleep_time)
                             attempt += 1
@@ -1078,7 +1078,7 @@ async def _proxy_catch_all_internal(
                     if upstream_res is not None:
                         try:
                             await upstream_res.aclose()
-                        except Exception:
+                        except Exception:  # nosec B110
                             pass
                     status_code = upstream_res.status_code if (upstream_res and hasattr(upstream_res, 'status_code')) else 503
                     AuditLogger.log_redaction_event(
@@ -1117,6 +1117,8 @@ async def _proxy_catch_all_internal(
                 res_headers.pop("transfer-encoding", None)
 
                 async def wrapped_stream() -> AsyncGenerator[bytes, None]:
+                    if upstream_res is None:
+                        raise RuntimeError("Expected upstream_res to be initialized")
                     llm_shield_sse_active_streams.inc()
                     try:
                         if is_v3 and v3_cipher:
@@ -1132,14 +1134,14 @@ async def _proxy_catch_all_internal(
                             if final_chunk:
                                 yield final_chunk.encode("utf-8")
                         else:
-                            async for chunk in rehydrate_sse_stream(
+                            async for b_chunk in rehydrate_sse_stream(
                                 upstream_res.aiter_bytes(),
                                 vault,
                                 watermark_text=watermark_text,  # type: ignore
                                 path=path,
                                 request_id=request_id,
                             ):
-                                yield chunk
+                                yield b_chunk
                     except (GeneratorExit, asyncio.CancelledError):
                         logger.info("Client disconnected mid-stream. Cleaning up SSE stream and upstream socket.")
                         if x_session_id:
@@ -1186,7 +1188,7 @@ async def _proxy_catch_all_internal(
                             break
 
                         if attempt < max_retries:
-                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)
+                            sleep_time = min(5.0, 0.5 * (2 ** attempt)) * random.uniform(0.5, 1.0)  # nosec B311
                             AuditLogger.log_upstream_retry_attempt(x_session_id, request_id, virtual_key_id, attempt + 1, current_target_url, applied_role_name=applied_role_name)
                             await asyncio.sleep(sleep_time)
                             attempt += 1

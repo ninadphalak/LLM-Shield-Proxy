@@ -269,7 +269,8 @@ async def test_dpop_enforcement_tiers():
          patch("llm_shield_proxy.security.identity._get_signing_key", new_callable=AsyncMock), \
          patch("llm_shield_proxy.security.identity.jwt.get_unverified_header") as mock_unverified_header, \
          patch("llm_shield_proxy.security.identity.jwt.PyJWK") as mock_jwk, \
-         patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread:
+         patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread, \
+         patch("llm_shield_proxy.security.identity._get_jwk_thumbprint") as mock_thumbprint:
 
         mock_decode.return_value = {"iss": "https://issuer.com", "aud": "shield"}
         mock_unverified_header.return_value = {"jwk": {"kty": "RSA"}}
@@ -279,7 +280,7 @@ async def test_dpop_enforcement_tiers():
             {"htm": "GET", "htu": "https://example.com/api", "iat": time.time(), "jti": "123"}
         ]
 
-        mock_jwk.return_value.thumbprint = "thumbprint"
+        mock_thumbprint.return_value = "thumbprint"
 
         # Test Lenient Mode (should pass and set warning)
         tenant_policy_lenient = {"agent_identity_enforcer": "lenient", "allowed_issuers": ["https://issuer.com"]}

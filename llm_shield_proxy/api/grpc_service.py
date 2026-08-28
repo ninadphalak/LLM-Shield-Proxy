@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import grpclib
 import grpclib.server
@@ -59,7 +60,7 @@ class ExtProcService(ExternalProcessorBase):
                             break
                 except asyncio.TimeoutError:
                     logger.error("gRPC Stream Timeout: Terminating degraded IPC connection.")
-                    stream.cancel()
+                    await stream.cancel()
                     break
 
                 if request.request_body.body:
@@ -132,7 +133,7 @@ class ExtProcService(ExternalProcessorBase):
         except Exception as exc:
             logger.error(f"Error in ext_proc stream: {exc}", exc_info=True)
 
-    def _process_request_body(self, raw_body: bytes, vault: StatelessCryptoVault) -> bytes:
+    def _process_request_body(self, raw_body: bytes, vault: Any) -> bytes:
         """Executes the 3-Tier cascade on the request body (Runs in threadpool)."""
         try:
             payload = json.loads(raw_body.decode("utf-8"))

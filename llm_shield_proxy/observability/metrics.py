@@ -27,7 +27,7 @@ llm_shield_latency_seconds_bucket = Histogram(
 try:
     from prometheus_client import REGISTRY
     if "llm_shield_tokens_total" in REGISTRY._names_to_collectors:
-        llm_shield_tokens_total = REGISTRY._names_to_collectors["llm_shield_tokens_total"]
+        llm_shield_tokens_total: Counter = REGISTRY._names_to_collectors["llm_shield_tokens_total"]  # type: ignore
     else:
         llm_shield_tokens_total = Counter(
             "llm_shield_tokens_total",

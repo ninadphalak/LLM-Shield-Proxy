@@ -14,7 +14,7 @@ class StatelessPIICipher:
     Stateless AES-256-GCM cipher for PII tokenization.
     Enforces O(1) space complexity and zero DB dependencies.
     """
-    def __init__(self, key: bytes = None, keys: dict = None, version: int = 1, session_id: str | None = None):
+    def __init__(self, key: bytes | None = None, keys: dict | None = None, version: int = 1, session_id: str | None = None):
         if keys is None:
             if key is None:
                 raise ValueError("Must provide either key or keys")

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-import functions_framework
+import functions_framework  # type: ignore
 from google.cloud import bigquery
 
 # Initialize the BigQuery client
