@@ -16,13 +16,55 @@ LLM-Shield-Proxy is a hyper-fast, FastAPI-based streaming gateway designed speci
 By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy applies guardrails at the microsecond level, keeping your AI applications compliant with strict InfoSec mandates (GLBA, PCI-DSS, HIPAA) while maintaining zero-perceived-latency.
 
 **Option 1: Standard Egress**
-<br>
-<img src="https://kroki.io/mermaid/svg/eNplktFq2zAUhu_zFAf1JgHbTZ04SzM6aLMyAhkLCfRipReKdRSLqpKQZRLvJQZjd7soe4u91foIk606ZPRcGOnw_99_JItLvc8Lah0s1z3wVVbbnaWmgLvVHO7n2hptqcN2ew4bzCuLcKMrxaitH1pLU0xYzJ3QquM0dW1Mn9xYvS_RevPi463_LqnazQsqFBkchSurD_U9WS4_x5tCoGRx24GX51-___75_vL88wd5OMXC1RUQr3kyDvbCFbBaLIhvfgioVoqK9dqFx_b75ItBdb2IYC5pxTCCT_gklEiShAwGQRcyG_KGKuHEN2TwmtH_ilbD7c5iWQ5CkKd2dIgT73EWqUfuYI1G1gSS-HSaAG-Eayxq1twpg-AJUn-qMIYU6nHjaonAkNNKOiid1Y84OxttpymfRGEb7wVzxWxkDu-Dr2w9zX_iQsrZGR_yS86jzjxMp-P83f_m1By6BqOlfwaW1jPIIItyLbXtTCf4cIxjAOPjY0Ca5lmGb6brUBeTSTYan6CaiwugC0wvR9sjCFOc8mHn45z3_gFOidAo" alt="Standard Egress Diagram" width="800" />
+```mermaid
+flowchart LR
+    subgraph VPC [Corporate VPC / Secure Boundary]
+        direction LR
+        App(Browser / IDE / LangChain)
+        Proxy[LLM-Shield-Proxy 🛡️🔒]
+        App == "Prompt with PII" ==> Proxy
+    end
+
+    LLM(("OpenAI, Claude, Gemini..."))
+
+    Proxy == "Sanitized Prompt (Zero Egress)" ==> LLM
+    LLM -. "Streaming Reply" .-> Proxy
+    Proxy -. "Rehydrated Stream" .-> App
+
+    linkStyle default stroke:#3b82f6,stroke-width:3px;
+
+    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0284c7
+    style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
+    style LLM fill:#1e293b,stroke:#e2e8f0,color:#fff
+```
 
 **Option 2: Zero-Internet Air-Gapped Mode**
-<br>
-<img src="https://kroki.io/mermaid/svg/eNp1ks2O0zAUhfd9iqvMpkVJ6SRNaYsGqZShqlQ0VYvYjFi48XVjTSY2jqs0g3gGJMSOxYi34K2YR8CJk_5ohBeJ45zz3XNts0TkUUyUhsWqBWZku81WERnDp-UUbidceTMiJVKYCiWFIhrLP58rbTkoVxhpLtIGUI6JlG3nrRJ5hgpewvzdtXkuSLqdxoSnTucgXCqxL26dxeKDt445JtSrVuDp8dfvv3--Pz3-_OEca11vFWbZV8e-YWbC5KSAF863g-Q0AlxdgWN491JDznUMy_ncMYtvbNnzEJV4TVKu-YPp1tqs2par5JjSVjW52el22_ko4EZiOpm7ME3IjqILM7znKe92u06nY6V12pL_XqicKGr4K_yyw6wuYGANFLyuiaEVEoPZGplMCge63lmKmvhf6bE921opXGFc0PL4KFiPlZptsikTnt6tdZEgUGRkl2jItBJ3OL4INkOfDVz76eWc6ngcyP1r68sqT3lZGE-S8QXrsRFjbmPu-cN-9Orc7Mt9s0BJZi6fIsUYQgjdSCRCNaYTvG3jUICy_qGA70dhiM_SNajLwSAM-ieoeu9qFrJRFBxYSDZBb_g8bM0ahn3awxNWeV4WdIn-KNgcQT4OWa_xMcZa_wAGvwsA" alt="Air-Gapped Egress Diagram" width="800" />
-<br>
+```mermaid
+flowchart LR
+    subgraph VPC [Air-Gapped Corporate VPC]
+        direction LR
+        App(Browser / IDE / LangChain)
+        Proxy[LLM-Shield-Proxy 🛡️🔒]
+        Egress{"Egress Gateway *"}
+        
+        App == "Prompt with PII" ==> Proxy
+        Proxy == "Sanitized Prompt" ==> Egress
+    end
+
+    Out(("To OpenAI, Claude, Gemini..."))
+
+    Egress == "Forwarded Request" ==> Out
+    Out -. "Streaming Reply" .-> Egress
+    Egress -. "Streaming Reply" .-> Proxy
+    Proxy -. "Rehydrated Stream" .-> App
+
+    linkStyle default stroke:#3b82f6,stroke-width:3px;
+
+    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0284c7
+    style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
+    style Egress fill:#fef9c3,stroke:#eab308,stroke-width:2px,color:#854d0e
+    style Out fill:#1e293b,stroke:#e2e8f0,color:#fff
+```
 *\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
 
 > **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
