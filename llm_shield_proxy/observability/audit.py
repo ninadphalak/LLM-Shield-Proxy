@@ -113,6 +113,7 @@ class AuditLogger:
                     cls._last_hash = new_hash
 
             except Exception:  # nosec B110 noqa: S110
+                # Security Note: Silently drop failed logs to prevent worker crash
                 # Silently drop failed logs to prevent worker crash
                 pass
 

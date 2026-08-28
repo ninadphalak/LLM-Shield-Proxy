@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     AST_BRACKET_MULTIPLIER: int = Field(default=10, description="Heuristic multiplier for total brackets vs depth to prevent JSON bombs")
 
     # Server Configuration
+    # Security Note: Binding to 0.0.0.0 is explicitly required for Docker container deployments
     HOST: str = Field(default="0.0.0.0", description="Proxy listen host")  # nosec B104 # noqa: S104
     PORT: int = Field(default=8000, description="Proxy listen port")
     WORKERS: int = Field(default=1, description="Number of uvicorn worker processes")
@@ -262,12 +263,14 @@ class Settings(BaseSettings):
             try:
                 key_bytes = base64.b64decode(key_src)
             except Exception:  # nosec B110 noqa: S110
+                # Security Note: Fallback decoding attempt without crashing the proxy
                 pass
 
             if key_bytes is None or len(key_bytes) != 32:
                 try:
                     key_bytes = bytes.fromhex(key_src)
                 except Exception:  # nosec B110 noqa: S110
+                # Security Note: Fallback decoding attempt without crashing the proxy
                     pass
 
             if key_bytes is None or len(key_bytes) != 32:

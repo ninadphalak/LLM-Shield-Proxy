@@ -41,6 +41,7 @@ def get_crypto_dek() -> bytes:
                 _DEK = key_bytes
                 return _DEK
         except Exception:  # nosec B110 noqa: S110
+            # Security Note: Fallback key derivation attempts
             pass
 
         try:
@@ -50,6 +51,7 @@ def get_crypto_dek() -> bytes:
                 _DEK = key_bytes
                 return _DEK
         except Exception:  # nosec B110 noqa: S110
+            # Security Note: Fallback key derivation attempts
             pass
 
     raise ValueError("Valid 256-bit SHIELD_ENCRYPTION_KEY not found or invalid.")
