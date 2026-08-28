@@ -20,7 +20,7 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 flowchart LR
     subgraph VPC [Corporate VPC / Secure Boundary]
         direction LR
-        App[Enterprise AI App]
+        App(Browser / IDE / LangChain)
         Proxy[LLM-Shield-Proxy 🛡️🔒]
         App == "Prompt with PII" ==> Proxy
     end
@@ -33,10 +33,10 @@ flowchart LR
     LLM -. "Streaming Reply" .-> Proxy
     Proxy -. "Rehydrated Stream" .-> App
 
-    linkStyle default stroke-width:3px;
+    linkStyle default stroke:#3b82f6,stroke-width:3px;
 
-    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5
-    style Internet fill:#fef2f2,stroke:#ef4444,stroke-width:2px,stroke-dasharray: 5 5
+    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0284c7
+    style Internet fill:#fef2f2,stroke:#ef4444,stroke-width:2px,stroke-dasharray: 5 5,color:#ef4444
     style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
     style LLM fill:#1e293b,stroke:#e2e8f0,color:#fff
 ```
@@ -46,31 +46,29 @@ flowchart LR
 flowchart LR
     subgraph VPC [Air-Gapped Corporate VPC]
         direction LR
-        App[Enterprise AI App]
+        App(Browser / IDE / LangChain)
         Proxy[LLM-Shield-Proxy 🛡️🔒]
-        Egress[Internal Egress Gateway]
+        Egress{Egress Gateway *}
         
         App == "Prompt with PII" ==> Proxy
         Proxy == "Sanitized Prompt" ==> Egress
     end
 
-    subgraph Internet [External Internet]
-        LLM((Cloud LLM Provider))
-    end
+    Out((To OpenAI, Claude, Gemini...))
 
-    Egress == "Forwarded Request" ==> LLM
-    LLM -. "Streaming Reply" .-> Egress
+    Egress == "Forwarded Request" ==> Out
+    Out -. "Streaming Reply" .-> Egress
     Egress -. "Streaming Reply" .-> Proxy
     Proxy -. "Rehydrated Stream" .-> App
 
-    linkStyle default stroke-width:3px;
+    linkStyle default stroke:#3b82f6,stroke-width:3px;
 
-    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5
-    style Internet fill:#fef2f2,stroke:#ef4444,stroke-width:2px,stroke-dasharray: 5 5
+    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5,color:#0284c7
     style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
-    style Egress fill:#fef9c3,stroke:#eab308,stroke-width:2px
-    style LLM fill:#1e293b,stroke:#e2e8f0,color:#fff
+    style Egress fill:#fef9c3,stroke:#eab308,stroke-width:2px,color:#854d0e
+    style Out fill:#1e293b,stroke:#e2e8f0,color:#fff
 ```
+*\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
 
 > **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
 
@@ -92,11 +90,7 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 * **[Universal Zero-SDK Translators](#-the-drop-in-proof-zero-sdk-integration):** Drop-in compatibility for existing OpenAI SDKs with automatic edge-translation to Anthropic, Gemini, and vLLM schemas.
 * **[Edge-Level Agent Identity Enforcer](docs/features/agent_identity_enforcer.md):** Cryptographic Zero-Trust ingress barrier that intercepts autonomous agent tool-calls, strictly validating mathematically signed Workload Identity and DPoP proofs in <1ms to prevent rogue agent escalation.
 
-### Research & Publications
-This repository provides the reference proxy architecture and benchmark suite for resolving SSE stream fragmentation in enterprise sandboxes, as proposed in:
-* **Preprint Publication:** [DOI: 10.5281/zenodo.21955770](https://doi.org/10.5281/zenodo.21955770)
 
----
 
 ## ⚡ 60-Second Quickstart & Deployment
 
