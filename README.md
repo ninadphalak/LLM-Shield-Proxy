@@ -223,47 +223,42 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 ## 🏗️ Architecture Diagram
 
 ```mermaid
-flowchart TD
-    classDef default fill:transparent,stroke:#888,stroke-width:1px
-
-    Client["Browser / IDE / LangChain"]
+flowchart LR
+    %% Nodes
+    Client["Browser / IDE"]
+    LLM["OpenAI / Claude"]
     
     subgraph Proxy ["🛡️ LLM-Shield-Proxy (VPC)"]
-        direction TD
+        direction LR
         
-        Auth["🔑 Auth"]
-        Router{"JSON-RPC?"}
-        
-        subgraph Engine ["🔒 Redaction Engine"]
-            direction LR
-            T1["Tier 1: Regex"] --> T2["Tier 2: Entropy"] --> T3["Tier 3: ONNX NER"]
+        subgraph Inbound ["Sanitization (Inbound)"]
+            direction TB
+            Engine["3-Tier Redaction Engine"]
+            Vault["Vault (Redis / AES)"]
+            Engine --> Vault
         end
         
-        Redis[("Redis Vault")]
-        AES["Stateless AES"]
+        subgraph Outbound ["Rehydration (Outbound)"]
+            direction TB
+            Buffer["SSE Sliding-Window Buffer"]
+            Rehydrator["Stream Rehydrator"]
+            Buffer --> Rehydrator
+        end
         
-        Auth --> Router
-        Router -->|Text| Engine
-        Router -->|Agent| AES
-        
-        Engine --> Redis
-        Engine --> AES
+        Vault -.->|State Lookup| Rehydrator
     end
     
-    LLM["OpenAI / Claude / Gemini"]
+    %% Flows
+    Client == "1. Raw Prompt" ==> Engine
+    Vault == "2. Sanitized Egress" ==> LLM
+    LLM == "3. SSE Stream" ==> Buffer
+    Rehydrator == "4. Rehydrated Return" ==> Client
     
+    %% Styles
+    classDef default fill:transparent,stroke:#888,stroke-width:1px
     style Proxy fill:transparent,stroke:#888,stroke-width:2px,stroke-dasharray: 5 5
-    style Engine fill:transparent,stroke:#888,stroke-width:1px,stroke-dasharray: 5 5
-
-    Client -->|1. Prompt| Auth
-    Redis -->|2. Sanitized| LLM
-    AES -->|2. Sanitized| LLM
-    
-    LLM -.->|3. Stream| Redis
-    LLM -.->|3. Stream| AES
-    
-    Redis -.->|4. Rehydrated| Client
-    AES -.->|4. Rehydrated| Client
+    style Inbound fill:transparent,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
+    style Outbound fill:transparent,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
 ```
 
 ### How It Works (The Data Flow)
