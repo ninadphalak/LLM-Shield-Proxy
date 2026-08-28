@@ -27,7 +27,7 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 > **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
 
-**LLM-Shield-Proxy** is an open-source, zero-egress **AI Gateway** and **LLM Firewall** deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
+**LLM-Shield-Proxy** is an open-source, zero-egress PII redaction and compliance **AI Gateway** and **LLM Firewall** deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
 
 Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance (**SOC 2 Compliance for AI**, HIPAA, HITRUST without breaking real-time streaming latency).
 
