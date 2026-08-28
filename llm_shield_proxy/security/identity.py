@@ -12,8 +12,11 @@ import threading
 import time
 from collections import defaultdict
 from typing import Any, Dict, Optional
+import hashlib
+import json
 
 import jwt
+from jwt.utils import base64url_encode
 from fastapi import HTTPException, Request
 
 from llm_shield_proxy.core.config import agent_identity_ctx, settings
@@ -24,10 +27,7 @@ logger = logging.getLogger(__name__)
 _jwks_clients: Dict[str, jwt.PyJWKClient] = {}
 _jwks_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 
-import hashlib
-import json
 
-from jwt.utils import base64url_encode
 
 
 def _get_jwk_thumbprint(jwk_dict: dict) -> str:
