@@ -66,7 +66,7 @@ async def test_get_http_client_ca_bundle_file(monkeypatch):
 
     with patch("httpx.AsyncClient") as mock_client:
         mock_client.return_value = MagicMock()
-        client = main.get_http_client(request)
+        main.get_http_client(request)
 
         mock_client.assert_called_once()
         kwargs = mock_client.call_args[1]
@@ -86,7 +86,7 @@ async def test_get_http_client_outbound_mtls(monkeypatch):
 
     with patch("httpx.AsyncClient") as mock_client:
         mock_client.return_value = MagicMock()
-        client = main.get_http_client(request)
+        main.get_http_client(request)
 
         mock_client.assert_called_once()
         kwargs = mock_client.call_args[1]
