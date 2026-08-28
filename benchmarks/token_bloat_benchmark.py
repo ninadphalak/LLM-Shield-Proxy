@@ -20,10 +20,12 @@ def benchmark_token_bloat():
 
     if tiktoken:
         enc = tiktoken.get_encoding("cl100k_base")
-        tokenize = lambda x: len(enc.encode(x))
+        def tokenize(x):
+            return len(enc.encode(x))
     else:
         # Rough heuristic for base64 token bloat (approx 1 token per 3-4 chars)
-        tokenize = lambda x: len(x) // 3
+        def tokenize(x):
+            return len(x) // 3
 
     test_cases = [
         "john.doe@example.com",
