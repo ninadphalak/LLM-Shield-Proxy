@@ -22,7 +22,7 @@ def test_aad_cross_pollination():
     nonce_a = os.urandom(12)
     nonce_b = os.urandom(12)
 
-    ct_a = aesgcm.encrypt(nonce_a, entity_a, aad_a)
+    aesgcm.encrypt(nonce_a, entity_a, aad_a)
     ct_b = aesgcm.encrypt(nonce_b, entity_b, aad_b)
 
     # The LLM receives these blobs in the prompt.
@@ -34,7 +34,7 @@ def test_aad_cross_pollination():
 
     # The proxy tries to decrypt Blob B using the AAD of user_1
     try:
-        decrypted = aesgcm.decrypt(nonce_b, ct_b, aad_a)
+        aesgcm.decrypt(nonce_b, ct_b, aad_a)
         print("Success! (This should not happen)")
     except Exception as e:
         print(f"Decryption failed with exception: {type(e).__name__} - {e}")

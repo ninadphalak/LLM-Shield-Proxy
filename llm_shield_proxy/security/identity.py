@@ -7,17 +7,17 @@ Maps identities in O(1) time and enforces per-tenant or global ingress barriers.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import threading
 import time
 from collections import defaultdict
 from typing import Any, Dict, Optional
-import hashlib
-import json
 
 import jwt
-from jwt.utils import base64url_encode
 from fastapi import HTTPException, Request
+from jwt.utils import base64url_encode
 
 from llm_shield_proxy.core.config import agent_identity_ctx, settings
 
