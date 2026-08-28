@@ -50,7 +50,7 @@ Because the nonce travels with the data, the returning SSE stream from the LLM c
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `SHIELD_DEFAULT_MASKING_MODE` | Set to `STATELESS_CRYPTO` to enable in-band encryption. | [View in DEPLOYMENT.md](../../DEPLOYMENT.md) |
+| `SHIELD_DEFAULT_MASKING_MODE` | Set to `STATELESS_SYNTHETIC` to enable in-band encryption. | [View in DEPLOYMENT.md](../../DEPLOYMENT.md) |
 
 ## Critical Logic & Edge Cases
 * **Key Rotation:** The AES-256-GCM keys are derived via PBKDF2 HMAC. This allows enterprise operators to safely rotate master keys in HashiCorp Vault without downtime.

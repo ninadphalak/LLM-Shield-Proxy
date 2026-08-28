@@ -62,7 +62,7 @@ To prevent PII egress to third-party LLMs without breaking token counts or atten
   - `SYNTHETIC`: Canonical locale swapping to preserve BPE token lengths.
   - `STRUCTURAL_TAG`: Replacements like `[PERSON_1]`.
   - `SCRUB`: Hard deletion of offending tokens.
-  - `STATELESS_CRYPTO`: Fully reversible encrypted envelopes.
+  - `STATELESS_SYNTHETIC`: Fully reversible encrypted envelopes.
 
 ### Stage 3: WORM Merkle Chaining & Traceability
 To satisfy non-repudiation and traceability without retaining prompt data:
