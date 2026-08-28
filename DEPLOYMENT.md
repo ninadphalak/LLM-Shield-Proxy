@@ -2,6 +2,9 @@
 
 # 🚀 Deployment: Infrastructure & Resiliency
 
+For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Topologies](docs/features/deployment-topologies.md)** guide.
+
+
 ## 1. Service Mesh Native Interface
 * **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks, providing seamless inbound/outbound interception to maintain your **LLM Security Posture Management (LLM SPM)**.
 * **Relevant Flags**: Not explicitly flagged (relies on standard `HOST`/`PORT` socket configuration).
