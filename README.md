@@ -26,7 +26,7 @@ flowchart LR
     end
 
     subgraph Internet [External Internet]
-        LLM((Cloud LLM Provider))
+        LLM((OpenAI, Claude, Gemini...))
     end
 
     Proxy == "Sanitized Prompt (Zero Egress)" ==> LLM
