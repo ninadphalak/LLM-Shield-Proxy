@@ -17,11 +17,15 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 **Option 1: Standard Egress**
 <br>
-<img src="docs/assets/diagram-standard.svg?v=3" alt="Standard Egress Diagram" width="800" />
+<a target="_blank" href="docs/assets/diagram-standard.svg?v=3">
+  <img src="docs/assets/diagram-standard.svg?v=3" alt="Standard Egress Diagram" style="max-width: 100%; height: auto;" />
+</a>
 
 **Option 2: Zero-Internet Air-Gapped Mode**
 <br>
-<img src="docs/assets/diagram-airgapped.svg?v=3" alt="Air-Gapped Egress Diagram" width="800" />
+<a target="_blank" href="docs/assets/diagram-airgapped.svg?v=3">
+  <img src="docs/assets/diagram-airgapped.svg?v=3" alt="Air-Gapped Egress Diagram" style="max-width: 100%; height: auto;" />
+</a>
 <br>
 *\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
 
@@ -36,7 +40,9 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pipelines based on the payload structure. This ensures that autonomous agents don't crash from broken syntax trees, while human prompts get the highest quality contextual masking.
 
 <br>
-<img src="docs/assets/diagram-dual-pipeline.svg?v=2" alt="Dual-Pipeline Redaction Architecture" width="800" />
+<a target="_blank" href="docs/assets/diagram-dual-pipeline.svg?v=2">
+  <img src="docs/assets/diagram-dual-pipeline.svg?v=2" alt="Dual-Pipeline Redaction Architecture" style="max-width: 100%; height: auto;" />
+</a>
 
 ### A. Human-to-LLM (Text Prompts / STATELESS_CRYPTO)
 For standard conversational text, the proxy respects your configured masking mode. You can choose from four strategies:
