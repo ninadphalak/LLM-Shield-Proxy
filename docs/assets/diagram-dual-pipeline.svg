@@ -53,7 +53,7 @@
   <text x="520" y="193" text-anchor="middle" class="text">3. SCRUB</text>
 
   <rect x="420" y="220" width="200" height="36" class="router-node" rx="6" />
-  <text x="520" y="243" text-anchor="middle" class="text">4. STATELESS_SYNTHETIC</text>
+  <text x="520" y="243" text-anchor="middle" class="text">4. STATELESS_CRYPTO</text>
 
   <!-- Sub B -->
   <rect x="400" y="310" width="240" height="90" class="subgraph-box" />
