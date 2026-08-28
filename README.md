@@ -70,8 +70,8 @@ For standard conversational text, the proxy respects your configured masking mod
 
 ### B. Machine-to-Machine (JSON-RPC / Tool Calls)
 When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces **STATELESS_CRYPTO**. 
-* **Why?** Substituting data with synthetic fakes or changing string lengths inside strict JSON payloads frequently breaks the JSON syntax tree, causing agent crashes.
-* **The Solution:** By forcing in-band AES encryption for machine traffic, the proxy guarantees mathematically reversible masking without mutating the JSON structure or relying on Redis.
+* **Why?** Replacing text with synthetic names often breaks JSON syntax and crashes agents. 
+* **The Solution:** To fix this, the proxy uses in-band AES encryption for machine traffic—protecting the data without changing string lengths or relying on Redis.
 
 ---
 
@@ -223,46 +223,46 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, 
 
 ```mermaid
 flowchart TD
-    %% Node Styles (Theme Adaptive)
-    classDef client stroke-width:2px,stroke-dasharray: 5 5
-    classDef proxy stroke-width:2px,font-weight:bold
-    classDef security stroke-width:2px,font-weight:bold
-    classDef dualMode stroke-width:2px,stroke-dasharray: 4 4
+    classDef client fill:#f8fafc,stroke:#cbd5e1,stroke-width:2px,color:#0f172a
+    classDef proxy fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
+    classDef vault fill:#fffbeb,stroke:#f59e0b,stroke-width:2px,color:#92400e
 
     UserApp["👤 Client App"]:::client
     UpstreamLLM["☁️ Upstream LLM"]:::client
 
-    subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy VPC"]
+    subgraph SecurityMoat ["🛡️ LLM-Shield-Proxy (Zero-Egress VPC)"]
         direction TD
-        InboundAuth["🔑 Inbound Auth & Virtual Key"]:::proxy
-
-        subgraph CascadeEngine ["🔒 3-Tier Redaction Engine"]
-            Tier1["Tier 1: O(N) DFA Regex"]:::security
-            Tier2["Tier 2: Shannon Entropy"]:::security
-            Tier3["Tier 3: ONNX NER Pipeline"]:::security
-            Tier1 --> Tier2 --> Tier3
-        end
-
-        subgraph CryptoState ["🔐 Dual-Mode State Cryptography"]
-            direction LR
-            Mode1["Mode A: Redis TTL Vault"]:::dualMode
-            Mode2["Mode B: Stateless AES-GCM (In-Band)"]:::dualMode
-        end
-
-        LookaheadBuffer["⏱️ Sliding-Window Buffer"]:::proxy
-        Rehydrator["🔄 SSE Re-hydrator"]:::proxy
+        Auth["🔑 Inbound Auth"]:::proxy
+        Router{"JSON-RPC?"}:::proxy
+        
+        Redaction["🔒 3-Tier Redaction Engine"]:::proxy
+        
+        Redis[("Redis (Stateful)")]:::vault
+        AES["AES-GCM (Stateless)"]:::vault
+        
+        Buffer["⏱️ SSE Sliding-Window Buffer"]:::proxy
+        Rehydrator["🔄 Stream Re-hydrator"]:::proxy
     end
 
-    %% Flow
-    UserApp -->|1. Prompt (Raw PII)| InboundAuth
-    InboundAuth -->|2. Validated| Tier1
-    Tier3 -->|3. Encrypt / Store Mappings| CryptoState
-    Tier3 -->|4. Sanitized Payload| UpstreamLLM
+    %% Inbound Flow
+    UserApp -->|1. Prompt| Auth
+    Auth --> Router
+    
+    Router -->|No: Text| Redaction
+    Router -->|Yes: Agent| AES
+    
+    Redaction -->|Store mapping| Redis
+    Redaction -->|Encrypt| AES
+    
+    Redis -->|2. Sanitized| UpstreamLLM
+    AES -->|2. Sanitized| UpstreamLLM
 
-    UpstreamLLM -.->|5. SSE Stream Deltas| LookaheadBuffer
-    LookaheadBuffer -->|6. Prefix-Safe Chunk| Rehydrator
-    Rehydrator <--> CryptoState
-    Rehydrator -.->|7. Real-Time Rehydrated Stream| UserApp
+    %% Outbound Flow
+    UpstreamLLM -.->|3. SSE Stream| Buffer
+    Buffer -.->|4. Safe Chunk| Rehydrator
+    Rehydrator <-.->|5. Restore| Redis
+    Rehydrator <-.->|5. Decrypt| AES
+    Rehydrator -.->|6. Original Text| UserApp
 ```
 
 ### How It Works (The Data Flow)
