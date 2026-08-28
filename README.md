@@ -1,5 +1,12 @@
 # LLM-Shield-Proxy 🛡️
 
+[![Build Status](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green)](https://pypi.org/project/llm-shield-proxy/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Docker Pulls](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
+
 <img src="docs/LLM-Shield-Proxy-paper-v2.gif" width="600" alt="LLM-Shield-Proxy Demo" />
 
 **Ultra-Low Latency Generative AI Sanitization for Highly Regulated Enterprise Infrastructure**
@@ -10,21 +17,26 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 ```mermaid
 flowchart LR
-    A[Direct LLM Stream] -->|Risk of Data Leak| B((Security Blocked))
-    C[Legacy Gateways] -->|+150ms Latency| D((UX Destroyed))
-    E[LLM-Shield-Proxy] -->|Sub-10µs Token Overlay| F((Secure & Fast))
-    
-    style B fill:#fef2f2,stroke:#ef4444
-    style D fill:#fef2f2,stroke:#ef4444
-    style F fill:#f0fdf4,stroke:#22c55e
-```
+    subgraph VPC [Corporate VPC / Secure Boundary]
+        direction LR
+        App[Enterprise AI App]
+        Proxy[LLM-Shield-Proxy 🛡️🔒]
+        App -- "Prompt with PII" --> Proxy
+    end
 
-[![Build Status](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green)](https://pypi.org/project/llm-shield-proxy/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![Docker Pulls](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
+    subgraph Internet [External Internet]
+        LLM((Cloud LLM Provider))
+    end
+
+    Proxy -- "Sanitized Prompt (Zero Egress)" --> LLM
+    LLM -. "Streaming Reply" .-> Proxy
+    Proxy -. "Rehydrated Stream" .-> App
+
+    style VPC fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,stroke-dasharray: 5 5
+    style Internet fill:#fef2f2,stroke:#ef4444,stroke-width:2px,stroke-dasharray: 5 5
+    style Proxy fill:#f0fdf4,stroke:#22c55e,stroke-width:3px,color:#166534
+    style LLM fill:#1e293b,stroke:#e2e8f0,color:#fff
+```
 
 > **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
 
@@ -117,6 +129,8 @@ docker run -d -p 8000:8000 \
 ---
 
 ### 📦 Installation Options & Configuration Strategy
+
+For architectural diagrams showing VPC and Air-Gapped Egress gateway setups, please refer to the **[Deployment Topologies](docs/features/deployment-topologies.md)** guide.
 
 LLM-Shield-Proxy is heavily modular. You can configure the engine based on your specific compliance ROI and memory constraints:
 
@@ -573,7 +587,9 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
 
 ---
 
-## Citation
+## 📚 Research & Publications
+
+[![DOI](https://zenodo.org/badge/latestdoi/ninadphalak/LLM-Shield-Proxy)](https://zenodo.org/badge/latestdoi/ninadphalak/LLM-Shield-Proxy)
 
 If you reference this architecture, benchmark methodology, or sliding-window buffer implementation, please cite:
 
