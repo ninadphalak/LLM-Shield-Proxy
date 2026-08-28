@@ -32,7 +32,7 @@ For standard text prompts, the proxy supports dynamic per-request masking via he
 - `STATELESS_CRYPTO`: Encrypts entities using fully reversible AES-256-GCM envelopes, allowing the downstream system to recover the PII while hiding it from the LLM (no Redis required).
 
 ### Autonomous Agent Pipeline (Machine-to-Machine)
-When the proxy detects structured AI tool invocations (like `jsonrpc: 2.0`), it completely bypasses the Text-Prompt pipeline. Standard masking (like `SYNTHETIC`) corrupts JSON code. Therefore, for Machine-to-Machine traffic, the proxy **always** strictly enforces the AST-Aware Semantic Firewall. It parses the syntax tree and applies `STATELESS_SYNTHETIC` directly to the JSON values, guaranteeing no structural breakage and zero Redis dependency.
+When the proxy detects structured AI tool invocations (like `jsonrpc: 2.0`), it completely bypasses the Text-Prompt pipeline. Standard masking (like `SYNTHETIC`) corrupts JSON code. Therefore, for Machine-to-Machine traffic, the proxy **always** strictly enforces the AST-Aware Semantic Firewall. It parses the syntax tree and applies `STATELESS_CRYPTO` directly to the JSON values, guaranteeing no structural breakage and zero Redis dependency.
 
 ## Article 32: Security of Processing
 
