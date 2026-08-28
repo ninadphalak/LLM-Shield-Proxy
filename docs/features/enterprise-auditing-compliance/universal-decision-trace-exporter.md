@@ -6,7 +6,7 @@
 The **Universal Decision Trace Exporter** provides unified observability across all security boundaries. Rather than having scattered logs in one system and network traces in another, this engine aggregates every single security decision (regex matches, policy evaluations, and tool-call RBAC blocks) and seamlessly weaves them into your existing OpenTelemetry (OTel) distributed traces.
 
 ## How It Works
-Modern cloud infrastructure relies heavily on distributed tracing (Jaeger, Zipkin, Datadog) to understand request lifecycles. 
+Modern cloud infrastructure relies heavily on distributed tracing (Jaeger, Zipkin, Datadog) to understand request lifecycles.
 
 1. **Span Enrichment:** When the proxy initiates a trace span for an incoming HTTP request, the Decision Trace Exporter attaches to the active context.
 2. **Lifecycle Aggregation:** Every time the Tier 1, 2, or 3 engines make a redaction decision, or the RBAC engine blocks a tool, an "event" is dynamically appended to the active OTel Span.

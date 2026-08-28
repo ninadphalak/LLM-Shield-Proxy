@@ -11,13 +11,13 @@ For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Top
 
 ## 2. Zero-Overhead OpenTelemetry Tracing
 * **Implementation Details**: Lightweight OpenTelemetry (OTel) Tracing handles W3C traceparent distributed tracing propagation via a dedicated asynchronous background thread. Provides full observability to Jaeger or Datadog with strictly zero latency overhead to the active HTTP streaming loop.
-* **Relevant Flags**: 
+* **Relevant Flags**:
   * [`TELEMETRY_ENABLED`](#advanced-feature-flags-compliance-security-and-engineering)
   * [`TELEMETRY_ENDPOINT_URL`](#advanced-feature-flags-compliance-security-and-engineering)
 
 ## 3. Service Mesh Native gRPC ext_proc Integration
 * **Implementation Details**: Implements Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`). Achieves Zero HTTP network hops by streaming buffers directly over UDS (Unix Domain Sockets).
-* **Relevant Flags**: 
+* **Relevant Flags**:
   * [`ENABLE_EXT_PROC`](#advanced-feature-flags-compliance-security-and-engineering)
   * [`EXT_PROC_SOCK_PATH`](#advanced-feature-flags-compliance-security-and-engineering)
 
@@ -135,8 +135,8 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 > **Zero-Trust Default (`SHIELD_FAILURE_MODE`)**: The proxy is hardcoded to default to `FAIL_CLOSED`. This ensures that if the engine faults, a Redis connection drops, or a policy cannot be resolved, the connection is instantly severed to prevent PII egress. If you must set `SHIELD_FAILURE_MODE=FAIL_OPEN` for local development or a POC, be aware that **PII may leak** if the engine encounters an error. Never use `FAIL_OPEN` in production.
 ## 8. 🔐 TLS and mTLS Deployment (Docker/Kubernetes)
 
-When deploying LLM-Shield-Proxy in production, you should mount TLS certificates securely. 
-In Kubernetes, use `Secrets` mounted as volumes. 
+When deploying LLM-Shield-Proxy in production, you should mount TLS certificates securely.
+In Kubernetes, use `Secrets` mounted as volumes.
 
 **Example Docker Compose with TLS:**
 ```yaml

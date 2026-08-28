@@ -2,7 +2,7 @@
 
 ## Overview: Privacy by Design & Data Minimization
 
-The General Data Protection Regulation (GDPR) mandates strict principles regarding how Personal Identifiable Information (PII) is processed. Traditional AI gateways that log raw prompts or rely on external API boundaries inherently violate GDPR's data minimization and local processing principles. 
+The General Data Protection Regulation (GDPR) mandates strict principles regarding how Personal Identifiable Information (PII) is processed. Traditional AI gateways that log raw prompts or rely on external API boundaries inherently violate GDPR's data minimization and local processing principles.
 
 The LLM-Shield-Proxy resolves this through a mathematically rigorous "Zero-Data" architecture, ensuring compliance with Articles 5, 17, 25, and 32.
 
@@ -20,8 +20,8 @@ Instead of logging raw PII for audit purposes (which violates minimization), the
 ## Article 25: Data Protection by Design and by Default
 
 ### In-Band AES-256-GCM Envelope Encryption
-Privacy is engineered directly into the data payload before it ever leaves the VPC. 
-- When PII must be recoverable for the user but hidden from the external LLM, the proxy utilizes **In-Band Stateless Synthetic**. 
+Privacy is engineered directly into the data payload before it ever leaves the VPC.
+- When PII must be recoverable for the user but hidden from the external LLM, the proxy utilizes **In-Band Stateless Synthetic**.
 - Detected entities are encrypted using **AES-256-GCM envelope cryptography** within the payload. The external LLM receives an encrypted cipher-token, processes the prompt, and the proxy decrypts the cipher-token upon the LLM's response.
 
 ### Text-Prompt Masking Pipeline (Human-to-LLM)

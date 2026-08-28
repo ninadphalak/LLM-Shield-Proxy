@@ -11,7 +11,7 @@ The LLM-Shield-Proxy systematically addresses Articles 12 (Record-keeping) and 1
 Article 12 mandates that high-risk AI systems automatically record events ('logs') over their lifetime to ensure traceability of the system's functioning.
 
 ### WORM Audit Logging & Merkle Chaining
-To provide absolute traceability without persisting raw user prompts to disk, the proxy implements **WORM (Write Once, Read Many) Audit Logging**. 
+To provide absolute traceability without persisting raw user prompts to disk, the proxy implements **WORM (Write Once, Read Many) Audit Logging**.
 - **SHA-256 Sequential Merkle Hash Chaining:** Every redaction, tool-call interception, and configuration change generates a cryptographic event. These events are linked using sequential SHA-256 hashes, creating a Merkle chain. Any retroactive tampering with the logs will immediately invalidate the chain.
 - **Proof of Non-Egress Receipt:** The proxy computes a rolling SHA-256 digest over the entire SSE stream. It emits an HMAC-signed attestation proof guaranteeing exactly what data was (and wasn't) sent to the external LLM provider, providing mathematical proof to EU auditors.
 

@@ -52,7 +52,7 @@ A: `SCRUB` is highly efficient and guarantees zero token bloat. If you are using
 
 
 ## Plainspeak
-This feature gives you the ultimate flexibility to choose exactly how sensitive data is hidden on a case-by-case basis. 
+This feature gives you the ultimate flexibility to choose exactly how sensitive data is hidden on a case-by-case basis.
 
 Instead of being locked into one method, you can tell the system what to do for each individual request. You can choose to replace the data with a realistic fake (Synthetic), a standard placeholder tag, completely black it out (Scrub), or scramble it with a password so you can read it later (Crypto). This means developers have full control over the privacy technique they want to use at any given moment.
 

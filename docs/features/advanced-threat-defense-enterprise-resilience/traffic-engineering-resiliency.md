@@ -8,9 +8,9 @@
 ## How It Works
 The proxy leverages high-performance Python `asyncio` primitives combined with Redis Lua scripting to enforce strict traffic discipline.
 
-1. **Token-Bucket Rate Limiting:** The proxy executes a Lua script (`evalsha`) on the Redis cluster for every incoming request. It enforces a strict RPM (Requests Per Minute) limit mapped to the client's Virtual Key. 
+1. **Token-Bucket Rate Limiting:** The proxy executes a Lua script (`evalsha`) on the Redis cluster for every incoming request. It enforces a strict RPM (Requests Per Minute) limit mapped to the client's Virtual Key.
 2. **Concurrency Shedding:** If the proxy detects that the `asyncio` event loop is experiencing severe latency (e.g., event loop lag > 100ms), it activates load-shedding, instantly returning `503 Service Unavailable` to new connections to protect active streams.
-3. **Timeout Disciplines:** Every outbound HTTP request is wrapped in a strict `httpx.Timeout` structure, enforcing absolute limits on `connect`, `read`, and `write` operations. 
+3. **Timeout Disciplines:** Every outbound HTTP request is wrapped in a strict `httpx.Timeout` structure, enforcing absolute limits on `connect`, `read`, and `write` operations.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:
 ```mermaid

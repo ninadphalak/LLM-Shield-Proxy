@@ -11,7 +11,7 @@ LLM-Shield-Proxy is engineered as **Critical Compliance Infrastructure**. By des
 ### Common Fail Closed Configurations
 
 #### 1. `TELEMETRY_ENDPOINT_URL`
-If you have configured a telemetry endpoint for shipping Merkle logs and the endpoint becomes unreachable, the proxy will halt traffic. 
+If you have configured a telemetry endpoint for shipping Merkle logs and the endpoint becomes unreachable, the proxy will halt traffic.
 *   **Production:** This ensures that no traffic is processed without an immutable audit trail.
 *   **Local/POC Testing:** If you are just testing the proxy locally, you can disable this by unsetting `TELEMETRY_ENDPOINT_URL` or setting `FAIL_OPEN_ON_TELEMETRY_ERROR=True` (NOT RECOMMENDED for production).
 

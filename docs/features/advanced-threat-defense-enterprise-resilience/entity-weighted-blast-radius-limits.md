@@ -6,7 +6,7 @@
 **Entity-Weighted Blast Radius Limits** protect enterprises from massive, bulk data exfiltration events. Instead of simply rate-limiting a user based on the *number* of API requests they make, this feature utilizes a Redis Token-Bucket circuit breaker that penalizes users based on the *density of sensitive data* (entities) present in their requests.
 
 ## How It Works
-Traditional rate limiters (e.g., 100 requests per minute) are easily bypassed by an attacker submitting a single request containing 10,000 credit card numbers. 
+Traditional rate limiters (e.g., 100 requests per minute) are easily bypassed by an attacker submitting a single request containing 10,000 credit card numbers.
 
 1. **Entity Accounting:** During the 3-Tier Redaction Cascade, the proxy counts the exact number of PII entities identified (e.g., 50 SSNs, 12 API keys).
 2. **Weighted Deductions:** Rather than deducting "1" from the rate limit bucket for the HTTP request, the proxy deducts a weight relative to the entity count (e.g., deducting 62 points).

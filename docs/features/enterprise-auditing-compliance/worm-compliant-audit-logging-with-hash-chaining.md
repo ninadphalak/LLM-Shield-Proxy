@@ -9,7 +9,7 @@
 Standard JSON logs written to stdout or a file can easily be manipulated by an attacker who gains root access to the server. Hash Chaining solves this using a localized blockchain-style structure:
 
 1. **Event Structuring:** Every time the proxy makes a security decision (e.g., redacting an SSN, blocking a tool call), it generates a structured JSON audit event containing the timestamp, tenant ID, and the action taken.
-2. **Cryptographic Chaining:** Before emitting the log, the proxy calculates the SHA-256 hash of the *previous* log event and embeds it into the current event's payload. 
+2. **Cryptographic Chaining:** Before emitting the log, the proxy calculates the SHA-256 hash of the *previous* log event and embeds it into the current event's payload.
 3. **Sealing:** The current event is then hashed, creating a mathematically unbreakable chain of custody.
 
 <!-- EDIT THIS MERMAID SCRIPT TO UPDATE THE DIAGRAM:

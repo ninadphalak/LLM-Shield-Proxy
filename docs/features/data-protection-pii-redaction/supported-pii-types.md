@@ -27,7 +27,7 @@ Tier 1 utilizes zero-allocation, pre-compiled `google-re2` DFA regular expressio
 ---
 
 ## 🧠 Tier 2: Shannon Entropy (Unstructured Secrets & Cryptography)
-Because developers often leak proprietary API keys or database passwords that don't match a standard Regex format, Tier 2 acts as a mathematical dragnet. 
+Because developers often leak proprietary API keys or database passwords that don't match a standard Regex format, Tier 2 acts as a mathematical dragnet.
 
 **What gets detected:**
 - **Cryptographic Keys & Salts**: High-entropy strings exceeding $\tau_H \ge 4.5$ bits/symbol.
@@ -37,7 +37,7 @@ Because developers often leak proprietary API keys or database passwords that do
 ---
 
 ## 🤖 Tier 3: NLP NER Models (Semantic & Contextual Data)
-Tier 3 utilizes Named Entity Recognition (NER) models (like Presidio or local ONNX runtimes) to understand the semantic meaning of low-entropy text. 
+Tier 3 utilizes Named Entity Recognition (NER) models (like Presidio or local ONNX runtimes) to understand the semantic meaning of low-entropy text.
 
 While Tiers 1 and 2 detect *structured* data perfectly, Tier 3 is required for *contextual* data (where the words look like normal English but hold sensitive meaning).
 

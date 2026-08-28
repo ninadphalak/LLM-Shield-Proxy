@@ -6,7 +6,7 @@
 The **Centralized Enterprise Secrets & mTLS** feature ensures that the proxy integrates seamlessly into high-security enterprise environments (like DoD or Financial Services) without relying on insecure `.env` files. It natively fetches configuration data, API keys, and cryptographic certs directly from HashiCorp Vault.
 
 ## How It Works
-Storing the `UPSTREAM_API_KEY` or `REDIS_PASSWORD` in a Kubernetes ConfigMap or local disk is a critical security vulnerability. 
+Storing the `UPSTREAM_API_KEY` or `REDIS_PASSWORD` in a Kubernetes ConfigMap or local disk is a critical security vulnerability.
 
 1. **Vault Authentication:** On startup, the proxy authenticates to HashiCorp Vault using Kubernetes Service Account Tokens or Vault AppRole credentials.
 2. **In-Memory Hydration:** It fetches all required API keys, HMAC salts, and Redis credentials directly into ephemeral RAM. These secrets are never written to disk.

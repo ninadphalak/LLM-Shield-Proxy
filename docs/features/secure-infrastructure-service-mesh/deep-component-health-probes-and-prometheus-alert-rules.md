@@ -6,7 +6,7 @@
 **Deep Component Health Probes** provide Kubernetes with absolute clarity regarding the proxy's operational status. Rather than simply returning a "200 OK" if the HTTP server is running, the proxy performs deep, asynchronous diagnostic checks against its critical dependencies (Redis, Vault, Upstream APIs) to ensure it is truly ready to handle traffic.
 
 ## How It Works
-If a proxy pod loses connection to the Redis Vault but continues accepting traffic, it could result in catastrophic tokenization failures or data leaks. 
+If a proxy pod loses connection to the Redis Vault but continues accepting traffic, it could result in catastrophic tokenization failures or data leaks.
 
 1. **Liveness Probe (`/health/live`):** Checks if the Python event loop is functioning and the core FastAPI process is responsive.
 2. **Readiness Probe (`/health/ready`):** Executes an active PING against the Redis cluster, validates that the HashiCorp Vault token is unexpired, and optionally performs a lightweight socket connection to the upstream LLM provider.

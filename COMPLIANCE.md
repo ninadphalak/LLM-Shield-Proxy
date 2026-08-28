@@ -7,7 +7,7 @@ As enterprises rapidly operationalize Generative AI, they face an unprecedented 
 ### The Article 12 Paradox
 A critical systemic contradiction exists between the **EU AI Act's Article 12** (which mandates rigorous, immutable event logging and traceability for high-risk AI systems) and **GDPR's Article 5(1)(c) & Article 17** (which mandate strict data minimization and the right to erasure). Traditional proxy architectures cannot satisfy both; they either log too much (violating GDPR) or log too little (violating the EU AI Act).
 
-**The Solution:** The LLM-Shield-Proxy resolves this paradox through an in-VPC mathematical sanitization layer. By combining SHA-256 sequential Merkle hash chaining (for immutable, WORM-compliant event sequencing) with RFC 6902 JSON patch differential logging (recording *what* categories were redacted, not the raw PII), the proxy achieves perfect traceability without retaining a single byte of sensitive user data. 
+**The Solution:** The LLM-Shield-Proxy resolves this paradox through an in-VPC mathematical sanitization layer. By combining SHA-256 sequential Merkle hash chaining (for immutable, WORM-compliant event sequencing) with RFC 6902 JSON patch differential logging (recording *what* categories were redacted, not the raw PII), the proxy achieves perfect traceability without retaining a single byte of sensitive user data.
 
 Coupled with a Sub-millisecond SSE sliding buffer and C++ google-re2 DFA regex engine, the LLM-Shield-Proxy provides the foundation for global compliance with zero compromise on enterprise engineering performance.
 
@@ -39,7 +39,7 @@ No. The LLM-Shield-Proxy is designed for drop-in OpenAI API compatibility. Deplo
 We utilize cryptographic WORM (Write Once, Read Many) Audit Logging via SHA-256 sequential Merkle hash chaining. The proxy generates an RFC 6902 JSON patch differential log that records the *metadata* of the redaction (e.g., "Redacted `[CREDIT_CARD]` at token offset 42") rather than the data itself. We emit a rolling SHA-256 digest over the SSE stream, producing an HMAC-signed attestation proof (Proof of Non-Egress Receipt) that guarantees to auditors no PII was transmitted to the external LLM.
 
 **Q3: Does redacting sensitive data degrade LLM reasoning or cause streaming latency lag?**
-No. To preserve LLM reasoning, we utilize a 4-Mode Pipeline. The `SYNTHETIC` mode employs canonical locale swapping to generate structurally valid synthetic data that precisely preserves BPE token counts and LLM attention weights. 
+No. To preserve LLM reasoning, we utilize a 4-Mode Pipeline. The `SYNTHETIC` mode employs canonical locale swapping to generate structurally valid synthetic data that precisely preserves BPE token counts and LLM attention weights.
 For latency, the proxy utilizes a highly optimized C++ `google-re2` DFA regex engine (O(N) linear time) and a sub-millisecond sliding-window SSE lookahead buffer (<4.3 µs overhead per chunk). This allows us to rehydrate fragmented tokens across Server-Sent Events without UI stalls or noticeable lag.
 
 **Q4: How does the proxy prevent autonomous agents from running unauthorized database or shell commands?**

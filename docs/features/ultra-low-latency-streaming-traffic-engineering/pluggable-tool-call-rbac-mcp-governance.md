@@ -3,11 +3,11 @@
 [⬅️ Back to Features Catalog](../../../FEATURES.md)
 
 ## What It Does
-The **Pluggable Tool-Call RBAC (MCP Governance)** is a critical component of the LLM-Shield-Proxy. 
+The **Pluggable Tool-Call RBAC (MCP Governance)** is a critical component of the LLM-Shield-Proxy.
 Intercepts autonomous JSON-RPC tool executions and enforces strict logical access controls against your existing Redis infrastructure. *(OPA and HashiCorp Vault resolvers planned for v1.2)*
 
 ## How It Works
-This feature integrates directly into the zero-egress VPC architecture to ensure secure and ultra-low latency processing. 
+This feature integrates directly into the zero-egress VPC architecture to ensure secure and ultra-low latency processing.
 1. **Initialization:** Configured during startup via `policies.yaml` or `.env`.
 2. **Execution:** Operates asynchronously within the data plane, guaranteeing high throughput.
 3. **Completion:** Mutates or validates the payload safely before egress to the upstream LLM provider.

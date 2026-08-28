@@ -4,7 +4,7 @@ LLM-Shield-Proxy provides comprehensive Transport Layer Security (TLS) and Mutua
 
 ## Architectural Overview
 
-When operating as an AI Gateway, the proxy must secure data both on the **inbound** connection (from internal corporate clients and autonomous agents) and on the **outbound** connection (to upstream LLM providers or corporate egress gateways). 
+When operating as an AI Gateway, the proxy must secure data both on the **inbound** connection (from internal corporate clients and autonomous agents) and on the **outbound** connection (to upstream LLM providers or corporate egress gateways).
 
 The proxy implements TLS termination using the native `uvicorn` high-performance async loops, and manages outbound TLS utilizing `httpx` and `ssl` contexts.
 
@@ -15,15 +15,15 @@ sequenceDiagram
     participant Client as Internal Client
     participant Proxy as LLM-Shield-Proxy
     participant Gateway as Upstream Gateway
-    
+
     Client->>Proxy: 1. Inbound Connection
     Note over Client,Proxy: TLS Termination (HTTPS) + Optional Inbound mTLS (CERT_REQUIRED)
-    
+
     Proxy->>Proxy: 2. PII Redaction & Verification
-    
+
     Proxy->>Gateway: 3. Outbound Connection
     Note over Proxy,Gateway: Upstream CA Verification + Optional Outbound mTLS
-    
+
     Gateway-->>Client: 4. Secure Response (SSE Streaming)
 ```
 
@@ -37,7 +37,7 @@ llm-shield-proxy --tls-cert-file /path/to/server.crt --tls-key-file /path/to/ser
 *Alternatively via Environment Variables:* `TLS_CERT_FILE` and `TLS_KEY_FILE`.
 
 ### Inbound Mutual TLS (mTLS)
-To enforce strict zero-trust authentication, require connecting clients to present a valid certificate signed by a specific Certificate Authority (CA). 
+To enforce strict zero-trust authentication, require connecting clients to present a valid certificate signed by a specific Certificate Authority (CA).
 
 By providing `--client-ca-file`, the proxy instructs the socket to use `ssl.CERT_REQUIRED`. This guarantees that the connection will forcefully drop at the TCP/TLS layer before any HTTP data is even processed if the client lacks a valid certificate.
 ```bash
@@ -77,6 +77,6 @@ llm-shield-proxy
 
 **The Problem:** When building enterprise AI systems, data must be encrypted in transit. Simply using standard HTTPS verifies that the server is legitimate, but it doesn't verify the *client*. Furthermore, standard internet CA roots do not work inside highly secure, air-gapped VPCs where external internet traffic is blocked.
 
-**The Solution:** This feature provides complete end-to-end cryptographic control. 
+**The Solution:** This feature provides complete end-to-end cryptographic control.
 1. **Inbound mTLS** ensures that only authorized corporate machines holding a specific cryptographic ID card can even *connect* to the proxy.
 2. **Outbound Custom CAs & mTLS** allow the proxy to securely communicate with internal corporate firewalls without relying on public internet infrastructure, while simultaneously proving its own identity to those internal firewalls.
