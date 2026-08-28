@@ -17,7 +17,7 @@ If you have configured a telemetry endpoint for shipping Merkle logs and the end
 
 #### 2. Redis Connection Drops
 If `SHIELD_DEFAULT_MASKING_MODE=STATEFUL` and the Redis vault goes offline, the proxy cannot map synthetic entities. It will return a `503 Service Unavailable` or `429 Too Many Requests` (to trigger client retries) rather than passing unmasked PII.
-*   **Fix:** Ensure `REDIS_URL` is correct and network policies allow traffic. If you don't want to use Redis for testing, switch to `SHIELD_DEFAULT_MASKING_MODE=STATELESS_CRYPTO` to use AES-256-GCM entirely in-memory.
+*   **Fix:** Ensure `REDIS_URL` is correct and network policies allow traffic. If you don't want to use Redis for testing, switch to `SHIELD_DEFAULT_MASKING_MODE=STATELESS_SYNTHETIC` to use AES-256-GCM entirely in-memory.
 
 #### 3. Missing `UPSTREAM_API_KEY`
 The proxy intercepts the stream but does not hold the ultimate LLM API key. If `UPSTREAM_API_KEY` is not provided in the environment or passed via the Authorization header, it drops the request immediately.

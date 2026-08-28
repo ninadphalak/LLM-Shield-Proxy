@@ -53,14 +53,14 @@
   <text x="520" y="193" text-anchor="middle" class="text">3. SCRUB</text>
 
   <rect x="420" y="220" width="200" height="36" class="router-node" rx="6" />
-  <text x="520" y="243" text-anchor="middle" class="text">4. STATELESS_CRYPTO</text>
+  <text x="520" y="243" text-anchor="middle" class="text">4. STATELESS_SYNTHETIC</text>
 
   <!-- Sub B -->
   <rect x="400" y="310" width="240" height="90" class="subgraph-box" />
   <text x="415" y="335" class="title">B. Machine-to-Machine</text>
 
   <rect x="420" y="350" width="200" height="36" class="router-node" rx="6" />
-  <text x="520" y="373" text-anchor="middle" class="text">STATELESS_CRYPTO</text>
+  <text x="520" y="373" text-anchor="middle" class="text">STATELESS_SYNTHETIC</text>
 
   <!-- Redis (Cylinder) -->
   <g class="vault-node" transform="translate(710, 80)">
