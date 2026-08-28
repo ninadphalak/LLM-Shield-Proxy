@@ -17,11 +17,11 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 **Option 1: Standard Egress**
 <br>
-<img src="docs/assets/diagram-standard.svg" alt="Standard Egress Diagram" width="800" />
+<img src="docs/assets/diagram-standard.svg?v=3" alt="Standard Egress Diagram" width="800" />
 
 **Option 2: Zero-Internet Air-Gapped Mode**
 <br>
-<img src="docs/assets/diagram-airgapped.svg" alt="Air-Gapped Egress Diagram" width="800" />
+<img src="docs/assets/diagram-airgapped.svg?v=3" alt="Air-Gapped Egress Diagram" width="800" />
 <br>
 *\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
 
