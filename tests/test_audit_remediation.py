@@ -268,7 +268,7 @@ async def test_dpop_enforcement_tiers():
     with patch("llm_shield_proxy.security.identity.jwt.decode") as mock_decode, \
          patch("llm_shield_proxy.security.identity._get_signing_key", new_callable=AsyncMock), \
          patch("llm_shield_proxy.security.identity.jwt.get_unverified_header") as mock_unverified_header, \
-         patch("llm_shield_proxy.security.identity.jwt.PyJWK") as mock_jwk, \
+         patch("llm_shield_proxy.security.identity.jwt.PyJWK"), \
          patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread, \
          patch("llm_shield_proxy.security.identity._get_jwk_thumbprint") as mock_thumbprint:
 

@@ -1,9 +1,0 @@
-Method,Name,Error,Occurrences,First Seen,Last Seen
-POST,/v1/chat/completions (PII),HTTPError('503 Server Error: Service Unavailable for url: /v1/chat/completions (PII)'),2,2026-08-17T12:49:56Z,2026-08-17T12:50:37Z
-POST,/v1/chat/completions (Adversarial),HTTPError('503 Server Error: Service Unavailable for url: /v1/chat/completions (Adversarial)'),3,2026-08-17T12:48:05Z,2026-08-17T12:50:46Z
-POST,/v1/chat/completions (Happy),"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",735,2026-08-17T12:45:52Z,2026-08-17T12:46:14Z
-POST,/v1/chat/completions (Streaming),CatchResponseError('Status 503'),4,2026-08-17T12:49:15Z,2026-08-17T12:50:45Z
-POST,/v1/chat/completions (Happy),HTTPError('503 Server Error: Service Unavailable for url: /v1/chat/completions (Happy)'),5,2026-08-17T12:47:24Z,2026-08-17T12:50:38Z
-POST,/v1/chat/completions (Adversarial),"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",245,2026-08-17T12:45:52Z,2026-08-17T12:46:12Z
-POST,/v1/chat/completions (PII),"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",477,2026-08-17T12:45:52Z,2026-08-17T12:46:11Z
-POST,/v1/chat/completions (Streaming),CatchResponseError('Status 0'),481,2026-08-17T12:45:52Z,2026-08-17T12:46:12Z
