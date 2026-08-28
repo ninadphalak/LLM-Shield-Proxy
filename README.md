@@ -35,34 +35,8 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 
 LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pipelines based on the payload structure. This ensures that autonomous agents don't crash from broken syntax trees, while human prompts get the highest quality contextual masking.
 
-```mermaid
-flowchart TD
-    classDef default fill:transparent,stroke:#888,stroke-width:1px
-
-    Client["Browser / IDE / LangChain"] --> Router{"JSON-RPC?"}
-    
-    Router -->|No: Text| SubA
-    Router -->|Yes: Agent| SubB
-    
-    subgraph SubA [A. Human-to-LLM]
-        direction TB
-        Syn["1. SYNTHETIC"]
-        Tag["2. STRUCTURAL_TAG"]
-        Scrub["3. SCRUB"]
-        CryptoA["4. STATELESS_SYNTHETIC"]
-    end
-
-    subgraph SubB [B. Machine-to-Machine]
-        direction TB
-        CryptoB["STATELESS_SYNTHETIC"]
-    end
-    
-    Syn -.-> Redis[(Redis Vault)]
-    Tag -.-> Redis
-
-    style SubA fill:transparent,stroke:#888,stroke-width:1px,stroke-dasharray: 5 5
-    style SubB fill:transparent,stroke:#888,stroke-width:1px,stroke-dasharray: 5 5
-```
+<br>
+<img src="docs/assets/diagram-dual-pipeline.svg?v=1" alt="Dual-Pipeline Redaction Architecture" width="800" />
 
 ### A. Human-to-LLM (Text Prompts)
 For standard conversational text, the proxy respects your configured masking mode. You can choose from four strategies:
