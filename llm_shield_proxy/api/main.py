@@ -910,7 +910,7 @@ async def _proxy_catch_all_internal(
                                 "type": "about:blank",
                                 "title": "Bad Request",
                                 "status": 400,
-                                "detail": str(ade)
+                                "detail": "JSON Payload nested too deeply"
                             },
                             headers={"Content-Type": "application/problem+json"}
                         )
