@@ -69,6 +69,9 @@ def test_audit_logger_rfc6902_diff_and_chaining(caplog):
     # Verify cryptographic chain integrity
     event_copy = log_entry.copy()
     event_hash = event_copy.pop("hash")
+    # Ed25519 signature fields are appended after the hash is computed; exclude them too.
+    event_copy.pop("signature", None)
+    event_copy.pop("public_key_fingerprint", None)
 
     # Reconstruct the string used for hashing (JSON serialized, keys sorted)
     # audit.py hashes the JSON representation containing 'previous_hash' directly.

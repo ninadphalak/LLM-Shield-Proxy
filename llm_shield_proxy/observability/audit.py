@@ -7,6 +7,8 @@ Guarantees zero raw PII leakage in log sinks.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -18,7 +20,13 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from fastapi import APIRouter
+
 from llm_shield_proxy.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Structured audit logger configuration
 audit_logger = logging.getLogger("llm_shield.audit")
@@ -40,6 +48,71 @@ if not audit_logger.handlers:
     _queue_listener.start()
 
     audit_logger.addHandler(_queue_handler)
+
+
+def _load_or_generate_signing_key() -> ed25519.Ed25519PrivateKey:
+    """Loads the Ed25519 audit-signing key from AUDIT_SIGNING_PRIVATE_KEY (PEM or raw 32-byte
+    seed, base64/hex), falling back to a freshly generated ephemeral key."""
+    raw = settings.AUDIT_SIGNING_PRIVATE_KEY
+    if raw:
+        raw = raw.strip()
+        try:
+            if "BEGIN" in raw:
+                key = serialization.load_pem_private_key(raw.encode("utf-8"), password=None)
+                if not isinstance(key, ed25519.Ed25519PrivateKey):
+                    raise TypeError("AUDIT_SIGNING_PRIVATE_KEY PEM is not an Ed25519 key")
+                return key
+
+            seed: Optional[bytes] = None
+            try:
+                seed = base64.b64decode(raw, validate=True)
+            except (binascii.Error, ValueError):
+                seed = None
+            if seed is None or len(seed) != 32:
+                seed = bytes.fromhex(raw)
+            if len(seed) != 32:
+                raise ValueError("Decoded AUDIT_SIGNING_PRIVATE_KEY seed is not 32 bytes")
+            return ed25519.Ed25519PrivateKey.from_private_bytes(seed)
+        except Exception as exc:
+            logger.warning(
+                "Failed to parse AUDIT_SIGNING_PRIVATE_KEY (%s); falling back to an ephemeral Ed25519 key.", exc
+            )
+
+    logger.warning(
+        "AUDIT_SIGNING_PRIVATE_KEY is unset; generated an ephemeral Ed25519 audit-signing key. "
+        "Signed receipts will not be verifiable against a stable public key across restarts."
+    )
+    return ed25519.Ed25519PrivateKey.generate()
+
+
+_AUDIT_SIGNING_KEY: ed25519.Ed25519PrivateKey = _load_or_generate_signing_key()
+_AUDIT_PUBLIC_KEY: ed25519.Ed25519PublicKey = _AUDIT_SIGNING_KEY.public_key()
+_AUDIT_PUBLIC_KEY_RAW: bytes = _AUDIT_PUBLIC_KEY.public_bytes(
+    encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
+)
+_AUDIT_PUBLIC_KEY_PEM: str = _AUDIT_PUBLIC_KEY.public_bytes(
+    encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
+).decode("utf-8")
+_AUDIT_PUBLIC_KEY_FINGERPRINT: str = hashlib.sha256(_AUDIT_PUBLIC_KEY_RAW).hexdigest()
+
+
+def get_audit_public_key_info() -> Dict[str, str]:
+    """Returns the published Ed25519 public key material used to verify signed audit receipts."""
+    return {
+        "algorithm": "Ed25519",
+        "public_key_pem": _AUDIT_PUBLIC_KEY_PEM,
+        "public_key_fingerprint": _AUDIT_PUBLIC_KEY_FINGERPRINT,
+        "instance_id": AuditLogger._instance_id,
+    }
+
+
+audit_router = APIRouter(prefix="/api/v1/audit", tags=["Audit"])
+
+
+@audit_router.get("/pubkey")
+async def get_audit_public_key() -> Dict[str, str]:
+    """Publishes the proxy's Ed25519 audit-signing public key for offline receipt verification."""
+    return get_audit_public_key_info()
 
 
 class AuditLogger:
@@ -98,6 +171,20 @@ class AuditLogger:
 
                     # Avoid double serialization by mutating the JSON string directly
                     final_str = f'{event_str[:-1]}, "hash": "{new_hash}"}}'
+
+                    try:
+                        # Sign the canonical hash-chained payload (non-blocking: this already
+                        # runs on the dedicated WORM background thread, never the ASGI loop).
+                        signature_b64 = base64.b64encode(
+                            _AUDIT_SIGNING_KEY.sign(final_str.encode("utf-8"))
+                        ).decode("ascii")
+                        final_str = (
+                            f'{final_str[:-1]}, "signature": "{signature_b64}", '
+                            f'"public_key_fingerprint": "{_AUDIT_PUBLIC_KEY_FINGERPRINT}"}}'
+                        )
+                    except Exception:  # nosec B110 noqa: S110
+                        # Security Note: Never let signing failures break WORM chain continuity.
+                        pass
 
                     if severity == "CRITICAL":
                         audit_logger.critical(final_str)

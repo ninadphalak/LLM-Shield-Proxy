@@ -51,7 +51,7 @@ from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
 from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
 from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
 from llm_shield_proxy.engines.vault import vault_store
-from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.observability.audit import AuditLogger, audit_router
 from llm_shield_proxy.observability.metrics import (
     llm_shield_latency_seconds_bucket,
     llm_shield_requests_total,
@@ -366,6 +366,7 @@ app = FastAPI(
 
 app.include_router(health_router)
 app.include_router(webhook_router)
+app.include_router(audit_router)
 
 
 @app.middleware("http")
