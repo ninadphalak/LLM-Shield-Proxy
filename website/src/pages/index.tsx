@@ -22,7 +22,7 @@ function HomepageHeader() {
         <div className={styles.buttons}>
           <Link
             className="button button--secondary button--lg"
-            href="https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/ARCHITECTURE.md">
+            to="/docs/architecture">
             View Architecture 🚀
           </Link>
           <Link

