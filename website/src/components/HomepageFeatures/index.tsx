@@ -44,6 +44,16 @@ const FeatureList: FeatureItem[] = [
     link: '/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading'
   },
   {
+    title: 'MCP Tool Governance',
+    icon: '🔌',
+    description: (
+      <>
+        A dedicated JSON-RPC 2.0 gateway for Claude Desktop, Cursor, and agent frameworks — per-role tool allow-lists, AST-aware argument/result redaction, and dynamic tools/list pruning.
+      </>
+    ),
+    link: '/docs/guides/mcp-tool-governance'
+  },
+  {
     title: 'Auditing & Compliance',
     icon: '🧾',
     description: (

@@ -57,6 +57,7 @@ class SSERehydrationBuffer:
 
         max_k = 0
         token_to_original = getattr(self.vault, "token_to_original", None)
+        is_word_char = getattr(self.vault, "_is_word_char", None)
         if token_to_original:
             for token in token_to_original:
                 # Check prefix lengths up to min(len(text), len(token) - 1)
@@ -65,6 +66,16 @@ class SSERehydrationBuffer:
                     if text.endswith(token[:k]):
                         max_k = k
                         break
+
+                # A COMPLETE token match sitting at the very tail of the buffer is
+                # still boundary-ambiguous if the token ends in a word character:
+                # more characters may arrive next chunk that extend it into a
+                # longer, unrelated word (e.g. token "Maya" + next-chunk "ns" ->
+                # legitimate word "Mayans"). Retain the full token until a
+                # non-word character (or stream end) resolves the right boundary,
+                # instead of rehydrating it prematurely.
+                if is_word_char and len(token) <= len(text) and is_word_char(token[-1]) and text.endswith(token):
+                    max_k = max(max_k, len(token))
 
         # Check for partial [ENC_v1_ tokens for StatelessCryptoVault
         if type(self.vault).__name__ == "StatelessCryptoVault":

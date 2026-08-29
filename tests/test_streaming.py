@@ -51,8 +51,11 @@ def test_sse_buffer_synthetic_unbracketed_word_fragmentation():
     assert emitted[0] == "Hello "
     assert emitted[1] == ""  # 'M' held
     assert emitted[2] == ""  # 'May' held
-    assert emitted[3] == "OriginalSensitiveName"  # Completed 'Maya' -> rehydrated
-    assert emitted[4] == "! How are you?"
+    # A *complete* 'Maya' match at the buffer tail is still boundary-ambiguous:
+    # the next chunk could extend it into an unrelated word (e.g. "Mayans"), so
+    # it is held rather than rehydrated immediately.
+    assert emitted[3] == ""
+    assert emitted[4] == "OriginalSensitiveName! How are you?"
 
     full_output = "".join(emitted)
     assert full_output == "Hello OriginalSensitiveName! How are you?"

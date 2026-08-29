@@ -11,6 +11,7 @@ import StatsBar from '@site/src/components/Homepage/StatsBar';
 import InteractiveShieldDemo from '@site/src/components/Homepage/InteractiveShieldDemo';
 import DualPipeline from '@site/src/components/Homepage/DualPipeline';
 import HowItWorks from '@site/src/components/Homepage/HowItWorks';
+import MCPGovernance from '@site/src/components/Homepage/MCPGovernance';
 import ComparisonTable from '@site/src/components/Homepage/ComparisonTable';
 import IntegrationStrip from '@site/src/components/Homepage/IntegrationStrip';
 import FinalCTA from '@site/src/components/Homepage/FinalCTA';
@@ -59,6 +60,7 @@ export default function Home(): ReactNode {
         <InteractiveShieldDemo />
         <DualPipeline />
         <HowItWorks />
+        <MCPGovernance />
         <HomepageFeatures />
         <ComparisonTable />
         <IntegrationStrip />

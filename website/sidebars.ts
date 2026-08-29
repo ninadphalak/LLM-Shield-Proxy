@@ -8,6 +8,7 @@ const sidebars: SidebarsConfig = {
     'deployment',
     'features-overview',
     'policies',
+    'guides/mcp-tool-governance',
     {
       type: 'category',
       label: 'Compliance',
