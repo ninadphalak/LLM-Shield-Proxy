@@ -35,6 +35,13 @@ const PHASE_LABEL: Record<Phase, string> = {
   received: '✅ Response received — PII rehydrated for your screen',
 };
 
+const AGENT_PHASE_LABEL: Record<Phase, string> = {
+  idle: 'Pick a Tier 3 example above to load a tool-call payload',
+  typing: '⏳ Building JSON-RPC payload…',
+  sent: '🛰️ Redacted payload sent to LLM — awaiting response…',
+  received: '✅ Response received — PII rehydrated for the calling agent',
+};
+
 type TerminalPart = {text: string; kind: 'comment' | 'sensitive' | 'protected' | 'restored' | null};
 
 const TERMINAL_LINES: TerminalPart[] = [
@@ -62,29 +69,15 @@ const TERMINAL_LINES: TerminalPart[] = [
   {text: '"Update record for John Doe, SSN 456-12-7890"', kind: null},
 ];
 
-const AGENT_BEFORE: TerminalPart[] = [
-  {text: '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "patient_name": "', kind: null},
-  {text: 'Sarah Connor', kind: 'sensitive'},
-  {text: '",\n      "ssn": "', kind: null},
-  {text: '456-12-7890', kind: 'sensitive'},
-  {text: '",\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
-];
-
-const AGENT_AFTER: TerminalPart[] = [
-  {text: '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "patient_name": ', kind: null},
-  {text: '{\n        "_shield_val": "Maya Torres",\n        "_shield_ctx": "aesgcm:8f2a...c91"\n      }', kind: 'protected'},
-  {text: ',\n      "ssn": ', kind: null},
-  {text: '{\n        "_shield_val": "839-14-2207",\n        "_shield_ctx": "aesgcm:5b7e...a03"\n      }', kind: 'protected'},
-  {text: ',\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
-];
-
-const AGENT_RECEIVED: TerminalPart[] = [
-  {text: '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "patient_name": "', kind: null},
-  {text: 'Sarah Connor', kind: 'restored'},
-  {text: '",\n      "ssn": "', kind: null},
-  {text: '456-12-7890', kind: 'restored'},
-  {text: '",\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
-];
+// The Agent-mode panels below render this same envelope around whichever
+// Tier 3 example is currently selected, with the "notes" value run through
+// the identical analyzeAndMask() pipeline used for chat text. This mirrors
+// the production AST mutator, which recursively scans every string leaf
+// value in a JSON-RPC payload through the full Tier 1/2/3 cascade - not a
+// separate, reduced pipeline for structured traffic.
+const AGENT_JSON_PREFIX =
+  '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "notes": "';
+const AGENT_JSON_SUFFIX = '"\n    }\n  },\n  "id": 17\n}';
 
 function TerminalBody({parts}: {parts: TerminalPart[]}): ReactNode {
   return (
@@ -203,20 +196,24 @@ function RehydratedPayload({segments, mode}: {segments: RedactionResult['segment
   );
 }
 
-type Selection = MaskMode | 'AGENT_JSON_RPC';
+type TrafficType = 'CHAT' | 'AGENT';
 
 const AGENT_BLURB =
-  "Not a masking mode you choose — this is how the proxy automatically handles structured tool calls.";
+  'Structured JSON-RPC / MCP tool calls always use AES-256-GCM (Stateless Crypto) — Scrub and Structural ' +
+  'Tags would break the payload schema. Tier 1 regex, Tier 2 synthesis, and Tier 3 NER still scan every ' +
+  'string value inside the JSON tree exactly as they do for chat text — switch the Tier 3 example above ' +
+  'to see it fire on different fields.';
 
 export default function InteractiveShieldDemo(): ReactNode {
   const [text, setText] = useState(TEMPLATES[0].text);
-  const [selection, setSelection] = useState<Selection>('SYNTHETIC');
+  const [trafficType, setTrafficType] = useState<TrafficType>('CHAT');
+  const [maskModeSelection, setMaskModeSelection] = useState<MaskMode>('SYNTHETIC');
   const [activeTemplate, setActiveTemplate] = useState(TEMPLATES[0].key);
   const [phase, setPhase] = useState<Phase>('idle');
   const [sentResult, setSentResult] = useState<RedactionResult | null>(null);
 
-  const isAgentMode = selection === 'AGENT_JSON_RPC';
-  const mode: MaskMode = isAgentMode ? 'STATELESS_CRYPTO' : selection;
+  const isAgentMode = trafficType === 'AGENT';
+  const mode: MaskMode = isAgentMode ? 'STATELESS_CRYPTO' : maskModeSelection;
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const llmRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -231,7 +228,7 @@ export default function InteractiveShieldDemo(): ReactNode {
     clearTimeout(debounceRef.current);
     clearTimeout(llmRef.current);
 
-    if (isAgentMode || !text.trim()) {
+    if (!text.trim()) {
       setPhase('idle');
       setSentResult(null);
       return;
@@ -248,7 +245,7 @@ export default function InteractiveShieldDemo(): ReactNode {
       clearTimeout(debounceRef.current);
       clearTimeout(llmRef.current);
     };
-  }, [text, mode, isAgentMode]);
+  }, [text, mode]);
 
   const syncScroll = () => {
     if (backdropRef.current && textareaRef.current) {
@@ -258,6 +255,8 @@ export default function InteractiveShieldDemo(): ReactNode {
   };
 
   const activeModeBlurb = isAgentMode ? AGENT_BLURB : MODE_OPTIONS.find((m) => m.value === mode)?.blurb;
+
+  const phaseLabel = isAgentMode ? AGENT_PHASE_LABEL[phase] : PHASE_LABEL[phase];
 
   return (
     <section className={styles.section}>
@@ -271,29 +270,38 @@ export default function InteractiveShieldDemo(): ReactNode {
             This is a live, 100% client-side preview of Tier 1 (regex) and Tier 2 (format-preserving
             synthesis) detection — nothing here calls a real LLM or leaves your machine. The
             production engine adds a local ONNX NER model (Tier 3) for free-text names and
-            organizations, and genuine AES-256-GCM for the AES-256-GCM mode. Pick{' '}
-            <strong>Agent → LLM tool call</strong> from the dropdown to see how structured JSON-RPC
-            traffic is protected differently from chat.
+            organizations, and genuine AES-256-GCM for the AES-256-GCM mode — and runs that identical
+            three-tier cascade on every string value inside structured JSON-RPC / tool-call traffic too,
+            not a separate or reduced pipeline. Switch <strong>Traffic type</strong> to{' '}
+            <strong>Agent tool call</strong> below to see it fire inside a JSON payload.
           </p>
         </div>
 
         <div className={styles.controls}>
           <label className={styles.controlGroup}>
+            <span className={styles.controlLabel}>Traffic type</span>
+            <select
+              className={styles.select}
+              value={trafficType}
+              onChange={(e) => setTrafficType(e.target.value as TrafficType)}>
+              <option value="CHAT">💬 Chat: Human ↔ LLM</option>
+              <option value="AGENT">🤖 Agent tool call: JSON-RPC (machine ↔ machine)</option>
+            </select>
+          </label>
+
+          <label className={styles.controlGroup}>
             <span className={styles.controlLabel}>Masking mode</span>
             <select
               className={styles.select}
-              value={selection}
-              onChange={(e) => setSelection(e.target.value as Selection)}>
-              <optgroup label="Masking mode — human ↔ LLM chat">
-                {MODE_OPTIONS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Not a masking mode — machine ↔ machine">
-                <option value="AGENT_JSON_RPC">🤖 Agent → LLM tool call (JSON-RPC)</option>
-              </optgroup>
+              value={mode}
+              disabled={isAgentMode}
+              title={isAgentMode ? 'Locked — structured JSON-RPC payloads always use AES-256-GCM' : undefined}
+              onChange={(e) => setMaskModeSelection(e.target.value as MaskMode)}>
+              {MODE_OPTIONS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -302,7 +310,6 @@ export default function InteractiveShieldDemo(): ReactNode {
             <select
               className={styles.select}
               value={activeTemplate}
-              disabled={isAgentMode}
               onChange={(e) => {
                 const template = TEMPLATES.find((t) => t.key === e.target.value);
                 if (template) {
@@ -331,29 +338,74 @@ export default function InteractiveShieldDemo(): ReactNode {
               <div className={styles.panel}>
                 <div className={styles.panelLabel}>Raw agent tool call (JSON-RPC)</div>
                 <pre className={styles.jsonBlock}>
-                  <TerminalBody parts={AGENT_BEFORE} />
+                  {AGENT_JSON_PREFIX}
+                  <HighlightedInput segments={liveResult.segments} />
+                  {AGENT_JSON_SUFFIX}
                 </pre>
               </div>
               <div className={styles.panel}>
                 <div className={styles.panelLabel}>Sent to LLM</div>
                 <pre className={styles.jsonBlock}>
-                  <TerminalBody parts={AGENT_AFTER} />
+                  {sentResult && (phase === 'sent' || phase === 'received') ? (
+                    sentResult.totalEntities > 0 ? (
+                      <>
+                        {AGENT_JSON_PREFIX}
+                        <MaskedPayload segments={sentResult.segments} />
+                        {AGENT_JSON_SUFFIX}
+                      </>
+                    ) : (
+                      <span className={styles.emptyState}>No sensitive entities detected — sent as-is.</span>
+                    )
+                  ) : (
+                    <span className={styles.emptyState}>Waiting for the tool call to build…</span>
+                  )}
                 </pre>
               </div>
               <div className={styles.panel}>
                 <div className={styles.panelLabel}>Received back by the agent (rehydrated)</div>
                 <pre className={styles.jsonBlock}>
-                  <TerminalBody parts={AGENT_RECEIVED} />
+                  {phase === 'received' && sentResult ? (
+                    sentResult.totalEntities > 0 ? (
+                      <>
+                        {AGENT_JSON_PREFIX}
+                        <RehydratedPayload segments={sentResult.segments} mode={mode} />
+                        {AGENT_JSON_SUFFIX}
+                      </>
+                    ) : (
+                      <span className={styles.emptyState}>Nothing to rehydrate — no entities were masked.</span>
+                    )
+                  ) : phase === 'sent' ? (
+                    <span className={styles.pending}>
+                      <span className={styles.spinner} /> Non-blocking — proxy is holding the mapping while
+                      the LLM responds…
+                    </span>
+                  ) : (
+                    <span className={styles.emptyState}>The rehydrated reply will appear here.</span>
+                  )}
                 </pre>
               </div>
             </div>
+
+            <div className={styles.statusRow}>
+              <span className={phase === 'typing' ? styles.statusPending : styles.status}>{phaseLabel}</span>
+              {sentResult && sentResult.totalEntities > 0 && (phase === 'sent' || phase === 'received') && (
+                <span className={styles.legend}>
+                  {Object.entries(sentResult.counts).map(([type, count]) => (
+                    <span key={type} className={styles.legendItem} style={{color: ENTITY_COLORS[type]}}>
+                      ● {type} × {count}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
             <p className={styles.agentCaption}>
-              Structured JSON-RPC / MCP tool calls always use <strong>Stateless Synthetic</strong> mode —
-              never Scrub or Structural Tags — because those would break the payload's schema and could
-              crash the agent. <code>_shield_val</code> is a realistic fake the LLM can safely see and
-              echo back; <code>_shield_ctx</code> is an in-band AES-256-GCM ciphertext the proxy uses to
-              restore the original value before handing the response back to the calling agent. No
-              Redis, no database, no long-term storage.
+              This is the exact same Tier 1/2/3 cascade as the chat demo, run against the{' '}
+              <code>notes</code> string inside a real JSON-RPC <code>tools/call</code> envelope — the proxy
+              recursively scans every string value in the payload tree, not just top-level or
+              "known" fields. Structured tool calls always use <strong>AES-256-GCM (Stateless Crypto)</strong>{' '}
+              — never Scrub or Structural Tags — because those would alter the payload's shape and could
+              break the calling agent's schema. The proxy restores the original value before handing the
+              response back. No Redis, no database, no long-term storage.
             </p>
           </>
         ) : (
@@ -417,9 +469,7 @@ export default function InteractiveShieldDemo(): ReactNode {
             </div>
 
             <div className={styles.statusRow}>
-              <span className={phase === 'typing' ? styles.statusPending : styles.status}>
-                {PHASE_LABEL[phase]}
-              </span>
+              <span className={phase === 'typing' ? styles.statusPending : styles.status}>{phaseLabel}</span>
               {sentResult && sentResult.totalEntities > 0 && (phase === 'sent' || phase === 'received') && (
                 <span className={styles.legend}>
                   {Object.entries(sentResult.counts).map(([type, count]) => (
