@@ -1,4 +1,4 @@
-[⬅️ Back to README](../README.md)
+[⬅️ Back to README](/)
 
 # 🛠️ Day-2 Operations & Production Runbook
 

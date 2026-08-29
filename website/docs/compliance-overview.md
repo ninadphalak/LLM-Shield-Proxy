@@ -1,4 +1,4 @@
-[⬅️ Back to README](README.md)
+[⬅️ Back to README](/)
 
 # 📜 Compliance: Audit, Forensics & Legal
 
@@ -26,7 +26,7 @@ The following matrix maps the LLM-Shield-Proxy's cryptographic and systems engin
 | **[ISO/IEC 42001 & NIST SP 800-53 Rev. 5](docs/compliance/nist_iso_fips.md)** | Continuous AI risk management and systemic assessment artifact generation. | Disqualification from federal/DoD contracts; operational halting. | Universal Decision Trace Exporter generating automated NIST OSCAL compliance artifacts. |
 | **[FIPS 140-3](docs/compliance/nist_iso_fips.md)** | Cryptographic module integrity and validated algorithm implementation. | Ineligibility for US Government and regulated sector deployment. | Cryptographic Known Answer Tests (KAT) for SHA-256 and AES-256-GCM. |
 
-*(For a detailed breakdown of the internal proxy mechanics, review the [Architecture & Cryptographic Data Flow](ARCHITECTURE.md) document).*
+*(For a detailed breakdown of the internal proxy mechanics, review the [Architecture & Cryptographic Data Flow](/docs/architecture) document).*
 
 ---
 

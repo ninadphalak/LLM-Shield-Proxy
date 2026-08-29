@@ -1,6 +1,6 @@
 # Multi-Provider Upstream Key Registry
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Multi-Provider Upstream Key Registry** centralizes and secures API key management for enterprises using multiple AI models. Instead of forcing client applications to juggle keys for OpenAI, Anthropic, Gemini, and DeepSeek, the proxy manages all upstream authentication securely behind the firewall, auto-resolving the correct key based on the target destination.
@@ -35,9 +35,9 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `OPENAI_API_KEY` | Real key injected for OpenAI/Azure destinations. | [View in deployment.md](../../deployment.md) |
-| `ANTHROPIC_API_KEY` | Real key injected for Anthropic destinations. | [View in deployment.md](../../deployment.md) |
-| `GEMINI_API_KEY` | Real key injected for Google Gemini destinations. | [View in deployment.md](../../deployment.md) |
+| `OPENAI_API_KEY` | Real key injected for OpenAI/Azure destinations. | [View in deployment.md](/docs/deployment) |
+| `ANTHROPIC_API_KEY` | Real key injected for Anthropic destinations. | [View in deployment.md](/docs/deployment) |
+| `GEMINI_API_KEY` | Real key injected for Google Gemini destinations. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Key Stripping:** If a developer accidentally hardcodes a real OpenAI key into their client application and sends it to the proxy, the proxy's middleware strips the rogue key completely, replacing it with the central registry key. This prevents developers from intentionally bypassing corporate billing accounts.
@@ -58,4 +58,4 @@ This feature works like a smart keychain that automatically grabs the right key 
 If you use multiple AI providers (OpenAI, Anthropic, DeepSeek), developers usually have to write messy code to juggle all the different API passwords. With this feature, developers just send their request to the proxy, and the proxy automatically looks at the destination, pulls the correct password out of its secure keychain, and unlocks the door. Developers never have to worry about managing the keys.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](../../../tests/test_multi_tenant.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_multi_tenant.py).

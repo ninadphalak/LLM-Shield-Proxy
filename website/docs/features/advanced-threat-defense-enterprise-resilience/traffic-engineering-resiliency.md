@@ -1,6 +1,6 @@
 # Traffic Engineering & Resiliency
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Traffic Engineering & Resiliency** encompasses a suite of low-level networking safeguards designed to protect the LLM-Shield-Proxy against massive traffic spikes, volumetric DDoS attacks, and backend LLM bottlenecks. It ensures the proxy remains highly available (99.99%) even when subjected to adversarial loads.
@@ -34,8 +34,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `DEFAULT_RATE_LIMIT_RPM` | Base Requests Per Minute allowed per Virtual Key (default 6000). | [View in deployment.md](../../deployment.md) |
-| `MAX_CONCURRENT_STREAMS` | Hard cap on active HTTP/2 SSE streams per pod. | [View in deployment.md](../../deployment.md) |
+| `DEFAULT_RATE_LIMIT_RPM` | Base Requests Per Minute allowed per Virtual Key (default 6000). | [View in deployment.md](/docs/deployment) |
+| `MAX_CONCURRENT_STREAMS` | Hard cap on active HTTP/2 SSE streams per pod. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Burst Allowances:** The Token-Bucket algorithm natively supports bursts. A client can execute 200 requests in a single second, provided they do not exceed the 6,000 RPM average over the rolling window, seamlessly supporting map-reduce style agent workloads.
@@ -56,4 +56,4 @@ This feature acts as a smart speed limit for incoming requests to prevent your i
 If a massive spike of thousands of users suddenly tries to use the AI all at the same time, it could crash the entire system. This feature uses a specialized "token bucket" system to enforce a strict speed limit (like allowing a maximum of 6000 requests per minute). Anyone who exceeds this limit is gently told to slow down, ensuring the system stays online for everyone else.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

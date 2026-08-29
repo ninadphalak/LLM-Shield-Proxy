@@ -30,4 +30,4 @@ To guarantee that the proxy's internal cryptographic algorithms are functioning 
 - **Execution:** During initialization, the proxy feeds predetermined inputs into the cryptographic modules and verifies that the outputs mathematically match the strict expected ciphertexts and digests.
 - **Failure Halting:** If a KAT fails (indicating hardware degradation, memory corruption, or binary tampering), the proxy will aggressively halt initialization and refuse to route traffic, preventing any unencrypted or improperly hashed data from traversing the network.
 
-*(Reference the [Architecture & Cryptographic Data Flow](../../ARCHITECTURE.md) for deeper implementation details).*
+*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details).*

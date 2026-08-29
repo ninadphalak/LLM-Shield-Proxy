@@ -1,6 +1,6 @@
 # OPA & Vault Stale-While-Revalidate RBAC Resolvers
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 LLM-Shield-Proxy features a highly optimized Pluggable RBAC Engine for tool-call governance. Starting in version 1.3, it supports asynchronous, high-performance resolvers for **Open Policy Agent (OPA)** and **HashiCorp Vault**.
@@ -37,11 +37,11 @@ flowchart TD
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `OPA_URL` | The URL to your OPA server (e.g., `http://opa:8181/v1/data/shield/rbac`). | [View in deployment.md](../../../deployment.md) |
-| `ENABLE_VAULT_SECRETS` | Set to `True` to activate Vault integration. | [View in deployment.md](../../../deployment.md) |
-| `VAULT_ADDR` | The HashiCorp Vault server address. | [View in deployment.md](../../../deployment.md) |
-| `VAULT_TOKEN` | The HashiCorp Vault authentication token. | [View in deployment.md](../../../deployment.md) |
-| `RBAC_CACHE_TTL_SECONDS` | Controls how long a policy remains fresh before requiring a background revalidation (default `300`). | [View in deployment.md](../../../deployment.md) |
+| `OPA_URL` | The URL to your OPA server (e.g., `http://opa:8181/v1/data/shield/rbac`). | [View in deployment.md](/docs/deployment) |
+| `ENABLE_VAULT_SECRETS` | Set to `True` to activate Vault integration. | [View in deployment.md](/docs/deployment) |
+| `VAULT_ADDR` | The HashiCorp Vault server address. | [View in deployment.md](/docs/deployment) |
+| `VAULT_TOKEN` | The HashiCorp Vault authentication token. | [View in deployment.md](/docs/deployment) |
+| `RBAC_CACHE_TTL_SECONDS` | Controls how long a policy remains fresh before requiring a background revalidation (default `300`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Thundering Herd Prevention:** The background fetch uses an `_inflight` state tracker. If 1,000 concurrent streaming requests hit the proxy for the same expired tenant key, only *one* background task is dispatched to OPA or Vault, shielding your backend infrastructure from spike loads.
@@ -64,4 +64,4 @@ This feature connects the proxy's security checks to the massive, enterprise-gra
 Instead of forcing a company to recreate all of their security rules from scratch inside the proxy, this feature acts as a lightning-fast bridge. It instantly asks the company's main security database, "Is this user allowed to do this?" and securely caches the answer so it doesn't slow down the chat.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

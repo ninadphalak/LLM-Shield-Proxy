@@ -1,6 +1,6 @@
 # HTTP/2 Upstream Connection Pooling
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **HTTP/2 Upstream Connection Pooling** fundamentally optimizes the proxy's networking layer. Rather than opening and closing a new TCP socket and performing a TLS handshake for every single LLM request, the proxy maintains a persistent, high-throughput pool of HTTP/2 multiplexed connections to upstream providers like OpenAI and Anthropic.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `HTTP_MAX_CONNECTIONS` | Maximum number of concurrent connections in the pool (default: 1000). | [View in deployment.md](../../deployment.md) |
-| `HTTP_MAX_KEEPALIVE_CONNECTIONS` | Number of persistent idle connections to keep warm (default: 200). | [View in deployment.md](../../deployment.md) |
+| `HTTP_MAX_CONNECTIONS` | Maximum number of concurrent connections in the pool (default: 1000). | [View in deployment.md](/docs/deployment) |
+| `HTTP_MAX_KEEPALIVE_CONNECTIONS` | Number of persistent idle connections to keep warm (default: 200). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Connection Draining (SIGTERM):** If the proxy pod is scaling down, Kubernetes sends a SIGTERM. The proxy stops accepting new connections but keeps the existing HTTP/2 streams alive for up to 25 seconds (`DRAIN_TIMEOUT_SECONDS`), ensuring in-flight SSE streams successfully complete before closing the connection pool.
@@ -55,4 +55,4 @@ This feature acts like a permanent carpool lane for internet traffic, making com
 Normally, every time your app asks the AI a question, it has to spend time "shaking hands" and setting up a secure connection over the internet, which takes a split second. This feature sets up a secure connection once, keeps it open, and forces all future questions to share that exact same connection simultaneously. This eliminates the repetitive setup delays.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_transport.py`](../../../tests/test_transport.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_transport.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_transport.py).

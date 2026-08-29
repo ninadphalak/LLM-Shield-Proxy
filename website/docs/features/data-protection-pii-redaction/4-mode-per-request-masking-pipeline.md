@@ -1,6 +1,6 @@
 # 4-Mode Per-Request Masking Pipeline
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **4-Mode Per-Request Masking Pipeline** empowers client applications to dynamically select their desired redaction strategy on a per-request basis without requiring server restarts. By passing a specific HTTP header, engineers can choose exactly how sensitive data is masked before it hits the LLM.
@@ -32,8 +32,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Header / Override | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `X-Shield-Masking-Mode` | HTTP header to dynamically set the mode (`SYNTHETIC`, `STRUCTURAL_TAG`, `SCRUB`, `STATELESS_CRYPTO`). | [View in POLICIES.md](../../POLICIES.md) |
-| `SHIELD_DEFAULT_MASKING_MODE` | The global default mode if the client does not specify the header. | [View in deployment.md](../../deployment.md) |
+| `X-Shield-Masking-Mode` | HTTP header to dynamically set the mode (`SYNTHETIC`, `STRUCTURAL_TAG`, `SCRUB`, `STATELESS_CRYPTO`). | [View in POLICIES.md](/docs/policies) |
+| `SHIELD_DEFAULT_MASKING_MODE` | The global default mode if the client does not specify the header. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Thread-Safety:** Because the proxy processes thousands of concurrent streaming requests, overriding a setting via a header must not affect other active streams. The proxy uses Python's `contextvars.ContextVar` and `copy_context().run()` to ensure the mode override is strictly isolated to the specific asyncio task handling the request.
@@ -57,4 +57,4 @@ This feature gives you the ultimate flexibility to choose exactly how sensitive 
 Instead of being locked into one method, you can tell the system what to do for each individual request. You can choose to replace the data with a realistic fake (Synthetic), a standard placeholder tag, completely black it out (Scrub), or scramble it with a password so you can read it later (Crypto). This means developers have full control over the privacy technique they want to use at any given moment.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

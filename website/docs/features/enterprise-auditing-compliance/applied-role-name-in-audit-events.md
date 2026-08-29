@@ -1,6 +1,6 @@
 # Applied Role Name in Audit Events
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Applied Role Name in Audit Events** feature provides exact attribution for every security decision made by the proxy. It ensures that compliance officers and security analysts know exactly *which* YAML policy role governed a specific request, vastly simplifying access control audits.
@@ -49,4 +49,4 @@ This feature acts as a strict "who authorized this?" tracker on the audit logs.
 If a file is redacted, the logs normally just say "file redacted". But an auditor will ask, "Wait, why was it redacted, and whose rules were we following?" This feature automatically tags every log with the exact name of the security policy (the "role") that caused the action, providing absolute clarity on why a decision was made.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

@@ -1,4 +1,4 @@
-[⬅️ Back to README](README.md)
+[⬅️ Back to README](/)
 
 # 🚀 Deployment: Infrastructure & Resiliency
 
@@ -45,7 +45,7 @@ DevOps teams can now mount a `policies.yaml` file to dynamically map `virtual_ke
 **Universal Dynamic Override Engine:**
 DevOps teams are no longer limited to basic security toggles; they can now dynamically override any of the 30+ `.env` properties (like `MAX_PAYLOAD_SIZE_BYTES` or `RATE_LIMIT_RPM`) natively per `virtual_key_id` inside `policies.yaml`. This is powered by an ASGI-native `contextvars.ContextVar` architecture to achieve strictly isolated, O(1) thread-safe tenant configurations without global state leakage.
 
-> **[View the Complete Policy-as-Code Guide & Templates 📜](POLICIES.md)**: For detailed Role-Based Access Control (RBAC) templates, feature support matrices, and FAQs.
+> **[View the Complete Policy-as-Code Guide & Templates 📜](/docs/policies)**: For detailed Role-Based Access Control (RBAC) templates, feature support matrices, and FAQs.
 
 ### Core Configuration Flags
 

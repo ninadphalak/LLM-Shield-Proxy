@@ -1,6 +1,6 @@
 # Security Response Headers on All Responses
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Security Response Headers** feature ensures that every single HTTP response emitted by the proxy—whether it is a successful LLM stream, a 400 error, or a 503 load-shedding rejection—is automatically armored with industry-standard HTTP security headers. This protects client applications and browsers interacting with the proxy from common web vulnerabilities.
@@ -51,4 +51,4 @@ This feature adds an invisible armor plating to the web browser when communicati
 When an app connects to the internet, hackers often try tricky browser attacks (like secretly embedding your chat window inside a malicious website to steal clicks). This feature forcefully attaches strict security instructions to every single response, ordering the user's web browser to instantly block those types of attacks.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

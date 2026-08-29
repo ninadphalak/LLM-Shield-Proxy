@@ -1,6 +1,6 @@
 # Provider Failover with Per-Request Override
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Provider Failover with Per-Request Override** guarantees zero-downtime service continuity for mission-critical AI applications. It allows the proxy to dynamically reroute requests to secondary LLM mirrors (like Azure OpenAI) if the primary provider experiences an outage, or empowers clients to explicitly declare a fallback URL on a per-request basis.
@@ -33,9 +33,9 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable / Header | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `FALLBACK_BASE_URL` | Global fallback provider URL if the primary fails. | [View in deployment.md](../../deployment.md) |
-| `FALLBACK_API_KEY` | Secondary API key for the fallback provider. | [View in deployment.md](../../deployment.md) |
-| `X-Shield-Fallback-URL` | Client HTTP header to dynamically override the fallback destination. | [View in POLICIES.md](../../POLICIES.md) |
+| `FALLBACK_BASE_URL` | Global fallback provider URL if the primary fails. | [View in deployment.md](/docs/deployment) |
+| `FALLBACK_API_KEY` | Secondary API key for the fallback provider. | [View in deployment.md](/docs/deployment) |
+| `X-Shield-Fallback-URL` | Client HTTP header to dynamically override the fallback destination. | [View in POLICIES.md](/docs/policies) |
 
 ## Critical Logic & Edge Cases
 * **No Unapproved Downgrades:** The proxy will *only* failover to explicitly approved URLs. It protects enterprises from situations where an application silently downgrades to a weaker, cheaper model (e.g., GPT-4 to GPT-3.5) without security authorization.
@@ -56,4 +56,4 @@ This feature is an automatic backup plan that ensures your app never goes down w
 If OpenAI's servers suddenly go offline, this feature detects the crash and instantly reroutes the question to a backup provider (like Anthropic or a different server) before the user even realizes there was a problem. It also allows developers to easily specify exactly which backup server they prefer to use for any given request.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

@@ -1,6 +1,6 @@
 # Zero-Overhead OpenTelemetry (OTel) Tracing
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Zero-Overhead OpenTelemetry (OTel) Tracing** allows the LLM-Shield-Proxy to emit deep, distributed network traces without introducing any latency penalties to the critical data path. It ensures that observability never comes at the cost of performance, even when handling thousands of concurrent LLM streams.
@@ -34,8 +34,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `OTEL_TRACES_SAMPLER` | Configures trace sampling (e.g., `always_on`, `parentbased_traceidratio`). | [View in deployment.md](../../deployment.md) |
-| `OTEL_BSP_MAX_QUEUE_SIZE` | The maximum number of spans to buffer in memory before dropping (default 2048). | [View in deployment.md](../../deployment.md) |
+| `OTEL_TRACES_SAMPLER` | Configures trace sampling (e.g., `always_on`, `parentbased_traceidratio`). | [View in deployment.md](/docs/deployment) |
+| `OTEL_BSP_MAX_QUEUE_SIZE` | The maximum number of spans to buffer in memory before dropping (default 2048). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Graceful Degradation:** If the downstream OTLP collector (e.g., Jaeger) goes offline, the in-memory queue will eventually fill up. The proxy gracefully drops new spans with a silent telemetry error rather than crashing the pod or blocking user traffic.
@@ -56,4 +56,4 @@ This feature acts like an ultra-lightweight GPS tracker attached to every reques
 To monitor the health of the system, we need to track exactly how many milliseconds a request spends in each part of the proxy. However, the act of tracking can sometimes accidentally slow down the system! This feature solves that by assigning the heavy lifting of tracking to a completely separate background worker, ensuring the main traffic flows at maximum speed without any tracking delays.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tracing.py`](../../../tests/test_tracing.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_tracing.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_tracing.py).

@@ -1,6 +1,6 @@
 # Sub-Millisecond SSE Sliding-Window Buffer
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Sub-Millisecond SSE Sliding-Window Buffer** is the patent-pending, core technological breakthrough of the LLM-Shield-Proxy. It solves the hardest problem in LLM security: securely redacting sensitive data from real-time Server-Sent Events (SSE) streams without destroying the "typing" visual effect that users expect from AI chatbots.
@@ -38,7 +38,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `MAX_SSE_LINE_LENGTH` | Limits the maximum size of a single SSE frame to prevent buffer overflow attacks. | [View in deployment.md](../../deployment.md) |
+| `MAX_SSE_LINE_LENGTH` | Limits the maximum size of a single SSE frame to prevent buffer overflow attacks. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Slowloris Stream Attacks:** The buffer handles network timeouts gracefully. If the upstream LLM hangs mid-stream, the proxy's `httpx` timeouts and jitter implementations prevent the connection pool from stalling.
@@ -62,4 +62,4 @@ This feature ensures the proxy can redact sensitive information without causing 
 When an AI streams text, it sends words in tiny, fragmented chunks (like sending "S-O-C-I-A-L" one letter at a time). Standard security filters get confused by this because they can't see the whole word. This feature creates a super-fast "waiting room" that briefly holds the letters together just long enough to read the full word, redacting it if necessary, before instantly passing it along to your screen.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](../../../tests/test_streaming.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_streaming.py).

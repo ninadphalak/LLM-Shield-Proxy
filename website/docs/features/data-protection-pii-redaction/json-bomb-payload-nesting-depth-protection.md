@@ -1,6 +1,6 @@
 # JSON Bomb / Payload Nesting Depth Protection
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **JSON Bomb Protection** feature is an adversarial defense mechanism that prevents stack overflow attacks and CPU exhaustion caused by maliciously crafted, infinitely nested JSON payloads. It hardens the proxy against Denial of Service (DoS) attacks targeting the AST-aware lexer.
@@ -58,4 +58,4 @@ This feature acts as a safety limit against overwhelming the system with overly 
 Hackers sometimes try to crash servers by sending data that has layers inside layers inside layers (like a billion Russian nesting dolls). If the computer tries to open them all, it runs out of memory and crashes. This feature strictly enforces a limit on how many layers deep the data can go, instantly blocking any "data bombs" before they cause harm.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

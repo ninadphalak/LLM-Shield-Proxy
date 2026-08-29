@@ -1,6 +1,6 @@
 # Universal Dynamic Override Engine
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Universal Dynamic Override Engine** gives clients and administrators absolute flexibility by allowing them to override nearly any global `.env` configuration (like masking modes, failover URLs, or downstream telemetry flags) on a per-tenant, per-request basis—without adding massive, bloated parameter lists to internal Python functions.
@@ -46,4 +46,4 @@ This feature gives you the ultimate flexibility to change the proxy's behavior o
 Normally, the rules of a proxy (like "always block Social Security Numbers") apply equally to everyone. This engine allows a specific user or app to send a special instruction (an "override") that says, "For this one specific question, use a different rule." It applies this temporary override seamlessly without messing up the rules for anyone else using the system at the same time.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

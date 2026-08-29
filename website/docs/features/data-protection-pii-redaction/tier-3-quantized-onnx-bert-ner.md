@@ -1,6 +1,6 @@
 # Tier 3 Quantized ONNX BERT-NER
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Tier 3 Quantized ONNX BERT-NER** is the final, most sophisticated layer of the 3-Tier cascade. While Tier 1 and Tier 2 handle structured patterns and secrets, Tier 3 uses Deep Learning for contextual free-text extraction. It identifies conversational PII (e.g., Patient Names, Organization Names, and Locations) buried in unstructured paragraphs, ensuring strict HIPAA and GDPR compliance for healthcare and legal workloads.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_TIER3_ONNX_NER` | Toggles deep neural entity extraction. Defaults to `false` for maximum speed. | [View in deployment.md](../../deployment.md) |
-| `ONNX_MODEL_PATH` | Path to a custom quantized Hugging Face ONNX model and tokenizer. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_TIER3_ONNX_NER` | Toggles deep neural entity extraction. Defaults to `false` for maximum speed. | [View in deployment.md](/docs/deployment) |
+| `ONNX_MODEL_PATH` | Path to a custom quantized Hugging Face ONNX model and tokenizer. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Script-Aware Non-Latin & CJK Rehydration:** Standard word boundaries (spaces) break in logographic scripts (Chinese, Japanese, Korean). The engine isolates ASCII boundaries securely while treating CJK ideographs continuously to prevent sub-word stream corruption.
@@ -55,4 +55,4 @@ This feature is a highly efficient artificial intelligence reader. Instead of ju
 For example, it can tell the difference between "Call Mr. Ford" (a person's name) and "I drive a Ford" (a car brand). To ensure it runs lightning-fast without slowing down your system, the AI model has been stripped down to its essential math (quantized) and runs directly in the computer's memory.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

@@ -1,6 +1,6 @@
 # WORM-Compliant Audit Logging with Hash Chaining
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **WORM-Compliant Audit Logging with Hash Chaining** (Write Once, Read Many) guarantees the absolute cryptographic integrity of your proxy's security audit logs. It prevents internal actors or external attackers from altering, deleting, or reordering log events to cover their tracks, satisfying the most stringent requirements for SOC 2 Type II, HIPAA, and FedRAMP compliance.
@@ -32,8 +32,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_AUDIT_LOGGING` | Toggles the emission of structured audit events. | [View in deployment.md](../../deployment.md) |
-| `ENABLE_HASH_CHAINING` | Enforces the SHA-256 linkage on emitted logs. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_AUDIT_LOGGING` | Toggles the emission of structured audit events. | [View in deployment.md](/docs/deployment) |
+| `ENABLE_HASH_CHAINING` | Enforces the SHA-256 linkage on emitted logs. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Process Forking (Gunicorn/Uvicorn):** Because the proxy runs across multiple worker processes, each worker maintains its own independent, isolated hash chain. To verify the logs later, auditors simply group the logs by `worker_id` and recalculate the chain.
@@ -54,4 +54,4 @@ This feature creates an unhackable, permanent diary of every security decision t
 To pass strict security audits (like SOC 2 or HIPAA), companies need absolute proof of what happened and when. This feature records every action and mathematically locks it to the action that happened right before it (like links in a chain). If a hacker tries to go back in time to delete or change a log entry, the entire mathematical chain breaks, instantly revealing the tampering to auditors.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).

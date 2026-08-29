@@ -1,6 +1,6 @@
 # Dynamic Schema Rewriting
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Dynamic Schema Rewriting** is the core mechanism that allows LLM-Shield-Proxy to guarantee zero-data leakage in Machine-to-Machine traffic (JSON-RPC / MCP tools) *without* requiring an external state store like Redis.

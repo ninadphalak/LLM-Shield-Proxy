@@ -1,6 +1,6 @@
 # Zero-Allocation Streaming JSON Lexer
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Zero-Allocation Streaming JSON Lexer** is the ultra-fast data parsing engine at the heart of the LLM-Shield-Proxy. By utilizing `orjson` (a high-performance Rust library) instead of the standard Python `json` module, the proxy can deserialize and analyze massive, continuous data streams while maintaining a nearly invisible memory footprint (`&lt;85 MB`).
@@ -55,4 +55,4 @@ This feature is a hyper-efficient data reader designed to save computer memory.
 Normally, when a computer reads a massive stream of data, it has to create temporary copies of every single word in its memory, which can eventually slow the whole system down (like a desk getting cluttered with sticky notes). This feature uses specialized programming to read the data directly as it flows by, without making any messy copies. This keeps the computer's memory completely clean and fast.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_streaming_json_lexer.py`](../../../tests/test_streaming_json_lexer.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_streaming_json_lexer.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_streaming_json_lexer.py).

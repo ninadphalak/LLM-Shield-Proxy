@@ -1,6 +1,6 @@
 # Automatic FinOps `stream_options` Injection
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Automatic FinOps `stream_options` Injection** ensures that enterprise chargeback mechanisms have 100% accurate token accounting during Server-Sent Events (SSE) streaming, without requiring developer teams to modify a single line of client application code.
@@ -34,7 +34,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_FINOPS_METERING` | Toggles the automatic injection and metrics collection. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_FINOPS_METERING` | Toggles the automatic injection and metrics collection. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Non-Destructive Execution:** If a developer's application already explicitly provides `stream_options`, the proxy safely merges the dictionary, ensuring `include_usage` is true without overwriting other parameters (like custom stop sequences).
@@ -55,4 +55,4 @@ This feature acts as an automatic accountant that tracks exactly how much AI com
 When an AI streams its response word-by-word, it sometimes forgets to send a final "receipt" of how many words were generated. This feature intercepts your request on the way out and secretly adds a tiny instruction asking the AI to always include the final token count. This ensures your billing department can always track exact usage costs without you having to change any code.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](../../../tests/test_finops_meter.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).

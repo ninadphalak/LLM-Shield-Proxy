@@ -23,7 +23,7 @@ function HomepageHeader() {
           <Link
             className="button button--secondary button--lg"
             to="/docs/architecture">
-            View Architecture 🚀
+            Explore Architecture 🚀
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"

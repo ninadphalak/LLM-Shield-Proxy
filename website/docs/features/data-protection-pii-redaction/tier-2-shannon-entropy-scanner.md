@@ -1,6 +1,6 @@
 # Tier 2 Shannon Entropy Scanner
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Tier 2 Shannon Entropy Scanner** is the second defensive layer in the LLM-Shield-Proxy. While regex (Tier 1) excels at structured data like SSNs, it completely fails to detect unstructured, proprietary cryptographic secrets (e.g., custom JWTs, internal API tokens, Database connection passwords). The Tier 2 engine automatically flags and redacts these unstructured secrets by evaluating the mathematical information density (entropy) of incoming token streams.
@@ -34,7 +34,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_TIER2_ENTROPY` | Toggles the Shannon Entropy scanner on or off. Defaults to `true`. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_TIER2_ENTROPY` | Toggles the Shannon Entropy scanner on or off. Defaults to `true`. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **False Positive Prevention:** Standard English text inherently has lower entropy than cryptographic secrets. The thresholds (4.5 and 3.4) are mathematically tuned to prevent standard conversational text from being flagged as a secret.
@@ -55,4 +55,4 @@ This feature acts like a randomness detector. While some sensitive information (
 Because we can't search for a specific password pattern, this scanner mathematically measures how "random" a piece of text is (known as Shannon entropy). If it spots a string of text that is completely unpredictable and random, it flags it as a likely secret key and hides it to prevent accidental leaks.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

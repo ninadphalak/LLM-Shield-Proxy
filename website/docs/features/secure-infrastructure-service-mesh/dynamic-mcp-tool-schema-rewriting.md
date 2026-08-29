@@ -1,6 +1,6 @@
 # Dynamic MCP Tool Schema Rewriting
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Dynamic MCP Tool Schema Rewriting** is a critical component of the v3 Stateless AST-Aware Semantic PII Firewall. It automatically modifies the JSON schema of tools provided by the LLM (like OpenAI's function calling or the Model Context Protocol (MCP)). This allows the proxy to encrypt sensitive data in tool calls and decrypt it later, without requiring developers to change their tool code or the LLM's prompt.
@@ -36,7 +36,7 @@ This engine operates natively alongside the v3 PII Firewall and does not require
 
 ## Critical Logic & Edge Cases
 * **Strict JSON Schema Compatibility:** The proxy modifies the schema strictly adhering to JSON Schema Draft 7 specifications (used by OpenAI). It ensures the injected properties are not marked as `required`, allowing the LLM to ignore them entirely without breaking validation.
-* **Anthropic Compatibility:** Anthropic Claude uses a different XML/JSON structure for tool use. The schema rewriter is fully integrated with the [Multi-Provider Translators](./multi-provider-translators.md) to ensure Claude's tool definitions are augmented correctly.
+* **Anthropic Compatibility:** Anthropic Claude uses a different XML/JSON structure for tool use. The schema rewriter is fully integrated with the [Multi-Provider Translators](/docs/features/ultra-low-latency-streaming-traffic-engineering/multi-provider-translators) to ensure Claude's tool definitions are augmented correctly.
 
 ## FAQ
 
@@ -50,4 +50,4 @@ This feature is a smart trick that allows encrypted data to seamlessly flow thro
 If we encrypt a user's ID before sending it to an AI, the AI might try to pass that encrypted gibberish to an external tool (like a database search tool), causing the tool to crash because it expects a real ID. This feature secretly sneaks a hidden tracker into the data. When the AI uses the tool, the proxy catches the request mid-air, decrypts the gibberish back into the real ID, and hands it to the tool so everything works perfectly.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../../tests/test_tool_rbac_and_compliance.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).

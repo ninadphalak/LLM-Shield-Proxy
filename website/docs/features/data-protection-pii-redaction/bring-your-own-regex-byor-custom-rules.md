@@ -1,6 +1,6 @@
 # Bring-Your-Own-Regex (BYOR) Custom Rules
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Bring-Your-Own-Regex (BYOR)** allows enterprise security operators to inject their own proprietary detection rules into the proxy without modifying the core source code. It is designed to extend the Tier 1 detection cascade to catch custom corporate identifiers, internal project codenames, or proprietary billing tokens.
@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `CUSTOM_REGEX_PATH` | Absolute path to the YAML file containing custom rules. | [View in deployment.md](../../deployment.md) |
+| `CUSTOM_REGEX_PATH` | Absolute path to the YAML file containing custom rules. | [View in deployment.md](/docs/deployment) |
 
 ### Configuration Example
 ```yaml
@@ -62,4 +62,4 @@ This feature allows you to teach the system how to recognize your company's own 
 Out of the box, the system knows what a credit card or email looks like. But what if your company uses a special internal ID format (like "EMP-XYZ-123")? This feature lets you add those custom rules in a simple configuration file. The proxy will then seamlessly learn to redact your custom IDs just as fast as it redacts standard credit card numbers.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

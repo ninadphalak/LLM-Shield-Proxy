@@ -1,6 +1,6 @@
 # Multi-Provider Translators
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Multi-Provider Translators** feature enables LLM-Shield-Proxy to act as a universal API gateway. It allows client applications to use standard OpenAI SDKs and payload schemas while transparently routing traffic to non-OpenAI providers (like Anthropic Claude or Google Gemini) with full, native compatibility.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `UPSTREAM_BASE_URL` | The URL of the target LLM provider (e.g., `https://api.anthropic.com`). | [View in deployment.md](../../deployment.md) |
-| `UPSTREAM_API_KEY` | The exact API key for the target upstream provider. | [View in deployment.md](../../deployment.md) |
+| `UPSTREAM_BASE_URL` | The URL of the target LLM provider (e.g., `https://api.anthropic.com`). | [View in deployment.md](/docs/deployment) |
+| `UPSTREAM_API_KEY` | The exact API key for the target upstream provider. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Role Alternation:** Some providers (like Anthropic) enforce strict alternating `user` and `assistant` roles. The translator automatically collapses consecutive `user` messages into a single block to prevent API 400 errors.
@@ -55,4 +55,4 @@ This feature acts as an automatic, universal translator between different AI com
 Every AI provider (like OpenAI or Anthropic) requires you to speak to them in a slightly different computer language. If you build your app for OpenAI, it usually breaks if you try to switch to Anthropic. This feature automatically translates your app's standard OpenAI requests into whatever language the target AI provider needs, allowing you to seamlessly swap between different AIs without rewriting any code.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](../../../tests/test_provider_adapters.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).

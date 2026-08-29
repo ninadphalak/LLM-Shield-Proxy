@@ -1,6 +1,6 @@
 # Pluggable Tool-Call RBAC (MCP Governance)
 
-[⬅️ Back to Features Catalog](../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Pluggable Tool-Call Role-Based Access Control (RBAC)** provides strict governance over autonomous AI agents. When an LLM attempts to execute a tool (e.g., calling an API, running a SQL query, or modifying a file via the Model Context Protocol (MCP)), this engine intercepts the execution request mid-stream and validates it against your corporate security policies.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable / File | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `policies.yaml` | Define `allowed_tools: ["fetch_data", "read_file"]` per security role. | [View in POLICIES.md](../../POLICIES.md) |
-| `ENABLE_AGENT_BREAKER` | Toggles autonomous loop protection and tool interception. | [View in deployment.md](../../deployment.md) |
+| `policies.yaml` | Define `allowed_tools: ["fetch_data", "read_file"]` per security role. | [View in POLICIES.md](/docs/policies) |
+| `ENABLE_AGENT_BREAKER` | Toggles autonomous loop protection and tool interception. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Fail-Closed Default:** If a tool is not explicitly listed in a user's `allowed_tools` array, the execution is universally blocked.
@@ -50,4 +50,4 @@ A: Absolutely. By deploying the proxy between your LLM and your MCP servers, you
 
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../tests/test_tool_rbac_and_compliance.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).

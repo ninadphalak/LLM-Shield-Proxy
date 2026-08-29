@@ -1,6 +1,6 @@
 # NIST OSCAL Assessment Results Generation
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **NIST OSCAL Assessment Results Generation** transforms the proxy's runtime security decisions into standardized, machine-readable compliance artifacts. Instead of manually mapping proxy logs to security controls during an audit, the proxy automatically generates NIST SP 800-53 Rev. 5 compliant OSCAL (Open Security Controls Assessment Language) payloads.
@@ -11,7 +11,7 @@ Proving compliance to federal auditors or enterprise risk teams is traditionally
 1. **Control Mapping:** Inside `policies.yaml`, security roles and redaction rules are explicitly mapped to NIST control identifiers (e.g., Redacting SSNs maps to `PE-19`, Information Leakage).
 2. **Runtime Assessment:** When the proxy successfully enforces a rule (e.g., blocking a tool call or masking PII), the Decision Engine flags this as an automated assessment event.
 3. **OSCAL Generation:** The proxy aggregates these events and structures them into valid OSCAL `assessment-results` JSON models.
-4. **Export:** These standardized artifacts are pushed directly to GRC platforms via the [GRC Webhook Transport](./grc-webhook-sidecar-file-transport.md), allowing auditors to view real-time compliance posture in their native dashboards.
+4. **Export:** These standardized artifacts are pushed directly to GRC platforms via the [GRC Webhook Transport](./grc-webhook-sidecar-file-transport), allowing auditors to view real-time compliance posture in their native dashboards.
 
 
 ```mermaid
@@ -34,11 +34,11 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_OSCAL_EXPORTER` | Toggles the generation of OSCAL assessment artifacts. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_OSCAL_EXPORTER` | Toggles the generation of OSCAL assessment artifacts. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Batching:** Generating an OSCAL artifact for every single SSN redacted would flood GRC APIs. The proxy intelligently batches assessment results into rolling time-windows (e.g., every 5 minutes), aggregating 10,000 successful redactions into a single "Pass" attestation for the `PE-19` control.
-* **Chain of Custody:** Every OSCAL artifact includes a reference to the `X-Request-ID` and the specific [WORM-Compliant Hash Chain](./worm-compliant-audit-logging-with-hash-chaining.md) block, providing an unbreakable forensic trail from the high-level compliance dashboard down to the exact byte-level network event.
+* **Chain of Custody:** Every OSCAL artifact includes a reference to the `X-Request-ID` and the specific [WORM-Compliant Hash Chain](./worm-compliant-audit-logging-with-hash-chaining) block, providing an unbreakable forensic trail from the high-level compliance dashboard down to the exact byte-level network event.
 
 ## FAQ
 
@@ -55,4 +55,4 @@ This feature acts as an automatic paperwork generator for government security au
 When a government auditor reviews your system, they usually demand massive, confusing spreadsheets detailing every single security rule. Instead of humans doing this manually, this feature automatically translates the proxy's real-time security actions into the exact, strict paperwork format (OSCAL) required by the US Government (NIST), saving hundreds of hours of manual compliance work.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).

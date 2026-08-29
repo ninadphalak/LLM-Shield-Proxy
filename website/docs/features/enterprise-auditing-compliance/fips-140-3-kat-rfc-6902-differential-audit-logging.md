@@ -1,6 +1,6 @@
 # FIPS 140-3 KAT & RFC 6902 Differential Audit Logging
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 This feature explicitly targets strict Federal (FedRAMP High / DoD IL5) compliance requirements. It ensures the proxy continuously validates its own cryptographic health via **Known Answer Tests (KAT)** per FIPS 140-3 standards, and emits granular, mathematically precise **RFC 6902 JSON Patch** structures to prove exactly *how* a payload was mutated.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_FIPS_STRICT_MODE` | Enforces KAT validation and disables non-FIPS approved ciphers. | [View in deployment.md](../../deployment.md) |
-| `ENABLE_RFC6902_LOGGING` | Toggles the generation of differential JSON patches in the audit logs. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_FIPS_STRICT_MODE` | Enforces KAT validation and disables non-FIPS approved ciphers. | [View in deployment.md](/docs/deployment) |
+| `ENABLE_RFC6902_LOGGING` | Toggles the generation of differential JSON patches in the audit logs. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Host OS Dependency:** The proxy's FIPS compliance heavily relies on the underlying Python interpreter being compiled against a FIPS-validated OpenSSL module (e.g., running the proxy on Ubuntu Pro FIPS or Red Hat Enterprise Linux).
@@ -55,4 +55,4 @@ This feature proves to government auditors that our encryption math isn't broken
 High-security environments (like the government) don't just trust that your encryption works; they demand proof. Every time the proxy starts up, it forces itself to take a math test (encrypting a known word and checking the result). If it fails the test, it instantly shuts down, refusing to handle any real data with broken encryption.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_fips_and_audit_diff.py`](../../../tests/test_fips_and_audit_diff.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_fips_and_audit_diff.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_fips_and_audit_diff.py).

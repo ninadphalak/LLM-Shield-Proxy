@@ -1,6 +1,6 @@
 # Supported PII & Sensitive Data Types
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 The LLM-Shield-Proxy employs a **3-Tier Cascade Engine** to detect and redact sensitive data. Below is an exhaustive list of the data types natively detected by Tiers 1 and 2, along with representative samples of semantic types covered by Tier 3 NLP models.
 

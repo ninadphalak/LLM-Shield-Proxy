@@ -1,6 +1,6 @@
 # Universal Decision Trace Exporter
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Universal Decision Trace Exporter** provides unified observability across all security boundaries. Rather than having scattered logs in one system and network traces in another, this engine aggregates every single security decision (regex matches, policy evaluations, and tool-call RBAC blocks) and seamlessly weaves them into your existing OpenTelemetry (OTel) distributed traces.
@@ -34,8 +34,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | The URL of your OpenTelemetry Collector. | [View in deployment.md](../../deployment.md) |
-| `ENABLE_DECISION_TRACES` | Toggles the deep enrichment of security events into spans. | [View in deployment.md](../../deployment.md) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | The URL of your OpenTelemetry Collector. | [View in deployment.md](/docs/deployment) |
+| `ENABLE_DECISION_TRACES` | Toggles the deep enrichment of security events into spans. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Data Sanitization:** The exporter strictly enforces that the actual PII strings (e.g., the real credit card number) are NEVER appended to the OTel Span events. It only logs the metadata (e.g., `decision: redact`, `entity_type: CREDIT_CARD`, `engine: tier_1`).
@@ -56,4 +56,4 @@ This feature translates the proxy's complex security decisions into a standard f
 Instead of hiding its security actions in messy text files, this feature packages every decision (like why it blocked a specific word) into highly structured, government-standard data packets. It then broadcasts these packets so that your company's existing dashboards and monitoring screens can display the security data beautifully and clearly.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).

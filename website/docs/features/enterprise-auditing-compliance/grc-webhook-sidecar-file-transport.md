@@ -1,6 +1,6 @@
 # GRC Webhook & Sidecar File Transport
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **GRC Webhook & Sidecar File Transport** is a pluggable integration layer that actively pushes strict compliance artifacts (like NIST OSCAL evaluations and Audit Logs) to external Governance, Risk, and Compliance (GRC) platforms such as Vanta, Drata, Sprinto, or internal SIEMs, automating continuous compliance monitoring.
@@ -35,9 +35,9 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `GRC_TRANSPORT_MODE` | Set to `WEBHOOK` or `SIDECAR`. | [View in deployment.md](../../deployment.md) |
-| `GRC_WEBHOOK_URL` | The destination API endpoint (if using Webhook mode). | [View in deployment.md](../../deployment.md) |
-| `GRC_SIDECAR_FILE_PATH` | The local file path for appending artifacts (if using Sidecar mode). | [View in deployment.md](../../deployment.md) |
+| `GRC_TRANSPORT_MODE` | Set to `WEBHOOK` or `SIDECAR`. | [View in deployment.md](/docs/deployment) |
+| `GRC_WEBHOOK_URL` | The destination API endpoint (if using Webhook mode). | [View in deployment.md](/docs/deployment) |
+| `GRC_SIDECAR_FILE_PATH` | The local file path for appending artifacts (if using Sidecar mode). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Retry Mechanics:** The Webhook transport utilizes the proxy's native exponential backoff engine. If the GRC platform API is temporarily down, the proxy will gracefully buffer and retry the delivery.
@@ -58,4 +58,4 @@ This feature acts as an automated courier that delivers compliance reports direc
 When the proxy makes security decisions, those logs are useless if they just sit on a server. This feature automatically bundles up the audit logs and instantly transmits them (via webhooks or sidecar files) straight into external audit software (like Vanta or Drata). This means your company's security score updates in real-time, completely automatically.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](../../../tests/test_audit_remediation.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).

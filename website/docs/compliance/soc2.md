@@ -31,4 +31,4 @@ To satisfy anomaly detection and prevent data exfiltration (CC7.2):
 - **Steganographic Canary Watermarking:** The proxy utilizes dynamic zero-width Unicode steganographic canary watermarking. This allows enterprise forensics teams to trace leaked model outputs back to specific users, agents, or sessions without altering the visible text of the LLM response.
 - **Composite Agent Loop Circuit Breakers:** To protect system availability against runaway autonomous AI loops, circuit breakers monitor execution patterns and halt execution if threshold limits (e.g., rapidly repeating unauthorized SQL queries) are breached.
 
-*(Reference the [Architecture & Cryptographic Data Flow](../../ARCHITECTURE.md) for deeper implementation details).*
+*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details).*

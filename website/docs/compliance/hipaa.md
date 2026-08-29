@@ -28,4 +28,4 @@ If a use case requires the LLM to reference a specific patient entity without kn
 - The external LLM receives a cryptographically secure cipher-token (e.g., `[[AES:GCM:8f7a9...]]`). It processes the clinical reasoning based on the surrounding text, and the proxy decrypts the cipher-token dynamically as the SSE stream returns to the clinician.
 - This guarantees that no usable ePHI is transmitted to or stored by the external LLM provider, perfectly aligning with transmission security rules.
 
-*(Reference the [Architecture & Cryptographic Data Flow](../../ARCHITECTURE.md) for deeper implementation details on the cryptographic lifecycle).*
+*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details on the cryptographic lifecycle).*

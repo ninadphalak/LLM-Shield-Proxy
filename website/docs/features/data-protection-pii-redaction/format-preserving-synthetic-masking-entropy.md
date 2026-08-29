@@ -1,6 +1,6 @@
 # Format-Preserving Synthetic Masking & Entropy
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Format-Preserving Synthetic Masking** is the proxy's default Data Loss Prevention (DLP) substitution strategy. Instead of replacing sensitive data with structural tags (e.g., turning a name into `[PERSON_1]`), it deterministically replaces the data with a realistic, unbracketed synthetic entity (e.g., turning "John Doe" into "Michael Smith", or a real SSN into a validly formatted fake SSN).
@@ -39,7 +39,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_SYNTHETIC_SWAPPING` | Toggles between Synthetic Masking (`true`) and Structural Tagging (`false`). | [View in deployment.md](../../deployment.md) |
+| `ENABLE_SYNTHETIC_SWAPPING` | Toggles between Synthetic Masking (`true`) and Structural Tagging (`false`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Referential Integrity:** If a user mentions the same patient name five times in a prompt, deterministic seeding guarantees the LLM receives the exact same synthetic name five times. The LLM's logic and memory are completely preserved.
@@ -60,4 +60,4 @@ This feature creates realistic fake data to replace sensitive information.
 If you just replace a real name with "[CENSORED]", the AI reading it might get confused because the sentence structure is suddenly unnatural. Instead, this feature automatically swaps out a real name for a fake name (like replacing "John Doe" with "Alex Smith"), or a real credit card with a mathematically valid fake credit card. This keeps the AI completely oblivious to the fact that the data was redacted, allowing it to generate much better responses.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

@@ -28,7 +28,8 @@ def get_identity(
     if authorization_header:
         auth = authorization_header.replace("Bearer ", "").strip()
         if auth:
-            return hashlib.sha256(auth.encode("utf-8")).hexdigest()[:12]
+            # Use PBKDF2 to satisfy CodeQL requirements for hashing sensitive tokens
+            return hashlib.pbkdf2_hmac("sha256", auth.encode("utf-8"), b"static_salt", 100000).hex()[:12]
 
     if client_ip:
         ip = client_ip.strip()
