@@ -23,6 +23,14 @@ To maintain our enterprise zero-latency guarantees, all Pull Requests must adher
 3. **Code Style & Formatting:**
    - Code must adhere to PEP 8 standard formatting and include type hints where applicable.
 
+4. **Website / Frontend Changes:**
+   - The [`website/`](website/) Docusaurus site deploys straight to production Firebase
+     Hosting on merge to `main` (see [`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml)).
+     `npm run build` must succeed locally before opening a PR — see
+     [website/README.md § Testing & CI Safety](website/README.md#testing--ci-safety) for the
+     SSR-safety rules this enforces (no `window`/`document`/naked timers outside `useEffect`
+     or `<BrowserOnly>`).
+
 ## Submission Workflow
 1. Fork the repository and create a feature branch (`git checkout -b feature/amazing-feature`).
 2. Commit your changes with clear, descriptive commit messages.
