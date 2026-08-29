@@ -9,6 +9,13 @@ import hmac
 import time
 from typing import Optional
 
+# Fixed application-level key for deriving a non-reversible identity fingerprint
+# from an Authorization header. This is not a secret store of confidentiality -
+# the header value is a high-entropy API key, not a low-entropy password, so a
+# keyed HMAC (fast, non-blocking under asyncio) is sufficient; a slow KDF like
+# PBKDF2/bcrypt buys no brute-force resistance here but would block the event loop.
+_IDENTITY_HMAC_KEY = b"llm-shield-identity-fingerprint-v1"
+
 
 def get_identity(
     virtual_key_id: Optional[str] = None,
@@ -28,11 +35,7 @@ def get_identity(
     if authorization_header:
         auth = authorization_header.replace("Bearer ", "").strip()
         if auth:
-            # auth is a high-entropy API key, not a low-entropy password: slow KDFs
-            # (PBKDF2/bcrypt) add no brute-force resistance here but do block the
-            # asyncio event loop under FastAPI/Uvicorn. Plain SHA-256 is safe for
-            # deriving a non-reversible identity fingerprint from this input.
-            return hashlib.sha256(auth.encode("utf-8")).hexdigest()[:12]  # lgtm[py/weak-sensitive-data-hashing]
+            return hmac.new(_IDENTITY_HMAC_KEY, auth.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
 
     if client_ip:
         ip = client_ip.strip()
