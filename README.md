@@ -13,7 +13,7 @@
 
 LLM-Shield-Proxy is a hyper-fast, FastAPI-based streaming gateway designed specifically for environments where data privacy is paramount (Banking, Healthcare, Legal). It intercepts and sanitizes real-time LLM streams to prevent the leakage of Non-Public Personal Information (NPI), Protected Health Information (PHI), and Payment Card Industry (PCI) data without degrading the end-user streaming experience.
 
-By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy applies guardrails at the microsecond level, keeping your AI applications compliant with strict InfoSec mandates (GLBA, PCI-DSS, HIPAA) while maintaining zero-perceived-latency.
+By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy applies guardrails at the microsecond level, helping your AI applications meet strict InfoSec mandates (GLBA, PCI-DSS, HIPAA) while maintaining zero-perceived-latency.
 
 **Option 1: Standard Egress**
 <br>
@@ -29,11 +29,11 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 <br>
 *\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
 
-> **SOC 2 Type II and HIPAA compliance for LLM streams without breaking real-time latency.**
+> **Technical controls supporting SOC 2 Type II and HIPAA safeguards for LLM streams, without breaking real-time latency.**
 
 **LLM-Shield-Proxy** is an open-source, zero-egress PII redaction and compliance **AI Gateway** and **LLM Firewall** deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
 
-Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance (**SOC 2 Compliance for AI**, HIPAA, HITRUST without breaking real-time streaming latency).
+Designed to enforce **Zero Trust AI** and support enterprise privacy compliance programs (**SOC 2 trust criteria**, HIPAA, HITRUST technical safeguards) without breaking real-time streaming latency.
 
 ## 🛡️ Dual-Pipeline Redaction Architecture
 
@@ -64,7 +64,7 @@ When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it *
 * **[Air-Gapped Egress Gateway Mode](docs/features/air-gapped-egress.md):** Allows operation in strict Zero-Internet corporate subnets by securely routing all upstream traffic through an internal egress gateway, optionally stripping auth headers for internal mTLS architectures.
 * **[Zero-Data Stateless Syntheticgraphy](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<85 MB RAM`).
 * **[Role-Based Policy-as-Code & Hot-Reloading](POLICIES.md):** Zero-downtime YAML file watcher (`policies.yaml`) dynamically maps `virtual_key_id` identities to granular security roles, custom PII profiles, and thread-safe $O(1)$ setting overrides.
-* **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) for strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
+* **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) to support **SOC 2 audit evidence**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
 * **[Streaming Tool-Call Interception & Agent Governance](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercepts real-time LLM function calls (e.g., `exec_sql`, `shell_exec`) mid-stream using a zero-allocation JSON parser, enforcing fail-closed tool access controls backed by Redis, OPA, or Vault policy stores to prevent agent drift.
 * **[Context-Aware Tool Catalog Pruner (MCP Discovery)](docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner.md):** Dynamically intercepts JSON-RPC server/discover payloads at the network edge using our Stateless Mutation Engine. Enforces $O(1)$ Pluggable Tool-Call RBAC to silently prune unauthorized tool schemas before they reach the LLM's context window, caching progressive discovery payloads (SEP-2549) via Redis for sub-millisecond agent delivery.
 * **[Service Mesh Native gRPC Sidecar](#5-service-mesh-native-grpc-ext_proc--k8s-sidecar):** Stream buffers directly over Unix Domain Sockets (UDS) via Envoy's `ext_proc` for zero HTTP network hops, paired with a zero-dependency Kubernetes Mutating Webhook.
@@ -193,7 +193,7 @@ LLM-Shield-Proxy is **not** a model router. It is designed to deploy as a transp
 * **Local & Open-Source Inference:** vLLM, Ollama, NVIDIA NIM, Hugging Face TGI.
 * **Upstream Providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral.
 
-Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic, SOC 2-compliant data masking before the payload ever reaches the orchestrator.
+Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic data masking, mapped to SOC 2 control evidence, before the payload ever reaches the orchestrator.
 
 
 
@@ -238,7 +238,7 @@ Dynamically intercepts OpenAI/MCP tool schemas on the fly, injecting cryptograph
 
 ## 🛡️ Enterprise Security & Threat Defenses
 
-LLM-Shield-Proxy is validated against an exhaustive suite of **127 automated unit, integration, and adversarial fuzzing tests**.
+LLM-Shield-Proxy is validated against an exhaustive, continuously growing suite of **170+ automated unit, integration, and adversarial fuzzing tests**.
 
 Below is a high-level summary of our defense architecture. For the complete **18-vector Threat Matrix**, detailed implementation specifications, and vulnerability coverage, view our [Deep Dive Security & Threat Model Documentation](SECURITY.md).
 
@@ -252,7 +252,7 @@ Below is a high-level summary of our defense architecture. For the complete **18
 
 ## 📜 Enterprise Compliance: Audit, Forensics & Legal
 
-LLM-Shield-Proxy is engineered specifically to help enterprises utilize Generative AI without violating data privacy regulations like HIPAA or failing SOC 2 audits.
+LLM-Shield-Proxy is engineered specifically to help enterprises adopt Generative AI while supporting data privacy regulations like HIPAA and SOC 2 audit requirements. These are technical controls that map to specific framework requirements — deploying this proxy is one control among many a full compliance program requires, not a certification or a substitute for legal/compliance review.
 
 Below is a summary of our compliance mappings. For the exhaustive deep-dive mapping, view our [Enterprise Compliance Documentation](COMPLIANCE.md).
 
@@ -468,7 +468,7 @@ If you want to contribute to enterprise AI security, check out [CONTRIBUTING.md]
 
 ## 🏢 Enterprise Support & Community
 
-If your organization is evaluating, benchmarking, or deploying LLM-Shield-Proxy to unblock LLM streaming and meet strict compliance requirements (like SOC 2/HIPAA), I encourage you to engage with the community:
+If your organization is evaluating, benchmarking, or deploying LLM-Shield-Proxy to unblock LLM streaming and support compliance programs (like SOC 2/HIPAA), I encourage you to engage with the community:
 
 * **Architecture Discussions:** Open a GitHub Discussion to share your feedback on high-throughput deployments, custom proxy pipelines, or benchmark results.
 * **Enterprise Case Studies:** If your startup or enterprise is using the proxy in production, let me know! I highlight production architectures and feature enterprise teams in my community benchmarks.

@@ -1,0 +1,68 @@
+.section {
+  padding: 5rem 0;
+  background: #0a0e14;
+  border-bottom: 1px solid #21262d;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.eyebrow {
+  display: inline-block;
+  color: var(--ifm-color-primary);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.title {
+  font-size: 2.25rem;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+@media screen and (max-width: 996px) {
+  .steps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media screen and (max-width: 560px) {
+  .steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+.step {
+  position: relative;
+  padding: 1.5rem 1.25rem;
+  border-left: 2px solid #30363d;
+}
+
+.stepNumber {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #30363d;
+  margin-bottom: 0.5rem;
+}
+
+.stepTitle {
+  font-size: 1.05rem;
+  margin-bottom: 0.5rem;
+}
+
+.stepBody {
+  color: #8b949e;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}

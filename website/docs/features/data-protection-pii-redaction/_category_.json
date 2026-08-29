@@ -1,0 +1,10 @@
+{
+  "label": "Data Protection & PII Redaction",
+  "position": 1,
+  "link": {
+    "type": "generated-index",
+    "title": "Data Protection & PII Redaction",
+    "description": "The core sanitization engine: the 3-tier detection cascade (regex, Shannon entropy, ONNX NER), the 4 masking modes, and the stateless AST-aware firewall for machine-to-machine JSON-RPC/tool-call traffic.",
+    "slug": "/features/data-protection-pii-redaction"
+  }
+}

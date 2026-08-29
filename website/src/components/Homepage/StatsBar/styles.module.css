@@ -1,0 +1,31 @@
+.wrapper {
+  padding: 2.5rem 0;
+  background: #0a0e14;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  text-align: center;
+}
+
+@media screen and (max-width: 768px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.value {
+  font-size: 2.25rem;
+  font-weight: 800;
+  background: -webkit-linear-gradient(45deg, #00ff9d, #00a8ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.label {
+  margin-top: 0.35rem;
+  color: #8b949e;
+  font-size: 0.85rem;
+}

@@ -7,10 +7,10 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'LLM-Shield-Proxy',
   tagline: 'Ultra-Low Latency Generative AI Sanitization for Highly Regulated Enterprise Infrastructure',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/favicon.svg',
 
   // Set the production url of your site here
-  url: 'https://llm-shield-proxy.web.app',
+  url: 'https://project-0039f5fd-ac66-4a1c-9e0.web.app',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/',
@@ -47,8 +47,14 @@ const config: Config = {
   ],
 
   themeConfig: {
-    // Replace with your project's social card
-    image: 'img/docusaurus-social-card.jpg',
+    image: 'img/social-card.png',
+    metadata: [
+      {
+        name: 'keywords',
+        content:
+          'PII redaction, LLM proxy, AI gateway, DLP for LLMs, HIPAA, SOC 2, GDPR, zero-egress, streaming SSE redaction, PHI, PCI, LLM firewall, AI security',
+      },
+    ],
     colorMode: {
       defaultMode: 'dark',
       disableSwitch: false,
@@ -56,6 +62,10 @@ const config: Config = {
     },
     navbar: {
       title: 'LLM-Shield-Proxy',
+      logo: {
+        alt: 'LLM-Shield-Proxy Logo',
+        src: 'img/logo.svg',
+      },
       items: [
         {
           type: 'docSidebar',
@@ -84,6 +94,22 @@ const config: Config = {
               label: 'Security',
               to: '/docs/security',
             },
+            {
+              label: 'Compliance',
+              to: '/docs/compliance-overview',
+            },
+            {
+              label: 'Deployment',
+              to: '/docs/deployment',
+            },
+            {
+              label: 'Features Overview',
+              to: '/docs/features-overview',
+            },
+            {
+              label: 'Policies',
+              to: '/docs/policies',
+            },
           ],
         },
         {
@@ -93,10 +119,35 @@ const config: Config = {
               label: 'GitHub Discussions',
               href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/discussions',
             },
+            {
+              label: 'Issues & Feature Requests',
+              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/issues',
+            },
+            {
+              label: 'Contributing Guide',
+              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/CONTRIBUTING.md',
+            },
+          ],
+        },
+        {
+          title: 'Project',
+          items: [
+            {
+              label: 'License (Apache 2.0)',
+              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/LICENSE',
+            },
+            {
+              label: 'Releases',
+              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/releases',
+            },
+            {
+              label: 'PyPI Package',
+              href: 'https://pypi.org/project/llm-shield-proxy/',
+            },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Ninad Phalak. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Ninad Phalak. Licensed under Apache 2.0.`,
     },
     prism: {
       theme: prismThemes.github,

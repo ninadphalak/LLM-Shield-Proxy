@@ -18,10 +18,10 @@ const FeatureList: FeatureItem[] = [
     icon: '🔒',
     description: (
       <>
-        Intercept and sanitize real-time LLM streams within your own VPC. Raw PHI and PII never traverse the public internet, ensuring SOC 2 & HIPAA compliance.
+        Intercept and sanitize real-time LLM streams within your own VPC. Raw PHI and PII never traverse the public internet, supporting SOC 2 and HIPAA technical safeguards.
       </>
     ),
-    link: '/docs/features-overview'
+    link: '/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy'
   },
   {
     title: 'Ultra-Low Latency Streaming',
@@ -31,7 +31,7 @@ const FeatureList: FeatureItem[] = [
         Patent-pending sliding-window buffer reconstructs fragmented tokens across Server-Sent Events with &lt;5 ms overhead, maintaining a real-time UX.
       </>
     ),
-    link: '/docs/architecture'
+    link: '/docs/features/ultra-low-latency-streaming-traffic-engineering/sub-millisecond-sse-sliding-window-buffer'
   },
   {
     title: 'Enterprise Policy-as-Code',
@@ -41,17 +41,17 @@ const FeatureList: FeatureItem[] = [
         Dynamic role-based access control (RBAC) and zero-downtime hot-reloading for granular tenant-scoped PII profiles and Agent Identity Enforcement.
       </>
     ),
-    link: '/docs/policies'
+    link: '/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading'
   },
   {
     title: 'Auditing & Compliance',
     icon: '🧾',
     description: (
       <>
-        FIPS 140-3 KAT compliance, cryptographically-chained WORM audit logging, and NIST OSCAL automated generation.
+        FIPS 140-3 KAT verification, cryptographically-chained WORM audit logging, and NIST OSCAL artifact generation for your GRC platform.
       </>
     ),
-    link: '/docs/compliance-overview'
+    link: '/docs/features/enterprise-auditing-compliance'
   },
   {
     title: 'Agent Identity Enforcer',
@@ -71,7 +71,7 @@ const FeatureList: FeatureItem[] = [
         Zero-dependency mutating webhooks, mTLS sidecar integrations, and deep component health probes integrated via Prometheus.
       </>
     ),
-    link: '/docs/deployment'
+    link: '/docs/features/secure-infrastructure-service-mesh'
   },
 ];
 
