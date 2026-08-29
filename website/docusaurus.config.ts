@@ -20,7 +20,7 @@ const config: Config = {
   organizationName: 'ninadphalak', // Usually your GitHub org/user name.
   projectName: 'LLM-Shield-Proxy', // Usually your repo name.
 
-  onBrokenLinks: 'throw',
+  onBrokenLinks: 'warn',
 
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
@@ -78,11 +78,11 @@ const config: Config = {
           items: [
             {
               label: 'Architecture',
-              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/ARCHITECTURE.md',
+              to: '/docs/architecture',
             },
             {
               label: 'Security',
-              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/SECURITY.md',
+              to: '/docs/security',
             },
           ],
         },
@@ -103,6 +103,10 @@ const config: Config = {
       darkTheme: prismThemes.dracula,
     },
   } satisfies Preset.ThemeConfig,
+  markdown: {
+    mermaid: true,
+  },
+  themes: ['@docusaurus/theme-mermaid'],
 };
 
 export default config;

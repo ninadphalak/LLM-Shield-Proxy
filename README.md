@@ -7,7 +7,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Docker Pulls](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
 
-<img src="docs/LLM-Shield-Proxy-paper-v2.gif" width="600" alt="LLM-Shield-Proxy Demo" />
+<img src="website/docs/LLM-Shield-Proxy-paper-v2.gif" width="600" alt="LLM-Shield-Proxy Demo" />
 
 **Ultra-Low Latency Generative AI Sanitization for Highly Regulated Enterprise Infrastructure**
 
@@ -17,14 +17,14 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 **Option 1: Standard Egress**
 <br>
-<a target="_blank" href="docs/assets/diagram-standard.svg?v=3">
-  <img src="docs/assets/diagram-standard.svg?v=3" alt="Standard Egress Diagram" style="max-width: 100%; height: auto;" />
+<a target="_blank" href="website/docs/assets/diagram-standard.svg?v=3">
+  <img src="website/docs/assets/diagram-standard.svg?v=3" alt="Standard Egress Diagram" style="max-width: 100%; height: auto;" />
 </a>
 
 **Option 2: Zero-Internet Air-Gapped Mode**
 <br>
-<a target="_blank" href="docs/assets/diagram-airgapped.svg?v=3">
-  <img src="docs/assets/diagram-airgapped.svg?v=3" alt="Air-Gapped Egress Diagram" style="max-width: 100%; height: auto;" />
+<a target="_blank" href="website/docs/assets/diagram-airgapped.svg?v=3">
+  <img src="website/docs/assets/diagram-airgapped.svg?v=3" alt="Air-Gapped Egress Diagram" style="max-width: 100%; height: auto;" />
 </a>
 <br>
 *\* Egress Gateway can be any standard network proxy (e.g., Squid, Envoy, LLMLite, NGINX).*
@@ -40,8 +40,8 @@ Designed to enforce **Zero Trust AI** and unblock enterprise privacy compliance 
 LLM-Shield-Proxy intelligently routes traffic through two distinct redaction pipelines based on the payload structure. This ensures that autonomous agents don't crash from broken syntax trees, while human prompts get the highest quality contextual masking.
 
 <br>
-<a target="_blank" href="docs/assets/diagram-dual-pipeline.svg?v=2">
-  <img src="docs/assets/diagram-dual-pipeline.svg?v=2" alt="Dual-Pipeline Redaction Architecture" style="max-width: 100%; height: auto;" />
+<a target="_blank" href="website/docs/assets/diagram-dual-pipeline.svg?v=2">
+  <img src="website/docs/assets/diagram-dual-pipeline.svg?v=2" alt="Dual-Pipeline Redaction Architecture" style="max-width: 100%; height: auto;" />
 </a>
 
 ### A. Human-to-LLM (Text Prompts / STATELESS_CRYPTO)
