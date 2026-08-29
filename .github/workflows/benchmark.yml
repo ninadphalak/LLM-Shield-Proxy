@@ -1,0 +1,84 @@
+name: Reproducible Public Benchmark
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Run Public Latency & Memory Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install psutil
+          pip install -e .
+
+      - name: Run Benchmark Suite
+        run: |
+          python benchmarks/benchmark.py --json-out BENCHMARK_LATEST.json
+
+      - name: Append Results to Job Summary
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+
+          with open("BENCHMARK_LATEST.json") as f:
+              data = json.load(f)
+
+          entropy = data["shannon_entropy"]
+          redact = data["payload_redaction"]
+          memory = data["memory"]
+
+          print("# LLM-Shield-Proxy Benchmark Results")
+          print()
+          print(f"_Generated: {data['generated_at']} on Python {data['python_version']} ({data['platform']})_")
+          print()
+          print("## Shannon Entropy Secret Scan (Tier 2)")
+          print()
+          print("| Metric | Value |")
+          print("| :--- | ---: |")
+          print(f"| Mean | {entropy['avg_us']:.2f} µs |")
+          print(f"| p50 | {entropy['p50_us']:.2f} µs |")
+          print(f"| p95 | {entropy['p95_us']:.2f} µs |")
+          print(f"| p99 | {entropy['p99_us']:.2f} µs |")
+          print(f"| Verified &lt;6 µs | {data['verified']['shannon_entropy_under_6us']} |")
+          print()
+          print("## 10,000-Word Adversarial Payload Redaction")
+          print()
+          print("| Metric | Value |")
+          print("| :--- | ---: |")
+          print(f"| Mean | {redact['avg_ms']:.2f} ms |")
+          print(f"| p50 | {redact['p50_ms']:.2f} ms |")
+          print(f"| p95 | {redact['p95_ms']:.2f} ms |")
+          print(f"| p99 | {redact['p99_ms']:.2f} ms |")
+          print()
+          print("## Resident Memory Baseline")
+          print()
+          print(f"- Active RSS: **{memory['rss_mb']:.2f} MB** (target: &lt;{memory['target_mb']:.0f} MB)")
+          EOF
+
+      - name: Upload BENCHMARK_LATEST.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-latest
+          path: BENCHMARK_LATEST.json
+          retention-days: 90

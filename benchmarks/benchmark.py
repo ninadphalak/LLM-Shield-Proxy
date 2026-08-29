@@ -7,12 +7,15 @@ Validates microsecond latency and throughput metrics:
 3. Isolates and benchmarks Shannon Entropy function to verify <6 µs execution.
 """
 
+import argparse
 import base64
+import json
 import os
 import random
 import statistics
 import sys
 import time
+from datetime import datetime, timezone
 
 import psutil
 
@@ -130,6 +133,14 @@ def get_process_memory() -> float:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="LLM-Shield-Proxy Enterprise Latency & Proof Benchmark")
+    parser.add_argument(
+        "--json-out",
+        default=None,
+        help="Optional path to write machine-readable benchmark results as JSON (e.g. for CI trend tracking).",
+    )
+    args = parser.parse_args()
+
     print("=" * 65)
     print("LLM-Shield-Proxy Enterprise Latency & Proof Benchmark")
     print("=" * 65 + "\n")
@@ -161,6 +172,21 @@ def main():
     print("=" * 65)
     print("ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED")
     print("=" * 65)
+
+    if args.json_out:
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "python_version": sys.version.split()[0],
+            "platform": sys.platform,
+            "shannon_entropy": entropy_results,
+            "payload_redaction": redact_results,
+            "memory": {"rss_mb": rss_mb, "target_mb": 60.0, "within_target": rss_mb < 60.0},
+            "verified": {"shannon_entropy_under_6us": entropy_results["avg_us"] < 6.0},
+        }
+        os.makedirs(os.path.dirname(os.path.abspath(args.json_out)), exist_ok=True)
+        with open(args.json_out, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, sort_keys=True)
+        print(f"\nMachine-readable results written to {args.json_out}")
 
 
 if __name__ == "__main__":

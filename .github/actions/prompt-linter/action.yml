@@ -1,0 +1,41 @@
+name: "LLM-Shield Prompt Template Linter"
+description: "Scans .txt/.md prompt template files for PII and high-entropy secrets using the Tier-1 regex and Tier-2 Shannon-entropy heuristics from LLM-Shield-Proxy."
+author: "Ninad Phalak"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  path:
+    description: "Root path to scan for .txt/.md files"
+    required: false
+    default: "."
+  entropy-threshold:
+    description: "Shannon entropy threshold (bits/symbol) for Tier-2 secret detection"
+    required: false
+    default: "4.5"
+  min-token-length:
+    description: "Minimum token length considered for Tier-2 entropy analysis"
+    required: false
+    default: "16"
+  fail-on-finding:
+    description: "If 'true', fail the workflow when any Tier-1/Tier-2 finding is detected"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    - name: Run Tier-1/Tier-2 Prompt Template Scan
+      shell: bash
+      run: |
+        python "${{ github.action_path }}/scanner.py" \
+          --path "${{ inputs.path }}" \
+          --entropy-threshold "${{ inputs.entropy-threshold }}" \
+          --min-token-length "${{ inputs.min-token-length }}" \
+          --fail-on-finding "${{ inputs.fail-on-finding }}"
