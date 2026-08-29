@@ -75,3 +75,66 @@
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 255, 157, 0.3);
 }
+
+/* Mobile readability: hero, body copy, and code blocks scale down instead of
+   overflowing or wrapping mid-word on narrow viewports. */
+@media screen and (max-width: 996px) {
+  .hero__title {
+    font-size: 2.4rem;
+  }
+
+  .hero__subtitle {
+    font-size: 1.15rem;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .heroBanner {
+    padding: 2.5rem 0;
+  }
+
+  .hero__title {
+    font-size: 1.9rem;
+    line-height: 1.25;
+  }
+
+  .hero__subtitle {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .buttons {
+    flex-direction: column;
+  }
+}
+
+/* Docusaurus code blocks default to a fixed font-size that reads fine on
+   desktop but forces horizontal scrolling or tiny text on phones. */
+@media screen and (max-width: 480px) {
+  :root {
+    --ifm-code-font-size: 82%;
+  }
+
+  .markdown h1 {
+    font-size: 1.6rem;
+  }
+
+  .markdown h2 {
+    font-size: 1.35rem;
+  }
+
+  .markdown h3 {
+    font-size: 1.15rem;
+  }
+
+  div[class^='codeBlockContent'] pre,
+  .theme-code-block pre {
+    font-size: 0.78rem;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
