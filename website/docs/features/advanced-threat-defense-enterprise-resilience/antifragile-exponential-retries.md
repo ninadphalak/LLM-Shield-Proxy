@@ -1,6 +1,6 @@
 # Antifragile Exponential Retries
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Antifragile Exponential Retries** feature shields client applications from transient network instability and API throttling. When an upstream provider returns a recoverable error (like a `429 Too Many Requests` or a brief `502 Bad Gateway`), the proxy automatically absorbs the failure and retries the request using an exponential backoff algorithm before giving up.
@@ -35,7 +35,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `MAX_RETRIES` | The maximum number of retry attempts before returning the error to the client (default 3). | [View in deployment.md](../../deployment.md) |
+| `MAX_RETRIES` | The maximum number of retry attempts before returning the error to the client (default 3). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Non-Recoverable Errors:** The proxy explicitly configures the `tenacity` engine to *never* retry on client errors like `400 Bad Request` or `401 Unauthorized`. Retrying these is futile and wastes resources.
@@ -56,4 +56,4 @@ This feature teaches the system how to be patient and polite when the internet i
 Sometimes a server gets overwhelmed and drops a connection. Instead of immediately hammering the server with a million retry requests (which just makes the crash worse), this feature forces the proxy to wait a little bit, then try again. If it fails again, it waits a little bit *longer*. This elegant, increasing delay gives the broken server time to recover.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](../../../tests/test_antifragile_dispatcher.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_antifragile_dispatcher.py).

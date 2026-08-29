@@ -1,6 +1,6 @@
 # Stateless Redis TTL Vault
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Stateless Redis TTL Vault** provides a high-performance, distributed memory store for the proxy's tokenization mappings. When running LLM-Shield-Proxy in a clustered environment (e.g., multiple Kubernetes pods), it ensures that all proxy replicas share the same PII-to-token mappings for the duration of a session, with guaranteed automatic self-destruction to maintain zero long-term data liability.
@@ -32,8 +32,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `REDIS_URL` | The connection string for the Redis cluster. | [View in deployment.md](../../deployment.md) |
-| `SESSION_TTL_SECONDS` | Duration before the vault automatically evicts session data (default 3600). | [View in deployment.md](../../deployment.md) |
+| `REDIS_URL` | The connection string for the Redis cluster. | [View in deployment.md](/docs/deployment) |
+| `SESSION_TTL_SECONDS` | Duration before the vault automatically evicts session data (default 3600). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Graceful Degradation:** If the Redis cluster experiences a network partition, the proxy's deep component health probes will immediately flag the cluster as unhealthy, and the proxy will gracefully fail-closed or fall back to stateless synthetic depending on the active policy.
@@ -57,4 +57,4 @@ This feature provides a highly secure, temporary storage locker for sensitive in
 When a user shares a sensitive detail (like their medical condition), this vault locks it away and replaces it with a temporary placeholder token (like `TOKEN_123`). The AI only sees the placeholder token. The brilliant part is that the locker has an automatic self-destruct timer (TTL). Once the conversation is over, the vault automatically deletes the sensitive data forever, guaranteeing it isn't left sitting on a server indefinitely.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_vault.py`](../../../tests/test_vault.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_vault.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_vault.py).

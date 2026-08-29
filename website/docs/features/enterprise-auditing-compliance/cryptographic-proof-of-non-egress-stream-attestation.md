@@ -1,6 +1,6 @@
 # Cryptographic Proof of Non-Egress Stream Attestation
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Cryptographic Proof of Non-Egress Stream Attestation** solves the problem of proving a negative. When dealing with strict Data Residency laws (like GDPR or EU sovereign clouds), you must legally prove that sensitive PII *never left* your VPC. This feature generates a cryptographically signed receipt for every single session, proving exactly what text was sent to the upstream LLM.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_EGRESS_ATTESTATION` | Toggles the generation of cryptographic receipts. | [View in deployment.md](../../deployment.md) |
-| `ATTESTATION_HMAC_KEY` | The secret symmetric key used to sign the receipts (load from Vault). | [View in deployment.md](../../deployment.md) |
+| `ENABLE_EGRESS_ATTESTATION` | Toggles the generation of cryptographic receipts. | [View in deployment.md](/docs/deployment) |
+| `ATTESTATION_HMAC_KEY` | The secret symmetric key used to sign the receipts (load from Vault). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Verification Process:** If an auditor demands proof for a specific `Request-ID`, your developers can reconstruct the sanitized payload, run it through the HMAC function using the securely vaulted key, and the resulting signature will perfectly match the signature in the audit logs, proving the data was sanitized.
@@ -55,4 +55,4 @@ This feature creates a mathematically guaranteed receipt proving that sensitive 
 When an AI streams a long response, how do you prove to an auditor that no Social Security Numbers accidentally leaked out? This feature calculates a unique digital fingerprint of the data as it flows out. At the very end of the stream, it attaches this fingerprint like a wax seal. If anyone questions the security later, this seal serves as absolute mathematical proof that the data was sanitized.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_attestation.py`](../../../tests/test_attestation.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_attestation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_attestation.py).

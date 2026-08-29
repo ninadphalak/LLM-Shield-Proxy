@@ -40,6 +40,6 @@ The proxy ensures state-of-the-art security via a **3-Tier Cascade Redaction Eng
 1. **Tier 1:** Pre-compiled C++ `google-re2` DFA regex engine (O(N) linear time, ReDoS-immune) for structured identifiers.
 2. **Tier 2:** Vectorized Shannon Entropy scanner (O(N) bit density, &lt;6 µs) to detect unstructured cryptographic secrets.
 3. **Tier 3:** Quantized ONNX BERT-NER executing natively in-memory (with BYOM support for XLM-RoBERTa for multilingual GDPR contexts) to extract conversational entities before egress.
-4. **Tier 4 (Agent-to-Agent AI Firewall):** When autonomous AI agents talk to each other using complex code formats (like JSON-RPC or MCP), standard proxies break. The proxy acts as a firewall for this machine-to-machine traffic, instantly identifying and hiding nested PII without breaking the underlying code structure. (For technical details on this "Stateless PII Synthesis & Rehydration", see the [Stateless Mutation Engine](../../features-overview.md) in the features catalog).
+4. **Tier 4 (Agent-to-Agent AI Firewall):** When autonomous AI agents talk to each other using complex code formats (like JSON-RPC or MCP), standard proxies break. The proxy acts as a firewall for this machine-to-machine traffic, instantly identifying and hiding nested PII without breaking the underlying code structure. (For technical details on this "Stateless PII Synthesis & Rehydration", see the [Stateless Mutation Engine](/docs/features-overview) in the features catalog).
 
-*(Reference the [Architecture & Cryptographic Data Flow](../../ARCHITECTURE.md) for deeper implementation details).*
+*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details).*

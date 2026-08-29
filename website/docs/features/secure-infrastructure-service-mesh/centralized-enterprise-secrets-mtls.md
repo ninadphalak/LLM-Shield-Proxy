@@ -1,6 +1,6 @@
 # Centralized Enterprise Secrets & mTLS
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Centralized Enterprise Secrets & mTLS** feature ensures that the proxy integrates seamlessly into high-security enterprise environments (like DoD or Financial Services) without relying on insecure `.env` files. It natively fetches configuration data, API keys, and cryptographic certs directly from HashiCorp Vault.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `VAULT_ADDR` | The URL of the HashiCorp Vault cluster. | [View in deployment.md](../../deployment.md) |
-| `VAULT_AUTH_METHOD` | The auth mechanism (`kubernetes`, `approle`, `token`). | [View in deployment.md](../../deployment.md) |
+| `VAULT_ADDR` | The URL of the HashiCorp Vault cluster. | [View in deployment.md](/docs/deployment) |
+| `VAULT_AUTH_METHOD` | The auth mechanism (`kubernetes`, `approle`, `token`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Dynamic Lease Renewal:** If Vault issues a dynamic secret (like a short-lived PostgreSQL password for audit logs), the proxy spins up a background `asyncio` task to automatically renew the lease before it expires, ensuring zero downtime.
@@ -52,4 +52,4 @@ This feature guarantees that the proxy never keeps passwords lying around where 
 Normally, apps read their passwords from a simple file saved on the hard drive. If a hacker breaches the drive, they get the passwords. This feature forces the proxy to fetch passwords directly from an ultra-secure central vault (like HashiCorp Vault) directly into its active memory. The passwords are never saved to the hard drive, meaning there's nothing for a hacker to steal if they break in.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](../../../tests/test_vault_mtls.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_vault_mtls.py).

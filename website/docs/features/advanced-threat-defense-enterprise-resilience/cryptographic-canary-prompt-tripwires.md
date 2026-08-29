@@ -1,6 +1,6 @@
 # Cryptographic Canary Prompt Tripwires
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Cryptographic Canary Prompt Tripwires** is a highly advanced adversarial defense mechanism designed to detect and instantly halt aggressive prompt injection or data exfiltration attacks. It plants verifiable "honeytokens" into the data stream. If an LLM or an attacker attempts to regurgitate or bypass security controls using these tokens, the proxy instantly kills the connection.
@@ -49,4 +49,4 @@ This feature acts as a hidden burglar alarm to catch hackers trying to steal dat
 It secretly plants fake, highly sensitive-looking information (like a fake "master password") inside the AI's context. A normal user will never see or ask about it. However, if a hacker tries to trick the AI into revealing all its secret instructions, the AI might repeat the fake password. The proxy is watching the response; the absolute second it sees the fake password coming out, it instantly pulls the plug and cuts off the hacker's connection.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

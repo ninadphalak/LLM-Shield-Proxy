@@ -1,6 +1,6 @@
 # Graceful Shutdown / Pod Drain
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Graceful Shutdown / Pod Drain** guarantees that during Kubernetes rolling deployments, scaling events, or server restarts, active LLM Server-Sent Events (SSE) streams are not abruptly severed. It ensures a flawless user experience (no "Connection Reset" errors in the middle of a chatbot response) during infrastructure maintenance.
@@ -36,7 +36,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `DRAIN_TIMEOUT_SECONDS` | Maximum time to wait for active streams before forcing a shutdown (default 25s). | [View in deployment.md](../../deployment.md) |
+| `DRAIN_TIMEOUT_SECONDS` | Maximum time to wait for active streams before forcing a shutdown (default 25s). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Kubernetes `terminationGracePeriodSeconds`:** For this feature to work, your Kubernetes Deployment YAML *must* have a `terminationGracePeriodSeconds` value greater than the proxy's `DRAIN_TIMEOUT_SECONDS`. (e.g., set K8s to 30s, and the proxy to 25s). This gives the proxy the necessary time to drain before K8s sends a ruthless `SIGKILL`.
@@ -60,4 +60,4 @@ This feature ensures no one gets cut off mid-sentence when the proxy server need
 When IT engineers update the server, normally it instantly kills all active connections, resulting in broken half-written AI responses for users. With this feature, when the server is told to shut down, it stops accepting *new* users, but patiently waits for all *current* users to finish their active conversations before finally turning itself off.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](../../../tests/test_enterprise_resiliency.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

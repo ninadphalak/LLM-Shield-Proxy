@@ -1,6 +1,6 @@
 # Tier 1 Pre-Compiled Regex Engine
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Tier 1 Pre-Compiled Regex Engine** is the foundational layer of the LLM-Shield-Proxy's 3-Tier Redaction Cascade. It is designed to rapidly and deterministically identify structured sensitive data (e.g., SSNs, Emails, Credit Card Numbers, and Custom Corporate Identifiers) using pre-compiled regular expressions, ensuring they are redacted before they leave your VPC.
@@ -34,7 +34,7 @@ The engine operates automatically, but can be extended via the Bring-Your-Own-Re
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `CUSTOM_REGEX_PATH` | Path to a YAML file containing custom regex rules to inject into Tier 1. | [View in deployment.md](../deployment.md) |
+| `CUSTOM_REGEX_PATH` | Path to a YAML file containing custom regex rules to inject into Tier 1. | [View in deployment.md](/docs/deployment) |
 
 ### BYOR Example (`custom_regex.yaml`)
 ```yaml
@@ -62,4 +62,4 @@ This feature quickly scans text for sensitive information like Social Security N
 Unlike standard search engines that can get stuck or crash if a hacker sends a tricky "bomb" of confusing text (known as backtracking), this engine uses a specialized, math-based search method. This guarantees the search moves straight through the text at a fast, predictable speed and can never be tricked into freezing the system.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](../../../tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

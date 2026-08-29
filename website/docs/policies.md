@@ -16,19 +16,19 @@ While you can override network limits (e.g., `RATE_LIMIT_RPM`, `MAX_PAYLOAD_SIZE
    - **What it does:** Silently injects a unique, tracking "honeytoken" string into the system prompt before sending it to the LLM.
    - **How it helps:** If the LLM ever outputs this hidden string, you have absolute proof that a user attempted to extract the system prompt (a prompt-leak attack).
    - **When to use:** Enable this for any external, untrusted, or customer-facing applications where prompt security is a concern.
-   - [Learn more about Canary Tripwires](security.md#cryptographic-canary-prompt-tripwires)
+   - [Learn more about Canary Tripwires](/docs/features/advanced-threat-defense-enterprise-resilience/cryptographic-canary-prompt-tripwires)
 
 2. **`ENABLE_BLAST_RADIUS_LIMITS`** (bool):
    - **What it does:** Monitors the number of sensitive entities (like credit cards or SSNs) detected in a single session.
    - **How it helps:** If a user tries to suddenly copy-paste a massive database of sensitive information into an LLM, this limit triggers and instantly cuts off the connection, preventing mass data exfiltration.
    - **When to use:** Enable this for high-risk applications handling bulk financial or healthcare data.
-   - [Learn more about Blast Radius Limits](security.md#entity-weighted-blast-radius-limits)
+   - [Learn more about Blast Radius Limits](/docs/features/advanced-threat-defense-enterprise-resilience/entity-weighted-blast-radius-limits)
 
 3. **`ENABLE_FINOPS_METERING`** (bool):
    - **What it does:** Extracts token usage statistics from the LLM provider's response stream.
    - **How it helps:** Allows you to calculate exactly how much money each individual department or client is costing you in AI API usage (Chargeback metering).
    - **When to use:** Enable this when you need to track budgets across different teams or bill clients for their AI usage.
-   - [Learn more about FinOps Metering](compliance-overview.md#llm-finops-chargeback-meter)
+   - [Learn more about FinOps Metering](/docs/features/advanced-threat-defense-enterprise-resilience/llm-finops-chargeback-meter)
 
 4. **`ENABLE_TIER3_ONNX_NER`** (bool):
    - **What it does:** Activates a Deep Learning AI model (Named Entity Recognition) to read the text and find complex sensitive data based on context, not just simple patterns.

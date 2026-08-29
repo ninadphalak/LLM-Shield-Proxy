@@ -1,6 +1,6 @@
 # Deep Component Health Probes and Prometheus Alert Rules
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Deep Component Health Probes** provide Kubernetes with absolute clarity regarding the proxy's operational status. Rather than simply returning a "200 OK" if the HTTP server is running, the proxy performs deep, asynchronous diagnostic checks against its critical dependencies (Redis, Vault, Upstream APIs) to ensure it is truly ready to handle traffic.
@@ -35,7 +35,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `PROBE_REDIS_TIMEOUT` | Maximum time to wait for a Redis PING before failing the readiness check. | [View in deployment.md](../../deployment.md) |
+| `PROBE_REDIS_TIMEOUT` | Maximum time to wait for a Redis PING before failing the readiness check. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Graceful Degradation Tolerances:** Depending on your enterprise configuration, losing Redis might *not* be fatal if you are primarily relying on Stateless Synthetic. The health probe logic dynamically adjusts its strictness based on the active `SHIELD_DEFAULT_MASKING_MODE`.
@@ -56,4 +56,4 @@ This feature acts like a highly sensitive heart monitor for the proxy.
 Normally, a cloud server just checks if an app is "turned on." This feature goes much deeper. It actively tests all of the proxy's internal organs (like testing its connection to the password vault and the database). If it detects that a critical organ is failing, it immediately alerts the cloud to stop sending it traffic and pages an engineer before a major crash happens.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](../../../tests/test_health_and_alerts.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_health_and_alerts.py).

@@ -1,4 +1,4 @@
-[⬅️ Back to README](README.md)
+[⬅️ Back to README](/)
 
 # 🏛️ Architecture: Deep Dive into the Data Plane
 
@@ -96,7 +96,7 @@ To process millions of tokens per minute without saturating the Python Global In
 
 ### Zero-Allocation Streaming JSON Lexer (`orjson` / Rust)
 * **Implementation Mechanics:** The `streaming/buffer.py` engine leverages `orjson` (a Rust-backed serializer). It parses fragmented Server-Sent Events (SSE) directly from raw TCP frames in-band. By bypassing intermediate Python dictionary allocations, the engine maps JSON directly to memory, guaranteeing that the Resident Set Size (RSS) remains strictly below `&lt;60MB` even under massive volumetric floods.
-* **Flags:** [`MAX_SSE_LINE_LENGTH`](deployment.md)
+* **Flags:** [`MAX_SSE_LINE_LENGTH`](/docs/deployment)
 
 ### Resilient SSE Sliding-Window Buffer
 * **Implementation Mechanics:** Server-Sent Events (SSE) stream arbitrary token chunks. An entity like `[PERSON_1]` may arrive fragmented across `[PER`, `SON_`, and `1]`. The `SSERehydrationBuffer` is a custom asynchronous generator that dynamically retains trailing characters. The buffer bound is defined by $LL = max(0, max_token_length - 1), maintaining mathematical overlap and executing prefix-safe regex rehydration without dropping streams or blocking the event loop.
@@ -120,7 +120,7 @@ The engine pipelines payload text through three consecutive filters, balancing c
 ### Step 2: Format-Preserving Synthetic Masking
 * **Implementation Mechanics:** Regular expressions fail on unstructured data (e.g., 64-character raw cryptographic keys). The Tier 2 engine computes Shannon entropy `H(S) = -\sum p(c) \log_2 p(c)` across a sliding window. It targets base64 strings with entropy `\ge 4.5` bits/char and hex strings `\ge 3.4` bits/char.
 * **Format-Preserving Masking:** Instead of returning bracketed `[API_KEY_1]`, the engine uses `canonical locale substitution` to generate synthetic equivalents (e.g., swapping a real SSN for a valid but fake SSN format). This preserves LLM token-attention weights and eliminates Byte-Pair Encoding (BPE) bloat.
-* **Flags:** [`ENABLE_TIER2_ENTROPY`](deployment.md), [`ENABLE_SYNTHETIC_SWAPPING`](deployment.md)
+* **Flags:** [`ENABLE_TIER2_ENTROPY`](/docs/deployment), [`ENABLE_SYNTHETIC_SWAPPING`](/docs/deployment)
 
 ### Step 3: Script-Aware Non-Latin & CJK Rehydration Engine
 * **Implementation Mechanics:** Standard word boundaries (``) break in logographic scripts (Chinese, Japanese, Korean) due to lack of whitespace, causing catastrophic sub-word collisions during stream rehydration (e.g. synthetic token `May` corrupting `Maybe` into `Sarahbe`). The proxy utilizes a specialized boundary isolation function that targets ASCII alphanumeric boundaries (`_is_ascii_word_char`) while treating CJK ideographs (`	ext{U+4E00}-	ext{U+9FFF}`) continuously, allowing seamless contextual wrapping without text corruption.
@@ -131,11 +131,11 @@ Because LLM-Shield is a strict Zero-Data proxy, PII to Tag mappings must be main
 
 ### Stateless Redis TTL Vault & Deterministic HMAC Masking
 * **Implementation Mechanics:** When scaling horizontally across Kubernetes pods, rehydration maps are written to `redis.asyncio` using Deterministic HMAC-SHA256 hashed keys. Keys are issued with hard rolling TTLs. If the stream disconnects, the vault automatically self-destructs the session, maintaining zero persistence.
-* **Flags:** [`REDIS_URL`](deployment.md), [`SESSION_TTL_SECONDS`](deployment.md)
+* **Flags:** [`REDIS_URL`](/docs/deployment), [`SESSION_TTL_SECONDS`](/docs/deployment)
 
 ### In-Band Stateless Syntheticgraphic Masking
 * **Implementation Mechanics:** For organizations without Redis, the proxy operates in 100% stateless mode. Entities are encrypted using AES-256-GCM envelope encryption. The encrypted ciphertext is converted to Base62 and passed *into* the LLM prompt. The downstream SSE stream returns the ciphertext, and the proxy decrypts it on the fly using a 256-bit DEK, eliminating the need for state completely.
-* **Flags:** [`SHIELD_DEFAULT_MASKING_MODE`](deployment.md)
+* **Flags:** [`SHIELD_DEFAULT_MASKING_MODE`](/docs/deployment)
 
 ## 4. 🌐 Service Mesh & Multi-Provider Translation
 
@@ -152,7 +152,7 @@ LLM-Shield actively manages API quotas and prevents adversarial resource exhaust
 
 ### Composite Agent Loop Circuit Breaker
 * **Implementation Mechanics:** Runaway autonomous AI agents (e.g., AutoGen, CrewAI loops) can bill thousands of dollars in minutes if stuck in a hallucination loop. The proxy tracks the depth of `tool_calls` arrays locally and deterministically trips a circuit breaker, severing the connection and throwing an HTTP 429 if an agent loops beyond the defined threshold.
-* **Flags:** [`ENABLE_AGENT_BREAKER`](deployment.md)
+* **Flags:** [`ENABLE_AGENT_BREAKER`](/docs/deployment)
 
 ### Rate Limiting & Deep Component Health
 * **Token-Bucket Rate Limiter:** Utilizing a Redis Lua script (`evalsha`) for atomicity, the proxy enforces a hard 6000 RPM / 200 Burst limit without race conditions.

@@ -1,6 +1,6 @@
 # UDS Socket TOCTOU Hardening
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **UDS Socket TOCTOU (Time-of-Check to Time-of-Use) Hardening** is a highly specific, OS-level security feature. When running the proxy in Service Mesh mode using a Unix Domain Socket (UDS) instead of a TCP port, this feature prevents local privilege escalation attacks by securely managing socket file permissions at the kernel level.
@@ -34,7 +34,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `UDS_SOCKET_PATH` | The path for the Unix Domain Socket (e.g., `/var/run/shield.sock`). | [View in deployment.md](../../deployment.md) |
+| `UDS_SOCKET_PATH` | The path for the Unix Domain Socket (e.g., `/var/run/shield.sock`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **File Cleanup:** The proxy binds to signal handlers to ensure that if the proxy crashes or receives a `SIGTERM`, it executes `os.unlink()` to delete the `.sock` file from the filesystem. This prevents "Address already in use" errors on subsequent restarts.
@@ -43,7 +43,7 @@ View diagram on GitHub mobile 📱 -->
 ## FAQ
 
 **Q: Do I need to worry about this if I'm just running the proxy on port 8000?**
-A: No. This specific hardening technique only applies when you are using the [Service Mesh Native gRPC ext_proc Integration](./service-mesh-native-grpc-ext-proc-integration.md) via Unix Domain Sockets, as TCP ports do not suffer from file-level permission race conditions.
+A: No. This specific hardening technique only applies when you are using the [Service Mesh Native gRPC ext_proc Integration](./service-mesh-native-grpc-ext-proc-integration) via Unix Domain Sockets, as TCP ports do not suffer from file-level permission race conditions.
 
 
 ## Plainspeak
@@ -52,4 +52,4 @@ This feature closes a tiny, split-second window of vulnerability when the proxy 
 When a program creates a communication pipe (a socket), there is sometimes a millisecond delay between creating the pipe and locking it with a password. A very fast hacker on the same machine could jump into the pipe during that unprotected millisecond. This feature uses advanced operating system commands to ensure the pipe is born completely locked down from the very first nanosecond.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

@@ -1,6 +1,6 @@
 # In-Band Stateless Syntheticgraphic Masking
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **In-Band Stateless Syntheticgraphic Masking** enables the proxy to operate in a 100% Zero-Data environment. Instead of relying on an external state store (like Redis) to map sensitive PII to tokens, it encrypts the sensitive data directly and passes the ciphertext into the downstream LLM prompt. This guarantees that your proxy maintains absolutely zero data liability.
@@ -50,7 +50,7 @@ Because the nonce travels with the data, the returning SSE stream from the LLM c
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `SHIELD_DEFAULT_MASKING_MODE` | Set to `STATELESS_CRYPTO` to enable in-band encryption. | [View in deployment.md](../../deployment.md) |
+| `SHIELD_DEFAULT_MASKING_MODE` | Set to `STATELESS_CRYPTO` to enable in-band encryption. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Key Rotation:** The AES-256-GCM keys are derived via PBKDF2 HMAC. This allows enterprise operators to safely rotate master keys in HashiCorp Vault without downtime.
@@ -76,4 +76,4 @@ Because In-Band Cryptographic Masking is a core mathematical mechanism, it serve
 - **AST-Aware Semantic Firewall:** When autonomous AI agents communicate using complex machine-to-machine JSON code (like JSON-RPC or MCP), the AST Firewall acts as a "Robotic Arm" that parses the code and uses this Cryptographic Masking mode to encrypt just the specific values without breaking the JSON structure.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_stateless_synthetic.py`](../../../tests/test_stateless_synthetic.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_stateless_synthetic.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_stateless_synthetic.py).

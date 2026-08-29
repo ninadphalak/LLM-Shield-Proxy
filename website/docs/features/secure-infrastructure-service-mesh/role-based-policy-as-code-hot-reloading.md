@@ -1,6 +1,6 @@
 # Role-Based Policy-as-Code & Hot-Reloading
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Role-Based Policy-as-Code & Hot-Reloading** allows security teams to manage Data Loss Prevention (DLP) rules declaratively via GitOps. Furthermore, it allows the proxy to dynamically ingest policy updates on-the-fly without requiring a pod restart or dropping active user connections.
@@ -34,7 +34,7 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `POLICY_HOT_RELOAD_INTERVAL` | The frequency in seconds to check for policy updates (default 10s). | [View in deployment.md](../../deployment.md) |
+| `POLICY_HOT_RELOAD_INTERVAL` | The frequency in seconds to check for policy updates (default 10s). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Validation Safety:** If a security engineer pushes a malformed YAML file (e.g., missing a required field or containing a syntax error), the Pydantic validator will reject it. The proxy will log a high-priority error and *continue using the last known good policy*, preventing an accidental DoS.
@@ -52,4 +52,4 @@ This feature allows security teams to change the rules of the proxy instantly, w
 Normally, if you update the security rules, you have to restart the server, which kicks everyone off their active chats. This feature constantly watches the rulebook file. The absolute second the file is updated, it smoothly slides the new rules into the system's memory. The next question asked uses the new rules, and no one's connection drops.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](../../../tests/test_policy_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

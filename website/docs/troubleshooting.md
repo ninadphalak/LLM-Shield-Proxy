@@ -1,4 +1,4 @@
-[⬅️ Back to README](../README.md)
+[⬅️ Back to README](/)
 
 # 🚑 Troubleshooting & Configuration Guide
 

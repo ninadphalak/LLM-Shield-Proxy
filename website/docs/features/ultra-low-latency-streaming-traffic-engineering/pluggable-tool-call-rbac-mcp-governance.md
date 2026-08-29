@@ -1,6 +1,6 @@
 # Pluggable Tool-Call RBAC (MCP Governance)
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Pluggable Tool-Call RBAC (MCP Governance)** is a critical component of the LLM-Shield-Proxy.
@@ -32,7 +32,7 @@ The engine operates automatically but can be tuned via deployment flags.
 
 | Environment Variable / Config | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_PLUGGABLE_TOOL_CALL_RBAC_MCP_GOVERNANCE` | Toggles this functionality. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_PLUGGABLE_TOOL_CALL_RBAC_MCP_GOVERNANCE` | Toggles this functionality. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Streaming Integrity:** Seamlessly handles split token chunks in real-time.
@@ -52,4 +52,4 @@ This feature acts as a bouncer that strictly controls what an AI agent is allowe
 When an AI decides it wants to use a tool (like "delete a file" or "send an email"), it shouldn't be blindly trusted. This feature intercepts the AI's request before it happens, checks the AI's "ID badge" against a strict list of permissions, and blocks the action immediately if the AI isn't authorized to use that specific tool.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](../../../tests/test_proxy.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_proxy.py).

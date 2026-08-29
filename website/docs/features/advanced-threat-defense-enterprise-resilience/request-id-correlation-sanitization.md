@@ -1,6 +1,6 @@
 # Request-ID Correlation & Sanitization
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Request-ID Correlation & Sanitization** provides enterprise traceability across complex distributed microservices. It ensures every single LLM interaction can be traced from the frontend UI, through the proxy, to the upstream AI provider, and finally into the OpenTelemetry / Grafana dashboards using a unified, mathematically sanitized identifier.
@@ -42,7 +42,7 @@ This feature operates fundamentally at the middleware layer and requires no expl
 ## FAQ
 
 **Q: Can I use standard W3C `traceparent` headers instead?**
-A: The proxy natively supports both! The `X-Request-ID` is used for application-level correlation and log tagging, while the W3C `traceparent` header is independently parsed and passed directly into the [Zero-Overhead OpenTelemetry Tracing](./zero-overhead-opentelemetry-otel-tracing.md) engine for strict distributed span tracking.
+A: The proxy natively supports both! The `X-Request-ID` is used for application-level correlation and log tagging, while the W3C `traceparent` header is independently parsed and passed directly into the [Zero-Overhead OpenTelemetry Tracing](/docs/features/enterprise-auditing-compliance/zero-overhead-opentelemetry-otel-tracing) engine for strict distributed span tracking.
 
 **Q: Is the Request ID passed to OpenAI/Anthropic?**
 A: Yes. It is appended as a custom header on the upstream HTTP/2 connection. While OpenAI doesn't natively expose this in their standard dashboards, it provides critical proof during enterprise support tickets when correlating proxy traffic with upstream provider logs.
@@ -54,4 +54,4 @@ This feature acts as a tracking number system for your data.
 When a user sends a message, it travels through a maze of different servers and programs. If something goes wrong, it's impossible to figure out where the error happened unless you can trace the message's exact path. This feature attaches a unique tracking ID to every single request. No matter where the data goes, IT engineers can use that tracking ID to find out exactly what happened to it.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](../../../tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

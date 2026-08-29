@@ -1,6 +1,6 @@
 # LLM FinOps Chargeback Meter
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **LLM FinOps Chargeback Meter** provides enterprise-grade observability into AI consumption. It actively intercepts token usage statistics from upstream providers (like OpenAI and Anthropic) and streams them asynchronously as Prometheus metrics. This allows organizations to build strict, multi-tenant chargeback models, billing individual departments or users down to the exact fraction of a cent.
@@ -34,10 +34,10 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_PROMETHEUS_METRICS` | Toggles the exposure of the `/metrics` endpoint on port 9090. | [View in deployment.md](../../deployment.md) |
+| `ENABLE_PROMETHEUS_METRICS` | Toggles the exposure of the `/metrics` endpoint on port 9090. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **FinOps Stream Options:** OpenAI does not emit usage data on SSE streams by default. The proxy integrates with the [Automatic FinOps `stream_options` Injection](./automatic-finops-stream-options-injection.md) feature to force OpenAI to return this data, guaranteeing accurate metering.
+* **FinOps Stream Options:** OpenAI does not emit usage data on SSE streams by default. The proxy integrates with the [Automatic FinOps `stream_options` Injection](/docs/features/ultra-low-latency-streaming-traffic-engineering/automatic-finops-stream-options-injection) feature to force OpenAI to return this data, guaranteeing accurate metering.
 * **Anthropic Normalization:** Anthropic Claude uses different terminology (`input_tokens`, `output_tokens`) in its streaming events. The proxy automatically normalizes these into the standard `prompt_tokens` and `completion_tokens` metric labels.
 
 ## FAQ
@@ -55,4 +55,4 @@ This feature is a highly detailed billing meter that helps companies figure out 
 Instead of just getting one massive bill from OpenAI at the end of the month, this feature tracks every single chat message and tags it with the specific user or department who sent it. It then sends this usage data to a dashboard, so the finance team can accurately charge each department for the exact amount of AI computing power they used.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](../../../tests/test_finops_meter.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).

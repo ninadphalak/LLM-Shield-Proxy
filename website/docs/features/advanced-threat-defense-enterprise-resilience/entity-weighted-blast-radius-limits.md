@@ -1,6 +1,6 @@
 # Entity-Weighted Blast Radius Limits
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Entity-Weighted Blast Radius Limits** protect enterprises from massive, bulk data exfiltration events. Instead of simply rate-limiting a user based on the *number* of API requests they make, this feature utilizes a Redis Token-Bucket circuit breaker that penalizes users based on the *density of sensitive data* (entities) present in their requests.
@@ -33,8 +33,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENTITY_RATE_LIMIT_BUCKET` | The maximum number of entities a user can process per minute (default 200). | [View in deployment.md](../../deployment.md) |
-| `REDIS_URL` | Required for distributed state synchronization. | [View in deployment.md](../../deployment.md) |
+| `ENTITY_RATE_LIMIT_BUCKET` | The maximum number of entities a user can process per minute (default 200). | [View in deployment.md](/docs/deployment) |
+| `REDIS_URL` | Required for distributed state synchronization. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Atomic Lua Evaluation:** The entire Token-Bucket deduction logic is written in a Lua script executed directly on the Redis server (`evalsha`). This guarantees 100% atomicity, meaning an attacker cannot bypass the limit by issuing hundreds of concurrent parallel requests.
@@ -55,4 +55,4 @@ This feature prevents a catastrophic data leak by putting a strict limit on how 
 Standard security limits only care about how many *questions* you ask (e.g., "10 questions a minute"). This feature is much smarter: it counts the actual *amount of sensitive data* (like counting how many Credit Card numbers) in the response. If an AI accidentally tries to output an entire database of 500 credit cards in a single response, this feature slams the brakes and blocks the massive leak, acting as a blast shield.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_blast_radius.py`](../../../tests/test_blast_radius.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_blast_radius.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_blast_radius.py).

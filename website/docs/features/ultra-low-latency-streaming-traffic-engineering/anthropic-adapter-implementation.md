@@ -1,6 +1,6 @@
 # Anthropic Adapter Implementation
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Anthropic Adapter Implementation** is a highly specialized protocol translator built natively into the proxy. It allows any OpenAI-compatible client to seamlessly interface with Anthropic's Claude API. It fundamentally bridges the gap between OpenAI's monolithic `messages` schema and Anthropic's distinct prompt engineering requirements.
@@ -35,7 +35,7 @@ The adapter engages automatically when the proxy detects an Anthropic target URL
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ANTHROPIC_VERSION` | Sets the `anthropic-version` API header. Default: `2023-06-01`. | [View in deployment.md](../../deployment.md) |
+| `ANTHROPIC_VERSION` | Sets the `anthropic-version` API header. Default: `2023-06-01`. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Tool Calling (Function Calling) Compatibility:** The adapter is fully aware of Anthropic's tool-use XML and JSON specifications, successfully mapping OpenAI's `tools` array into Anthropic's format, and parsing Claude's tool execution requests back into standard OpenAI JSON-RPC payloads.
@@ -55,4 +55,4 @@ This feature specifically handles the unique, strict conversational rules requir
 Anthropic is extremely picky about how a conversation is formatted (for example, it requires exactly alternating "User" and "Assistant" messages). If your application sends messages out of order, Anthropic will reject them. This adapter acts as a smart editor, automatically reformatting and fixing your message history in real-time so that Anthropic accepts it without complaints.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](../../../tests/test_provider_adapters.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).

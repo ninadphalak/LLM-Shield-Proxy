@@ -28,7 +28,7 @@ sequenceDiagram
 
 ## Configuration Flags
 
-The behavior is controlled by several key flags (see [Deployment Configuration](../../deployment.md) for a full reference):
+The behavior is controlled by several key flags (see [Deployment Configuration](/docs/deployment) for a full reference):
 
 - `AIR_GAPPED_MODE` (bool): Master toggle to enable strict Zero-Internet routing.
 - `EGRESS_GATEWAY_URL` (string): The internal proxy URL. Required if `AIR_GAPPED_MODE` is `true`. (e.g., `http://egress-proxy.internal:8080`).
@@ -59,4 +59,4 @@ Yes. You can configure `EGRESS_GATEWAY_URL` with `https://` and supply the `SSL_
 
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_air_gapped_egress.py`](../../tests/test_air_gapped_egress.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_air_gapped_egress.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_air_gapped_egress.py).

@@ -30,4 +30,4 @@ As AI agents become autonomous, the risk of unauthorized lateral movement (e.g.,
 ### Composite Agent Loop Circuit Breakers
 To prevent runaway autonomous loops—a critical risk in agentic architectures—the proxy implements **Composite Agent Loop Circuit Breakers**. If an agent begins rapidly iterating or executing repetitive, unverified tool calls without human-in-the-loop validation, the circuit breaker halts the execution.
 
-*(Reference the [Architecture & Cryptographic Data Flow](../../ARCHITECTURE.md) for deeper implementation details on the proxy's streaming capabilities).*
+*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details on the proxy's streaming capabilities).*

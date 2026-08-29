@@ -1,6 +1,6 @@
 # Granular Entity Policy Scopes
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 **Granular Entity Policy Scopes** allow enterprise administrators to define highly specific, department-level Data Loss Prevention (DLP) rules. Instead of applying a blanket "redact everything" policy, you can configure the proxy so that the HR department's LLM agent can process employee IDs and salaries, while the Marketing department's agent automatically redacts them.
@@ -29,7 +29,7 @@ View diagram on GitHub mobile 📱 -->
 
 | File / Config | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `policies.yaml` | The YAML file defining roles and their associated entity scopes. | [View in POLICIES.md](../../POLICIES.md) |
+| `policies.yaml` | The YAML file defining roles and their associated entity scopes. | [View in POLICIES.md](/docs/policies) |
 
 ## Critical Logic & Edge Cases
 * **Zero-Trust Default (FAIL_CLOSED):** If a `virtual_key_id` is not found, or if a role is improperly defined without explicit `allowed_entities`, the proxy defaults to redacting *everything* recognized by the cascade engines to prevent accidental exfiltration.
@@ -53,4 +53,4 @@ This feature ensures that different departments have exactly the right level of 
 For example, the HR department's AI might be allowed to see employee names, but the Marketing department's AI should definitely not. This feature creates specific "ID badges" (profiles) for different teams. When a team uses the system, it instantly checks their badge and strictly applies their custom rules, defaulting to blocking everything if it's ever unsure.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](../../../tests/test_policy_scopes.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_scopes.py).

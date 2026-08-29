@@ -1,6 +1,6 @@
 # Stateless AST-Aware Semantic PII Firewall
 
-[⬅️ Back to Features Catalog](../../../features-overview.md)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
 The **Stateless AST-Aware Semantic PII Firewall** extends the proxy's redaction capabilities beyond basic text prompts and directly into autonomous agent workflows. It intercepts and safely mutates structured tool invocations (such as JSON-RPC 2.0 payloads or MCP protocol commands) to ensure agents do not leak sensitive PII when executing backend tools like `exec_sql` or `fetch_profile`.
@@ -59,4 +59,4 @@ This feature acts as a smart translator between an AI agent and the tools it use
 When an AI wants to use a tool, it sends instructions in a specific computer format (called JSON). If we just blindly blacked-out sensitive words in those instructions, it would break the formatting and cause the tool to crash. Instead, this firewall carefully unpackages the instructions, hides only the sensitive data while keeping the structure intact, and then seamlessly repackages it so the tool still works perfectly.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](../../../tests/test_tool_rbac_and_compliance.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).
