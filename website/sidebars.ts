@@ -27,6 +27,7 @@ const sidebars: SidebarsConfig = {
         'litellm-ollama-recipe',
         'openwebui-langchain-recipe',
         'pluggable-rbac-engine',
+        'migration-from-presidio',
         'architecture-whitepaper'
       ],
     },
