@@ -1,0 +1,10 @@
+{
+  "label": "Enterprise Auditing & Compliance",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "title": "Enterprise Auditing & Compliance",
+    "description": "Tamper-evident WORM audit logging, FIPS 140-3 KAT verification, NIST OSCAL artifact generation, and cryptographic proof of non-egress for auditors and GRC platforms.",
+    "slug": "/features/enterprise-auditing-compliance"
+  }
+}

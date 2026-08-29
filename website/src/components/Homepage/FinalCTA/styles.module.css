@@ -1,0 +1,29 @@
+.section {
+  padding: 6rem 0;
+  text-align: center;
+  background: radial-gradient(ellipse at center, #161b22 0%, #0a0e14 70%);
+}
+
+.title {
+  font-size: 2.1rem;
+  max-width: 700px;
+  margin: 0 auto 1rem;
+}
+
+.subtitle {
+  color: #8b949e;
+  font-size: 1.05rem;
+  margin-bottom: 2rem;
+}
+
+.subtitle code {
+  background: #161b22;
+  border: 1px solid #30363d;
+}
+
+.buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}

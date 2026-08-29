@@ -1,0 +1,10 @@
+{
+  "label": "Ultra-Low-Latency Streaming & Traffic Engineering",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "Ultra-Low-Latency Streaming & Traffic Engineering",
+    "description": "How the proxy redacts and re-hydrates Server-Sent Event streams delta-by-delta without stalling the UX, plus multi-provider translation, failover, and connection pooling.",
+    "slug": "/features/ultra-low-latency-streaming-traffic-engineering"
+  }
+}

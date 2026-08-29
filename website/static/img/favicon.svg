@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="lsp-fav-grad" x1="4" y1="2" x2="60" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00ff9d"/>
+      <stop offset="1" stop-color="#00a8ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0a0e14"/>
+  <path d="M32 8 L52 15 V29 C52 42 44 50.5 32 55 C20 50.5 12 42 12 29 V15 Z" fill="url(#lsp-fav-grad)"/>
+  <path d="M25 32 L30 37 L40 25" stroke="#0a0e14" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

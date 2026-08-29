@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00ff9d"/>
+      <stop offset="1" stop-color="#00a8ff"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="80%" cy="15%" r="70%">
+      <stop offset="0" stop-color="#161b22"/>
+      <stop offset="1" stop-color="#0a0e14"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bgGlow)"/>
+  <rect width="1200" height="630" fill="none" stroke="#21262d" stroke-width="2"/>
+
+  <!-- Shield mark -->
+  <g transform="translate(90,150)">
+    <path d="M110 0 L210 34 V110 C210 175 165 220 110 245 C55 220 10 175 10 110 V34 Z"
+          fill="none" stroke="url(#grad)" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M110 0 L210 34 V110 C210 175 165 220 110 245 Z" fill="url(#grad)" fill-opacity="0.12"/>
+    <path d="M68 122 L98 152 L155 90" stroke="url(#grad)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <text x="360" y="235" fill="#ffffff" font-size="66" font-weight="800">LLM-Shield-Proxy</text>
+  <text x="360" y="290" fill="url(#grad)" font-size="32" font-weight="700">Zero-Egress PII Redaction for Enterprise GenAI</text>
+
+  <text x="360" y="350" fill="#8b949e" font-size="26">Self-hosted &#183; Real-time SSE streaming &#183; Agent tool-call safe</text>
+
+  <!-- Stat chips -->
+  <g font-size="24" font-weight="700">
+    <rect x="360" y="400" width="190" height="56" rx="10" fill="#0d1117" stroke="#30363d"/>
+    <text x="455" y="435" fill="#00ff9d" text-anchor="middle">&lt;85 MB RAM</text>
+
+    <rect x="565" y="400" width="190" height="56" rx="10" fill="#0d1117" stroke="#30363d"/>
+    <text x="660" y="435" fill="#00a8ff" text-anchor="middle">&lt;5 &#181;s overhead</text>
+
+    <rect x="770" y="400" width="220" height="56" rx="10" fill="#0d1117" stroke="#30363d"/>
+    <text x="880" y="435" fill="#ffffff" text-anchor="middle">Apache 2.0</text>
+  </g>
+
+  <text x="360" y="560" fill="#6e7681" font-size="24">github.com/ninadphalak/LLM-Shield-Proxy</text>
+</svg>

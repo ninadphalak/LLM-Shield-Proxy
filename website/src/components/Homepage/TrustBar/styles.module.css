@@ -1,0 +1,50 @@
+.wrapper {
+  padding: 1.75rem 0;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.caption {
+  color: #8b949e;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+}
+
+.chip {
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #c9d1d9 !important;
+  text-decoration: none !important;
+  transition: all 0.15s ease;
+}
+
+.chip:hover {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary) !important;
+}
+
+.disclaimer {
+  margin: 0.75rem 0 0;
+  text-align: center;
+  color: #6e7681;
+  font-size: 0.75rem;
+}
