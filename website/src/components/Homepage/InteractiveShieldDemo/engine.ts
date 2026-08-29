@@ -5,7 +5,7 @@
  * in-browser feel for the four masking modes described in the docs. The
  * real engine additionally runs a local ONNX NER model (Tier 3) for
  * contextual name/organization detection across arbitrary free text, and
- * uses real AES-256-GCM for STATELESS_CRYPTO rather than this demo's
+ * uses real AES-256-GCM for the AES-256-GCM mode rather than this demo's
  * illustrative hash-based placeholder.
  */
 
@@ -21,7 +21,10 @@ export type EntityType =
 export type MaskMode = 'SYNTHETIC' | 'STRUCTURAL_TAG' | 'SCRUB' | 'STATELESS_CRYPTO';
 
 export interface Segment {
-  text: string;
+  /** What gets sent to the LLM: original text for non-entity spans, masked value for entities. */
+  masked: string;
+  /** The real value. Used to render the rehydrated "received from LLM" panel. */
+  original: string;
   type: EntityType | null;
 }
 
@@ -36,6 +39,8 @@ const NAME_SYNTH_MAP: Record<string, string> = {
   'robert chen': 'David Kim',
   'maria garcia': 'Lucia Fernandez',
   'james wilson': 'Andre Walsh',
+  'emily davis': 'Priya Nair',
+  'michael brown': 'Owen Castillo',
 };
 
 function fnv1a(str: string): number {
@@ -132,13 +137,13 @@ interface RawMatch {
   text: string;
 }
 
-const PATTERNS: Array<{ type: EntityType; regex: RegExp }> = [
-  { type: 'EMAIL', regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g },
-  { type: 'SSN', regex: /\b\d{3}-\d{2}-\d{4}\b/g },
-  { type: 'CREDIT_CARD', regex: /\b(?:\d[ -]?){13,16}\b/g },
-  { type: 'API_KEY', regex: /\b(?:sk|key|token)[-_][A-Za-z0-9_-]{10,}\b/gi },
-  { type: 'IP_ADDRESS', regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g },
-  { type: 'PHONE', regex: /\b\d{3}[-.]\d{3}[-.]\d{4}\b/g },
+const PATTERNS: Array<{type: EntityType; regex: RegExp}> = [
+  {type: 'EMAIL', regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g},
+  {type: 'SSN', regex: /\b\d{3}-\d{2}-\d{4}\b/g},
+  {type: 'CREDIT_CARD', regex: /\b(?:\d[ -]?){13,16}\b/g},
+  {type: 'API_KEY', regex: /\b(?:sk|key|token)[-_][A-Za-z0-9_-]{10,}\b/gi},
+  {type: 'IP_ADDRESS', regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g},
+  {type: 'PHONE', regex: /\b\d{3}[-.]\d{3}[-.]\d{4}\b/g},
 ];
 
 function findNameMatches(text: string): RawMatch[] {
@@ -146,7 +151,7 @@ function findNameMatches(text: string): RawMatch[] {
   for (const name of Object.keys(NAME_SYNTH_MAP)) {
     const idx = text.toLowerCase().indexOf(name);
     if (idx !== -1) {
-      matches.push({ start: idx, end: idx + name.length, type: 'PERSON', text: text.slice(idx, idx + name.length) });
+      matches.push({start: idx, end: idx + name.length, type: 'PERSON', text: text.slice(idx, idx + name.length)});
     }
   }
   return matches;
@@ -154,19 +159,17 @@ function findNameMatches(text: string): RawMatch[] {
 
 function findRegexMatches(text: string): RawMatch[] {
   const matches: RawMatch[] = [];
-  for (const { type, regex } of PATTERNS) {
+  for (const {type, regex} of PATTERNS) {
     for (const m of text.matchAll(regex)) {
       if (m.index === undefined) continue;
-      matches.push({ start: m.index, end: m.index + m[0].length, type, text: m[0] });
+      matches.push({start: m.index, end: m.index + m[0].length, type, text: m[0]});
     }
   }
   return matches;
 }
 
 function resolveOverlaps(matches: RawMatch[]): RawMatch[] {
-  const sorted = [...matches].sort(
-    (a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start),
-  );
+  const sorted = [...matches].sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start));
   const resolved: RawMatch[] = [];
   let lastEnd = -1;
   for (const m of sorted) {
@@ -195,7 +198,8 @@ export function analyzeAndMask(text: string, mode: MaskMode): RedactionResult {
   let cursor = 0;
   for (const match of matches) {
     if (match.start > cursor) {
-      segments.push({ text: text.slice(cursor, match.start), type: null });
+      const plain = text.slice(cursor, match.start);
+      segments.push({masked: plain, original: plain, type: null});
     }
 
     const key = `${match.type}:${match.text.toLowerCase()}`;
@@ -207,15 +211,16 @@ export function analyzeAndMask(text: string, mode: MaskMode): RedactionResult {
     }
 
     const masked = maskValue(match.type, match.text, mode, tagIndex);
-    segments.push({ text: masked, type: match.type });
+    segments.push({masked, original: match.text, type: match.type});
     counts[match.type] = (counts[match.type] ?? 0) + 1;
     cursor = match.end;
   }
 
   if (cursor < text.length) {
-    segments.push({ text: text.slice(cursor), type: null });
+    const plain = text.slice(cursor);
+    segments.push({masked: plain, original: plain, type: null});
   }
 
   const totalEntities = Object.values(counts).reduce((a, b) => a + (b ?? 0), 0);
-  return { segments, counts, totalEntities };
+  return {segments, counts, totalEntities};
 }

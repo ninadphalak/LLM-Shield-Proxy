@@ -8,7 +8,7 @@ import Heading from '@theme/Heading';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import TrustBar from '@site/src/components/Homepage/TrustBar';
 import StatsBar from '@site/src/components/Homepage/StatsBar';
-import LiveDemo from '@site/src/components/Homepage/LiveDemo';
+import InteractiveShieldDemo from '@site/src/components/Homepage/InteractiveShieldDemo';
 import DualPipeline from '@site/src/components/Homepage/DualPipeline';
 import HowItWorks from '@site/src/components/Homepage/HowItWorks';
 import ComparisonTable from '@site/src/components/Homepage/ComparisonTable';
@@ -27,10 +27,10 @@ function HomepageHeader() {
           Stop PII from ever leaving your VPC — even mid-stream
         </Heading>
         <p className="hero__subtitle">
-          {siteConfig.tagline}. LLM-Shield-Proxy redacts PII, PHI, and secrets from LLM traffic in
-          real time — including token-by-token streams and machine-to-machine agent traffic —
-          with &lt;85 MB RAM and microsecond overhead.
+          Intercepts requests to any LLM, redacts PII before it ever leaves your network, and
+          instantly restores it on the way back — without breaking real-time chat or streaming.
         </p>
+        <p className={styles.heroSubMeta}>{siteConfig.tagline}</p>
         <div className={styles.buttons}>
           <Link className="button button--secondary button--lg" to="/docs/deployment">
             60-Second Quickstart
@@ -56,7 +56,7 @@ export default function Home(): ReactNode {
       <TrustBar />
       <StatsBar />
       <main>
-        <LiveDemo />
+        <InteractiveShieldDemo />
         <DualPipeline />
         <HowItWorks />
         <HomepageFeatures />
