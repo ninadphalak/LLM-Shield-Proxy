@@ -78,11 +78,11 @@ const config: Config = {
           items: [
             {
               label: 'Architecture',
-              to: '/docs/architecture', // Make sure to add this file or change this link
+              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/ARCHITECTURE.md',
             },
             {
               label: 'Security',
-              to: '/docs/security', // Make sure to add this file or change this link
+              href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/SECURITY.md',
             },
           ],
         },
