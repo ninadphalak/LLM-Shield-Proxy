@@ -98,4 +98,4 @@ async def mutate_webhook(request: Request) -> JSONResponse:
             }
         })
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Internal Server Error"})
