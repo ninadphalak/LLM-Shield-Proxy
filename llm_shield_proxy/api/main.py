@@ -902,7 +902,7 @@ async def _proxy_catch_all_internal(
                         redacted_bytes = await mutator.mutate(orjson.dumps(payload))
                         redacted_payload = orjson.loads(redacted_bytes)
                         entities_detected = 0 # Handled statelessly
-                    except ASTDepthExceededException as ade:
+                    except ASTDepthExceededException:
                         # RFC 7807 compliant HTTP 400 error
                         return JSONResponse(
                             status_code=400,
