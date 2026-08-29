@@ -69,9 +69,22 @@
   border-color: var(--ifm-color-primary);
 }
 
+.select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .modeBlurb {
   text-align: center;
   color: #6e7681;
+  font-size: 0.85rem;
+  margin-bottom: 2rem;
+}
+
+.agentModeBlurb {
+  text-align: center;
+  color: #ffb020;
+  font-weight: 600;
   font-size: 0.85rem;
   margin-bottom: 2rem;
 }
@@ -308,41 +321,24 @@
 .terminalBody {
   margin: 0;
   padding: 1.25rem;
-  font-size: 0.82rem;
-  line-height: 1.7;
+  font-size: 0.98rem;
+  line-height: 1.75;
   color: #c9d1d9;
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.gridTwo {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.25rem;
-  margin: 2rem 0 1.25rem;
-  text-align: left;
-}
-
-@media screen and (max-width: 768px) {
-  .gridTwo {
-    grid-template-columns: 1fr;
-  }
-}
-
 .jsonBlock {
   margin: 0;
   padding: 1rem;
-  font-size: 0.8rem;
-  line-height: 1.6;
+  font-size: 0.92rem;
+  line-height: 1.65;
   color: #c9d1d9;
   overflow-x: auto;
-  min-height: 220px;
+  overflow-y: auto;
+  min-height: 240px;
   white-space: pre;
-}
-
-.forcedBadge {
-  color: var(--ifm-color-primary);
 }
 
 .agentCaption {
@@ -393,11 +389,16 @@
   }
 
   .inputWrap,
-  .output {
+  .output,
+  .jsonBlock {
     min-height: 180px;
   }
 
   .terminalBody {
-    font-size: 0.72rem;
+    font-size: 0.82rem;
+  }
+
+  .jsonBlock {
+    font-size: 0.78rem;
   }
 }

@@ -6,6 +6,10 @@
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Docker Pulls](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
+[![Docs & Live Demo](https://img.shields.io/badge/docs-interactive%20demo-00ff9d)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
+
+> 📖 **[Read the full docs and try the interactive PII-redaction playground →](https://project-0039f5fd-ac66-4a1c-9e0.web.app)**
+> Type real-looking PII into your browser and watch it get redacted before it ever reaches an LLM, then rehydrated on the way back — no signup, no server calls, entirely client-side.
 
 <img src="website/docs/LLM-Shield-Proxy-paper-v2.gif" width="600" alt="LLM-Shield-Proxy Demo" />
 
