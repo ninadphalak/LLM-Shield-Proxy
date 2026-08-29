@@ -35,7 +35,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   received: '✅ Response received — PII rehydrated for your screen',
 };
 
-type TerminalPart = {text: string; kind: 'comment' | 'sensitive' | 'protected' | null};
+type TerminalPart = {text: string; kind: 'comment' | 'sensitive' | 'protected' | 'restored' | null};
 
 const TERMINAL_LINES: TerminalPart[] = [
   {text: '# Before — talking straight to the provider\n', kind: 'comment'},
@@ -78,6 +78,14 @@ const AGENT_AFTER: TerminalPart[] = [
   {text: ',\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
 ];
 
+const AGENT_RECEIVED: TerminalPart[] = [
+  {text: '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "patient_name": "', kind: null},
+  {text: 'Sarah Connor', kind: 'restored'},
+  {text: '",\n      "ssn": "', kind: null},
+  {text: '456-12-7890', kind: 'restored'},
+  {text: '",\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
+];
+
 function TerminalBody({parts}: {parts: TerminalPart[]}): ReactNode {
   return (
     <>
@@ -99,6 +107,13 @@ function TerminalBody({parts}: {parts: TerminalPart[]}): ReactNode {
         if (p.kind === 'protected') {
           return (
             <mark key={i} className={styles.diffProtected}>
+              {p.text}
+            </mark>
+          );
+        }
+        if (p.kind === 'restored') {
+          return (
+            <mark key={i} className={styles.restored}>
               {p.text}
             </mark>
           );
@@ -188,12 +203,20 @@ function RehydratedPayload({segments, mode}: {segments: RedactionResult['segment
   );
 }
 
+type Selection = MaskMode | 'AGENT_JSON_RPC';
+
+const AGENT_BLURB =
+  "Not a masking mode you choose — this is how the proxy automatically handles structured tool calls.";
+
 export default function InteractiveShieldDemo(): ReactNode {
   const [text, setText] = useState(TEMPLATES[0].text);
-  const [mode, setMode] = useState<MaskMode>('SYNTHETIC');
+  const [selection, setSelection] = useState<Selection>('SYNTHETIC');
   const [activeTemplate, setActiveTemplate] = useState(TEMPLATES[0].key);
   const [phase, setPhase] = useState<Phase>('idle');
   const [sentResult, setSentResult] = useState<RedactionResult | null>(null);
+
+  const isAgentMode = selection === 'AGENT_JSON_RPC';
+  const mode: MaskMode = isAgentMode ? 'STATELESS_CRYPTO' : selection;
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const llmRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -208,7 +231,7 @@ export default function InteractiveShieldDemo(): ReactNode {
     clearTimeout(debounceRef.current);
     clearTimeout(llmRef.current);
 
-    if (!text.trim()) {
+    if (isAgentMode || !text.trim()) {
       setPhase('idle');
       setSentResult(null);
       return;
@@ -225,7 +248,7 @@ export default function InteractiveShieldDemo(): ReactNode {
       clearTimeout(debounceRef.current);
       clearTimeout(llmRef.current);
     };
-  }, [text, mode]);
+  }, [text, mode, isAgentMode]);
 
   const syncScroll = () => {
     if (backdropRef.current && textareaRef.current) {
@@ -234,7 +257,7 @@ export default function InteractiveShieldDemo(): ReactNode {
     }
   };
 
-  const activeModeBlurb = MODE_OPTIONS.find((m) => m.value === mode)?.blurb;
+  const activeModeBlurb = isAgentMode ? AGENT_BLURB : MODE_OPTIONS.find((m) => m.value === mode)?.blurb;
 
   return (
     <section className={styles.section}>
@@ -248,7 +271,9 @@ export default function InteractiveShieldDemo(): ReactNode {
             This is a live, 100% client-side preview of Tier 1 (regex) and Tier 2 (format-preserving
             synthesis) detection — nothing here calls a real LLM or leaves your machine. The
             production engine adds a local ONNX NER model (Tier 3) for free-text names and
-            organizations, and genuine AES-256-GCM for the AES-256-GCM mode.
+            organizations, and genuine AES-256-GCM for the AES-256-GCM mode. Pick{' '}
+            <strong>Agent → LLM tool call</strong> from the dropdown to see how structured JSON-RPC
+            traffic is protected differently from chat.
           </p>
         </div>
 
@@ -257,13 +282,18 @@ export default function InteractiveShieldDemo(): ReactNode {
             <span className={styles.controlLabel}>Masking mode</span>
             <select
               className={styles.select}
-              value={mode}
-              onChange={(e) => setMode(e.target.value as MaskMode)}>
-              {MODE_OPTIONS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
+              value={selection}
+              onChange={(e) => setSelection(e.target.value as Selection)}>
+              <optgroup label="Masking mode — human ↔ LLM chat">
+                {MODE_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Not a masking mode — machine ↔ machine">
+                <option value="AGENT_JSON_RPC">🤖 Agent → LLM tool call (JSON-RPC)</option>
+              </optgroup>
             </select>
           </label>
 
@@ -272,6 +302,7 @@ export default function InteractiveShieldDemo(): ReactNode {
             <select
               className={styles.select}
               value={activeTemplate}
+              disabled={isAgentMode}
               onChange={(e) => {
                 const template = TEMPLATES.find((t) => t.key === e.target.value);
                 if (template) {
@@ -287,90 +318,132 @@ export default function InteractiveShieldDemo(): ReactNode {
             </select>
           </label>
         </div>
-        {activeModeBlurb && <p className={styles.modeBlurb}>{activeModeBlurb}</p>}
-
-        <div className={styles.grid}>
-          <div className={styles.panel}>
-            <div className={styles.panelLabel}>You type this</div>
-            <div className={styles.inputWrap}>
-              <div ref={backdropRef} className={styles.backdrop} aria-hidden="true">
-                <HighlightedInput segments={liveResult.segments} />
-              </div>
-              <textarea
-                ref={textareaRef}
-                className={styles.textarea}
-                value={text}
-                spellCheck={false}
-                onScroll={syncScroll}
-                onChange={(e) => {
-                  setActiveTemplate('');
-                  setText(e.target.value);
-                }}
-                placeholder="Type a prompt with a name, email, SSN, or card number…"
-              />
-            </div>
-          </div>
-
-          <div className={styles.panel}>
-            <div className={styles.panelLabel}>Sent to LLM</div>
-            <div className={styles.output}>
-              {sentResult && (phase === 'sent' || phase === 'received') ? (
-                sentResult.totalEntities > 0 ? (
-                  <MaskedPayload segments={sentResult.segments} />
-                ) : (
-                  <span className={styles.emptyState}>No sensitive entities detected — sent as-is.</span>
-                )
-              ) : (
-                <span className={styles.emptyState}>Waiting for you to stop typing…</span>
-              )}
-            </div>
-          </div>
-
-          <div className={styles.panel}>
-            <div className={styles.panelLabel}>Received from LLM (rehydrated)</div>
-            <div className={styles.output}>
-              {phase === 'received' && sentResult ? (
-                sentResult.totalEntities > 0 ? (
-                  <RehydratedPayload segments={sentResult.segments} mode={mode} />
-                ) : (
-                  <span className={styles.emptyState}>Nothing to rehydrate — no entities were masked.</span>
-                )
-              ) : phase === 'sent' ? (
-                <span className={styles.pending}>
-                  <span className={styles.spinner} /> Non-blocking — proxy is holding the mapping while the
-                  LLM responds…
-                </span>
-              ) : (
-                <span className={styles.emptyState}>The rehydrated reply will appear here.</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.statusRow}>
-          <span className={phase === 'typing' ? styles.statusPending : styles.status}>{PHASE_LABEL[phase]}</span>
-          {sentResult && sentResult.totalEntities > 0 && (phase === 'sent' || phase === 'received') && (
-            <span className={styles.legend}>
-              {Object.entries(sentResult.counts).map(([type, count]) => (
-                <span key={type} className={styles.legendItem} style={{color: ENTITY_COLORS[type]}}>
-                  ● {type} × {count}
-                </span>
-              ))}
-            </span>
-          )}
-        </div>
-        {mode === 'SCRUB' && phase === 'received' && sentResult && sentResult.totalEntities > 0 && (
-          <p className={styles.scrubNote}>
-            Scrub mode destroys the original values on the way in — there's nothing stored to restore,
-            so the response above still shows the redacted placeholders. Switch to Synthetic, Structural,
-            or AES-256-GCM to see full rehydration.
+        {activeModeBlurb && (
+          <p className={isAgentMode ? styles.agentModeBlurb : styles.modeBlurb}>
+            {isAgentMode && '🔒 '}
+            {activeModeBlurb}
           </p>
         )}
 
+        {isAgentMode ? (
+          <>
+            <div className={styles.grid}>
+              <div className={styles.panel}>
+                <div className={styles.panelLabel}>Raw agent tool call (JSON-RPC)</div>
+                <pre className={styles.jsonBlock}>
+                  <TerminalBody parts={AGENT_BEFORE} />
+                </pre>
+              </div>
+              <div className={styles.panel}>
+                <div className={styles.panelLabel}>Sent to LLM</div>
+                <pre className={styles.jsonBlock}>
+                  <TerminalBody parts={AGENT_AFTER} />
+                </pre>
+              </div>
+              <div className={styles.panel}>
+                <div className={styles.panelLabel}>Received back by the agent (rehydrated)</div>
+                <pre className={styles.jsonBlock}>
+                  <TerminalBody parts={AGENT_RECEIVED} />
+                </pre>
+              </div>
+            </div>
+            <p className={styles.agentCaption}>
+              Structured JSON-RPC / MCP tool calls always use <strong>Stateless Synthetic</strong> mode —
+              never Scrub or Structural Tags — because those would break the payload's schema and could
+              crash the agent. <code>_shield_val</code> is a realistic fake the LLM can safely see and
+              echo back; <code>_shield_ctx</code> is an in-band AES-256-GCM ciphertext the proxy uses to
+              restore the original value before handing the response back to the calling agent. No
+              Redis, no database, no long-term storage.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className={styles.grid}>
+              <div className={styles.panel}>
+                <div className={styles.panelLabel}>You type this</div>
+                <div className={styles.inputWrap}>
+                  <div ref={backdropRef} className={styles.backdrop} aria-hidden="true">
+                    <HighlightedInput segments={liveResult.segments} />
+                  </div>
+                  <textarea
+                    ref={textareaRef}
+                    className={styles.textarea}
+                    value={text}
+                    spellCheck={false}
+                    onScroll={syncScroll}
+                    onChange={(e) => {
+                      setActiveTemplate('');
+                      setText(e.target.value);
+                    }}
+                    placeholder="Type a prompt with a name, email, SSN, or card number…"
+                  />
+                </div>
+              </div>
+
+              <div className={styles.panel}>
+                <div className={styles.panelLabel}>Sent to LLM</div>
+                <div className={styles.output}>
+                  {sentResult && (phase === 'sent' || phase === 'received') ? (
+                    sentResult.totalEntities > 0 ? (
+                      <MaskedPayload segments={sentResult.segments} />
+                    ) : (
+                      <span className={styles.emptyState}>No sensitive entities detected — sent as-is.</span>
+                    )
+                  ) : (
+                    <span className={styles.emptyState}>Waiting for you to stop typing…</span>
+                  )}
+                </div>
+              </div>
+
+              <div className={styles.panel}>
+                <div className={styles.panelLabel}>Received from LLM (rehydrated)</div>
+                <div className={styles.output}>
+                  {phase === 'received' && sentResult ? (
+                    sentResult.totalEntities > 0 ? (
+                      <RehydratedPayload segments={sentResult.segments} mode={mode} />
+                    ) : (
+                      <span className={styles.emptyState}>Nothing to rehydrate — no entities were masked.</span>
+                    )
+                  ) : phase === 'sent' ? (
+                    <span className={styles.pending}>
+                      <span className={styles.spinner} /> Non-blocking — proxy is holding the mapping while
+                      the LLM responds…
+                    </span>
+                  ) : (
+                    <span className={styles.emptyState}>The rehydrated reply will appear here.</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.statusRow}>
+              <span className={phase === 'typing' ? styles.statusPending : styles.status}>
+                {PHASE_LABEL[phase]}
+              </span>
+              {sentResult && sentResult.totalEntities > 0 && (phase === 'sent' || phase === 'received') && (
+                <span className={styles.legend}>
+                  {Object.entries(sentResult.counts).map(([type, count]) => (
+                    <span key={type} className={styles.legendItem} style={{color: ENTITY_COLORS[type]}}>
+                      ● {type} × {count}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+            {mode === 'SCRUB' && phase === 'received' && sentResult && sentResult.totalEntities > 0 && (
+              <p className={styles.scrubNote}>
+                Scrub mode destroys the original values on the way in — there's nothing stored to restore,
+                so the response above still shows the redacted placeholders. Switch to Synthetic,
+                Structural, or AES-256-GCM to see full rehydration.
+              </p>
+            )}
+          </>
+        )}
+
         <div className={styles.terminalSection}>
-          <span className={styles.eyebrow}>It's not just human chat</span>
+          <span className={styles.eyebrow}>Zero code changes</span>
           <Heading as="h3" className={styles.subsectionTitle}>
-            Machine-to-machine traffic gets the same protection
+            Point your existing SDK at the proxy — that's the whole integration
           </Heading>
           <p className={styles.terminalIntro}>
             Same request. Same SDK. The only change is the <code>base_url</code> — everything upstream
@@ -387,36 +460,6 @@ export default function InteractiveShieldDemo(): ReactNode {
               <TerminalBody parts={TERMINAL_LINES} />
             </pre>
           </div>
-
-          <p className={styles.terminalIntro}>
-            It's not just chat. When one AI agent hands structured data to another — a tool call, a
-            function argument, a JSON-RPC message — LLM-Shield-Proxy finds sensitive values{' '}
-            <em>inside the structure</em> and swaps them in place, without touching the schema.
-          </p>
-          <div className={styles.gridTwo}>
-            <div className={styles.panel}>
-              <div className={styles.panelLabel}>Before — raw agent tool call</div>
-              <pre className={styles.jsonBlock}>
-                <TerminalBody parts={AGENT_BEFORE} />
-              </pre>
-            </div>
-            <div className={styles.panel}>
-              <div className={styles.panelLabel}>
-                After — <span className={styles.forcedBadge}>Stateless Synthetic (enforced)</span>
-              </div>
-              <pre className={styles.jsonBlock}>
-                <TerminalBody parts={AGENT_AFTER} />
-              </pre>
-            </div>
-          </div>
-          <p className={styles.agentCaption}>
-            Structured JSON-RPC / MCP tool calls always use <strong>Stateless Synthetic</strong> mode —
-            never Scrub or Structural Tags — because those would break the payload's schema and could
-            crash the agent. <code>_shield_val</code> is a realistic fake the LLM can safely see and
-            echo back; <code>_shield_ctx</code> is an in-band AES-256-GCM ciphertext the proxy uses to
-            restore the original value on the way out. No Redis, no database, no long-term storage —
-            this is the same stateless design as the AES-256-GCM mode above, applied automatically.
-          </p>
         </div>
       </div>
     </section>
