@@ -41,6 +41,14 @@ class Settings(BaseSettings):
         default="STANDARD", description="Format for audit logs (STANDARD or RFC6902_DIFF)"
     )
     FIPS_STRICT_MODE: bool = Field(default=True, description="Strict fail-closed for FIPS tests")
+    AUDIT_SIGNING_PRIVATE_KEY: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ed25519 private key used to sign WORM audit receipts, as a PEM string or a "
+            "32-byte seed (base64 or hex). An ephemeral key is generated at startup if unset "
+            "(receipts remain internally verifiable but are not stable across restarts)."
+        ),
+    )
     ENABLE_EXT_PROC: bool = Field(default=True, description="Enable Envoy ext_proc gRPC hook")
     EXT_PROC_SOCK_PATH: str = Field(
         default="/var/run/llm-shield/ext_proc.sock", description="Path to the ext_proc UDS socket"
