@@ -62,6 +62,22 @@ const TERMINAL_LINES: TerminalPart[] = [
   {text: '"Update record for John Doe, SSN 456-12-7890"', kind: null},
 ];
 
+const AGENT_BEFORE: TerminalPart[] = [
+  {text: '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "patient_name": "', kind: null},
+  {text: 'Sarah Connor', kind: 'sensitive'},
+  {text: '",\n      "ssn": "', kind: null},
+  {text: '456-12-7890', kind: 'sensitive'},
+  {text: '",\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
+];
+
+const AGENT_AFTER: TerminalPart[] = [
+  {text: '{\n  "jsonrpc": "2.0",\n  "method": "tools/call",\n  "params": {\n    "name": "update_patient_record",\n    "arguments": {\n      "patient_name": ', kind: null},
+  {text: '{\n        "_shield_val": "Maya Torres",\n        "_shield_ctx": "aesgcm:8f2a...c91"\n      }', kind: 'protected'},
+  {text: ',\n      "ssn": ', kind: null},
+  {text: '{\n        "_shield_val": "839-14-2207",\n        "_shield_ctx": "aesgcm:5b7e...a03"\n      }', kind: 'protected'},
+  {text: ',\n      "notes": "Follow-up scheduled for next week"\n    }\n  },\n  "id": 17\n}', kind: null},
+];
+
 function TerminalBody({parts}: {parts: TerminalPart[]}): ReactNode {
   return (
     <>
@@ -352,6 +368,10 @@ export default function InteractiveShieldDemo(): ReactNode {
         )}
 
         <div className={styles.terminalSection}>
+          <span className={styles.eyebrow}>It's not just human chat</span>
+          <Heading as="h3" className={styles.subsectionTitle}>
+            Machine-to-machine traffic gets the same protection
+          </Heading>
           <p className={styles.terminalIntro}>
             Same request. Same SDK. The only change is the <code>base_url</code> — everything upstream
             of the proxy is invisible to your existing agents, scripts, and machine-to-machine tool calls.
@@ -367,6 +387,36 @@ export default function InteractiveShieldDemo(): ReactNode {
               <TerminalBody parts={TERMINAL_LINES} />
             </pre>
           </div>
+
+          <p className={styles.terminalIntro}>
+            It's not just chat. When one AI agent hands structured data to another — a tool call, a
+            function argument, a JSON-RPC message — LLM-Shield-Proxy finds sensitive values{' '}
+            <em>inside the structure</em> and swaps them in place, without touching the schema.
+          </p>
+          <div className={styles.gridTwo}>
+            <div className={styles.panel}>
+              <div className={styles.panelLabel}>Before — raw agent tool call</div>
+              <pre className={styles.jsonBlock}>
+                <TerminalBody parts={AGENT_BEFORE} />
+              </pre>
+            </div>
+            <div className={styles.panel}>
+              <div className={styles.panelLabel}>
+                After — <span className={styles.forcedBadge}>Stateless Synthetic (enforced)</span>
+              </div>
+              <pre className={styles.jsonBlock}>
+                <TerminalBody parts={AGENT_AFTER} />
+              </pre>
+            </div>
+          </div>
+          <p className={styles.agentCaption}>
+            Structured JSON-RPC / MCP tool calls always use <strong>Stateless Synthetic</strong> mode —
+            never Scrub or Structural Tags — because those would break the payload's schema and could
+            crash the agent. <code>_shield_val</code> is a realistic fake the LLM can safely see and
+            echo back; <code>_shield_ctx</code> is an in-band AES-256-GCM ciphertext the proxy uses to
+            restore the original value on the way out. No Redis, no database, no long-term storage —
+            this is the same stateless design as the AES-256-GCM mode above, applied automatically.
+          </p>
         </div>
       </div>
     </section>
