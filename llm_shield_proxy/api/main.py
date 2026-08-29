@@ -41,6 +41,7 @@ from watchdog.observers import Observer
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
 from llm_shield_proxy.adapters.provider_factory import resolve_provider
 from llm_shield_proxy.api.health import health_router
+from llm_shield_proxy.api.mcp_router import mcp_router
 from llm_shield_proxy.api.webhook import webhook_router
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
@@ -367,6 +368,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(webhook_router)
 app.include_router(audit_router)
+app.include_router(mcp_router)
 
 
 @app.middleware("http")

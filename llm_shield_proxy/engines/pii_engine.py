@@ -51,23 +51,53 @@ INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
     r"(?i)\b(?:system\s+override|ignore\s+all\s+previous\s+instructions|<\|im_start\|>system|<\|im_end\|>)\b"
 )
 
+# ASCII-only boundary assertions. Python's `\b` treats any Unicode word character
+# (including CJK ideographs, Hiragana, Katakana, Hangul) as part of `\w`, so PII
+# glued directly to non-Latin script text with no whitespace (e.g. "邮箱是john@x.com没有")
+# silently fails to match with `\b`. These assertions only block adjacency to ASCII
+# alphanumerics/underscore, permitting adjacency to non-Latin scripts.
+_ASCII_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
+_ASCII_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
+
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
-    ("EMAIL", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
-    ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
-    ("PHONE", re.compile(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?(?:\d{3}[-.\s]?)?\d{4}\b")),
-    ("CREDIT_CARD", re.compile(r"\b(?:\d[ -]?){13,16}\b")),
+    (
+        "EMAIL",
+        re.compile(
+            _ASCII_LEFT_BOUNDARY + r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}" + _ASCII_RIGHT_BOUNDARY
+        ),
+    ),
+    ("SSN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{4}" + _ASCII_RIGHT_BOUNDARY)),
+    (
+        "PHONE",
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?(?:\d{3}[-.\s]?)?\d{4}"
+            + _ASCII_RIGHT_BOUNDARY
+        ),
+    ),
+    ("CREDIT_CARD", re.compile(_ASCII_LEFT_BOUNDARY + r"(?:\d[ -]?){13,16}" + _ASCII_RIGHT_BOUNDARY)),
     (
         "IP_ADDRESS",
-        re.compile(r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"),
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
+            + _ASCII_RIGHT_BOUNDARY
+        ),
     ),
     (
         "AWS_API_KEY",
-        re.compile(r"\b(?:sk-[a-zA-Z0-9]{32,48}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b"),
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"(?:sk-[a-zA-Z0-9]{32,48}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})"
+            + _ASCII_RIGHT_BOUNDARY
+        ),
     ),
     (
         "GITHUB_PAT",
-        re.compile(r"\b(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]+)\b"),
+        re.compile(
+            _ASCII_LEFT_BOUNDARY + r"(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]+)" + _ASCII_RIGHT_BOUNDARY
+        ),
     ),
     (
         "SSH_PRIVATE_KEY",
@@ -75,9 +105,13 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     ),
     (
         "JWT_TOKEN",
-        re.compile(r"\bey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]*\b"),
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]*"
+            + _ASCII_RIGHT_BOUNDARY
+        ),
     ),
-    ("MRN", re.compile(r"\b\d{3}-\d{2}-\d{2}[A-Za-z0-9]\b")),
+    ("MRN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{2}[A-Za-z0-9]" + _ASCII_RIGHT_BOUNDARY)),
 ]
 
 # Tier 3 Contextual NER Rules (Rule-based fallback for Person/Org names)
