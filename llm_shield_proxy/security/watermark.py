@@ -28,8 +28,11 @@ def get_identity(
     if authorization_header:
         auth = authorization_header.replace("Bearer ", "").strip()
         if auth:
-            # Use PBKDF2 to satisfy CodeQL requirements for hashing sensitive tokens
-            return hashlib.pbkdf2_hmac("sha256", auth.encode("utf-8"), b"static_salt", 100000).hex()[:12]
+            # auth is a high-entropy API key, not a low-entropy password: slow KDFs
+            # (PBKDF2/bcrypt) add no brute-force resistance here but do block the
+            # asyncio event loop under FastAPI/Uvicorn. Plain SHA-256 is safe for
+            # deriving a non-reversible identity fingerprint from this input.
+            return hashlib.sha256(auth.encode("utf-8")).hexdigest()[:12]  # lgtm[py/weak-sensitive-data-hashing]
 
     if client_ip:
         ip = client_ip.strip()
