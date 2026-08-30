@@ -96,6 +96,17 @@ async def test_log_and_schema_injection():
     assert exporter.merkle_tree.records[0]["payload"]["Tool_Name"] == malicious_tool_name
 
 
+def test_oscal_artifact_uses_fresh_document_and_result_uuids_and_version_1_2():
+    exporter = DecisionTraceExporter()
+
+    first = orjson.loads(exporter.generate_oscal_artifact())["assessment-results"]
+    second = orjson.loads(exporter.generate_oscal_artifact())["assessment-results"]
+
+    assert first["metadata"]["oscal-version"] == "1.2.0"
+    assert first["uuid"] != second["uuid"]
+    assert first["results"][0]["uuid"] != second["results"][0]["uuid"]
+
+
 @pytest.mark.asyncio
 async def test_latency_overhead(mock_resolver):
     validator = RBACValidator(mock_resolver)

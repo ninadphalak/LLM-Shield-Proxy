@@ -44,10 +44,32 @@ class Settings(BaseSettings):
     AUDIT_SIGNING_PRIVATE_KEY: Optional[str] = Field(
         default=None,
         description=(
-            "Ed25519 private key used to sign WORM audit receipts, as a PEM string or a "
+            "Ed25519 private key used to sign audit receipts, as a PEM string or a "
             "32-byte seed (base64 or hex). An ephemeral key is generated at startup if unset "
             "(receipts remain internally verifiable but are not stable across restarts)."
         ),
+    )
+    AUDIT_SIGNING_KEY_FILE: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to an Ed25519 private key mounted by the operator's secret manager. "
+            "Takes precedence over AUDIT_SIGNING_PRIVATE_KEY and fails startup if unreadable or invalid."
+        ),
+    )
+    AUDIT_DURABILITY: Literal["best_effort", "durable", "required"] = Field(
+        default="best_effort",
+        description=(
+            "Audit delivery mode. best_effort preserves non-blocking stdout behavior; durable/required "
+            "require AUDIT_DURABLE_PATH and never silently drop records."
+        ),
+    )
+    AUDIT_DURABLE_PATH: Optional[str] = Field(
+        default=None,
+        description="Append-only JSONL path for durable audit evidence; supports {instance_id} and {pid} tokens.",
+    )
+    AUDIT_DURABLE_FSYNC: bool = Field(default=True, description="fsync each durable audit record before acknowledgement")
+    AUDIT_ENQUEUE_TIMEOUT_SECONDS: float = Field(
+        default=5.0, description="Maximum wait for durable/required audit queue acknowledgement"
     )
     ENABLE_EXT_PROC: bool = Field(default=True, description="Enable Envoy ext_proc gRPC hook")
     EXT_PROC_SOCK_PATH: str = Field(
@@ -336,7 +358,9 @@ class Settings(BaseSettings):
                         env_vals = dotenv_values(env_path)
                         for k, v in env_vals.items():
                             attr_name = k.upper()
-                            if hasattr(self, attr_name) and v is not None:
+                            # Process environment is authoritative over dotenv,
+                            # matching BaseSettings source precedence.
+                            if k not in os.environ and hasattr(self, attr_name) and v is not None:
                                 setattr(self, attr_name, v)
                 except Exception as exc:
                     logger.debug("Failed loading .env configuration: %s", exc)

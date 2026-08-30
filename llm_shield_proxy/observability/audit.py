@@ -1,14 +1,12 @@
 """Enterprise Structured Audit Logger Module.
 
-Provides SOC 2 and HIPAA compliant structured JSON audit logging with
-Segmented Cryptographic Hash Chaining to ensure log tamper-proofing.
-Guarantees zero raw PII leakage in log sinks.
+Provides privacy-safe structured JSON audit logging with segmented
+cryptographic hash chaining and optional durable local persistence.
 """
 
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import json
 import logging
@@ -18,14 +16,19 @@ import secrets
 import socket
 import sys
 import threading
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import APIRouter
 
+from llm_shield_proxy.compliance.evidence import load_ed25519_private_key_material
 from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.observability.audit_sink import AuditPersistenceError, JSONLFileAuditSink
 
 logger = logging.getLogger(__name__)
 
@@ -74,26 +77,18 @@ def _load_or_generate_signing_key() -> ed25519.Ed25519PrivateKey:
     """Loads the Ed25519 audit-signing key from AUDIT_SIGNING_PRIVATE_KEY (PEM or raw 32-byte
     seed, base64/hex), falling back to a freshly generated ephemeral key."""
     raw = settings.AUDIT_SIGNING_PRIVATE_KEY
-    if raw:
-        raw = raw.strip()
+    key_file = settings.AUDIT_SIGNING_KEY_FILE
+    if key_file:
         try:
-            if "BEGIN" in raw:
-                key = serialization.load_pem_private_key(raw.encode("utf-8"), password=None)
-                if not isinstance(key, ed25519.Ed25519PrivateKey):
-                    raise TypeError("AUDIT_SIGNING_PRIVATE_KEY PEM is not an Ed25519 key")
-                return key
-
-            seed: Optional[bytes] = None
-            try:
-                seed = base64.b64decode(raw, validate=True)
-            except (binascii.Error, ValueError):
-                seed = None
-            if seed is None or len(seed) != 32:
-                seed = bytes.fromhex(raw)
-            if len(seed) != 32:
-                raise ValueError("Decoded AUDIT_SIGNING_PRIVATE_KEY seed is not 32 bytes")
-            return ed25519.Ed25519PrivateKey.from_private_bytes(seed)
+            raw = Path(key_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(f"Unable to read AUDIT_SIGNING_KEY_FILE: {key_file}") from exc
+    if raw:
+        try:
+            return load_ed25519_private_key_material(raw)
         except Exception as exc:
+            if key_file:
+                raise RuntimeError(f"Invalid Ed25519 key in AUDIT_SIGNING_KEY_FILE: {key_file}") from exc
             logger.warning(
                 "Failed to parse AUDIT_SIGNING_PRIVATE_KEY (%s); falling back to an ephemeral Ed25519 key.", exc
             )
@@ -140,17 +135,65 @@ class AuditLogger:
 
     Maintains a tamper-evident SHA-256 hash chain of all audit events.
     In zero-dependency mode, the chain is Segmented (per-process in RAM).
-    When a Pod restarts, a new Genesis Hash is created, and the WORM aggregator
-    reconstructs the global timeline using instance_id and timestamps.
+    In best-effort mode, a Pod restart creates a new chain. A configured durable
+    sink recovers the previous hash, sequence, and chain identifier.
     """
 
     _last_hash: str = "0000000000000000000000000000000000000000000000000000000000000000"
     _instance_id: str = socket.gethostname()
+    _chain_id: str = str(uuid.uuid4())
+    _sequence: int = 0
+    _recovered: bool = False
+    _durability: str = "best_effort"
+    _durable_sink: Optional[JSONLFileAuditSink] = None
     # Bounded: see _enqueue_log for the drop policy applied when this fills up.
-    _log_queue: "queue.Queue[tuple[str, Dict[str, Any]]]" = queue.Queue(maxsize=10_000)
+    @dataclass
+    class _QueueItem:
+        severity: str
+        log_entry: Dict[str, Any]
+        completion: Optional[threading.Event] = None
+        error: list[BaseException] = field(default_factory=list)
+
+    _log_queue: "queue.Queue[AuditLogger._QueueItem]" = queue.Queue(maxsize=10_000)
     _worker_thread: Optional[threading.Thread] = None
     _worker_init_lock = threading.Lock()
     _chain_lock = threading.Lock()
+
+    @classmethod
+    def configure_durability(
+        cls,
+        mode: str = "best_effort",
+        path: Optional[str] = None,
+        *,
+        fsync: bool = True,
+    ) -> None:
+        """Configure an optional append-only durable sink.
+
+        This method exists for startup wiring and tests. Reconfiguration while
+        records are actively being emitted is unsupported.
+        """
+        normalized = mode.lower()
+        if normalized not in {"best_effort", "durable", "required"}:
+            raise ValueError("AUDIT_DURABILITY must be best_effort, durable, or required")
+        if normalized != "best_effort" and not path:
+            raise ValueError(f"AUDIT_DURABLE_PATH is required when AUDIT_DURABILITY={normalized}")
+
+        cls._durability = normalized
+        cls._durable_sink = None
+        cls._recovered = False
+        if path:
+            resolved_path = path.format(instance_id=cls._instance_id, pid=os.getpid())
+            sink = JSONLFileAuditSink(resolved_path, fsync=fsync)
+            previous = sink.last_record()
+            cls._durable_sink = sink
+            if previous:
+                previous_hash = previous.get("hash")
+                if not previous_hash:
+                    raise AuditPersistenceError("Durable audit tail has no hash; refusing unsafe chain recovery")
+                cls._last_hash = str(previous_hash)
+                cls._sequence = int(previous.get("sequence", 0))
+                cls._chain_id = str(previous.get("chain_id") or uuid.uuid4())
+                cls._recovered = True
 
     @classmethod
     def _start_worker_if_needed(cls):
@@ -158,19 +201,23 @@ class AuditLogger:
             with cls._worker_init_lock:
                 # Double-checked locking
                 if cls._worker_thread is None or not cls._worker_thread.is_alive():
-                    cls._worker_thread = threading.Thread(target=cls._worker, daemon=True, name="AuditWORMHashWorker")
+                    cls._worker_thread = threading.Thread(target=cls._worker, daemon=True, name="AuditHashWorker")
                     cls._worker_thread.start()
 
     @classmethod
     def _worker(cls):
         while True:
             try:
-                severity, log_entry = cls._log_queue.get()
+                item = cls._log_queue.get()
+                severity, log_entry = item.severity, item.log_entry
 
                 # agent_identity_claim is extracted from the contextvar by the caller (see
                 # _enqueue_log) and embedded into log_entry before it reaches this thread,
                 # since contextvars don't propagate across threads.
                 with cls._chain_lock:
+                    next_sequence = cls._sequence + 1
+                    log_entry["chain_id"] = cls._chain_id
+                    log_entry["sequence"] = next_sequence
                     log_entry["previous_hash"] = cls._last_hash
 
                     try:
@@ -191,7 +238,7 @@ class AuditLogger:
 
                     try:
                         # Sign the canonical hash-chained payload (non-blocking: this already
-                        # runs on the dedicated WORM background thread, never the ASGI loop).
+                        # runs on the dedicated audit background thread, never the ASGI loop).
                         signature_b64 = base64.b64encode(
                             _AUDIT_SIGNING_KEY.sign(final_str.encode("utf-8"))
                         ).decode("ascii")
@@ -200,8 +247,11 @@ class AuditLogger:
                             f'"public_key_fingerprint": "{_AUDIT_PUBLIC_KEY_FINGERPRINT}"}}'
                         )
                     except Exception:  # nosec B110 noqa: S110
-                        # Security Note: Never let signing failures break WORM chain continuity.
+                        # Security Note: Never let signing failures break hash-chain continuity.
                         pass
+
+                    if cls._durable_sink is not None:
+                        cls._durable_sink.append(final_str)
 
                     if severity == "CRITICAL":
                         audit_logger.critical(final_str)
@@ -215,11 +265,21 @@ class AuditLogger:
                     sys.stdout.flush()
 
                     cls._last_hash = new_hash
+                    cls._sequence = next_sequence
 
-            except Exception:  # nosec B110 noqa: S110
-                # Security Note: Silently drop failed logs to prevent worker crash
-                # Silently drop failed logs to prevent worker crash
-                pass
+                if item.completion is not None:
+                    item.completion.set()
+                cls._log_queue.task_done()
+
+            except Exception as exc:  # nosec B110 noqa: S110
+                logger.exception("Audit worker failed to persist an event")
+                try:
+                    item.error.append(exc)
+                    if item.completion is not None:
+                        item.completion.set()
+                    cls._log_queue.task_done()
+                except Exception:  # nosec B110 noqa: S110
+                    pass
 
     @classmethod
     def _enqueue_log(cls, severity: str, log_entry: Dict[str, Any]) -> None:
@@ -229,21 +289,24 @@ class AuditLogger:
             log_entry["agent_identity_claim"] = agent_id
 
         cls._start_worker_if_needed()
+        completion = threading.Event() if cls._durability != "best_effort" else None
+        item = cls._QueueItem(severity=severity, log_entry=log_entry, completion=completion)
         try:
-            cls._log_queue.put_nowait((severity, log_entry))
+            if cls._durability == "best_effort":
+                cls._log_queue.put_nowait(item)
+            else:
+                cls._log_queue.put(item, timeout=settings.AUDIT_ENQUEUE_TIMEOUT_SECONDS)
         except queue.Full:
-            # Security Note: never block the ASGI request path waiting on the WORM
-            # worker. If it can't keep up (stalled sink, slow signing), drop the
-            # event and log a WARNING rather than growing memory unboundedly.
+            # Best-effort mode never blocks the request path. If the worker cannot
+            # keep up, it drops the event rather than growing memory without bound.
             # audit_events_dropped_total makes sustained drops (i.e. audit records
             # compliance can no longer vouch for) observable and alertable, since a
             # single WARNING line in a high-volume log stream is easy to miss. A
-            # durable, truly-never-drop trail (e.g. an external Kafka/SQS-backed WORM
-            # sink behind this queue, or SHIELD_FAILURE_MODE=FAIL_CLOSED rejecting new
-            # requests once the backlog is nonzero) is the appropriate next step for
-            # deployments where audit completeness is a hard compliance requirement.
+            # Durable modes instead wait for an acknowledgement and surface failures.
+            if cls._durability != "best_effort":
+                raise AuditPersistenceError("Durable audit queue remained full until its configured timeout")
             logger.warning(
-                "AuditLogger WORM queue full (worker stalled); dropping audit event to bound memory: event=%s",
+                "Audit queue full (worker stalled); dropping best-effort audit event: event=%s",
                 log_entry.get("event", "unknown"),
             )
             try:
@@ -254,19 +317,27 @@ class AuditLogger:
                 # Security Note: metrics recording must never itself raise inside a drop handler
                 pass
 
+        if completion is not None:
+            if not completion.wait(timeout=settings.AUDIT_ENQUEUE_TIMEOUT_SECONDS):
+                raise AuditPersistenceError("Required audit persistence acknowledgement timed out")
+            if item.error:
+                raise AuditPersistenceError("Required audit persistence failed") from item.error[0]
+
     @classmethod
     def log_startup_event(cls) -> None:
         """Emits a Genesis startup audit event initializing the cryptographic hash chain."""
-        initial_hash = secrets.token_hex(32)
-        cls._last_hash = initial_hash
+        initial_hash = cls._last_hash if cls._recovered else secrets.token_hex(32)
+        if not cls._recovered:
+            cls._last_hash = initial_hash
 
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event": "PROXY_STARTUP",
+            "event": "PROXY_RESUME" if cls._recovered else "PROXY_STARTUP",
             "service": "LLM-Shield",
             "instance_id": cls._instance_id,
             "process_id": os.getpid(),
             "initial_hash": initial_hash,
+            "audit_durability": cls._durability,
         }
         cls._enqueue_log("INFO", log_entry)
 
@@ -545,4 +616,13 @@ class AuditLogger:
             "details": details,
         }
         AuditLogger._enqueue_log(severity, log_entry)
+
+
+# Configure once at import/startup. The default remains the historical,
+# non-blocking best-effort stdout behavior.
+AuditLogger.configure_durability(
+    settings.AUDIT_DURABILITY,
+    settings.AUDIT_DURABLE_PATH,
+    fsync=settings.AUDIT_DURABLE_FSYNC,
+)
 
