@@ -152,7 +152,7 @@ async def test_tools_list_rbac_pruning_and_ttl():
     scope = build_scope([
         (b"x-tenant-id", b"tenant-123"),
         (b"x-virtual-key", b"my-key"),
-        (b"x-upstream-url", b"http://upstream.mcp/tools")
+        (b"x-upstream-url", b"http://93.184.216.34/tools")
     ])
 
     receiver = ReceiveIterator([req_body])
@@ -218,7 +218,7 @@ async def test_upstream_failure_fail_closed():
 
     scope = build_scope([
         (b"x-tenant-id", b"tenant-123"),
-        (b"x-upstream-url", b"http://upstream.mcp/tools")
+        (b"x-upstream-url", b"http://93.184.216.34/tools")
     ])
 
     receiver = ReceiveIterator([req_body])

@@ -28,7 +28,7 @@ import ipaddress
 import re
 import socket
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Iterable, List, Optional, Sequence, Union
+from typing import Any, Awaitable, Callable, List, Optional, Sequence, Union
 from urllib.parse import urlsplit
 
 IPNetwork = Union["ipaddress.IPv4Network", "ipaddress.IPv6Network"]
