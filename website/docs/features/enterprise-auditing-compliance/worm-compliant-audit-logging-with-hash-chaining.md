@@ -1,61 +1,57 @@
-# WORM-Compliant Audit Logging with Hash Chaining
+# Tamper-Evident Audit Logging with Hash Chaining
 
-[⬅️ Back to Features Catalog](/docs/features-overview)
+[Back to Features Catalog](/docs/features-overview)
 
-## What It Does
-**WORM-Compliant Audit Logging with Hash Chaining** (Write Once, Read Many) guarantees the absolute cryptographic integrity of your proxy's security audit logs. It prevents internal actors or external attackers from altering, deleting, or reordering log events to cover their tracks, satisfying the most stringent requirements for SOC 2 Type II, HIPAA, and FedRAMP compliance.
+## What it does
 
-## How It Works
-Standard JSON logs written to stdout or a file can easily be manipulated by an attacker who gains root access to the server. Hash Chaining solves this using a localized blockchain-style structure:
+Each audit event contains a SHA-256 link to the preceding event and is signed with Ed25519. The verifier detects edits, insertions, reordering, sequence gaps, malformed signatures, and unexpected signing-key fingerprints within the evidence it receives.
 
-1. **Event Structuring:** Every time the proxy makes a security decision (e.g., redacting an SSN, blocking a tool call), it generates a structured JSON audit event containing the timestamp, tenant ID, and the action taken.
-2. **Cryptographic Chaining:** Before emitting the log, the proxy calculates the SHA-256 hash of the *previous* log event and embeds it into the current event's payload.
-3. **Sealing:** The current event is then hashed, creating a mathematically unbreakable chain of custody.
+This is **tamper evidence**, not WORM storage by itself. A local append-only JSONL file can still be deleted or replaced by an administrator. To make a WORM retention claim, ship the file to storage whose immutability and retention controls are independently configured and tested (for example, an object-lock or compliance-mode archive).
 
+## Delivery modes
 
-```mermaid
-flowchart LR
-    A[Event N-1] -->|Hash(N-1)| B(Event N)
-    B -->|Hash(N)| C(Event N+1)
-    D[Attacker modifies Event N] -.->|Breaks Chain!| C
+| Mode | Request-path behavior | Persistence |
+| :--- | :--- | :--- |
+| `best_effort` (default) | Non-blocking; a full bounded queue can drop an event and increments `audit_events_dropped_total` | Structured stdout only unless an external collector persists it |
+| `durable` | Waits for the audit worker to append and acknowledge each event; raises on timeout or sink failure | Local JSONL, flushed and `fsync`'d by default |
+| `required` | Same persistence acknowledgement contract as `durable`; intended for deployments that treat audit failure as a request failure | Local JSONL, flushed and `fsync`'d by default |
+
+`durable` and `required` require `AUDIT_DURABLE_PATH`. They trade request latency and availability for evidence completeness.
+
+## Configuration
+
+```dotenv
+AUDIT_DURABILITY=durable
+AUDIT_DURABLE_PATH=/var/lib/llm-shield/audit-{instance_id}-{pid}.jsonl
+AUDIT_DURABLE_FSYNC=true
+AUDIT_ENQUEUE_TIMEOUT_SECONDS=5
+AUDIT_SIGNING_KEY_FILE=/run/secrets/llm-shield-audit-ed25519.pem
 ```
 
+`AUDIT_SIGNING_KEY_FILE` is the preferred production source and fails startup if the mounted Ed25519 key is missing or invalid. Inline `AUDIT_SIGNING_PRIVATE_KEY` remains available for compatibility. Use a separate path per process. `{instance_id}` and `{pid}` are expanded automatically. A shared file across workers does not provide cross-process locking or a single global chain.
 
-View diagram on GitHub mobile 📱 -->
+On restart, the proxy recovers the last valid record's `chain_id`, `sequence`, and hash from its configured file and emits `PROXY_RESUME`. Invalid or truncated final records fail initialization rather than silently starting a new chain.
 
+## Offline verification
 
-## Performance Profile
-- **Execution Speed:** SHA-256 hashing of small JSON payloads executes in `&lt;0.5µs`.
-- **Overhead:** Extremely low. The previous hash state is held securely in memory per worker process.
+```bash
+llm-shield-proxy audit-verify \
+  --audit-log /var/lib/llm-shield/audit-instance-123.jsonl \
+  --pubkey-file audit-public-key.pem \
+  --json-out verification.json
+```
 
-## Configuration Flags
+The command exits non-zero when continuity or signature verification fails. Retain the trusted public key separately from the audit file.
 
-| Environment Variable | Description | Linked Deployment Guide |
-| :--- | :--- | :--- |
-| `ENABLE_AUDIT_LOGGING` | Toggles the emission of structured audit events. | [View in deployment.md](/docs/deployment) |
-| `ENABLE_HASH_CHAINING` | Enforces the SHA-256 linkage on emitted logs. | [View in deployment.md](/docs/deployment) |
+## Security boundaries
 
-## Critical Logic & Edge Cases
-* **Process Forking (Gunicorn/Uvicorn):** Because the proxy runs across multiple worker processes, each worker maintains its own independent, isolated hash chain. To verify the logs later, auditors simply group the logs by `worker_id` and recalculate the chain.
-* **Log Aggregation:** These chained events are emitted directly to `stdout` to be consumed by Fluentd, Promtail, or Datadog agents. The proxy does not write to local disk, adhering strictly to 12-Factor App methodology.
-* **Unhandled request exceptions are sealed into the chain, deliberately without detail:** any exception the global handler catches emits an `UNHANDLED_EXCEPTION` event (`severity: CRITICAL`) carrying only `exception_type` (e.g. `ValueError`) plus `request_id`/`path`/`method` -- never `str(exc)` or a traceback. Those can carry raw, unredacted request content (a value that failed validation, a fragment of a prompt), which has no business entering a sink that promises zero raw PII leakage. The full exception and traceback still get logged -- to the separate operational application logger (`logger.error(..., exc_info=exc)`), which is expected to flow to a SIEM/log aggregator with its own (typically shorter) retention, not the compliance-grade WORM record.
-* **Backpressure is observable, not just logged:** the WORM queue and the stdout sink queue are both bounded and drop-on-full rather than blocking the request path. Every drop still increments `audit_events_dropped_total{sink="worm_chain_queue"|"stdout_queue"}` (Prometheus) in addition to the existing `WARNING` log line, so sustained drops -- which mean the compliance record is incomplete for that window -- are alertable instead of something you only discover by grepping logs after the fact.
+- Hash chaining detects modification relative to adjacent records that are present. Deleting an unanchored suffix cannot be detected from the shortened file alone; periodically anchor the final hash and sequence in an independent system.
+- Ed25519 authenticates records against the supplied public key. Key custody, rotation, and archival remain operator responsibilities.
+- The event schema contains security metadata, not matched PII values or prompt bodies.
+- `fsync` confirms an operating-system persistence request. It does not prove storage-device durability or regulatory retention.
 
-  A bounded, drop-on-full in-process queue is a deliberate memory-safety trade-off, not a claim of zero audit loss. Deployments where audit completeness is a hard compliance requirement should alert on `audit_events_dropped_total > 0` and, for a stronger guarantee, put a durable external sink (Kafka/Kinesis/SQS-backed WORM writer) behind the `stdout` consumer rather than relying on the in-process queue alone.
+For multiple workers, immutable retention, and separate terminal-state anchoring, follow the [checkpoint and retention guide](/docs/immutable-retention). The checkpoint aggregates verified terminal states but does not invent a global event order.
 
-## FAQ
+## Related tests
 
-**Q: If an attacker deletes the last 5 logs, how do we know?**
-A: You will have a dangling chain. The final log received by your SIEM (e.g., Splunk) will point to a hash that doesn't exist, instantly triggering a tampering alert during forensic review.
-
-**Q: Are the actual PII strings (like the real SSN) written to these logs?**
-A: Absolutely not. The proxy logs the *metadata* of the redaction (e.g., `entities_redacted: ["SSN", "CREDIT_CARD"]`) but never the sensitive strings themselves, ensuring the log aggregation platform does not become a toxic data lake.
-
-
-## Plainspeak
-This feature creates an unhackable, permanent diary of every security decision the proxy makes.
-
-To pass strict security audits (like SOC 2 or HIPAA), companies need absolute proof of what happened and when. This feature records every action and mathematically locks it to the action that happened right before it (like links in a chain). If a hacker tries to go back in time to delete or change a log entry, the entire mathematical chain breaks, instantly revealing the tampering to auditors.
-
-## Related Tests
-See the following test files for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py) and [`tests/test_hardening_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_hardening_remediation.py) (unhandled-exception audit event, PII exclusion, and drop-metric coverage).
+See `tests/test_audit_durability.py`, `tests/test_audit_signing.py`, and `tests/test_compliance_report.py`.

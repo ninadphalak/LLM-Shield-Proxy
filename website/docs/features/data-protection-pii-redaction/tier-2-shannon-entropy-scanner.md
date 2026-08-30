@@ -10,7 +10,7 @@ Instead of relying on massive, slow dictionaries of potential secret formats, th
 
 1. **Sliding Window Evaluation:** The engine runs a vectorized O(N) math loop that evaluates the bit density of text using Shannon's Entropy formula: `H(S) = -\sum p(c) \log_2 p(c)`.
 2. **Algorithmic Thresholds:** It isolates high-density character strings and evaluates them against strict thresholds. It targets Base64 strings with an entropy `\ge 4.5` bits/char and Hexadecimal strings with `\ge 3.4` bits/char.
-3. **Microsecond Execution:** Because it avoids heavy regex backtracking and uses native math operations, the entire scan executes in `&lt;6 µs`.
+3. **Scoped Measurement:** Benchmark the scanner separately from the complete request path, using the intended chunk-size and input distribution.
 
 
 ```mermaid
@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** `&lt;6 µs` per evaluation chunk.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely low. The math-bound loop bypasses the Python GIL using vectorized operations.
 
 ## Configuration Flags
@@ -38,15 +38,15 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **False Positive Prevention:** Standard English text inherently has lower entropy than cryptographic secrets. The thresholds (4.5 and 3.4) are mathematically tuned to prevent standard conversational text from being flagged as a secret.
-* **Base64 Candidate Inspection:** The engine safely extracts Base64 candidate strings (≥ 20 characters) and inspects them recursively to neutralize obfuscated PII payloads before they bypass standard filters.
+* **Base64 Candidate Inspection:** The engine extracts candidates of at least 20 characters and decodes text-sized values up to 8,192 characters. Larger encoded interiors are skipped to bound detector work; a 256-character guard on each boundary keeps adjacent plaintext in scope.
 
 ## FAQ
 
 **Q: Why use entropy instead of a massive Regex dictionary for secrets?**
-A: Regex dictionaries for secrets require evaluating hundreds of patterns (AWS keys, GCP keys, Stripe keys, etc.). This introduces severe latency and backtracking overhead, and it will still miss internal, proprietary keys. Entropy instantly catches *any* high-density secret mathematically, regardless of the vendor.
+A: Regex dictionaries can miss proprietary key formats. Entropy adds a format-independent signal for sufficiently long, high-density candidates, but its effectiveness depends on the configured threshold and input distribution.
 
 **Q: Will this accidentally redact normal words or long URLs?**
-A: No. Standard English and typical URLs do not contain the random character distribution required to trip the `\ge 4.5` bits/char Base64 threshold.
+A: False positives are possible with any heuristic. The default threshold reduces matches on ordinary prose, but deployments should validate URLs, identifiers, and domain-specific text against their own corpus.
 
 
 ## Plainspeak

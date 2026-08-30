@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Loop evaluation via Redis takes `&lt;1ms` per request.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Leverages the existing session TTL infrastructure, meaning it requires zero additional database tables.
 
 ## Configuration Flags

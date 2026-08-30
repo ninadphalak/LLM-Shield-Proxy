@@ -7,7 +7,7 @@ The LLM-Shield-Proxy employs a **3-Tier Cascade Engine** to detect and redact se
 ---
 
 ## 🛡️ Tier 1: Microsecond Regex (High-Fidelity Structured Data)
-Tier 1 utilizes zero-allocation, pre-compiled `google-re2` DFA regular expressions to detect highly structured, standardized formats in linear O(N) time.
+Tier 1 uses pre-compiled `google-re2` regular expressions to detect structured formats with RE2's bounded-time matching model.
 
 **Exhaustive List of Tier 1 Native Detectors:**
 1. **`CREDIT_CARD`**: Major credit card formats (Visa, MasterCard, Amex, Discover) validated via length and spacing.
@@ -31,7 +31,7 @@ Because developers often leak proprietary API keys or database passwords that do
 
 **What gets detected:**
 - **Cryptographic Keys & Salts**: High-entropy strings exceeding `\tau_H \ge 4.5` bits/symbol.
-- **Obfuscated / Smuggled Data**: Base64 or Hex-encoded payloads injected into the prompt.
+- **Obfuscated / Smuggled Data**: Text-sized Base64 candidates and Hex-encoded secrets. Base64 decoding is bounded to 8,192 characters; images and larger encoded interiors are outside this detector's scope.
 - **Proprietary Tokens**: Any alphanumeric string of sufficient length (16+ characters) that is mathematically random enough to be classified as a secret.
 
 ---

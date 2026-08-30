@@ -1,0 +1,11 @@
+.term {
+  cursor: help;
+  text-decoration: underline dotted rgba(255, 255, 255, 0.55);
+  text-underline-offset: 0.18em;
+}
+
+.term:focus {
+  border-radius: 2px;
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: 2px;
+}

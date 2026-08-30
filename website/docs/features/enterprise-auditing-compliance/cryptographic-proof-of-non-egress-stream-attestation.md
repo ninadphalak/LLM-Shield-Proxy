@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Rolling hashes are extremely fast, calculated simultaneously with the JSON lexer in `&lt;1µs`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Minimal CPU overhead; strictly CPU-bound math operations that do not block network I/O.
 
 ## Configuration Flags

@@ -6,11 +6,11 @@
 **HTTP/2 Upstream Connection Pooling** fundamentally optimizes the proxy's networking layer. Rather than opening and closing a new TCP socket and performing a TLS handshake for every single LLM request, the proxy maintains a persistent, high-throughput pool of HTTP/2 multiplexed connections to upstream providers like OpenAI and Anthropic.
 
 ## How It Works
-TLS handshakes are computationally expensive and add significant latency (often 50ms - 150ms) to every request.
+New TCP/TLS handshakes add environment-dependent latency. Reusing eligible connections avoids repeating that setup work.
 
 1. **Persistent Sockets:** The proxy's `httpx.AsyncClient` is configured to hold long-lived `keep-alive` sockets open.
 2. **HTTP/2 Multiplexing:** Under HTTP/2, multiple concurrent LLM streams are multiplexed simultaneously over a single, highly efficient TCP connection, eliminating the head-of-line blocking problem inherent in older HTTP/1.1 proxies.
-3. **Connection Re-Use:** When a client application connects to the proxy, the proxy instantly routes the payload through one of the pre-warmed sockets to the upstream provider, resulting in 0ms of TCP/TLS overhead.
+3. **Connection Re-Use:** When an eligible pooled connection exists, the proxy can reuse it instead of creating a new TCP/TLS connection.
 
 
 ```mermaid
@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Eliminates 50ms to 150ms of network handshake latency per request.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely efficient memory usage; maintaining 1,000 HTTP/2 streams on a single socket consumes a fraction of the resources compared to 1,000 separate TCP sockets.
 
 ## Configuration Flags

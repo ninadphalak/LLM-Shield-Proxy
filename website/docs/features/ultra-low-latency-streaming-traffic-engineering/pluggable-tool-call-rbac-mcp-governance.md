@@ -24,7 +24,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Designed for microsecond-level latency impact.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Highly concurrent execution without saturating the Python GIL.
 
 ## Configuration Flags

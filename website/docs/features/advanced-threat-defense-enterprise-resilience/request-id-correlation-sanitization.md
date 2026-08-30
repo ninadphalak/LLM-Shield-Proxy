@@ -29,7 +29,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Regex validation and context assignment execute in `&lt;1µs`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** `contextvars` execution is thread-safe and eliminates the need to pass `request_id` variables deeply through the call stack.
 
 ## Configuration Flags

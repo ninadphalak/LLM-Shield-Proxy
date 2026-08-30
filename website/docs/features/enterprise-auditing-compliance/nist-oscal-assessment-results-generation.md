@@ -1,58 +1,64 @@
-# NIST OSCAL Assessment Results Generation
+# NIST OSCAL 1.2 Assessment Results
 
-[⬅️ Back to Features Catalog](/docs/features-overview)
+[Back to Features Catalog](/docs/features-overview)
 
-## What It Does
-**NIST OSCAL Assessment Results Generation** transforms the proxy's runtime security decisions into standardized, machine-readable compliance artifacts. Instead of manually mapping proxy logs to security controls during an audit, the proxy automatically generates NIST SP 800-53 Rev. 5 compliant OSCAL (Open Security Controls Assessment Language) payloads.
+## What it does
 
-## How It Works
-Proving compliance to federal auditors or enterprise risk teams is traditionally a manual, screenshot-heavy process.
+LLM-Shield-Proxy creates privacy-safe OSCAL 1.2 `assessment-results` artifacts from runtime governance decisions and offline pilot assessments. OSCAL is a machine-readable exchange format. The artifact supports control assessment and evidence transfer; it is not a compliance determination or auditor attestation.
 
-1. **Control Mapping:** Inside `policies.yaml`, security roles and redaction rules are explicitly mapped to NIST control identifiers (e.g., Redacting SSNs maps to `PE-19`, Information Leakage).
-2. **Runtime Assessment:** When the proxy successfully enforces a rule (e.g., blocking a tool call or masking PII), the Decision Engine flags this as an automated assessment event.
-3. **OSCAL Generation:** The proxy aggregates these events and structures them into valid OSCAL `assessment-results` JSON models.
-4. **Export:** These standardized artifacts are pushed directly to GRC platforms via the [GRC Webhook Transport](./grc-webhook-sidecar-file-transport), allowing auditors to view real-time compliance posture in their native dashboards.
+Artifacts contain observation descriptions and selected metadata such as decision type, record hash, Merkle root, or aggregate entity count. They do not contain prompt text, detected values, or reversible redaction tokens.
 
+## OSCAL 1.2 compatibility notice
 
-```mermaid
-flowchart LR
-    A[Security Decision Made] --> B(Map to NIST Control)
-    B --> C(Generate OSCAL JSON)
-    C --> D[Push to GRC Platform]
-    D -.-> E[Auditor Dashboard]
+The next release changes two externally visible artifact behaviors:
+
+- `metadata.oscal-version` moves from `1.1.2` to `1.2.0`. Treat this as an artifact schema-version bump and update validators or transformations before upgrading.
+- `DecisionTraceExporter.generate_oscal_artifact()` now creates fresh document and result UUIDs on every call. Previous versions reused hardcoded UUID constants, which could make unrelated artifacts collide in a GRC store.
+
+Consumers must not compare, cache, join, or deduplicate runtime artifacts using the previous constant UUID values. Use explicit evidence metadata, request identifiers, hashes, and timestamps for correlation.
+
+Offline assessment artifacts are intentionally different: they can derive deterministic document, result, and observation UUIDs from the input fingerprint and detector configuration so a frozen assessment can be reproduced byte-for-byte when its timestamp is also fixed.
+
+## Shared builder and maintenance boundary
+
+`llm_shield_proxy/compliance/oscal.py` is the single shared OSCAL builder. Both `assessment.py` and `compliance/trace_exporter.py` call it. Future OSCAL shape or version changes belong in that module instead of being duplicated in each caller.
+
+The builder's default `import-ap` value is a placeholder assessment-plan URN. Replace it with the deployment's actual assessment plan before treating an artifact as formal audit evidence.
+
+## Runtime exporter
+
+`DecisionTraceExporter` retains privacy-safe decision metadata in process memory and can serialize the current observations:
+
+```python
+from llm_shield_proxy.compliance.trace_exporter import DecisionTraceExporter
+
+exporter = DecisionTraceExporter()
+artifact = exporter.generate_oscal_artifact()
 ```
 
+Configured GRC transports can receive individual OSCAL decision deltas asynchronously. Delivery, retention, receiving-system validation, and correlation remain deployment responsibilities.
 
-View diagram on GitHub mobile 📱 -->
+## Offline assessment
 
+The assessment CLI writes aggregate JSON, HTML, and OSCAL files without persisting source or transformed records:
 
-## Performance Profile
-- **Execution Speed:** JSON templating executes asynchronously in `&lt;2ms`.
-- **Overhead:** Offloaded entirely to background workers to preserve microsecond streaming performance on the main event loop.
+```bash
+llm-shield-proxy assess representative.jsonl --out assessment-output
+```
 
-## Configuration Flags
+See the [pilot assessment guide](/docs/guides/pilot-assessment) for the input contract and reproduction controls.
 
-| Environment Variable | Description | Linked Deployment Guide |
-| :--- | :--- | :--- |
-| `ENABLE_OSCAL_EXPORTER` | Toggles the generation of OSCAL assessment artifacts. | [View in deployment.md](/docs/deployment) |
+## Consumer upgrade checklist
 
-## Critical Logic & Edge Cases
-* **Batching:** Generating an OSCAL artifact for every single SSN redacted would flood GRC APIs. The proxy intelligently batches assessment results into rolling time-windows (e.g., every 5 minutes), aggregating 10,000 successful redactions into a single "Pass" attestation for the `PE-19` control.
-* **Chain of Custody:** Every OSCAL artifact includes a reference to the `X-Request-ID` and the specific [WORM-Compliant Hash Chain](./worm-compliant-audit-logging-with-hash-chaining) block, providing an unbreakable forensic trail from the high-level compliance dashboard down to the exact byte-level network event.
+- Accept OSCAL `1.2.0` in validators and ingestion pipelines.
+- Stop depending on the old runtime document or result UUID constants.
+- Regression-test OSCAL-to-GRC mappings.
+- Supply the real assessment-plan reference.
+- Validate that receiving systems preserve hashes, timestamps, and evidence properties.
+- Configure retention and checkpoint anchoring separately when long-lived audit evidence is required.
 
-## FAQ
+## Related tests
 
-**Q: Do I need to be a government agency to use this?**
-A: No! While OSCAL was designed by NIST, it is rapidly becoming the universal standard for continuous compliance. Modern GRC tools (like Vanta or Drata) can ingest OSCAL data to automatically prove SOC 2 or ISO 27001 compliance for commercial startups.
-
-**Q: Can I map custom policies to custom controls?**
-A: Yes. The `policies.yaml` file allows you to inject custom control IDs (e.g., `ACME-SEC-01`) alongside the standard NIST IDs, ensuring the generated OSCAL fits your company's proprietary risk framework.
-
-
-## Plainspeak
-This feature acts as an automatic paperwork generator for government security audits.
-
-When a government auditor reviews your system, they usually demand massive, confusing spreadsheets detailing every single security rule. Instead of humans doing this manually, this feature automatically translates the proxy's real-time security actions into the exact, strict paperwork format (OSCAL) required by the US Government (NIST), saving hundreds of hours of manual compliance work.
-
-## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).
+- `tests/test_tool_rbac_and_compliance.py`
+- `tests/test_assessment.py`
+- `tests/test_compliance_report.py`

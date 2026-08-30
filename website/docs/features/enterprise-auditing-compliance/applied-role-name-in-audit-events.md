@@ -9,7 +9,7 @@ The **Applied Role Name in Audit Events** feature provides exact attribution for
 When a user authenticates, their `virtual_key_id` maps to a specific role (e.g., `role_data_scientist`).
 
 1. **Context Propagation:** During the authentication phase, the resolved role name is injected into Python's `contextvars`.
-2. **Event Enrichment:** Whenever the proxy emits a WORM-compliant audit log or an OSCAL assessment artifact, it pulls the role name from the context variable.
+2. **Event Enrichment:** Whenever the proxy emits a hash-chained audit record or an OSCAL assessment artifact, it pulls the role name from the context variable.
 3. **Structured Output:** The event is permanently tagged with `"applied_role_name": "role_data_scientist"`.
 
 
@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Variable lookup executes in `O(1)`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely low memory overhead.
 
 ## Configuration Flags

@@ -2,10 +2,10 @@ import type {ReactNode} from 'react';
 import styles from './styles.module.css';
 
 const STATS: {value: string; label: string}[] = [
-  {value: '<85 MB', label: 'Resident memory (verified RSS)'},
-  {value: '<5 µs', label: 'Added latency per SSE chunk'},
-  {value: '170+', label: 'Automated tests in CI, and growing'},
-  {value: '0', label: 'Bytes of PII persisted to disk'},
+  {value: 'Apache 2.0', label: 'No project license fee or paid tier'},
+  {value: '7', label: 'Published conformance domains'},
+  {value: '3', label: 'Offline assessment artifact formats'},
+  {value: '0', label: 'Upstream calls made by the assessor'},
 ];
 
 export default function StatsBar(): ReactNode {

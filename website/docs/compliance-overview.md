@@ -1,58 +1,35 @@
-[⬅️ Back to README](/)
+# Compliance controls and evidence boundaries
 
-# 📜 Compliance: Audit, Forensics & Legal
+LLM-Shield-Proxy combines in-VPC inspection, upstream-boundary tests, privacy-safe audit metadata, SHA-256 predecessor links, Ed25519 signatures, and OSCAL 1.2 assessment artifacts. These features can **support** technical controls and audit evidence. They do not make a deployment or organization compliant, replace legal advice, or constitute certification.
 
-As enterprises rapidly operationalize Generative AI, they face an unprecedented regulatory tension: the necessity to innovate via LLMs versus the draconian legal liabilities of exposing sensitive data. Traditional cloud AI gateways fail to resolve this tension—they introduce severe streaming latency, rely on heavy memory-bound architectures, and persist data, thereby creating their own data privacy liabilities.
+## What the evidence can establish
 
-### The Article 12 Paradox
-A critical systemic contradiction exists between the **EU AI Act's Article 12** (which mandates rigorous, immutable event logging and traceability for high-risk AI systems) and **GDPR's Article 5(1)(c) & Article 17** (which mandate strict data minimization and the right to erasure). Traditional proxy architectures cannot satisfy both; they either log too much (violating GDPR) or log too little (violating the EU AI Act).
+| Evidence | What it supports | What it does not establish |
+| :--- | :--- | :--- |
+| Configured-upstream conformance test | Known protected fixtures are absent from serialized transformed requests in the tested configuration | Universal detector recall, all production traffic, or network-path isolation |
+| Hash chain + Ed25519 signatures | Changes, gaps, ordering errors, and key mismatch within evidence supplied to the verifier | Storage-level WORM, complete event capture, trusted key custody, or detection of an unanchored deleted suffix |
+| Durable local JSONL mode | Append acknowledgement and restart recovery for one configured process/file | Multi-worker global ordering or immutable retention |
+| OSCAL 1.2 assessment results | Machine-readable control observations and evidence exchange | Control effectiveness, authorization to operate, or framework certification |
+| Compliance evidence pack | Integrity-manifested bundle of supplied evidence and generated summaries | Independent auditor attestation |
 
-**The Solution:** The LLM-Shield-Proxy resolves this paradox through an in-VPC mathematical sanitization layer. By combining SHA-256 sequential Merkle hash chaining (for immutable, WORM-compliant event sequencing) with RFC 6902 JSON patch differential logging (recording *what* categories were redacted, not the raw PII), the proxy achieves perfect traceability without retaining a single byte of sensitive user data.
+## Framework mappings
 
-Coupled with a Sub-millisecond SSE sliding buffer and C++ google-re2 DFA regex engine, the LLM-Shield-Proxy provides the foundation for global compliance with zero compromise on enterprise engineering performance.
+- [SOC 2](/docs/compliance/soc2): supports access-control, boundary-protection, logging, and monitoring evidence selected by the operator and auditor.
+- [HIPAA](/docs/compliance/hipaa): supports technical safeguards such as access control, integrity checks, and transmission-security design. A covered entity or business associate remains responsible for its risk analysis and safeguards.
+- [GDPR](/docs/compliance/gdpr): supports data-minimization and privacy-by-design engineering. Lawful basis, notices, rights handling, retention, and processor/controller duties remain organizational responsibilities.
+- [EU AI Act](/docs/compliance/eu_ai_act): supports event metadata and human-enforced tool policy. System classification and provider/deployer obligations require separate analysis.
+- [NIST, ISO, and cryptographic controls](/docs/compliance/nist_iso_fips): exports mappings and performs implementation self-tests; it does not claim a FIPS-validated cryptographic module or NIST/ISO certification.
 
----
+## Audit delivery truth boundary
 
-## 🗂️ Universal Regulatory Mapping & Deep Dives
+The default `AUDIT_DURABILITY=best_effort` path is non-blocking and process-local. It can drop events when the bounded queue is full, starts a new chain after restart, and uses an ephemeral Ed25519 key unless a stable signing key is configured.
 
-The following matrix maps the LLM-Shield-Proxy's cryptographic and systems engineering mechanics directly to major global regulatory mandates. **Click the framework name for a detailed compliance guide.**
+`durable` and `required` modes add acknowledged local JSONL append, `fsync` by default, and chain recovery after restart. Local files remain deletable or replaceable by administrators. WORM retention requires an independently configured immutable store; suffix-deletion detection requires an external terminal-hash/sequence anchor; production authenticity requires controlled key generation, custody, rotation, and archival.
 
-| Regulatory Framework & Article | Specific Legal / Audit Mandate | Non-Compliance Risk & Penalty | LLM-Shield-Proxy Technical Mechanism |
-| :--- | :--- | :--- | :--- |
-| **[EU AI Act (Art. 12 & 14)](docs/compliance/eu_ai_act.md)** | Automated, immutable event logging & human oversight for high-risk AI systems. | Up to 7% of global annual turnover or €35M. | WORM Merkle chaining; Streaming tool-call RBAC. |
-| **[GDPR (Art. 5, 17, 25, 32)](docs/compliance/gdpr.md)** | Data minimization, privacy by design, right to erasure, and state-of-the-art security. | Up to 4% of global annual turnover or €20M. | Ephemeral TTL memory eviction (&lt;85 MB RAM); RFC 6902 differential logs; Zero-Data Mode. |
-| **[HIPAA (45 CFR § 164.312)](docs/compliance/hipaa.md)** | Transmission security and access controls to safeguard ePHI in transit. | Tiered fines up to $1.5M/year per violation; Criminal penalties. | Tier-3 Quantized ONNX ClinicalBERT NER; In-Band stateless envelope cryptography. |
-| **[SOC 2 Type II (CC6.1, CC6.6, CC7.2)](docs/compliance/soc2.md)** | Logical access, boundary protection, and anomaly detection/response. | Loss of enterprise contracts; reputational damage. | Pluggable streaming RBAC; Composite Agent Loop Circuit Breakers; HashiCorp Vault resolvers. |
-| **[ISO/IEC 42001 & NIST SP 800-53 Rev. 5](docs/compliance/nist_iso_fips.md)** | Continuous AI risk management and systemic assessment artifact generation. | Disqualification from federal/DoD contracts; operational halting. | Universal Decision Trace Exporter generating automated NIST OSCAL compliance artifacts. |
-| **[FIPS 140-3](docs/compliance/nist_iso_fips.md)** | Cryptographic module integrity and validated algorithm implementation. | Ineligibility for US Government and regulated sector deployment. | Cryptographic Known Answer Tests (KAT) for SHA-256 and AES-256-GCM. |
+## How to present the project accurately
 
-*(For a detailed breakdown of the internal proxy mechanics, review the [Architecture & Cryptographic Data Flow](/docs/architecture) document).*
+Use: "supports SOC 2 or HIPAA technical controls and produces verifiable evidence artifacts."
 
----
+Do not use: "SOC 2 compliant," "HIPAA compliant," "guaranteed non-egress," or "WORM audit log" without the deployment controls and independent validation those claims require.
 
-## ❓ Compliance Officer & CISO FAQ
-
-**Q1: Will our software engineering team need to rewrite existing applications?**
-No. The LLM-Shield-Proxy is designed for drop-in OpenAI API compatibility. Deploying the sanitization layer requires exactly zero application code changes—engineers only need to perform a 1-line `base_url` change in their existing SDKs (e.g., pointing the OpenAI Python client to the local in-VPC proxy endpoint). The proxy handles multi-provider translation (OpenAI schemas to Anthropic, Gemini, or vLLM) transparently at the network edge.
-
-**Q2: How do we prove zero PII egress to SOC 2 or EU regulators without logging the personal data itself?**
-We utilize cryptographic WORM (Write Once, Read Many) Audit Logging via SHA-256 sequential Merkle hash chaining. The proxy generates an RFC 6902 JSON patch differential log that records the *metadata* of the redaction (e.g., "Redacted `[CREDIT_CARD]` at token offset 42") rather than the data itself. We emit a rolling SHA-256 digest over the SSE stream, producing an HMAC-signed attestation proof (Proof of Non-Egress Receipt) that guarantees to auditors no PII was transmitted to the external LLM.
-
-**Q3: Does redacting sensitive data degrade LLM reasoning or cause streaming latency lag?**
-No. To preserve LLM reasoning, we utilize a 4-Mode Pipeline. The `SYNTHETIC` mode employs canonical locale swapping to generate structurally valid synthetic data that precisely preserves BPE token counts and LLM attention weights.
-For latency, the proxy utilizes a highly optimized C++ `google-re2` DFA regex engine (O(N) linear time) and a sub-millisecond sliding-window SSE lookahead buffer (&lt;4.3 µs overhead per chunk). This allows us to rehydrate fragmented tokens across Server-Sent Events without UI stalls or noticeable lag.
-
-**Q4: How does the proxy prevent autonomous agents from running unauthorized database or shell commands?**
-By utilizing Pluggable Streaming Tool-Call RBAC. The proxy intercepts JSON-RPC 2.0 and MCP (Model Context Protocol) function calls (like `exec_sql` or `shell_exec`) mid-stream. It validates these against OPA (Open Policy Agent) and HashiCorp Vault resolvers. If an agent attempts an unauthorized action or enters a runaway state, our Composite Agent Loop Circuit Breakers atomatically halt the execution.
-
-**Q5: How does the proxy handle AI agents talking to other AI agents or tools?**
-Traditional proxies break when AI agents send complex, nested commands to each other. Our proxy features a specialized "Agent-to-Agent AI Firewall" (stateless PII synthesis and rehydration) that can instantly parse and secure machine-to-machine traffic without breaking the underlying code structure. This is the proxy's "secret sauce" for securing the next generation of autonomous AI.
-
-**Q6: Can the proxy scan text embedded inside images or multimodal vision payloads?**
-This capability is not natively supported out of the box in standard mode. Currently, our deterministic engines (google-re2, Shannon Entropy) are optimized for ultra-low latency text and SSE streams. However, domain-specific extensions or custom integrations for multimodal OCR payloads can be added on a best-effort basis upon request, or extended via BYOM (Bring Your Own Model) and BYOR (Bring Your Own Regex) configurations.
-
-**Q7: How does our IT/DevOps department deploy and monitor this?**
-The system is deployed as an Envoy gRPC `ext_proc` sidecar over Unix Domain Sockets (UDS) with strict umask policies, or as a zero-dependency Kubernetes Mutating Webhook. Monitoring is natively supported via the GRC Dispatcher, which exports OpenTelemetry `gen_ai.*` spans and NIST OSCAL assessment results directly to enterprise GRC platforms like Vanta, Drata, and Datadog. Leveraging Linux `epoll`, the proxy effortlessly supports 1,800+ concurrent streams per CPU core.
-
-**Q8: How do we prove an audit log entry wasn't fabricated after the fact by whoever operates the log store?**
-The WORM SHA-256 hash chain proves the log is internally tamper-evident, but that alone still requires trusting the log store's operator. Every audit event is additionally signed with [Ed25519](docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts.md), a private key held only by the proxy instance, with the public key published at `GET /api/v1/audit/pubkey` for offline verification — giving auditors non-repudiation, not just tamper-evidence. To hand an external auditor a self-contained evidence package, run `llm-shield-proxy compliance-report --framework=hipaa` to bundle verified audit evidence, NIST OSCAL results, and a SHA-256 integrity manifest into a single `.zip`.
+Run the [Open Streaming-Privacy Conformance Lab](/docs/conformance) and attach its JSON report to a pilot assessment. Performance figures are environment-scoped and must identify the measured operation and exclusions.

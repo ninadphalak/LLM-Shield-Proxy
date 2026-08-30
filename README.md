@@ -9,15 +9,19 @@
 [![Docs & Live Demo](https://img.shields.io/badge/docs-interactive%20demo-00ff9d)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
 > 📖 **[Read the full docs and try the interactive PII-redaction playground →](https://project-0039f5fd-ac66-4a1c-9e0.web.app)**
-> Type real-looking PII into your browser and watch it get redacted before it ever reaches an LLM, then rehydrated on the way back — no signup, no server calls, entirely client-side.
+> Type real-looking PII into your browser and watch it get redacted before it ever reaches an LLM, then rehydrated on the way back - no signup, no server calls, entirely client-side.
 
 <img src="website/docs/LLM-Shield-Proxy-paper-v2.gif" width="600" alt="LLM-Shield-Proxy Demo" />
 
-**Ultra-Low Latency Generative AI Sanitization for Highly Regulated Enterprise Infrastructure**
+**Independently verifiable, in-VPC streaming privacy with bounded processing and audit evidence**
 
 LLM-Shield-Proxy is a hyper-fast, FastAPI-based streaming gateway designed specifically for environments where data privacy is paramount (Banking, Healthcare, Legal). It intercepts and sanitizes real-time LLM streams to prevent the leakage of Non-Public Personal Information (NPI), Protected Health Information (PHI), and Payment Card Industry (PCI) data without degrading the end-user streaming experience.
 
-By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy applies guardrails at the microsecond level, helping your AI applications meet strict InfoSec mandates (GLBA, PCI-DSS, HIPAA) while maintaining zero-perceived-latency.
+The project uses a **Tiered Detection Approach** and publishes the tests needed to measure its safety and performance in a specific environment. It can support technical controls used in GLBA, PCI-DSS, HIPAA, and SOC 2 programs; installing it does not make an organization compliant.
+
+> **Apache 2.0:** every source line is inspectable, and the proxy is completely free to download and self-host.
+
+In this project, **zero egress** has a narrow, testable meaning: *unredacted protected data does not reach the configured upstream boundary*. It does not mean the process makes no network calls; the proxy necessarily sends the transformed request to the upstream selected by its operator.
 
 **Option 1: Standard Egress**
 <br>
@@ -35,7 +39,7 @@ By utilizing a highly optimized **Tiered Detection Approach**, LLM-Shield-Proxy 
 
 > **Technical controls supporting SOC 2 Type II and HIPAA safeguards for LLM streams, without breaking real-time latency.**
 
-**LLM-Shield-Proxy** is an open-source, zero-egress PII redaction and compliance **AI Gateway** and **LLM Firewall** deployed directly within your corporate VPC. It intercepts OpenAI-compatible LLM API requests, redacts Personally Identifiable Information (PII) and raw secrets before they leave your infrastructure, and deterministically re-hydrates real-time Server-Sent Events (SSE) chat responses with ultra-low stream latency.
+**LLM-Shield-Proxy** is an open-source streaming privacy gateway and LLM firewall deployed inside an operator-controlled environment. It transforms OpenAI-compatible requests before the configured upstream boundary and rehydrates authorized values in incremental SSE responses.
 
 Designed to enforce **Zero Trust AI** and support enterprise privacy compliance programs (**SOC 2 trust criteria**, HIPAA, HITRUST technical safeguards) without breaking real-time streaming latency.
 
@@ -58,24 +62,24 @@ For standard conversational text, the proxy respects your configured masking mod
 ### B. Machine-to-Machine (JSON-RPC / Tool Calls)
 When the proxy detects structured AI tool calls or JSON-RPC `2.0` payloads, it **bypasses your configuration** and strictly enforces an **AST-Aware Semantic Firewall** with **STATELESS_SYNTHETIC**.
 * **Why?** Blindly running regex over raw JSON strings can corrupt syntax (e.g., matching a JSON key or injecting unescaped characters), causing agent crashes.
-* **The Solution:** The proxy parses the payload into an Abstract Syntax Tree (AST). It safely replaces sensitive leaf values with synthetic fakes and bundles them with an in-band AES-256-GCM cipher (e.g., `{"_shield_val": "Maya", "_shield_ctx": "aesgcm..."}`). This guarantees 100% valid JSON syntax without relying on Redis state.
+* **The Solution:** The proxy parses the payload into an Abstract Syntax Tree (AST), replaces selected leaf values, and can bundle reversible AES-256-GCM context (for example, `{"_shield_val": "Maya", "_shield_ctx": "aesgcm..."}`). AST mutation preserves JSON syntax; provider echo and rehydration behavior must be integration-tested.
 
 ---
 
 ### 🔥 Enterprise Flagship Features
-* **[Sub-Millisecond SSE Rehydration](#-how-it-works-the-data-flow):** Patent-pending sliding-window buffer reconstructs fragmented sensitive tokens across Server-Sent Events without breaking real-time UX or introducing network lag (<4.3 µs overhead per chunk).
+* **[Fragment-Safe SSE Rehydration](#-how-it-works-the-data-flow):** The sliding-window buffer reconstructs protected placeholders split across Server-Sent Event chunks. Run the reproducible conformance harness below for environment-scoped measurements.
 * **[Zero-Egress Synthetic Masking](#️-dual-pipeline-redaction-architecture):** Advanced **Data Loss Prevention (DLP) for LLMs** using format-preserving substitution (Regex + Shannon Entropy + ONNX NER) ensuring PII never traverses the public internet.
 * **[Air-Gapped Egress Gateway Mode](docs/features/air-gapped-egress.md):** Allows operation in strict Zero-Internet corporate subnets by securely routing all upstream traffic through an internal egress gateway, optionally stripping auth headers for internal mTLS architectures.
-* **[Zero-Data Stateless Syntheticgraphy](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption guarantee zero long-term data liability (operating in an ultra-low footprint of `<85 MB RAM`).
+* **[Zero-Data Stateless Syntheticgraphy](#4-in-band-stateless-crypto--ephemeral-vaults):** Ephemeral TTL vaults and AES-256-GCM envelope encryption avoid persistent prompt storage in the masking path. Measure process memory in your selected installation mode and workload.
 * **[Role-Based Policy-as-Code & Hot-Reloading](POLICIES.md):** Zero-downtime YAML file watcher (`policies.yaml`) dynamically maps `virtual_key_id` identities to granular security roles, custom PII profiles, and thread-safe $O(1)$ setting overrides.
-* **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** Every PII redaction and agent RBAC decision is cryptographically sealed in a local WORM-compliant Merkle Tree. Export tamper-evident **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans** directly to your GRC platform (Vanta/Drata) or SIEM (Datadog) to support **SOC 2 audit evidence**, **ISO 42001 AI Management System** forensics, and comprehensive **LLM Security Posture Management (LLM SPM)**.
-* **[Ed25519-Signed Audit Receipts & One-Command Compliance Packs](website/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts.md):** Every WORM audit event is signed with Ed25519 for cryptographic non-repudiation (public key at `GET /api/v1/audit/pubkey`); `llm-shield-proxy compliance-report --framework=hipaa` bundles verified audit evidence, NIST OSCAL results, and a SHA-256 integrity manifest into a single auditor-ready `.zip`.
-* **[Streaming Tool-Call Interception & Agent Governance](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercepts real-time LLM function calls (e.g., `exec_sql`, `shell_exec`) mid-stream using a zero-allocation JSON parser, enforcing fail-closed tool access controls backed by Redis, OPA, or Vault policy stores to prevent agent drift.
-* **[Context-Aware Tool Catalog Pruner (MCP Discovery)](docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner.md):** Dynamically intercepts JSON-RPC server/discover payloads at the network edge using our Stateless Mutation Engine. Enforces $O(1)$ Pluggable Tool-Call RBAC to silently prune unauthorized tool schemas before they reach the LLM's context window, caching progressive discovery payloads (SEP-2549) via Redis for sub-millisecond agent delivery.
+* **[Universal Decision Trace Exporter](#-enterprise-compliance-audit-forensics--legal):** PII redaction and agent RBAC decisions can be emitted as hash-chained, signed evidence plus **NIST OSCAL artifacts** and **OpenTelemetry `gen_ai.*` spans**. True WORM retention requires a separately configured immutable sink.
+* **[Ed25519-Signed Audit Receipts & Evidence Packs](website/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts.md):** Audit events are signed for offline verification (public key at `GET /api/v1/audit/pubkey`); `llm-shield-proxy compliance-report --framework=hipaa` bundles the verification summary, OSCAL results, and a SHA-256 manifest. These artifacts support an audit; they do not certify compliance.
+* **[Streaming Tool-Call Interception & Agent Governance](docs/PLUGGABLE_RBAC_ENGINE.md):** Intercepts real-time LLM function calls (e.g., `exec_sql`, `shell_exec`) with a bounded JSON parser, enforcing fail-closed tool access controls backed by Redis, OPA, or Vault policy stores to prevent agent drift.
+* **[Context-Aware Tool Catalog Pruner (MCP Discovery)](docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner.md):** Intercepts JSON-RPC discovery payloads and evaluates tool names against resolved policy before the catalog reaches the model. Redis caching is optional; latency is deployment-specific.
 * **[Service Mesh Native gRPC Sidecar](#5-service-mesh-native-grpc-ext_proc--k8s-sidecar):** Stream buffers directly over Unix Domain Sockets (UDS) via Envoy's `ext_proc` for zero HTTP network hops, paired with a zero-dependency Kubernetes Mutating Webhook.
-* **[ReDoS-Immune C++ DFA Engine](#️-bring-your-own-regex-byor-enterprise-rule-injection):** Pre-compiled Deterministic Finite Automatons (`google-re2`) guarantee linear execution time against adversarial regex payloads.
+* **[Bounded Regex Engine](#️-bring-your-own-regex-byor-enterprise-rule-injection):** Supported patterns can use `google-re2` to avoid catastrophic backtracking; validate fallback behavior and unsupported constructs at startup.
 * **[Universal Zero-SDK Translators](#-the-drop-in-proof-zero-sdk-integration):** Drop-in compatibility for existing OpenAI SDKs with automatic edge-translation to Anthropic, Gemini, and vLLM schemas.
-* **[Edge-Level Agent Identity Enforcer](docs/features/agent_identity_enforcer.md):** Cryptographic Zero-Trust ingress barrier that intercepts autonomous agent tool-calls, strictly validating mathematically signed Workload Identity and DPoP proofs in <1ms to prevent rogue agent escalation.
+* **[Edge-Level Agent Identity Enforcer](docs/features/agent_identity_enforcer.md):** Validates configured workload identity and DPoP proofs before governed tool calls. Measure latency and exercise replay/failure cases in the pilot profile.
 
 
 
@@ -151,8 +155,8 @@ LLM-Shield-Proxy is heavily modular. You can configure the engine based on your 
 
 | Installation Tier | Command | Capabilities Included | Use Case / Trade-off |
 | :--- | :--- | :--- | :--- |
-| **Standard Mode**<br>*(Microsecond Proxy)* | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | **Best for DevOps & Secrets:** Operates with ultra-low memory (`<85 MB` RAM) and maximum throughput. **Coverage:** 100% deterministic catch rate for structured compliance data (SSNs, Emails, IP/MAC) and high-entropy cryptographic secrets (API Keys, Hex tokens). Misses conversational/free-text names. |
-| **Full NLP Mode**<br>*(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** | **Best for HIPAA/GDPR:** Adds a quantized BERT-NER model via ONNX runtime to extract conversational PII (Patient Names, Organizations) from free-text. **Coverage:** >95% F1 Recall for contextual entities on standard benchmark datasets, matching the accuracy of enterprise cloud NLP APIs (AWS Comprehend, Google Cloud DLP, Microsoft Presidio) at 10x lower memory. Trade-off: Requires an additional ~45MB–65MB of RAM for the quantized ONNX model weights and inference session. |
+| **Standard Mode** | `pip install llm-shield-proxy` | **Tier 1 (Regex)** & **Tier 2 (Shannon Entropy)** | Best for structured identifiers and secret candidates. It does not provide population-level recall guarantees and can miss conversational names or novel formats. Measure RSS and latency on your workload. |
+| **Full NLP Mode**<br>*(Contextual NER)* | `pip install "llm-shield-proxy[ner]"` | Adds **Tier 3 (ONNX Runtime NER)** | Adds a configurable local ONNX model for contextual entities. Quality and memory depend on the selected model and corpus; publish model, dataset, splits, and confidence intervals with any accuracy claim. |
 
 > **Enabling Tier 3 ONNX NER:** When installed with `[ner]`, enable deep neural entity extraction by setting `ENABLE_TIER3_ONNX_NER=true` in your `.env` or environment variables (and optionally point `ONNX_MODEL_PATH` to custom model weights). If disabled or not installed, the engine automatically and gracefully bypasses Tier 3 with zero startup overhead.
 
@@ -168,15 +172,15 @@ LLM-Shield-Proxy is highly extensible without risking latency or ReDoS.
 | Existing Legacy Proxies | LLM-Shield-Proxy |
 | :--- | :--- |
 | **Destroys Real-Time SSE Streaming:** Buffers entire responses before scanning, causing multi-second UI latency stalls. | **Ultra-Low Latency Streaming:** Redacts and re-hydrates delta-by-delta as SSE packets stream. |
-| **Heavy Memory Footprint:** Requires 1GB–2GB RAM for heavy spaCy or PyTorch NLP libraries. | **Ultra-Lightweight <85 MB RAM:** Runs on a microsecond compiled regex + Shannon entropy + synthetic generator engine. |
-| **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage (Zero-Data Mode):** Self-destructing TTL session vault built for zero data liability. Operates in strict "Zero-Data Mode"—no prompts, PII, or context windows are ever written to persistent disk or external storage. |
-| **Complex Cloud Egress:** Routes data to 3rd-party SaaS inspection APIs. | **100% Zero-Egress VPC:** All scanning happens locally inside your secure corporate boundary. |
+| **Optional heavyweight NLP dependencies:** Some deployments use large NLP runtimes. | **Tiered local processing:** Standard mode avoids a neural runtime; optional ONNX mode has a workload- and model-dependent footprint. |
+| **Data Liability:** Stores user PII in long-term databases. | **Zero Long-Term Storage (Zero-Data Mode):** Self-destructing TTL session vault built for zero data liability. Operates in strict "Zero-Data Mode"-no prompts, PII, or context windows are ever written to persistent disk or external storage. |
+| **Inspection API egress:** Some products send source data to a separate inspection service. | **Testable upstream boundary:** scanning occurs in the operator's deployment and the conformance test checks that known raw protected values are absent from the serialized configured-upstream request. |
 
 ### 🏛️ Built for Trust & Transparency
 Designed specifically for highly regulated enterprise environments, strict **Zero Trust AI** network architectures, and security-first engineering teams implementing **LLM Security Posture Management (LLM SPM)**.
-1. **Keeps data in your VPC:** The shield runs 100% inside your corporate boundary without transmitting unredacted data to external third parties.
-2. **Zero-Data Storage:** Sensitive prompts are never persisted. The proxy utilizes self-destructing in-memory vaults with deterministic TTL eviction. To help quantify open-source adoption, the proxy optionally transmits anonymous, zero-payload volumetric request counts (opt-out via ANONYMOUS_USAGE_TRACKING=False).
-3. **Continuous Stability:** Validated under high-concurrency stress testing to maintain consistent throughput and sub-millisecond latency.
+1. **Keeps inspection local:** Deploy the shield inside your boundary and test that unredacted protected data does not reach the configured upstream.
+2. **Ephemeral masking state:** Sensitive prompt mappings use in-memory or TTL-backed vaults unless the operator selects an external state store.
+3. **Measurable stability:** Run the conformance and load-test protocols in the exact installation mode, host, concurrency, audit, and upstream configuration you plan to operate.
 4. **Transparent Rule Engine:** Combines transparent, deterministic pattern matching with Shannon entropy and local ONNX neural entity recognition.
 
 ---
@@ -185,10 +189,10 @@ Designed specifically for highly regulated enterprise environments, strict **Zer
 
 It's a crowded space. Here is exactly why you should deploy LLM-Shield-Proxy instead of the alternatives:
 
-* **Microsoft Presidio / spaCy:** Legacy libraries that consume 1GB+ of RAM and block your event loop with 50-150ms of latency per request. (Because nothing says "real-time AI" like pausing the universe for regex). LLM-Shield-Proxy uses a flat <85 MB footprint with <6 µs latency overhead.
+* **Microsoft Presidio / spaCy:** Different detector stacks make different quality, dependency, and resource trade-offs. Compare them on the same corpus and service-level protocol; the project does not currently publish a validated universal memory or total-proxy latency advantage.
 * **Cloud AI Safety APIs (Azure/AWS):** Checking for PII by sending raw data out of your VPC defeats the purpose. With LLM-Shield-Proxy, the data never leaves your infrastructure unredacted.
 * **Standard Regex Gateways:** They break on asynchronous Server-Sent Events (SSE). If a sensitive token is split across two streaming packets, standard gateways let it leak. LLM-Shield-Proxy uses a sliding-window lookahead buffer to seamlessly hold split tokens without breaking stream formatting.
-* **LiteLLM / LangChain:** LLM-Shield-Proxy is not a model router or orchestration framework. It works *alongside* them. Put LLM-Shield-Proxy in front of your orchestrator to guarantee data masking before routing.
+* **LiteLLM / LangChain:** LLM-Shield-Proxy is not a model router or orchestration framework. Put it in front of the orchestrator and verify the serialized configured-upstream boundary using the conformance suite.
 
 ### 🤝 The Orchestrators (What we complement)
 LLM-Shield-Proxy is **not** a model router. It is designed to deploy as a transparent edge proxy directly in front of industry-standard orchestration tools. It stacks with your existing AI routing infrastructure, requires zero code changes, and is compatible out-of-the-box with:
@@ -198,7 +202,7 @@ LLM-Shield-Proxy is **not** a model router. It is designed to deploy as a transp
 * **Local & Open-Source Inference:** vLLM, Ollama, NVIDIA NIM, Hugging Face TGI.
 * **Upstream Providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral.
 
-Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic data masking, mapped to SOC 2 control evidence, before the payload ever reaches the orchestrator.
+Place **LLM-Shield-Proxy** in front of them to apply configured masking and produce evidence that can support SOC 2 control testing before the payload reaches the selected upstream.
 
 
 
@@ -217,7 +221,7 @@ Drop **LLM-Shield-Proxy** directly in front of them to guarantee deterministic d
 #### 📤 Outbound (Streaming Rehydration)
 1. **SSE Stream Intercept:** The LLM streams the sanitized response back via Server-Sent Events (SSE).
 2. **Prefix-Aware Buffer:** Because LLMs often fragment tokens across SSE chunks, our patent-pending sliding-window buffer retains trailing prefix overlap (e.g., `[PER`... `SON_1]`) ensuring split tokens never leak.
-3. **Real-Time Rehydration:** The instant a synthetic name or tag is fully assembled in the buffer, the proxy retrieves the original data (via Redis or AES decryption) and streams the un-redacted text back to the user with <5µs latency overhead.
+3. **Incremental Rehydration:** When a synthetic name or tag is fully assembled, the proxy retrieves the original data (via Redis or AES decryption) and resumes valid SSE delivery. Measure end-to-end overhead with the published protocol; component microbenchmarks are not total proxy latency.
 
 ---
 
@@ -227,17 +231,17 @@ LLM-Shield-Proxy delivers enterprise privacy and zero-trust security through hig
 
 > **[View the Complete Architecture Deep Dive 🏛️](ARCHITECTURE.md)**: For an exhaustive breakdown of the streaming lexer, memory mechanics, and service mesh integrations.
 
-### [1. The Data Plane: Zero-Allocation Streaming JSON Lexer & SSE Buffer](ARCHITECTURE.md#1-️-the-data-plane--streaming-engine)
-Rust-backed `orjson` engine parses fragmented Server-Sent Events with mathematical overlap bounding, enabling high-throughput without Python GIL saturation and capping memory at `<85 MB`.
+### [1. The Data Plane: Bounded Streaming JSON Lexer & SSE Buffer](ARCHITECTURE.md#1-️-the-data-plane--streaming-engine)
+`orjson` parses fragmented Server-Sent Events while the overlap buffer retains a bounded suffix. The conformance report measures retained-buffer bounds and process allocation separately; it does not assert a universal process-RSS ceiling.
 
 ### [2. O(N) DFA Pre-compiled Regex Engine (`google-re2`)](ARCHITECTURE.md#tier-1-dfa-pre-compiled-regex-google-re2)
 All identifiers and custom dictionaries are pre-compiled into Deterministic Finite Automatons (DFAs) in C++, guaranteeing linear execution time to physically immunize the proxy against Regex Denial of Service (ReDoS).
 
 ### [3. Dual-Mode Shannon Entropy Secret Scanner](ARCHITECTURE.md#tier-2-shannon-entropy--format-preserving-synthetic-masking)
-Vectorized O(N) math loop evaluating H(S) bit density to instantly intercept unstructured 64-char cryptographic keys in `<6 µs`.
+An O(N) Shannon-entropy operation identifies high-density secret candidates. Its current behavior should be measured with the published benchmark harness.
 
 ### [4. Stateless Syntheticgraphic Rehydration (JSON-RPC)](ARCHITECTURE.md#3--cryptographic-memory-vaults)
-Dynamically intercepts OpenAI/MCP tool schemas on the fly, injecting cryptographic hidden fields (like `_ctx_hash_prop`) into the JSON Schema `required` array. This mathematically forces the LLM to echo back the reversible cipher, enabling infinite horizontal scalability without any Redis dependency.
+Dynamically intercepts OpenAI/MCP tool schemas and injects cryptographic context fields into the JSON Schema `required` array. Provider echo behavior is not guaranteed by schema alone and must be tested with the selected model and parser.
 
 ---
 
@@ -250,14 +254,14 @@ Below is a high-level summary of our defense architecture. For the complete **22
 | Security Domain | Defense Mechanisms & Capabilities |
 | :--- | :--- |
 | **🛡️ Core Cryptographic Masking & Defenses** | 1. [Data Loss Prevention (DLP) for LLMs (Synthetic Masking & Entropy)](SECURITY.md#data-loss-prevention-dlp-for-llms-synthetic-masking--entropy)<br>2. [In-Band Stateless Syntheticgraphic Masking](SECURITY.md#in-band-stateless-cryptographic-masking)<br>3. [Stateless Redis TTL Vault & Deterministic HMAC Masking](SECURITY.md#stateless-redis-ttl-vault--deterministic-hmac-masking)<br>4. [Dynamic Canary Watermarking & Steganography (Leak Forensics)](SECURITY.md#dynamic-canary-watermarking--steganography-leak-forensics) |
-| **🛑 Threat Prevention & Isolation** | 1. [Autonomous Agent Security (Composite Agent Loop Circuit Breaker)](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)<br>2. [Granular Entity Policy Scopes & Zero Trust AI Defaults (O(1) mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)<br>3. [Zero-Allocation Streaming JSON Lexer](SECURITY.md#zero-allocation-streaming-json-lexer)<br>4. [Cryptographic Canary Prompt Tripwires](SECURITY.md#cryptographic-canary-prompt-tripwires)<br>5. [Entity-Weighted Blast Radius Limits](SECURITY.md#entity-weighted-blast-radius-limits) |
-| **📜 Audit, Forensics, and Compliance** | 1. [WORM-Compliant Audit Logging & SHA-256 Hash Chaining](SECURITY.md#worm-compliant-merkle-attestation--audit-logging)<br>2. [Cryptographic SHA-256 Hash Chaining](SECURITY.md#cryptographic-sha-256-hash-chaining)<br>3. [Cryptographic Proof of Non-Egress Cryptographic Attestation](SECURITY.md#cryptographic-proof-of-non-egress-merkle-attestation)<br>4. [FIPS 140-3 KAT & RFC 6902 Differential Audit Logging](SECURITY.md#fips-140-3-kat--rfc-6902-differential-audit-logging) |
+| **🛑 Threat Prevention & Isolation** | 1. [Autonomous Agent Security (Composite Agent Loop Circuit Breaker)](SECURITY.md#autonomous-agent-security-composite-agent-loop-circuit-breaker)<br>2. [Granular Entity Policy Scopes & Zero Trust AI Defaults (O(1) mapping)](SECURITY.md#granular-entity-policy-scopes--zero-trust-ai-defaults)<br>3. [Bounded Streaming JSON Lexer](SECURITY.md#zero-allocation-streaming-json-lexer)<br>4. [Cryptographic Canary Prompt Tripwires](SECURITY.md#cryptographic-canary-prompt-tripwires)<br>5. [Entity-Weighted Blast Radius Limits](SECURITY.md#entity-weighted-blast-radius-limits) |
+| **📜 Audit, Forensics, and Compliance** | 1. [Tamper-Evident Audit Logging & SHA-256 Hash Chaining](SECURITY.md#worm-compliant-merkle-attestation--audit-logging)<br>2. [Cryptographic SHA-256 Hash Chaining](SECURITY.md#cryptographic-sha-256-hash-chaining)<br>3. [Cryptographic Proof of Non-Egress Cryptographic Attestation](SECURITY.md#cryptographic-proof-of-non-egress-merkle-attestation)<br>4. [FIPS 140-3 KAT & RFC 6902 Differential Audit Logging](SECURITY.md#fips-140-3-kat--rfc-6902-differential-audit-logging) |
 | **🏗️ Secure Infrastructure & Service Mesh** | 1. [Centralized Enterprise Secrets & mTLS](SECURITY.md#centralized-enterprise-secrets--mtls)<br>2. [Service Mesh Native gRPC ext_proc Integration](SECURITY.md#service-mesh-native-grpc-ext_proc-integration)<br>3. [Zero-Dependency Kubernetes Mutating Webhook](SECURITY.md#zero-dependency-kubernetes-mutating-webhook)<br>4. [Traffic Engineering & Resiliency](SECURITY.md#traffic-engineering--resiliency)<br>5. [Provider Failover Routing & Exponential Retries](ARCHITECTURE.md#provider-failover-routing) |
 | **🔄 Multi-Provider Adapters** | 1. [Multi-Provider Translators & Anthropic Adapter](SECURITY.md#multi-provider-translators--anthropic-adapter) |
 
 ## 📜 Enterprise Compliance: Audit, Forensics & Legal
 
-LLM-Shield-Proxy is engineered specifically to help enterprises adopt Generative AI while supporting data privacy regulations like HIPAA and SOC 2 audit requirements. These are technical controls that map to specific framework requirements — deploying this proxy is one control among many a full compliance program requires, not a certification or a substitute for legal/compliance review.
+LLM-Shield-Proxy is engineered specifically to help enterprises adopt Generative AI while supporting data privacy regulations like HIPAA and SOC 2 audit requirements. These are technical controls that map to specific framework requirements - deploying this proxy is one control among many a full compliance program requires, not a certification or a substitute for legal/compliance review.
 
 Below is a summary of our compliance mappings. For the exhaustive deep-dive mapping, view our [Enterprise Compliance Documentation](COMPLIANCE.md).
 
@@ -267,7 +271,7 @@ If you are deploying LLM-Shield to satisfy a compliance audit, map the proxy's f
 | Compliance Domain | Supported Features & Capabilities |
 | :--- | :--- |
 | **🏥 HIPAA Transmission Security** | Local O(1) Redaction, Tier-2 Shannon Entropy + canonical locale synthetic substituting. No raw PHI traverses public internet to third-party APIs. |
-| **🛡️ SOC 2 Audit Controls** | WORM-Compliant Cryptographic SHA-256 Hash Chaining. Emits tamper-evident structured logs with strict RFC 6902 differential patching. |
+| **🛡️ SOC 2 Audit Evidence** | SHA-256 hash chaining and Ed25519 signatures emit tamper-evident structured records; durable and immutable retention remain deployment choices. |
 | **⚖️ Legal & Egress Provenance** | Cryptographic Proof of Non-Egress Cryptographic Attestation. Dynamic Canary Watermarking for insider leak forensics. |
 | **🔐 Data Integrity & Storage** | Zero long-term storage. In-Band Stateless AES-256-GCM masking or ephemeral Redis TTL Vault mapping with Deterministic HMAC masking. |
 ---
@@ -275,107 +279,75 @@ If you are deploying LLM-Shield to satisfy a compliance audit, map the proxy's f
 
 ---
 
-## 🏢 Enterprise Hardware Sizing Guide
+## 🏢 Enterprise Capacity Planning
 
-Based on extreme stress testing, the Proxy scales highly efficiently across multi-core architectures. The proxy engine is fully asynchronous and achieves its highest throughput on Linux environments utilizing `epoll`.
+Capacity is deployment-specific. Worker count, detector tier, payload distribution, SSE duration, TLS, audit durability, upstream behavior, and host kernel all affect the result. No universal concurrency or process-RSS limit is currently claimed.
 
-### Production Sizing (Enterprise Linux)
-*   **Rule of Thumb:** Provision 1 CPU core for every **1,800** expected peak concurrent users.
-*   **Mid-Tier (16 Cores)**: ~28,800 Concurrent Users. *(Recommended: AWS c6i.4xlarge, GCP c2-standard-16, or Azure Standard_F16s_v2)*
-*   **High-Tier (32 Cores)**: ~57,600 Concurrent Users. *(Recommended: AWS c6i.8xlarge, GCP c2-standard-32, or Azure Standard_F32s_v2)*
-*   **Memory (RAM) Footprint:** The proxy is strictly **CPU-bound**. With a lightweight Resident Set Size (RSS) of `<85 MB` per worker, memory-optimized instances are completely unnecessary. Standard compute-optimized instances provide vastly more RAM than the proxy will ever consume.
+### Production sizing protocol
 
-> [!NOTE]
-> **Windows Deployment Note (`SO_REUSEPORT`):** While the proxy runs efficiently on Windows, scaling to extreme high-concurrency with multiple workers is constrained by the Windows TCP stack. Windows does not natively support the `SO_REUSEPORT` socket option. Under massive load, this can result in less efficient connection routing across Uvicorn workers. For maximum enterprise production scale, Linux deployments are generally recommended. *In rigorous load tests, a single Python core on Windows tops out around ~800 to 900 concurrent streaming users before encountering `accept()` backlog saturation (`ConnectionRefusedError`).*
-
----
+1. Run the exact container, detector tier, audit mode, and upstream adapter planned for production.
+2. Sweep concurrency while recording completed streams, errors, event-loop lag, CPU, peak RSS, and p50/p95/p99 end-to-end overhead.
+3. Repeat at least five independent trials, publish raw results and environment metadata, and size from the lower confidence bound with operational headroom.
 
 ## ⚡ Performance & Latency Benchmarks
 
-LLM-Shield-Proxy is engineered for sub-millisecond overhead and ultra-lightweight resource usage. Numbers from the automated benchmark suite (`python benchmark.py`):
-
-```text
-=================================================================
-LLM-Shield-Proxy Enterprise Latency & Proof Benchmark
-=================================================================
-
-1. ISOLATED SHANNON ENTROPY SECRET SCANNER (<6 µs Proof):
------------------------------------------------------------------
-   • Mean Latency:   2.60 µs
-   • Median (p50):   2.60 µs
-   • 95th Percentile:2.70 µs
-   • 99th Percentile:3.30 µs
-   [VERIFIED] Shannon Entropy executes in <6 µs: True
-
-2. MASSIVE PAYLOAD REDACTION (10,000 Words / 50 Adversarial Secrets):
------------------------------------------------------------------
-   • Mean Latency:   25.96 ms
-   • Median (p50):   25.80 ms
-   • 95th Percentile:26.73 ms
-   • 99th Percentile:32.08 ms
-
-3. RESIDENT MEMORY BASELINE:
------------------------------------------------------------------
-   • Active RSS Footprint: 82.45 MB (<85 MB Target: True)
-
-=================================================================
-ALL AUDIT BENCHMARKS COMPLETED AND VERIFIED
-=================================================================
-```
-
-### Microsecond Streaming & Inference Overhead Table
-
-| Metric | Average Latency | Median Latency | Footprint / Notes |
-| :--- | :--- | :--- | :--- |
-| **Tier 1 Regex Overhead** | `0.0379 ms` | `0.0366 ms` (`36.60 µs`) | Microsecond pattern scan |
-| **Tier 2 (Shannon Entropy) Overhead** | `0.0026 ms` | `0.0026 ms` (`2.60 µs`) | Math-bound loop execution |
-| **Tier 3 (ONNX NER) Overhead** | `~12.50 ms` | `~11.80 ms` | Inference on 50-token chunk (Optional NLP Mode) |
-| **Total SSE Stream Overhead** | `0.0043 ms` | `0.0042 ms` (`4.23 µs`) | Added latency per SSE delta chunk |
-| **AES-256-GCM Encrypt + Decrypt** | `0.0017 ms` | `0.0017 ms` (`1.76 µs`) | Authenticated vault cipher cycle |
-| **Process RAM Footprint** | - | - | `<85 MB` Resident Set Size (82.45 MB verified) |
-
-### ⚡ Under the Hood: Architectural Speed Optimizations
-To achieve microsecond latencies, LLM-Shield-Proxy bypasses heavy legacy NLP frameworks in favor of aggressive low-level algorithmic optimizations:
-
-1. **O(N) Vectorized Shannon Entropy:** Tier 2 evaluates raw unformatted secrets (API keys, Hex) using a highly optimized frequency `Counter` and math-bound loop, avoiding heavy regex backtracking. It executes in `<6 µs`.
-2. **DFA Pre-compiled Regex Caching:** Tier 1 identifiers are compiled into deterministic finite automatons (DFA) at startup, ensuring constant-time structural matching.
-3. **Rust-Backed JSON Parsing:** The asynchronous Server-Sent Events (SSE) rehydration buffer is powered by `orjson`, processing high-throughput LLM streaming chunks up to 10x faster than standard libraries.
-4. **Lazy-Loaded ONNX Neural Pipeline:** The Tier 3 Named Entity Recognition (NER) pipeline is strictly lazy-loaded. If disabled, it gracefully bypasses neural inference with zero startup overhead or memory bloat.
-5. **Bounded Recursion (JSON Bomb Defense):** Traversal of nested payloads and `tool_calls` is hard-capped at `max_depth = 40`, preventing adversarial stack-overflow latency attacks in `<1ms`.
-6. **Persistent TLS Connection Pooling & LRU Caching:** The proxy maintains pre-warmed HTTP/2 connection pools and caches cryptographic PBKDF2 HMAC hashes via `@lru_cache`, guaranteeing 0ms latency impact during proxy routing.
-
-### 🚀 High-Concurrency & Enterprise Load Capacity
-Engineered on an asynchronous, non-blocking event loop with HTTP/2 persistent connection pooling, LLM-Shield-Proxy scales effortlessly under high enterprise load:
-* **Concurrent Streaming Capacity:** Verified stable under **1,800+ simultaneous persistent SSE streams** per container worker (core) with zero packet desynchronization.
-* **Leak-Free Memory Stability:** Resident Set Size (RSS) stays strictly capped (`<85 MB`) under sustained multi-hour stress testing without garbage collection bloat.
-
-To run the automated benchmark and stress test suites locally:
+The repository includes two complementary benchmark paths. Run the conformance harness for deterministic safety checks and local microbenchmark distributions:
 
 ```bash
-# Automated latency & unit benchmarks
-python benchmark.py
+llm-shield-proxy benchmark --iterations 2000 --json-out CONFORMANCE_LATEST.json
+```
+
+The current public artifact is a 10,000-iteration pre-release self-test on Windows 11, CPython 3.14.7, AMD64:
+
+| In-process operation | p50 | p95 | p99 |
+| :--- | ---: | ---: | ---: |
+| Empty-vault SSE buffer | `26.9 µs` | `53.1 µs` | `73.5 µs` |
+| Protected-token SSE buffer | `41.4 µs` | `74.0 µs` | `102.7 µs` |
+
+The report also verifies all seven conformance domains, a retained prefix of 5 characters against an 8-character bound, and a 4,656-byte peak for the declared Python-allocation scope. That allocation figure is not process RSS.
+
+These measurements exclude ASGI, HTTP/TLS, network, upstream-model, concurrency, and durable-audit costs. See the [result, environment, checksum, and limitations](website/docs/conformance/results.md).
+
+### ⚡ Under the Hood: Architectural Speed Optimizations
+The implementation uses component-level optimizations whose service-level effect must be measured:
+
+1. **O(N) Shannon Entropy:** Tier 2 evaluates raw unformatted secret candidates using a frequency `Counter`.
+2. **DFA Pre-compiled Regex Caching:** Tier 1 identifiers are compiled into deterministic finite automatons (DFA) at startup, ensuring constant-time structural matching.
+3. **Native JSON Parsing:** The asynchronous SSE rehydration buffer uses `orjson`; comparative speedups require a published baseline, payload corpus, and environment.
+4. **Lazy-Loaded ONNX Neural Pipeline:** The Tier 3 Named Entity Recognition (NER) pipeline is strictly lazy-loaded. If disabled, it gracefully bypasses neural inference with zero startup overhead or memory bloat.
+5. **Bounded Recursion (JSON Bomb Defense):** Traversal of nested payloads and `tool_calls` is hard-capped at `max_depth = 40` to bound adversarial nesting.
+6. **Connection Pooling & Caching:** The proxy reuses upstream connections and selected computations; neither mechanism implies zero routing overhead.
+
+### 🚀 High-Concurrency & Enterprise Load Capacity
+The proxy uses an asynchronous event loop and connection pooling. Publish service-level capacity only after running the controlled load protocol for the exact deployment.
+
+To run the conformance, component benchmark, and stress test suites locally:
+
+```bash
+# Streaming privacy conformance and in-process distributions
+llm-shield-proxy benchmark --iterations 2000 --json-out CONFORMANCE_LATEST.json
 
 # Locust concurrent stream stress suite
-locust -f load_test.py --headless -u 500 -r 50 --run-time 10m --host http://localhost:8000
+locust -f benchmarks/load_test.py --headless -u 500 -r 50 --run-time 10m --host http://localhost:8000
 ```
 
 ---
 
 ## ⚖️ Engineering Philosophy & Architecture Trade-offs
 
-Building a microsecond-latency reverse proxy requires low-level architectural optimizations:
+Building a low-overhead streaming proxy requires bounded algorithms and reproducible measurement:
 
-1. **Custom SSE Sliding-Window vs. Off-the-Shelf Parsers:** Standard HTTP/SSE libraries buffer data line-by-line, which fails when sensitive entities (such as SSNs) are fragmented across consecutive `data:` delta chunks. LLM-Shield-Proxy implements a custom async generator buffer retaining prefix overlap (`L = max_token_length - 1`), guaranteeing 100% interception of fragmented packets without stream stalling.
-2. **ONNX Runtime vs. PyTorch:** Heavy ML frameworks like PyTorch or spaCy consume 1GB+ of RAM and incur significant initialization latency. By quantizing the Tier 3 BERT-NER model and executing via C++ ONNX Runtime, the proxy maintains a `<85 MB` footprint and starts instantly.
-3. **Rust-Backed `orjson` vs. Standard `json`:** Standard `json` parsing introduces CPU overhead during high-concurrency streaming. `orjson` executes deserialization in native code without GIL contention, delivering up to 10x faster parsing on large payloads.
-4. **Information Theory (Shannon Entropy) vs. Brute-Force Regex:** Massive regex dictionaries degrade performance through backtracking and miss unstructured credentials. The proxy couples structural regex with an $O(N)$ Shannon Entropy scanner, isolating high-density cryptographic secrets in `<6 µs`.
+1. **Custom SSE Sliding-Window:** The async buffer retains prefix overlap (`L = max_token_length - 1`). The conformance suite exercises adversarial fragmentation, including UTF-8 code points split across transport chunks.
+2. **ONNX Runtime:** Optional quantized models avoid requiring a full training framework in the serving process. Actual accuracy, startup time, and RSS are model- and environment-specific.
+3. **`orjson`:** Native deserialization is used on the streaming path. Comparative claims require the same workload and baseline.
+4. **Information Theory:** Structural matching is complemented by an O(N) Shannon-entropy heuristic. It is not a complete secret detector and must be evaluated on positive and hard-negative corpora.
 
 ---
 
 ## 📝 Known Limitations
 
 Please be aware of the following current limitations:
-- **Text Only:** The proxy does not currently scan or redact text embedded inside base64 image payloads (e.g., OpenAI Vision models).
+- **Text-sized Base64 only:** The detector inspects encoded candidates up to 8,192 characters. For larger bodies it skips the encoded interior while retaining 256-character boundary guards for adjacent plaintext. It does not scan text embedded in images or arbitrary encoded attachments (for example, OpenAI Vision payloads).
 - **Supported Languages:** Multilingual support requires providing your own ONNX model via BYOM (`ONNX_MODEL_PATH`). By default, the proxy falls back to an English-optimized NLP model.
 - **Non-Standard Streaming:** Designed for standard Server-Sent Events (SSE). Custom or proprietary streaming protocols may bypass the sliding-window buffer.
 
@@ -419,7 +391,7 @@ curl -X OPTIONS http://localhost:8000/v1/chat/completions
 ```
 
 ### 2. ⚙️ 12-Factor Environment Configuration (`pydantic-settings`)
-100% compliant with 12-factor app standards. All upstream target routing, keys, thresholds, and pool sizes are managed via validated `pydantic-settings`:
+Configuration follows 12-factor environment-variable practices. Upstream routing, keys, thresholds, and pool sizes are managed via validated `pydantic-settings`:
 
 | Environment Variable | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -491,7 +463,7 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
   * [In-Band Stateless Syntheticgraphic Masking](ARCHITECTURE.md#in-band-stateless-cryptographic-masking)
   * [Multi-Provider Translators (e.g. Zero-SDK OpenAI-to-Anthropic request transformation and SSE stream normalization)](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
   * [Anthropic Adapter Implementation](ARCHITECTURE.md#multi-provider-translators--anthropic-adapter)
-  * [Zero-Allocation Streaming JSON Lexer](ARCHITECTURE.md#zero-allocation-streaming-json-lexer-orjson--rust)
+  * [Bounded Streaming JSON Lexer](ARCHITECTURE.md#zero-allocation-streaming-json-lexer-orjson--rust)
   * [Provider Failover Routing (Explicit header-driven rerouting to secondary mirrors without model downgrades)](ARCHITECTURE.md#provider-failover-routing)
   * [Antifragile Exponential Retries (Native asyncio jitter catching network timeouts and 429/50x errors)](ARCHITECTURE.md#antifragile-exponential-retries)
 * **[POLICIES.md](POLICIES.md) - Role-Based Policy-as-Code (RBAC)**
@@ -510,13 +482,13 @@ LLM-Shield-Proxy is actively gathering feedback from CISOs, DevOps engineers, an
   * [Cryptographic SHA-256 Hash Chaining](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [Dynamic Canary Watermarking & Steganography (Leak Forensics)](COMPLIANCE.md#dynamic-canary-watermarking--steganography)
   * [Cryptographic Proof of Non-Egress Cryptographic Attestation](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
-  * [WORM-Compliant Audit Logging & SHA-256 Hash Chaining](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
+  * [Tamper-Evident Audit Logging & SHA-256 Hash Chaining](COMPLIANCE.md#cryptographic-audit--tamper-evidence)
   * [FIPS 140-3 KAT, RFC 6902 Differential Audit Logging](COMPLIANCE.md#data-in-transit-encryption--fips-integrity)
   * [LLM FinOps Chargeback Meter (Asynchronous Prometheus metrics for multi-tenant chargebacks)](COMPLIANCE.md#llm-finops-chargeback-meter)
   * [Universal Decision Trace Exporter (NIST OSCAL artifacts and OpenTelemetry spans)](COMPLIANCE.md#universal-decision-trace-exporter)
 * **[DEPLOYMENT.md](DEPLOYMENT.md) - Infrastructure & Resiliency**
   * [Service Mesh Native Interface](DEPLOYMENT.md#1-service-mesh-native-interface)
-  * [Zero-Overhead OpenTelemetry Tracing (W3C traceparent propagation via background thread)](DEPLOYMENT.md#2-zero-overhead-opentelemetry-tracing)
+  * [Asynchronous OpenTelemetry Tracing (bounded background delivery)](DEPLOYMENT.md#2-zero-overhead-opentelemetry-tracing)
   * [Service Mesh Native gRPC ext_proc Integration (Zero HTTP network hops)](DEPLOYMENT.md#3-service-mesh-native-grpc-extproc-integration)
   * [Traffic Engineering & Resiliency (Redis evalsha Token-Bucket Rate Limiter, Kubernetes 25s SIGTERM draining)](DEPLOYMENT.md#4-traffic-engineering--resiliency)
   * [Zero-Dependency Kubernetes Mutating Webhook](DEPLOYMENT.md#5-zero-dependency-kubernetes-mutating-webhook)

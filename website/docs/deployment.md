@@ -10,7 +10,7 @@ For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Top
 * **Relevant Flags**: Not explicitly flagged (relies on standard `HOST`/`PORT` socket configuration).
 
 ## 2. Zero-Overhead OpenTelemetry Tracing
-* **Implementation Details**: Lightweight OpenTelemetry (OTel) Tracing handles W3C traceparent distributed tracing propagation via a dedicated asynchronous background thread. Provides full observability to Jaeger or Datadog with strictly zero latency overhead to the active HTTP streaming loop.
+* **Implementation Details**: OpenTelemetry tracing handles W3C `traceparent` propagation through a bounded asynchronous path. Measure its request-path and drop behavior in the selected exporter configuration; asynchronous does not mean zero overhead.
 * **Relevant Flags**:
   * [`TELEMETRY_ENABLED`](#advanced-feature-flags-compliance-security-and-engineering)
   * [`TELEMETRY_ENDPOINT_URL`](#advanced-feature-flags-compliance-security-and-engineering)
@@ -37,7 +37,7 @@ For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Top
 
 
 ## 7. ⚙️ Complete 12-Factor Environment Configuration (`pydantic-settings`)
-100% compliant with 12-factor app standards. All upstream target routing, keys, thresholds, and pool sizes are managed via validated `pydantic-settings`:
+Configuration follows 12-factor environment-variable practices. Upstream routing, keys, thresholds, and pool sizes are managed via validated `pydantic-settings`:
 
 ### Hierarchical Policy-as-Code (RBAC)
 DevOps teams can now mount a `policies.yaml` file to dynamically map `virtual_key_id` client identities to distinct security roles. The proxy features a zero-downtime hot-reloading mechanism that continuously polls the file (defaulting to every 5 seconds) and applies modifications immediately without dropping active Server-Sent Event (SSE) streams. Unknown identifiers strictly enforce a Zero-Trust `FAIL_CLOSED` default.
@@ -87,13 +87,19 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **In-Band Stateless Synthetic** | `SHIELD_DEFAULT_MASKING_MODE` | `SYNTHETIC` | Set to `STATELESS_CRYPTO` to enable AES-256-GCM masking. |
 | **In-Band Stateless Synthetic** | `SHIELD_ENCRYPTION_KEY` | `None` | 256-bit AES-GCM encryption key for stateless masking. |
 | **Audit, Forensics & Legal** | `AUDIT_LOG_FORMAT` | `STANDARD` | Set to `RFC6902_DIFF` for RFC 6902 Differential Audit Logging. |
+| **Audit durability** | `AUDIT_DURABILITY` | `best_effort` | `best_effort`, `durable`, or `required`. Durable modes wait for persistence acknowledgement. |
+| **Audit durability** | `AUDIT_DURABLE_PATH` | `None` | Required in durable modes. Append-only JSONL path; supports `{instance_id}` and `{pid}` tokens. |
+| **Audit durability** | `AUDIT_DURABLE_FSYNC` | `True` | Flush and request `fsync` before acknowledging each durable record. |
+| **Audit durability** | `AUDIT_ENQUEUE_TIMEOUT_SECONDS` | `5` | Maximum wait for durable queue and persistence acknowledgement. |
+| **Audit signing** | `AUDIT_SIGNING_PRIVATE_KEY` | `None` | Stable Ed25519 PEM/base64/hex private material. Unset keys are ephemeral and unsuitable for cross-restart verification. |
+| **Audit signing** | `AUDIT_SIGNING_KEY_FILE` | `None` | Preferred production option. Path to a secret-manager-mounted Ed25519 key; takes precedence and fails startup if unreadable or invalid. |
 | **Audit, Forensics & Legal** | `FIPS_STRICT_MODE` | `True` | Strict fail-closed validation for FIPS 140-3 KAT tests. |
 | **Agent Circuit Breaker** | `ENABLE_AGENT_BREAKER` | `True` | Enable Composite Agent Loop Circuit Breaker. |
 | **Agent Circuit Breaker** | `AGENT_BREAKER_THRESHOLD` | `3` | Consecutive duplicate turns before tripping the circuit breaker. |
 | **Agent Identity Enforcer** | `AGENT_IDENTITY_ENFORCER` | `"off"` | Agent Identity Enforcer mode (`"off"`, `"lenient"`, `"strict"`). |
 | **Leak Forensics** | `ENABLE_WATERMARKING` | `False` | Enable Dynamic Canary Watermarking & Steganography. |
 | **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Secret for HMAC-SHA256 watermarking. |
-| **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry & WORM-Compliant Merkle Logging. |
+| **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry export. |
 | **OTel & Tracing** | `TELEMETRY_ENDPOINT_URL` | `None` | Target webhook endpoint URL for audit telemetry. |
 | **OTel & Tracing** | `ANONYMOUS_USAGE_TRACKING` | `True` | Enable anonymous, opt-out volumetric telemetry. |
 | **Tripwire** | `ENABLE_CANARY_TRIPWIRE` | `False` | Enable deterministic prompt-extraction tripwire. |

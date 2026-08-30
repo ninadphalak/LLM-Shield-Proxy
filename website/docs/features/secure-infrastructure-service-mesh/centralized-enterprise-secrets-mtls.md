@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Vault lookups occur only on startup or during a TTL refresh, causing zero latency in the active HTTP request path.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Minimal. Vault tokens are cached using a non-blocking asynchronous TTL mechanism.
 
 ## Configuration Flags

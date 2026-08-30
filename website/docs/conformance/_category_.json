@@ -1,0 +1,8 @@
+{
+  "label": "Open Conformance Lab",
+  "position": 2,
+  "link": {
+    "type": "doc",
+    "id": "conformance/index"
+  }
+}

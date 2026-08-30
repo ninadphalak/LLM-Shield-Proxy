@@ -4,7 +4,7 @@ If you are building an enterprise chatbot using **Open-WebUI** or an agentic wor
 
 The biggest bottleneck is the UI. Chat interfaces rely on Server-Sent Events (SSE) to create that real-time "typewriter" effect. Because network protocols are oblivious to semantic boundaries, standard PII proxies routinely fracture redaction placeholders across multiple TCP packets (e.g., sending `[PER` in chunk 1, and `SON_1]` in chunk 2). When this happens, raw bracket tags leak onto the user's screen, ruining the application.
 
-**LLM-Shield-Proxy** solves this by using an asynchronous sliding-window lookahead buffer. It temporarily holds back unclosed structural brackets until the token resolves, re-hydrating the data with sub-millisecond added overhead—all within a &lt;60MB local footprint.
+**LLM-Shield-Proxy** uses an asynchronous sliding-window lookahead buffer. It retains unresolved placeholder prefixes until they can be classified and rehydrates incremental output. Latency and RSS depend on the installation mode and workload and must be measured.
 
 Here is how to integrate it into Open-WebUI and LangChain in seconds.
 
@@ -44,7 +44,7 @@ chat = ChatOpenAI(
 # Send a prompt containing PII
 messages = [HumanMessage(content="Schedule a meeting for Sarah Connor at sarah.c@sky.net")]
 
-# The proxy streams the response back with zero latency penalties
+# The proxy preserves incremental streaming; measure its added latency locally
 for chunk in chat.stream(messages):
     print(chunk.content, end="", flush=True)
 ```

@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** `aiofiles` disk writes execute in `&lt;1ms`. Async webhooks utilize non-blocking `httpx`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely low. Designed to prevent slow GRC APIs from impacting the LLM data plane.
 
 ## Configuration Flags

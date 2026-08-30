@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Security Response Headers** feature ensures that every single HTTP response emitted by the proxy—whether it is a successful LLM stream, a 400 error, or a 503 load-shedding rejection—is automatically armored with industry-standard HTTP security headers. This protects client applications and browsers interacting with the proxy from common web vulnerabilities.
+The **Security Response Headers** feature ensures that every single HTTP response emitted by the proxy-whether it is a successful LLM stream, a 400 error, or a 503 load-shedding rejection-is automatically armored with industry-standard HTTP security headers. This protects client applications and browsers interacting with the proxy from common web vulnerabilities.
 
 ## How It Works
 Modern web security requires strict directives to prevent browsers from executing malicious behaviors (like MIME-sniffing or clickjacking).
@@ -29,7 +29,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Dictionary insertion executes in `&lt;0.1µs`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Zero measurable overhead.
 
 ## Configuration Flags

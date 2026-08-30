@@ -2,9 +2,9 @@
 
 If you are running **LiteLLM** for enterprise routing or **Ollama** for local inference, you already have the infrastructure to serve models. But if your team is processing sensitive customer data, medical records, or developer secrets, you need a way to sanitize those prompts before they hit your logs or upstream cloud models.
 
-The problem? Most compliance proxies destroy streaming Server-Sent Events (SSE) by buffering the entire chunk, or they demand heavy NLP frameworks that consume 1GB+ of RAM.
+The integration problem is preserving incremental Server-Sent Events (SSE) while applying local privacy transformations and optional detector models.
 
-Here is how to drop **LLM-Shield-Proxy**—a &lt;60MB zero-egress FastAPI sidecar with a sub-millisecond SSE sliding-window buffer—in front of your existing LiteLLM or Ollama setup using just a few lines of Docker Compose.
+Here is how to place **LLM-Shield-Proxy**-a self-hosted FastAPI sidecar with a bounded SSE sliding-window buffer-in front of LiteLLM or Ollama using Docker Compose. Measure RSS and latency for the selected detector tier and workload.
 
 ## The Architecture (Zero-Egress Sandwich)
 Instead of your application talking directly to LiteLLM/Ollama, you route traffic through LLM-Shield-Proxy. The proxy intercepts the payload, redacts PII using local Regex and ONNX NER, and forwards the clean traffic upstream.

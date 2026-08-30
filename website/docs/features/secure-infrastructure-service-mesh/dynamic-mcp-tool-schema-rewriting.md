@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Schema AST mutation executes in `&lt;1ms`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely lightweight, parsing the schema once during the outbound request phase.
 
 ## Configuration Flags

@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Processes massive 10,000-word payloads in `&lt;0.03ms` (`37µs` average).
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Adds virtually zero latency to the streaming data plane.
 
 ## Configuration Flags

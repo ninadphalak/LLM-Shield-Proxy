@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Span creation and queuing takes `&lt;1µs`. Network export happens out-of-band.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Background thread execution completely shields the Python GIL (Global Interpreter Lock) from network I/O latency.
 
 ## Configuration Flags

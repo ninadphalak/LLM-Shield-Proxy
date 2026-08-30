@@ -15,6 +15,8 @@ import MCPGovernance from '@site/src/components/Homepage/MCPGovernance';
 import ComparisonTable from '@site/src/components/Homepage/ComparisonTable';
 import IntegrationStrip from '@site/src/components/Homepage/IntegrationStrip';
 import FinalCTA from '@site/src/components/Homepage/FinalCTA';
+import EvidenceShowcase from '@site/src/components/Homepage/EvidenceShowcase';
+import GlossaryTerm from '@site/src/components/GlossaryTerm';
 
 import styles from './index.module.css';
 
@@ -23,18 +25,24 @@ function HomepageHeader() {
   return (
     <header className={clsx('hero', styles.heroBanner)}>
       <div className="container">
-        <span className={styles.heroEyebrow}>Open-source · Self-hosted · Zero-egress</span>
+        <span className={styles.heroEyebrow}>Apache-2.0 · Self-hosted · Independently verifiable</span>
         <Heading as="h1" className="hero__title">
-          Stop PII from ever leaving your VPC — even mid-stream
+          Verifiable streaming privacy at the LLM boundary
         </Heading>
         <p className="hero__subtitle">
-          Intercepts requests to any LLM, redacts PII before it ever leaves your network, and
-          instantly restores it on the way back — without breaking real-time chat or streaming.
+          Inspect and transform protected data inside your VPC, verify the exact{' '}
+          <GlossaryTerm definition="The serialized request handed to the configured upstream client after transformations.">
+            upstream boundary
+          </GlossaryTerm>, preserve incremental{' '}
+          <GlossaryTerm definition="Server-Sent Events: an HTTP format for delivering model output as a sequence of data events.">
+            SSE
+          </GlossaryTerm>{' '}
+          delivery, and export audit evidence you can check offline.
         </p>
         <p className={styles.heroSubMeta}>{siteConfig.tagline}</p>
         <div className={styles.buttons}>
           <Link className="button button--secondary button--lg" to="/docs/deployment">
-            60-Second Quickstart
+            Install and run locally
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
@@ -42,7 +50,7 @@ function HomepageHeader() {
             ⭐ GitHub Repository
           </Link>
         </div>
-        <p className={styles.heroMeta}>Apache 2.0 · U.S. Patent Pending · No code rewrites — change one base_url</p>
+        <p className={styles.heroMeta}>Every line is inspectable. The proxy is completely free.</p>
       </div>
     </header>
   );
@@ -52,12 +60,13 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title="Self-Hosted PII Redaction for LLMs"
-      description="LLM-Shield-Proxy is an open-source, zero-egress reverse proxy that redacts PII, PHI, and secrets from LLM traffic in real time — streaming SSE and machine-to-machine JSON-RPC/MCP tool calls included. <85 MB RAM, microsecond overhead, Apache 2.0.">
+      description="Apache-2.0 streaming privacy gateway with an open conformance specification, a testable pre-upstream privacy boundary, and signed audit evidence for LLM and MCP traffic.">
       <HomepageHeader />
       <TrustBar />
       <StatsBar />
       <main>
         <InteractiveShieldDemo />
+        <EvidenceShowcase />
         <DualPipeline />
         <HowItWorks />
         <MCPGovernance />

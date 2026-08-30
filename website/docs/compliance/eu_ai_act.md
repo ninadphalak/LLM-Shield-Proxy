@@ -10,10 +10,9 @@ The LLM-Shield-Proxy systematically addresses Articles 12 (Record-keeping) and 1
 
 Article 12 mandates that high-risk AI systems automatically record events ('logs') over their lifetime to ensure traceability of the system's functioning.
 
-### WORM Audit Logging & Merkle Chaining
-To provide absolute traceability without persisting raw user prompts to disk, the proxy implements **WORM (Write Once, Read Many) Audit Logging**.
-- **SHA-256 Sequential Merkle Hash Chaining:** Every redaction, tool-call interception, and configuration change generates a cryptographic event. These events are linked using sequential SHA-256 hashes, creating a Merkle chain. Any retroactive tampering with the logs will immediately invalidate the chain.
-- **Proof of Non-Egress Receipt:** The proxy computes a rolling SHA-256 digest over the entire SSE stream. It emits an HMAC-signed attestation proof guaranteeing exactly what data was (and wasn't) sent to the external LLM provider, providing mathematical proof to EU auditors.
+### Tamper-Evident Audit Chaining
+The proxy can generate privacy-safe audit metadata linked with sequential SHA-256 hashes and signed with Ed25519. Verification detects modification or sequence gaps in the records received. Durable local delivery is opt-in; WORM retention requires a separately configured immutable store and operating controls.
+- **Stream attestation receipt:** The proxy can compute a rolling SHA-256 digest over an SSE stream and emit an HMAC-signed receipt. It establishes integrity for the observed stream under the configured key; it is not independent proof of every upstream system's behavior.
 
 ### NIST OSCAL Decision Traces
 The **Universal Decision Trace Exporter** formats these cryptographic events into automated NIST OSCAL (SP 800-53 Rev. 5) assessment results and OpenTelemetry `gen_ai.*` spans. This allows seamless ingestion into GRC systems (Vanta, Drata) for continuous, provable record-keeping.
@@ -28,6 +27,6 @@ As AI agents become autonomous, the risk of unauthorized lateral movement (e.g.,
 - **Policy Evaluation:** Tool calls (like `exec_sql`) are synchronously evaluated against OPA (Open Policy Agent) and HashiCorp Vault resolvers utilizing atomic dictionaries and thundering-herd locks.
 
 ### Composite Agent Loop Circuit Breakers
-To prevent runaway autonomous loops—a critical risk in agentic architectures—the proxy implements **Composite Agent Loop Circuit Breakers**. If an agent begins rapidly iterating or executing repetitive, unverified tool calls without human-in-the-loop validation, the circuit breaker halts the execution.
+To prevent runaway autonomous loops-a critical risk in agentic architectures-the proxy implements **Composite Agent Loop Circuit Breakers**. If an agent begins rapidly iterating or executing repetitive, unverified tool calls without human-in-the-loop validation, the circuit breaker halts the execution.
 
 *(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details on the proxy's streaming capabilities).*

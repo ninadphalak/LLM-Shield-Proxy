@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Dictionary mutation executes in O(1) time.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Virtually none. The usage data is routed to a bounded background queue for asynchronous metric publication.
 
 ## Configuration Flags

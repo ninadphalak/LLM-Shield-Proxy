@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Health probes execute in `&lt;5ms` by utilizing persistent connection pools.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely low. Probes are cached for 2-3 seconds to prevent Kubernetes from accidentally initiating a Denial of Service attack against Redis by probing too aggressively.
 
 ## Configuration Flags

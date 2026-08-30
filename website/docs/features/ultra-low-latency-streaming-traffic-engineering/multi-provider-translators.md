@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Translation operations happen entirely in-memory and execute in under `~1ms`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Highly optimized `orjson` serialization ensures payload restructuring doesn't block the asyncio event loop.
 
 ## Configuration Flags

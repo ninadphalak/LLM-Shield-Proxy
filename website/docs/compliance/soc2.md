@@ -18,13 +18,12 @@ As LLM agents utilize protocols like MCP (Model Context Protocol) to execute dow
 
 ## Boundary Protection & System Operations (CC6.6 & CC7.2)
 
-### Tamper-Evident SHA-256 Hash Chains (Non-Repudiation)
-SOC 2 requires provable logs that demonstrate system integrity.
-- **WORM Audit Logging:** Every redaction or access interception is logged via **SHA-256 sequential Merkle hash chaining**. This cryptographic linking provides absolute non-repudiation and tamper-evident auditing. If an internal actor attempts to alter the logs to hide a breach, the Merkle chain is immediately invalidated.
+### Tamper-Evident SHA-256 Hash Chains
+Audit records can be linked with SHA-256 and signed with Ed25519 so offline verification detects changes, gaps, and signing-key mismatch in the evidence received. This supports control testing; it does not establish SOC 2 compliance by itself. Configure durable delivery for completeness and an independent immutable store when WORM retention is required.
 
 ### RFC 6902 Differential Logs
 To maintain confidentiality while logging:
-- The proxy utilizes **RFC 6902 JSON patch differential audit logging**. Instead of logging the raw request (which could contain sensitive enterprise IP), the system logs the structural *delta*—recording exactly what rules were triggered and what entity categories were redacted.
+- The proxy utilizes **RFC 6902 JSON patch differential audit logging**. Instead of logging the raw request (which could contain sensitive enterprise IP), the system logs the structural *delta*-recording exactly what rules were triggered and what entity categories were redacted.
 
 ### Insider Leak Forensics & Anomaly Detection
 To satisfy anomaly detection and prevent data exfiltration (CC7.2):

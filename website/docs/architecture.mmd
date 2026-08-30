@@ -13,7 +13,7 @@ flowchart TD
         InboundAuth["🔑 Inbound Auth & Virtual Key Swapping\n(Constant-Time Verification)"]:::proxyEngine
 
         subgraph CascadeEngine ["🔒 3-Tier Multi-Modal & CJK Redaction Engine"]
-            Tier1["Tier 1: Pre-compiled DFA Regex\n(<0.03ms Pattern Matching)"]:::piiSecurity
+            Tier1["Tier 1: Pre-compiled DFA Regex\n(workload-scoped measurement)"]:::piiSecurity
             Tier2["Tier 2: Shannon Entropy Secret Filter\n(Base64 >= 4.5, Hex >= 3.4 bits/char)"]:::piiSecurity
             Tier3["Tier 3: Contextual ONNX NER Pipeline\n(Script-Aware CJK & Multi-Modal Unwrapping)"]:::piiSecurity
             Tier1 --> Tier2 --> Tier3
