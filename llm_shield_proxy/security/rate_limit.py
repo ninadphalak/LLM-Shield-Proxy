@@ -94,12 +94,26 @@ class DistributedRateLimiter:
                         if not self._lua_sha:
                             self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
 
-                result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
+                try:
+                    result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
+                except Exception as e:
+                    if "NOSCRIPT" in str(e):
+                        # Script was flushed (Redis restart/failover/SCRIPT FLUSH -- routine ops
+                        # events). Reload once and retry before giving up on this call.
+                        async with self._lock:
+                            self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
+                        result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
+                    else:
+                        raise
                 return bool(result)
-            except Exception:  # nosec B110 noqa: S110
-                # Security Note: Fallback to in-memory on Redis failure to ensure fail-open
-                # Fallback to in-memory on Redis failure
-                pass
+            except Exception as e:
+                # Security Note: invalidate the cached SHA so a future call re-attempts
+                # distributed limiting once Redis recovers, instead of permanently
+                # degrading to per-process limiting for the rest of the process lifetime.
+                self._lua_sha = None
+                logging.getLogger(__name__).warning(
+                    "Redis error during rate limit evaluation; degrading to in-memory bucket for this call: %s", e
+                )
 
         # Fallback to in-memory bucket
         if virtual_key_id not in self._in_memory_buckets:
@@ -147,12 +161,27 @@ class DistributedBlastRadiusLimiter:
                         if not self._lua_sha:
                             self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
 
-                result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, requested)  # type: ignore
+                try:
+                    result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, requested)  # type: ignore
+                except Exception as e:
+                    if "NOSCRIPT" in str(e):
+                        # Script was flushed (Redis restart/failover/SCRIPT FLUSH -- routine ops
+                        # events). Reload once and retry before falling back.
+                        async with self._lock:
+                            self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
+                        result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, requested)  # type: ignore
+                    else:
+                        raise
                 return bool(result)
             except Exception as e:
-                # Catch redis.exceptions.RedisError and any other connection errors
-                logging.getLogger(__name__).warning("Redis error during blast radius evaluation, failing open: %s", e)
-                return True
+                # Security Note: this limiter guards against bulk PII exfiltration, so it must
+                # never fail OPEN on a Redis error. Invalidate the cached SHA so a future call
+                # re-attempts distributed enforcement once Redis recovers, then fall through to
+                # the in-memory bucket below for a strict, fail-closed per-process limit.
+                self._lua_sha = None
+                logging.getLogger(__name__).warning(
+                    "Redis error during blast radius evaluation; degrading to in-memory limiter (fail-closed): %s", e
+                )
 
         # Fallback to in-memory bucket if no Redis (but we still want to limit)
         if virtual_key_id not in self._in_memory_buckets:

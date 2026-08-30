@@ -245,7 +245,7 @@ Dynamically intercepts OpenAI/MCP tool schemas on the fly, injecting cryptograph
 
 LLM-Shield-Proxy is validated against an exhaustive, continuously growing suite of **170+ automated unit, integration, and adversarial fuzzing tests**.
 
-Below is a high-level summary of our defense architecture. For the complete **18-vector Threat Matrix**, detailed implementation specifications, and vulnerability coverage, view our [Deep Dive Security & Threat Model Documentation](SECURITY.md).
+Below is a high-level summary of our defense architecture. For the complete **22-vector Threat Matrix**, detailed implementation specifications, and vulnerability coverage, view our [Deep Dive Security & Threat Model Documentation](SECURITY.md).
 
 | Security Domain | Defense Mechanisms & Capabilities |
 | :--- | :--- |

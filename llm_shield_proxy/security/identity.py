@@ -16,6 +16,7 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 import jwt
+from cachetools import TTLCache
 from fastapi import HTTPException, Request
 from jwt.utils import base64url_encode
 
@@ -26,6 +27,17 @@ logger = logging.getLogger(__name__)
 # Global state for coalescing fetches
 _jwks_clients: Dict[str, jwt.PyJWKClient] = {}
 _jwks_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+
+# RFC 9449 SS11.1 replay cache: each (jkt, jti) pair may be consumed exactly once
+# within a DPoP proof's freshness window. TTL matches the 300s (5 minute) freshness
+# ceiling enforced below, so an entry never needs to outlive the proof it guards.
+_DPOP_REPLAY_CACHE_TTL_SECONDS = 300
+_dpop_replay_cache: TTLCache = TTLCache(maxsize=100_000, ttl=_DPOP_REPLAY_CACHE_TTL_SECONDS)
+_dpop_replay_lock = asyncio.Lock()
+
+
+class DPoPReplayError(Exception):
+    """Raised when a DPoP proof's (jkt, jti) pair has already been consumed."""
 
 
 
@@ -141,6 +153,7 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             raise jwt.InvalidTokenError("Missing jwk in DPoP header")
 
         dpop_jwk = jwt.PyJWK(jwk_dict)
+        actual_jkt = _get_jwk_thumbprint(jwk_dict)
 
         # Offload DPoP signature verification as well
         dpop_claims = await asyncio.to_thread(
@@ -161,6 +174,20 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             raise jwt.InvalidTokenError("DPoP proof iat is in the future")
         if now - iat > 360:
             raise jwt.InvalidTokenError("DPoP proof expired (older than 5 minutes)")
+
+        # RFC 9449 SS11.1: reject replayed proofs. A cryptographically valid, fresh
+        # DPoP proof is still rejected if this exact (jkt, jti) pair was already
+        # consumed -- this is what actually stops a captured proof from being reused
+        # by an eavesdropper for the rest of its freshness window.
+        jti = dpop_claims.get("jti")
+        if not jti:
+            raise jwt.InvalidTokenError("DPoP proof missing jti")
+
+        replay_key = f"{actual_jkt}:{jti}"
+        async with _dpop_replay_lock:
+            if replay_key in _dpop_replay_cache:
+                raise DPoPReplayError(replay_key)
+            _dpop_replay_cache[replay_key] = True
 
         # Finding 3: 3-Tier Replay validation (Strict vs Lenient vs None)
         expected_htu = str(request.url.replace(query=""))
@@ -188,7 +215,6 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         if not expected_jkt:
             raise jwt.InvalidTokenError("Missing cnf.jkt in access token")
 
-        actual_jkt = _get_jwk_thumbprint(jwk_dict)
         if actual_jkt != expected_jkt:
             raise jwt.InvalidTokenError("DPoP jkt thumbprint mismatch")
 
@@ -197,6 +223,9 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         request.state.agent_identity_claim = identity_claim
         agent_identity_ctx.set(identity_claim)
 
+    except DPoPReplayError:
+        logger.warning("Agent Identity Enforcer blocked request: DPoP proof replayed")
+        raise HTTPException(status_code=401, detail="DPoP proof replayed")
     except Exception as e:
         logger.warning(f"Agent Identity Enforcer blocked request: {str(e)}")
         raise HTTPException(

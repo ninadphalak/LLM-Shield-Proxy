@@ -290,10 +290,12 @@ async def test_dpop_enforcement_tiers():
         await verify_agent_identity(request, tenant_policy=tenant_policy_lenient)
         assert request.state.dpop_warning == "DPoP htm mismatch"
 
-        # Test Strict Mode (should fail with 401)
+        # Test Strict Mode (should fail with 401 on htm mismatch, not on jti replay --
+        # uses a distinct jti from the lenient-mode call above since the replay cache
+        # would otherwise reject this call for the wrong reason)
         mock_to_thread.side_effect = [
             {"cnf": {"jkt": "thumbprint"}, "sub": "agent1"},
-            {"htm": "GET", "htu": "https://example.com/api", "iat": time.time(), "jti": "123"}
+            {"htm": "GET", "htu": "https://example.com/api", "iat": time.time(), "jti": "456"}
         ]
         tenant_policy_strict = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"]}
         with pytest.raises(HTTPException) as exc:

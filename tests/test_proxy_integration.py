@@ -91,9 +91,12 @@ def test_health_and_livez_check_endpoints():
 
 
 def test_cors_preflight_options():
+    # CORS_ALLOWED_ORIGINS is unset by default: preflight now denies cross-origin
+    # access ("null") rather than reflecting "*" -- see test_hardening_remediation.py
+    # for the explicit strict-default/allowlist/wildcard-opt-in coverage.
     res = client.options("/v1/chat/completions")
     assert res.status_code == 204
-    assert res.headers["access-control-allow-origin"] == "*"
+    assert res.headers["access-control-allow-origin"] == "null"
     assert "OPTIONS" in res.headers["access-control-allow-methods"]
     assert "Authorization" in res.headers["access-control-allow-headers"]
 

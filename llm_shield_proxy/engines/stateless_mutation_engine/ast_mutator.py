@@ -1,4 +1,6 @@
 
+import asyncio
+
 import orjson
 
 from llm_shield_proxy.core.config import settings
@@ -17,12 +19,22 @@ class StatelessASTVisitor:
         self.max_depth = settings.AST_MAX_DEPTH
         self.bracket_multiplier = settings.AST_BRACKET_MULTIPLIER
 
-    async def _detect_pii(self, value: str) -> bool:
+    def _detect_pii(self, value: str) -> bool:
         # Unified 3-Tier detection cascade (Regex + Shannon Entropy + NER / ONNX)
         spans = pii_engine.detect_spans(value)
         return len(spans) > 0
 
     async def mutate(self, payload: bytes) -> bytes:
+        """Sanitizes a JSON-RPC/MCP payload off the event loop.
+
+        The traversal below is 100% synchronous CPU work (JSON parse, stack-based
+        walk, per-string PII detection). Running it directly on the event loop
+        would stall every other concurrent request for the duration of a single
+        large tool-call payload, so it's offloaded to a worker thread.
+        """
+        return await asyncio.to_thread(self._mutate_sync, payload)
+
+    def _mutate_sync(self, payload: bytes) -> bytes:
         # 1. Pre-FFI JSON Bomb Defense: Fast heuristic checking structural depth
         # If there are more total brackets than our absolute limit allows, reject early.
         if payload.count(b"{") + payload.count(b"[") > (self.max_depth * self.bracket_multiplier):
@@ -50,7 +62,7 @@ class StatelessASTVisitor:
                             raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}.{k}")
                         stack.append((v, f"{path}.{k}", depth + 1))
                     elif isinstance(v, str):
-                        if await self._detect_pii(v):
+                        if self._detect_pii(v):
                             aad = f"{path}.{k}"
                             cipher_text = self.cipher.encrypt(v, aad)
 
@@ -70,7 +82,7 @@ class StatelessASTVisitor:
                             raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}[{i}]")
                         stack.append((v, f"{path}[{i}]", depth + 1))
                     elif isinstance(v, str):
-                        if await self._detect_pii(v):
+                        if self._detect_pii(v):
                             aad = f"{path}[{i}]"
                             cipher_text = self.cipher.encrypt(v, aad)
 

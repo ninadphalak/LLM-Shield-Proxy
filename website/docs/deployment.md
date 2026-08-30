@@ -61,7 +61,9 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **`ANTHROPIC_API_KEY`** | `str` | `None` | Centralized Anthropic API key |
 | **`DEEPSEEK_API_KEY`** | `str` | `None` | Centralized DeepSeek API key |
 | **`VALID_VIRTUAL_KEYS`** | `str` | `""` | Comma-separated list of authorized client virtual keys |
-| **`ALLOW_CLIENT_UPSTREAM_OVERRIDE`** | `bool` | `False` | Allow clients to override upstream URL via header |
+| **`ENABLE_OPEN_BYOK_PASSTHROUGH`** | `bool` | `False` | Allow a caller presenting an unrecognized but provider-shaped key (`sk-proj-`/`sk-ant-`/`AIza` prefix) to pass through as BYOK without matching `VALID_VIRTUAL_KEYS`. A prefix match alone doesn't authenticate the caller as an entitled proxy user -- with this left at its default, an unrecognized key is rejected `401` instead of being routed through the DLP pipeline and forwarded upstream. |
+| **`ALLOW_CLIENT_UPSTREAM_OVERRIDE`** | `bool` | `False` | Allow clients to override upstream URL via header. The SSRF-validated IP is pinned for the socket connection, but TLS SNI/certificate verification still targets the real hostname -- see "TLS SNI Pinning on Dynamic Upstream Override" below. |
+| **`CORS_ALLOWED_ORIGINS`** | `str` | `""` | Comma-separated allowed browser origins for preflight requests. Unset/empty is **strict-by-default**: `Access-Control-Allow-Origin: null` (cross-origin access denied) rather than reflecting the caller's `Origin` or falling back to `*`. Set to `*` to explicitly opt into reflecting any origin, or list specific origins to allowlist them. |
 | **`REDIS_URL`** | `str` | `None` | Redis connection URL for distributed vault state |
 | **`SESSION_TTL_SECONDS`** | `int` | `3600` | Rolling TTL in seconds for session vault states |
 | **`MAX_SESSION_VAULTS`** | `int` | `10000` | Maximum in-memory LRU session vault capacity |
@@ -156,3 +158,12 @@ services:
       - OUTBOUND_CLIENT_KEY=/etc/ssl/llm-shield/proxy-client.key
 ```
 This configuration secures the listener with HTTPS, mandates inbound mTLS (`CLIENT_CA_FILE`), and enables outbound mTLS towards the upstream provider.
+
+### TLS SNI Pinning on Dynamic Upstream Override
+
+When `ALLOW_CLIENT_UPSTREAM_OVERRIDE=True` (via `X-Upstream-Base-Url`) or `AIR_GAPPED_MODE` is active, the proxy resolves the target hostname, validates the IP against the SSRF denylist, and pins the outbound connection to that specific IP -- closing the DNS-rebinding window between the check and the actual connection. Pinning a socket to a bare IP would normally break TLS, since certificate hostname verification is checked against whatever host is in the connection URL, and real certificates don't carry IP SANs. To avoid that, the proxy separately passes the original FQDN through as `extensions={"sni_hostname": ...}` on the outbound `httpx` request, so:
+
+- The socket connects to the pinned, SSRF-validated IP.
+- TLS SNI negotiation and certificate hostname verification happen against the real domain.
+
+No configuration is required for this -- it's automatic whenever the proxy pins a connection to a resolved IP. It does **not** apply to `FALLBACK_BASE_URL`/`X-Shield-Fallback-URL` failover targets, which are plain configured FQDNs and use ordinary hostname-based TLS.

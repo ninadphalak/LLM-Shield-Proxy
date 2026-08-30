@@ -42,6 +42,12 @@ llm_shield_vault_refresh_errors_total = Counter(
     "Total number of background Vault secret refresh errors",
 )
 
+audit_events_dropped_total = Counter(
+    "audit_events_dropped_total",
+    "Total number of audit/WORM log records dropped because a sink queue was full (compliance-relevant: alert on nonzero)",
+    ["sink"],
+)
+
 shield_proxy_tokens_saved_total = Counter(
     "shield_proxy_tokens_saved_total",
     "Total prompt and completion tokens saved via local masking/caching",

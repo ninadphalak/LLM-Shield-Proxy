@@ -278,7 +278,11 @@ async def rehydrate_sse_stream(
                                             AuditLogger.log_finops_metered(sess_id, vk_id, mdl, p_tok, c_tok, t_tok)
 
                                         if total_tokens > 0:
-                                            asyncio.create_task(asyncio.to_thread(_record_sse_metrics, v_id, model, prompt_tokens, completion_tokens, total_tokens, s_id))
+                                            # Reference retained via app_state.background_tasks so
+                                            # this can't be garbage-collected mid-flight.
+                                            app_state.spawn_background_task(
+                                                asyncio.to_thread(_record_sse_metrics, v_id, model, prompt_tokens, completion_tokens, total_tokens, s_id)
+                                            )
 
                                 # 1. OpenAI Chat Completion Delta
                                 choices = data_obj.get("choices", [])

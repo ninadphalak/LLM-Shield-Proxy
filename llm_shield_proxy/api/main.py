@@ -27,7 +27,7 @@ from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any, Coroutine, Dict, Optional, Set
 from urllib.parse import urlparse
 
 import httpx
@@ -51,7 +51,7 @@ from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
 )
 from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
 from llm_shield_proxy.engines.stateless_mutation_engine.schema_rewriter import DynamicSchemaRewriter
-from llm_shield_proxy.engines.vault import vault_store
+from llm_shield_proxy.engines.vault import VaultStore, vault_store
 from llm_shield_proxy.observability.audit import AuditLogger, audit_router
 from llm_shield_proxy.observability.metrics import (
     llm_shield_latency_seconds_bucket,
@@ -82,6 +82,19 @@ class AppState:
     active_requests: int = 0
     active_requests_lock: threading.Lock = threading.Lock()
     shutdown_event: Optional[asyncio.Event] = None
+    background_tasks: Set[asyncio.Task] = set()
+
+    def spawn_background_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        """Schedules a fire-and-forget task while retaining a strong reference.
+
+        Per asyncio's own docs, a task with no retained reference can be garbage
+        collected mid-execution; this keeps it alive in `background_tasks` until
+        it completes, then lets the done-callback drop the reference.
+        """
+        task = asyncio.create_task(coro)
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task
 
 
 app_state = AppState()
@@ -296,6 +309,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     policy_watch_task = asyncio.create_task(_watch_policies())
 
+    # Moves the vault store's TTL sweep off the per-request hot path (see
+    # VaultStore.get_vault / run_eviction_loop docstrings). Only meaningful for
+    # the in-memory VaultStore -- RedisVaultStore relies on native key TTLs.
+    vault_eviction_task = None
+    if isinstance(vault_store, VaultStore) and shutdown_ev is not None:
+        vault_eviction_task = asyncio.create_task(
+            vault_store.run_eviction_loop(settings.POLICIES_RELOAD_INTERVAL_SECONDS, shutdown_ev)
+        )
+
     # Start gRPC ext_proc server in background
     grpc_server = None
     sock_path = settings.EXT_PROC_SOCK_PATH
@@ -336,6 +358,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await policy_watch_task
     except asyncio.CancelledError:
         pass
+
+    if vault_eviction_task is not None:
+        vault_eviction_task.cancel()
+        try:
+            await vault_eviction_task
+        except asyncio.CancelledError:
+            pass
 
     observer.stop()
     await asyncio.get_running_loop().run_in_executor(None, observer.join)
@@ -405,7 +434,31 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Sanitized global exception handler preventing raw PII or stack trace leaks."""
+    """Sanitized global exception handler preventing raw PII or stack trace leaks.
+
+    The client only ever sees a flat "Internal Server Error" -- but the exception and
+    its full traceback are NOT lost: they go to the operational application logger
+    (this process's stdout/stderr, which enterprises typically ship to a SIEM/log
+    aggregator via a sidecar or the container log driver) with the request_id attached
+    for correlation, plus a PII-safe CRITICAL entry in the signed WORM audit chain
+    (see AuditLogger.log_unhandled_exception) so the *fact* that a request failed
+    unhandled is part of the tamper-evident compliance record even though the raw
+    exception detail deliberately isn't.
+    """
+    request_id = getattr(request.state, "request_id", None) or "n/a"
+    logger.error(
+        "Unhandled exception on %s %s (request_id=%s)",
+        request.method,
+        request.url.path,
+        request_id,
+        exc_info=exc,
+    )
+    AuditLogger.log_unhandled_exception(
+        request_id=request_id,
+        path=request.url.path,
+        method=request.method,
+        exc=exc,
+    )
     return JSONResponse(
         status_code=500,
         content={"error": {"message": "Internal Server Error", "type": "server_error"}},
@@ -614,11 +667,14 @@ async def _proxy_catch_all_internal(
     if request.method == "OPTIONS":
         origin = request.headers.get("origin", "")
         allowed_origins = {o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()}
-        if "*" in allowed_origins or (origin and origin in allowed_origins):
-            allow_origin = origin or "*"
-        elif not settings.CORS_ALLOWED_ORIGINS:
-            allow_origin = origin or "*"
+        if "*" in allowed_origins:
+            allow_origin = "*"
+        elif origin and origin in allowed_origins:
+            allow_origin = origin
         else:
+            # Strict-by-default: an unset/empty CORS_ALLOWED_ORIGINS (or an Origin not on
+            # the explicit allowlist) disables cross-origin access rather than reflecting
+            # the caller's Origin or falling back to "*".
             allow_origin = "null"
 
         return Response(
@@ -633,6 +689,12 @@ async def _proxy_catch_all_internal(
         )
 
     target_host = None
+    # Set only when upstream_base gets rewritten to an SSRF-validated IP literal below.
+    # Carries the original FQDN through to the outbound httpx call so TLS SNI and
+    # certificate hostname verification happen against the real domain -- pinning the
+    # *socket* to the validated IP without also pinning (and breaking) TLS to it. See
+    # the `extensions={"sni_hostname": ...}` call sites downstream.
+    sni_hostname: Optional[str] = None
 
     if settings.AIR_GAPPED_MODE and settings.EGRESS_GATEWAY_URL:
         upstream_base = settings.EGRESS_GATEWAY_URL
@@ -641,6 +703,7 @@ async def _proxy_catch_all_internal(
             target_host = parsed.netloc
             resolved_ip = await _resolve_internal_hostname(parsed.hostname)
             if resolved_ip:
+                sni_hostname = parsed.hostname
                 ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
                 port_str = f":{parsed.port}" if parsed.port else ""
                 upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
@@ -660,6 +723,7 @@ async def _proxy_catch_all_internal(
                     content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}},
                 )
             # Overwrite upstream base with the resolved IP to prevent DNS rebinding SSRF
+            sni_hostname = hostname
             ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
             port_str = f":{parsed.port}" if parsed.port else ""
             upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
@@ -698,8 +762,11 @@ async def _proxy_catch_all_internal(
     if matched_key:
         is_virtual_key = True
         virtual_key_id = get_virtual_key_id(matched_key)
-    elif client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
-        # Direct genuine BYOK provider key passthrough
+    elif settings.ENABLE_OPEN_BYOK_PASSTHROUGH and client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
+        # Direct genuine BYOK provider key passthrough. Gated behind ENABLE_OPEN_BYOK_PASSTHROUGH
+        # (default False): a prefix match alone doesn't authenticate the caller as an entitled
+        # proxy user -- without this flag, an unrecognized key falls through to the 401 below
+        # instead of being routed through the DLP pipeline and forwarded upstream.
         is_virtual_key = False
     elif settings.OVERRIDE_CLIENT_AUTH:
         # Bypass strict prefix checks if enterprise secret injection is active
@@ -1032,6 +1099,7 @@ async def _proxy_catch_all_internal(
                 attempt = 0
                 current_target_url = target_url
                 current_headers = dict(headers)
+                current_sni_hostname = sni_hostname
                 upstream_res = None
                 is_fallback = False
 
@@ -1041,6 +1109,7 @@ async def _proxy_catch_all_internal(
                         url=current_target_url,
                         headers=current_headers,
                         content=redacted_bytes,
+                        extensions={"sni_hostname": current_sni_hostname} if current_sni_hostname else None,
                     )
                     try:
                         upstream_res = await http_client.send(req, stream=True)
@@ -1070,6 +1139,9 @@ async def _proxy_catch_all_internal(
                                 is_fallback = True
                                 attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
+                                # Fallback URLs are plain configured FQDNs, never IP-rewritten,
+                                # so normal httpx hostname-based TLS applies -- no SNI override.
+                                current_sni_hostname = None
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
                                 parsed_fallback = urlparse(fallback_url)
@@ -1171,6 +1243,7 @@ async def _proxy_catch_all_internal(
                 attempt = 0
                 current_target_url = target_url
                 current_headers = dict(headers)
+                current_sni_hostname = sni_hostname
                 upstream_res = None
                 is_fallback = False
 
@@ -1181,6 +1254,7 @@ async def _proxy_catch_all_internal(
                             url=current_target_url,
                             headers=current_headers,
                             content=redacted_bytes,
+                            extensions={"sni_hostname": current_sni_hostname} if current_sni_hostname else None,
                         )
                         upstream_res.raise_for_status()
                         break
@@ -1207,6 +1281,9 @@ async def _proxy_catch_all_internal(
                             if fallback_url:
                                 is_fallback = True
                                 current_target_url = build_target_url(fallback_url, path)
+                                # Fallback URLs are plain configured FQDNs, never IP-rewritten,
+                                # so normal httpx hostname-based TLS applies -- no SNI override.
+                                current_sni_hostname = None
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
                                 parsed_fallback = urlparse(fallback_url)
@@ -1327,8 +1404,12 @@ async def _proxy_catch_all_internal(
                             "token_count": _total_tokens,
                             "model": _model,
                         }
-                        # Fire-and-forget; use shared http_client to avoid socket exhaustion
-                        asyncio.create_task(dispatch_telemetry(settings.TELEMETRY_ENDPOINT_URL, _tel_payload, http_client))
+                        # Fire-and-forget; use shared http_client to avoid socket exhaustion.
+                        # Reference retained via app_state.background_tasks so this can't be
+                        # garbage-collected mid-flight.
+                        app_state.spawn_background_task(
+                            dispatch_telemetry(settings.TELEMETRY_ENDPOINT_URL, _tel_payload, http_client)
+                        )
 
                     return JSONResponse(
                         content=rehydrated_res,
@@ -1366,6 +1447,7 @@ async def _proxy_catch_all_internal(
         url=target_url,
         headers=headers,
         content=body_bytes,
+        extensions={"sni_hostname": sni_hostname} if sni_hostname else None,
     )
 
     if upstream_res.status_code >= 400:

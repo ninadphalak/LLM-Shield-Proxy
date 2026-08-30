@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import secrets
 import socket
 import sys
@@ -36,9 +37,28 @@ if not audit_logger.handlers:
     import queue
     from logging.handlers import QueueHandler, QueueListener
 
-    # True asynchronous logging: a lock-free queue that won't block the ASGI event loop.
-    _log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(-1)
-    _queue_handler = QueueHandler(_log_queue)
+    # Bounded queue with a strict drop policy: if the stdout sink stalls (slow log
+    # collector, container log-driver backpressure, journald hiccup -- all routine
+    # ops events, not edge cases), we drop new records instead of growing memory
+    # without bound for the life of the process.
+    class _BoundedQueueHandler(QueueHandler):
+        def enqueue(self, record: logging.LogRecord) -> None:
+            try:
+                self.queue.put_nowait(record)
+            except queue.Full:
+                logger.warning(
+                    "Audit stdout queue full (sink stalled); dropping log record to bound memory."
+                )
+                try:
+                    from llm_shield_proxy.observability.metrics import audit_events_dropped_total
+
+                    audit_events_dropped_total.labels(sink="stdout_queue").inc()
+                except Exception:  # nosec B110 noqa: S110
+                    # Security Note: metrics recording must never itself raise inside a drop handler
+                    pass
+
+    _log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(maxsize=10_000)
+    _queue_handler = _BoundedQueueHandler(_log_queue)
 
     _stream_handler = logging.StreamHandler(sys.stdout)
     _stream_handler.setFormatter(logging.Formatter("%(message)s"))
@@ -126,7 +146,8 @@ class AuditLogger:
 
     _last_hash: str = "0000000000000000000000000000000000000000000000000000000000000000"
     _instance_id: str = socket.gethostname()
-    _log_queue: "queue.Queue[tuple[str, Dict[str, Any]]]" = queue.Queue(-1)
+    # Bounded: see _enqueue_log for the drop policy applied when this fills up.
+    _log_queue: "queue.Queue[tuple[str, Dict[str, Any]]]" = queue.Queue(maxsize=10_000)
     _worker_thread: Optional[threading.Thread] = None
     _worker_init_lock = threading.Lock()
     _chain_lock = threading.Lock()
@@ -146,13 +167,9 @@ class AuditLogger:
             try:
                 severity, log_entry = cls._log_queue.get()
 
-                # Try to fetch agent_id from context if available in this thread.
-                # Note: contextvars don't automatically propagate to background threads unless explicitly passed.
-                # Since log_entry is fully constructed by the caller, we assume all necessary context is already inside log_entry!
-                # Wait, the original code did: agent_id = agent_identity_ctx.get() inside the method.
-                # If we do it in the background thread, agent_identity_ctx.get() will be empty because it's a new thread!
-                # So we MUST extract agent_id in the caller and pass it in!
-
+                # agent_identity_claim is extracted from the contextvar by the caller (see
+                # _enqueue_log) and embedded into log_entry before it reaches this thread,
+                # since contextvars don't propagate across threads.
                 with cls._chain_lock:
                     log_entry["previous_hash"] = cls._last_hash
 
@@ -212,7 +229,30 @@ class AuditLogger:
             log_entry["agent_identity_claim"] = agent_id
 
         cls._start_worker_if_needed()
-        cls._log_queue.put_nowait((severity, log_entry))
+        try:
+            cls._log_queue.put_nowait((severity, log_entry))
+        except queue.Full:
+            # Security Note: never block the ASGI request path waiting on the WORM
+            # worker. If it can't keep up (stalled sink, slow signing), drop the
+            # event and log a WARNING rather than growing memory unboundedly.
+            # audit_events_dropped_total makes sustained drops (i.e. audit records
+            # compliance can no longer vouch for) observable and alertable, since a
+            # single WARNING line in a high-volume log stream is easy to miss. A
+            # durable, truly-never-drop trail (e.g. an external Kafka/SQS-backed WORM
+            # sink behind this queue, or SHIELD_FAILURE_MODE=FAIL_CLOSED rejecting new
+            # requests once the backlog is nonzero) is the appropriate next step for
+            # deployments where audit completeness is a hard compliance requirement.
+            logger.warning(
+                "AuditLogger WORM queue full (worker stalled); dropping audit event to bound memory: event=%s",
+                log_entry.get("event", "unknown"),
+            )
+            try:
+                from llm_shield_proxy.observability.metrics import audit_events_dropped_total
+
+                audit_events_dropped_total.labels(sink="worm_chain_queue").inc()
+            except Exception:  # nosec B110 noqa: S110
+                # Security Note: metrics recording must never itself raise inside a drop handler
+                pass
 
     @classmethod
     def log_startup_event(cls) -> None:
@@ -451,6 +491,38 @@ class AuditLogger:
             "severity": "CRITICAL",
             "consecutive_loops": consecutive_loops,
             "applied_role_name": applied_role_name,
+        }
+        AuditLogger._enqueue_log("CRITICAL", log_entry)
+
+    @staticmethod
+    def log_unhandled_exception(
+        request_id: Optional[str],
+        path: str,
+        method: str,
+        exc: BaseException,
+    ) -> None:
+        """Emits a structured JSON audit event recording an unhandled request exception.
+
+        Deliberately carries only the exception's type name -- never `str(exc)` or a
+        traceback, since either can contain raw request content (a fragment of an
+        unredacted prompt, a malformed value under inspection, etc.) that has no
+        business entering the "zero raw PII leakage" WORM audit chain. The full
+        exception message and traceback belong in the operational application logger
+        (see `global_exception_handler` in api/main.py, which logs both there via
+        `logger.error(..., exc_info=exc)`) -- a separate sink with shorter retention
+        that engineers use for root-causing, not the compliance-grade audit record.
+        """
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "UNHANDLED_EXCEPTION",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "path": path,
+            "method": method,
+            "severity": "CRITICAL",
+            "exception_type": type(exc).__name__,
         }
         AuditLogger._enqueue_log("CRITICAL", log_entry)
 

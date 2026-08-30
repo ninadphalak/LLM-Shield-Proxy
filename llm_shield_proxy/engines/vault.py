@@ -1,12 +1,17 @@
-"""Enterprise Session-Scoped Cryptographic Vault Management Module.
+"""Enterprise Session-Scoped Vault Management Module.
 
 Provides bidirectional deterministic mapping between sensitive original PII values
-and session-bound tokens (or realistic synthetic values), enforcing AES-256-GCM encryption
-and namespace isolation across tenants.
+and session-bound tokens (or realistic synthetic values), with namespace isolation
+across tenants. Note: `Vault.original_to_token`/`token_to_original` are held in
+plaintext for the vault's lifetime -- in process memory for `VaultStore`, and as
+plaintext JSON in Redis for `RedisVaultStore` (protected only by Redis ACLs/TLS
+and TTL expiry, not application-layer encryption). See the `Vault` class docstring
+below for detail.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
@@ -54,7 +59,16 @@ class Vault:
     Maintains deterministic bijective mappings between raw PII text values
     and temporary session tokens. Supports both bracketed structural tagging
     ([PERSON_1], [EMAIL_1]) and unbracketed synthetic entity swapping.
-    Protects original PII values with AES-256-GCM authenticated envelope encryption.
+
+    Note: original PII values are held in plaintext in `original_to_token`/
+    `token_to_original` for the vault's lifetime -- this class does NOT encrypt
+    them. `self.dek`/`self._aesgcm` are currently unused by this class (no
+    caller reads `self.dek` or invokes `self._aesgcm`); AES-256-GCM encryption
+    elsewhere in the codebase (e.g. `engines/crypto_vault.py`, the stateless
+    mutation engine's cipher) is separate from this vault's own token maps.
+    Confidentiality of the in-memory mapping relies on process memory isolation
+    (or, for `RedisVaultStore`, on Redis ACLs/TLS) and TTL-bounded lifetime, not
+    on encryption at this layer.
 
     Thread-safe and supports multi-tenant namespace isolation.
     """
@@ -254,15 +268,46 @@ class VaultStore:
         self._lock: threading.Lock = threading.Lock()
 
     def _evict_expired(self) -> None:
-        """Evicts orphaned session vaults whose TTL has expired."""
+        """Full O(active-sessions) sweep evicting every orphaned, TTL-expired vault.
+
+        This is the expensive pass: don't call it on the request hot path (see
+        `get_vault`, which does a cheap O(1) per-key check instead). Intended to
+        run periodically off-path via `run_eviction_loop`, so vaults that expire
+        without ever being looked up again still get reclaimed instead of sitting
+        in memory until LRU capacity eviction happens to reach them.
+        """
         now = time.time()
         expired_keys = [k for k, ts in self._timestamps.items() if now - ts > self.ttl_seconds]
         for k in expired_keys:
             self._sessions.pop(k, None)
             self._timestamps.pop(k, None)
 
+    async def run_eviction_loop(self, interval_seconds: float, stop_event: asyncio.Event) -> None:
+        """Periodically sweeps expired session vaults in the background.
+
+        Runs until `stop_event` is set. Each iteration is wrapped so one failed
+        sweep can't silently kill the loop (matches the policy-watcher pattern
+        in api/main.py's lifespan).
+        """
+        while not stop_event.is_set():
+            try:
+                with self._lock:
+                    self._evict_expired()
+            except Exception as exc:
+                logger.error("Vault background eviction sweep failed: %s", exc)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                pass
+
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
         """Retrieves or creates an in-memory session vault enforcing TTL eviction.
+
+        Only performs an O(1) check of the requested key's own timestamp (not a
+        scan of all active sessions), so per-request latency doesn't grow as the
+        number of concurrent sessions climbs toward `max_capacity`. The full
+        multi-key sweep that actually reclaims memory from sessions that never
+        get looked up again runs separately via `run_eviction_loop`.
 
         Args:
             session_id: Unique client session identifier.
@@ -277,7 +322,10 @@ class VaultStore:
         vault_key = f"{virtual_key_id}:{session_id}"
         now = time.time()
         with self._lock:
-            self._evict_expired()
+            ts = self._timestamps.get(vault_key)
+            if ts is not None and now - ts > self.ttl_seconds:
+                self._sessions.pop(vault_key, None)
+                self._timestamps.pop(vault_key, None)
 
             if vault_key in self._sessions:
                 self._sessions.move_to_end(vault_key)

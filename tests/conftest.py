@@ -18,6 +18,12 @@ def test_environment_setup():
     settings.VALID_VIRTUAL_KEYS = ""
     settings.SHIELD_ENCRYPTION_KEY = "00" * 32
 
+    # Most of the existing suite exercises BYOK passthrough directly with
+    # provider-shaped keys (sk-proj-/sk-ant-/AIza) and predates the opt-in gate on
+    # that path (ENABLE_OPEN_BYOK_PASSTHROUGH, default False in production). Tests
+    # that specifically verify the gate itself override this back to False locally.
+    settings.ENABLE_OPEN_BYOK_PASSTHROUGH = True
+
     # Ensure telemetry endpoint is None during tests to prevent httpx_mock AssertionError
     # on unexpected background POST requests. ANONYMOUS_USAGE_TRACKING remains True
     # to ensure the proxy behaves correctly and swallows errors as expected.
@@ -26,6 +32,10 @@ def test_environment_setup():
     from llm_shield_proxy.security.circuit_breaker import circuit_breaker_cache
 
     circuit_breaker_cache.clear()
+
+    from llm_shield_proxy.security.identity import _dpop_replay_cache
+
+    _dpop_replay_cache.clear()
 
     if hasattr(app.state, "http_client"):
         app.state.http_client = None

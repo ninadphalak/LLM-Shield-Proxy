@@ -37,7 +37,9 @@ The behavior is controlled by several key flags (see [Deployment Configuration](
 ## Critical Logic & Conditional Behaviors
 
 ### 1. SSRF Protection Bypass for Internal Gateways
-Normally, the LLM-Shield Proxy strictly blocks requests targeting internal or private RFC 1918 IP addresses to prevent Server-Side Request Forgery (SSRF). However, when `AIR_GAPPED_MODE` is active, the `EGRESS_GATEWAY_URL` is parsed by a dedicated, non-blocking async DNS resolver (`_resolve_internal_hostname`) that explicitly *allows* private IPs. The internal IP is substituted securely in the target URL to bypass DNS-rebinding attacks.
+Normally, the LLM-Shield Proxy strictly blocks requests targeting internal or private RFC 1918 IP addresses to prevent Server-Side Request Forgery (SSRF). However, when `AIR_GAPPED_MODE` is active, the `EGRESS_GATEWAY_URL` is parsed by a dedicated, non-blocking async DNS resolver (`_resolve_internal_hostname`) that explicitly *allows* private IPs. The resolved internal IP is substituted into the connection URL so the socket connects to that pinned address rather than re-resolving the hostname at connect time (closing the DNS-rebinding TOCTOU window between the check and the actual connection).
+
+Pinning the socket to a resolved IP would normally break TLS: `httpx`/`httpcore` validate the server certificate against whatever hostname is in the connection URL, and a real certificate almost never carries a bare IP in its SAN. To avoid that, the proxy separately carries the original `EGRESS_GATEWAY_URL` hostname through as an `extensions={"sni_hostname": ...}` override on the outbound `httpx` request -- so the socket connects to the pinned IP, but TLS SNI negotiation and certificate hostname verification happen against the real gateway hostname. The `Host` HTTP header is set the same way, independently of the SNI override.
 
 ### 2. Authorization Header Stripping
 For internal mTLS deployments, you might configure your egress gateway to inject the public API keys, effectively treating LLM-Shield as an untrusted internal node that does not have access to the actual LLM API keys.
@@ -55,7 +57,7 @@ Yes. LLM-Shield routes all upstream paths directly to the `EGRESS_GATEWAY_URL` w
 No, if `FORWARD_CLIENT_AUTH` is disabled and the egress gateway handles the authentication, LLM-Shield does not need to possess the upstream API keys.
 
 **Q: Can I use this with TLS termination?**
-Yes. You can configure `EGRESS_GATEWAY_URL` with `https://` and supply the `SSL_CA_BUNDLE_PATH` so LLM-Shield can verify the egress gateway's internal certificates.
+Yes. You can configure `EGRESS_GATEWAY_URL` with `https://` and supply the `SSL_CA_BUNDLE_PATH` so LLM-Shield can verify the egress gateway's internal certificates. Certificate hostname verification is checked against the gateway's real hostname (via the SNI pinning described above), not the resolved IP -- so a normal, domain-issued internal certificate works as expected even though the socket itself connects to the pinned IP.
 
 
 ## Related Tests
