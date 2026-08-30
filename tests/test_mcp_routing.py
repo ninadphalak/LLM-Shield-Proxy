@@ -11,7 +11,10 @@ from llm_shield_proxy.security.tool_rbac import BasePolicyResolver
 
 client = TestClient(app)
 
-UPSTREAM_URL = "http://mcp-upstream.test/mcp"
+# Literal IP rather than a hostname: the router now runs the upstream routing target itself
+# through the DNS-resolving egress firewall (fail-closed on resolution failure), and this test
+# environment has no real DNS for a fake hostname to resolve against.
+UPSTREAM_URL = "http://93.184.216.34/mcp"
 
 
 class MockPolicyResolver(BasePolicyResolver):

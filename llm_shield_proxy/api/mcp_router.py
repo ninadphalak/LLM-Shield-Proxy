@@ -22,7 +22,7 @@ from llm_shield_proxy.engines.masking import ScrubVault
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
-from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, scan_arguments
+from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, evaluate_url, scan_arguments
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, OPAPolicyResolver
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,33 @@ async def mcp_gateway(
     virtual_key = _extract_virtual_key(x_shield_virtual_key, authorization)
     upstream_url = _resolve_upstream_url(x_shield_upstream_url)
     allowed, blocked, egress_policy = await _resolve_role(policy_resolver, virtual_key)
+
+    # SSRF / DNS-Rebinding Gate: the upstream routing target itself is client-controlled
+    # (X-Shield-Upstream-URL / UPSTREAM_MCP_BASE_URL) and is the actual destination of the
+    # outbound request below -- it must clear the same egress firewall applied to URLs found
+    # inside tool arguments, not just those. Checked once per gateway call since upstream_url
+    # is constant across an entire batch.
+    if upstream_url:
+        try:
+            await evaluate_url(upstream_url, egress_policy)
+        except EgressPolicyViolationError as exc:
+            AuditLogger.log_security_event(
+                event_type="mcp_egress_policy_violation",
+                severity="CRITICAL",
+                details={
+                    "reason": exc.reason,
+                    "method": "upstream_routing",
+                    "blocked_url": exc.url,
+                    "blocked_host": exc.host,
+                    "resolved_ip": exc.matched_ip,
+                    "matched_rule": exc.matched_rule,
+                    "applied_role_name": egress_policy.get("role_name", virtual_key),
+                },
+                virtual_key_id=virtual_key,
+            )
+            return _jsonrpc_error_response(
+                None, JSONRPC_EGRESS_FORBIDDEN, "SSRF Policy Violation: Upstream target forbidden by egress policy"
+            )
 
     http_client = getattr(request.app.state, "http_client", None)
     if http_client is None:

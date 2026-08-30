@@ -7,6 +7,7 @@ import orjson
 import redis.asyncio as redis
 
 from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, evaluate_url
 
 
 class MCPDiscoveryPrunerMiddleware:
@@ -115,6 +116,40 @@ class MCPDiscoveryPrunerMiddleware:
         upstream_url: str, req_id: Optional[Any]
     ):
         try:
+            policy = await self.rbac_resolver.resolve_policy(virtual_key)
+
+            # SSRF / DNS-Rebinding Gate: upstream_url is client-controlled (X-Upstream-URL) and
+            # is the actual destination of the outbound request below, so it must clear the same
+            # egress firewall used for tool-argument URLs elsewhere in the gateway. Checked before
+            # the cache lookup so a forbidden target can never be cached or reach the network.
+            try:
+                await evaluate_url(upstream_url, policy)
+            except EgressPolicyViolationError as exc:
+                AuditLogger.log_security_event(
+                    event_type="mcp_egress_policy_violation",
+                    severity="CRITICAL",
+                    details={
+                        "reason": exc.reason,
+                        "method": "upstream_routing",
+                        "blocked_url": exc.url,
+                        "blocked_host": exc.host,
+                        "resolved_ip": exc.matched_ip,
+                        "matched_rule": exc.matched_rule,
+                    },
+                    virtual_key_id=virtual_key,
+                )
+                error_payload = orjson.dumps({
+                    "type": "https://llm-shield.internal/probs/mcp-egress-forbidden",
+                    "title": "MCP Upstream Egress Forbidden",
+                    "status": 403,
+                    "detail": "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
+                    "instance": scope.get("path", "/tools/list")
+                })
+                return await self._send_error(send, 403, error_payload, is_json=True)
+
+            allowed = set(policy.get("allowed_tools", []))
+            blocked = set(policy.get("blocked_tools", []))
+
             policy_version_bytes = await self.redis_client.get(f"mcp:policy_version:{tenant_id}")
             policy_version = policy_version_bytes.decode("utf-8") if policy_version_bytes else "1"
 
@@ -127,10 +162,6 @@ class MCPDiscoveryPrunerMiddleware:
             cached_data = await self.redis_client.get(cache_key)
             if cached_data:
                 return await self._send_json_stream(send, cached_data)
-
-            policy = await self.rbac_resolver.resolve_policy(virtual_key)
-            allowed = set(policy.get("allowed_tools", []))
-            blocked = set(policy.get("blocked_tools", []))
 
             # Managed httpx client inside context manager to prevent connection leaks
             async with httpx.AsyncClient(http2=True) as client:
