@@ -16,10 +16,18 @@ from llm_shield_proxy.core.config import settings
 
 def main() -> None:
     """Parses command-line arguments and launches the Uvicorn server (or a subcommand)."""
-    if len(sys.argv) > 1 and sys.argv[1] == "compliance-report":
-        from llm_shield_proxy.cli import compliance_report_main
+    operator_commands = {
+        "assess",
+        "audit-verify",
+        "audit-checkpoint",
+        "audit-checkpoint-verify",
+        "compliance-report",
+        "benchmark",
+    }
+    if len(sys.argv) > 1 and sys.argv[1] in operator_commands:
+        from llm_shield_proxy.cli import operator_main
 
-        sys.exit(compliance_report_main(sys.argv[2:]))
+        sys.exit(operator_main(sys.argv[1:]))
 
     parser = argparse.ArgumentParser(
         prog="llm-shield-proxy",

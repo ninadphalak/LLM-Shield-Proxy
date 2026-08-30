@@ -1,4 +1,13 @@
+import os
+
 import pytest
+
+# Disable only configured OpenTelemetry export before importing the application.
+# The tracer provider is created at import time, so changing settings in a fixture
+# is too late to prevent a background exporter thread. Anonymous usage tracking
+# intentionally remains at its production default and is tested independently.
+os.environ["TELEMETRY_ENABLED"] = "false"
+os.environ["TELEMETRY_ENDPOINT_URL"] = ""
 
 from llm_shield_proxy.api.main import app
 from llm_shield_proxy.core.config import settings
@@ -17,6 +26,7 @@ def test_environment_setup():
     settings._valid_virtual_keys_set = frozenset()
     settings.VALID_VIRTUAL_KEYS = ""
     settings.SHIELD_ENCRYPTION_KEY = "00" * 32
+    settings.TELEMETRY_ENABLED = False
 
     # Most of the existing suite exercises BYOK passthrough directly with
     # provider-shaped keys (sk-proj-/sk-ant-/AIza) and predates the opt-in gate on
@@ -24,9 +34,7 @@ def test_environment_setup():
     # that specifically verify the gate itself override this back to False locally.
     settings.ENABLE_OPEN_BYOK_PASSTHROUGH = True
 
-    # Ensure telemetry endpoint is None during tests to prevent httpx_mock AssertionError
-    # on unexpected background POST requests. ANONYMOUS_USAGE_TRACKING remains True
-    # to ensure the proxy behaves correctly and swallows errors as expected.
+    # Keep external OTel export off in tests without altering anonymous usage tracking.
     settings.TELEMETRY_ENDPOINT_URL = None
 
     from llm_shield_proxy.security.circuit_breaker import circuit_breaker_cache

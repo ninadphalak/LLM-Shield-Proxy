@@ -131,6 +131,22 @@ def test_verify_worm_log_without_pubkey_skips_signature_check(tmp_path):
     assert summary["signatures_valid"] == 0
 
 
+def test_verify_worm_log_detects_sequence_gap(tmp_path):
+    log_path, pubkey_path = _write_signed_worm_log(tmp_path)
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    for index, record in enumerate(records, start=1):
+        record["chain_id"] = "test-chain"
+        record["sequence"] = index if index < 3 else 4
+    # Adding fields invalidates hashes too, but the verifier must independently
+    # report the sequence discontinuity.
+    log_path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    summary = verify_worm_log(str(log_path), pubkey_path.read_text(encoding="utf-8"))
+
+    assert summary["chain_valid"] is False
+    assert any(item["reason"] == "sequence_discontinuity" for item in summary["chain_breaks"])
+
+
 def test_summarize_oscal_generates_fresh_shell_when_no_file_given():
     summary = summarize_oscal(None)
     assert summary["result_count"] >= 1

@@ -3,11 +3,13 @@ import collections
 import hashlib
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import orjson
 from opentelemetry import trace
 
+from .oscal import build_assessment_results, build_observation
 from .transport import BaseGRCTransport
 
 logger = logging.getLogger(__name__)
@@ -95,40 +97,22 @@ class DecisionTraceExporter:
 
         if self.transports:
             # Single-event OSCAL payload
-            oscal_delta = {
-                "assessment-results": {
-                    "uuid": "4b5d2b7c-3f2d-489e-8c5e-855a73507d4b",
-                    "metadata": {
-                        "title": "LLM-Shield-Proxy Runtime Assessment Delta",
-                        "last-modified": f"{timestamp}",
-                        "version": "1.0.0",
-                        "oscal-version": "1.1.2",
-                    },
-                    "results": [
-                        {
-                            "uuid": "5d5f2a1b-3c3b-4f9f-9c7a-9f5b8a5d3f2e",
-                            "title": "Continuous RBAC Governance Trace Event",
-                            "start": f"{timestamp}",
-                            "observations": [
-                                {
-                                    "title": f"Decision for {tool_name}",
-                                    "description": f"RBAC decision: {rbac_decision}",
-                                    "methods": ["AUTOMATED"],
-                                    "relevant-evidence": [
-                                        {
-                                            "description": "Merkle Hash Chain",
-                                            "properties": [
-                                                {"name": "merkle_root", "value": new_root},
-                                                {"name": "prompt_hash", "value": redacted_prompt_hash},
-                                            ],
-                                        }
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-            }
+            oscal_delta = build_assessment_results(
+                title="LLM-Shield-Proxy Runtime Assessment Delta",
+                description="Single privacy-safe runtime RBAC governance trace event.",
+                result_title="Continuous RBAC Governance Trace Event",
+                generated_at=datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                observations=[
+                    build_observation(
+                        title=f"Decision for {tool_name}",
+                        description=f"RBAC decision: {rbac_decision}",
+                        properties={
+                            "merkle_root": new_root,
+                            "prompt_hash": redacted_prompt_hash,
+                        },
+                    )
+                ],
+            )
 
             # Fire-and-forget dispatch
             try:
@@ -145,47 +129,32 @@ class DecisionTraceExporter:
 
     def generate_oscal_artifact(self) -> bytes:
         """
-        Generates NIST SP 800-53 Rev. 5 Assessment Results JSON schema format.
+        Generate an OSCAL 1.2 Assessment Results artifact.
+
+        Document, result, and observation UUIDs are fresh for every call. They
+        identify this artifact instance and must not be used as stable decision
+        correlation identifiers.
         """
-        oscal_payload = {
-            "assessment-results": {
-                "uuid": "4b5d2b7c-3f2d-489e-8c5e-855a73507d4b",
-                "metadata": {
-                    "title": "LLM-Shield-Proxy Runtime Assessment",
-                    "last-modified": f"{time.time()}",
-                    "version": "1.0.0",
-                    "oscal-version": "1.1.2",
+        observations = [
+            build_observation(
+                title=f"Decision for {rec['payload']['Tool_Name']}",
+                description=f"RBAC decision: {rec['payload']['RBAC_Decision']}",
+                properties={
+                    "record_hash": rec["record_hash"],
+                    "merkle_root": rec["merkle_root"],
+                    "prompt_hash": rec["payload"]["Redacted_Prompt_Hash"],
                 },
-                "import-ap": {
-                    "href": "https://raw.githubusercontent.com/usnistgov/oscal-content/master/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json"
-                },
-                "results": [
-                    {
-                        "uuid": "5d5f2a1b-3c3b-4f9f-9c7a-9f5b8a5d3f2e",
-                        "title": "Continuous RBAC Governance Trace",
-                        "description": "Evidence of mid-stream tool execution governance and PII redaction.",
-                        "start": f"{time.time()}",
-                        "observations": [
-                            {
-                                "uuid": f"obs-{idx}",
-                                "title": f"Decision for {rec['payload']['Tool_Name']}",
-                                "description": f"RBAC decision: {rec['payload']['RBAC_Decision']}",
-                                "methods": ["AUTOMATED"],
-                                "relevant-evidence": [
-                                    {
-                                        "description": "Merkle Hash Chain",
-                                        "properties": [
-                                            {"name": "record_hash", "value": rec["record_hash"]},
-                                            {"name": "merkle_root", "value": rec["merkle_root"]},
-                                            {"name": "prompt_hash", "value": rec["payload"]["Redacted_Prompt_Hash"]},
-                                        ],
-                                    }
-                                ],
-                            }
-                            for idx, rec in enumerate(self.merkle_tree.records)
-                        ],
-                    }
-                ],
-            }
-        }
+            )
+            for rec in self.merkle_tree.records
+        ]
+        oscal_payload = build_assessment_results(
+            title="LLM-Shield-Proxy Runtime Assessment",
+            description="Evidence of tool execution governance and protected-data redaction.",
+            result_title="Continuous RBAC Governance Trace",
+            assessment_plan_href=(
+                "https://raw.githubusercontent.com/usnistgov/oscal-content/master/"
+                "nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json"
+            ),
+            observations=observations,
+        )
         return orjson.dumps(oscal_payload, option=orjson.OPT_SORT_KEYS)

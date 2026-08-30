@@ -45,6 +45,8 @@ INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u2
 
 # Candidate base64 patterns for obfuscated PII smuggling
 BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9+/]{20,}={0,2}\b")
+MAX_BASE64_INSPECTION_CHARS = 8_192
+BASE64_BOUNDARY_SCAN_CHARS = 256
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
@@ -300,33 +302,73 @@ class PIIEngine:
         if active_profile is None:
             active_profile = self._global_strict_profile
 
+        # Locate encoded bodies once. Small candidates are decoded below. For an
+        # attachment-sized candidate, retain small edge guards so detectors can still
+        # catch plaintext that touches the body, but do not run every detector across
+        # the encoded interior. Segment offsets preserve positions in the source text.
+        base64_candidates: List[Tuple[int, int, str]] = []
+        excluded_interiors: List[Tuple[int, int]] = []
+        for match in BASE64_CANDIDATE_PATTERN.finditer(text):
+            start, end = match.span()
+            if end - start > MAX_BASE64_INSPECTION_CHARS:
+                interior_start = start + BASE64_BOUNDARY_SCAN_CHARS
+                interior_end = end - BASE64_BOUNDARY_SCAN_CHARS
+                if interior_start < interior_end:
+                    excluded_interiors.append((interior_start, interior_end))
+                continue
+            base64_candidates.append((start, end, match.group(0)))
+
+        scan_segments: List[Tuple[int, str]] = []
+        if excluded_interiors:
+            cursor = 0
+            for start, end in excluded_interiors:
+                if cursor < start:
+                    scan_segments.append((cursor, text[cursor:start]))
+                cursor = max(cursor, end)
+            if cursor < len(text):
+                scan_segments.append((cursor, text[cursor:]))
+        else:
+            scan_segments.append((0, text))
+
         # Tier 1: Structured DFA Regex Scanning (including Tier 1.5 Custom Patterns)
         with tracer.start_as_current_span("regex_tier"):
             for entity_type, pattern in active_profile.tier1_patterns:
-                for match in pattern.finditer(text):
-                    raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+                for offset, segment in scan_segments:
+                    for match in pattern.finditer(segment):
+                        raw_spans.append(
+                            (offset + match.start(), offset + match.end(), entity_type, match.group(0))
+                        )
 
         # Tier 2: Shannon Entropy Analysis (Detects unformatted API keys, hashes, secret tokens)
         if self.enable_tier2 and settings.ENABLE_TIER2_ENTROPY:
-            for match in CANDIDATE_SECRET_PATTERN.finditer(text):
-                token = match.group(0)
-                if len(token) >= settings.SHANNON_MIN_LENGTH:
-                    entropy = calculate_shannon_entropy(token)
-                    is_hex = all(c in "0123456789abcdefABCDEF" for c in token)
-                    # Standard Base64/alphanumeric secrets (>= 4.5 bits) or high-entropy Hex tokens (>= 3.4 bits on >= 24 chars)
-                    if entropy >= self.entropy_threshold or (is_hex and len(token) >= 24 and entropy >= 3.4):
-                        raw_spans.append((match.start(), match.end(), "SECRET_KEY", token))
+            for offset, segment in scan_segments:
+                for match in CANDIDATE_SECRET_PATTERN.finditer(segment):
+                    token = match.group(0)
+                    if len(token) >= settings.SHANNON_MIN_LENGTH:
+                        entropy = calculate_shannon_entropy(token)
+                        is_hex = all(c in "0123456789abcdefABCDEF" for c in token)
+                        # Standard Base64/alphanumeric secrets (>= 4.5 bits) or high-entropy Hex tokens (>= 3.4 bits on >= 24 chars)
+                        if entropy >= self.entropy_threshold or (
+                            is_hex and len(token) >= 24 and entropy >= 3.4
+                        ):
+                            raw_spans.append(
+                                (
+                                    offset + match.start(),
+                                    offset + match.end(),
+                                    "SECRET_KEY",
+                                    token,
+                                )
+                            )
 
         # Obfuscated Base64 Candidate Inspection
-        for match in BASE64_CANDIDATE_PATTERN.finditer(text):
-            token = match.group(0)
+        for start, end, token in base64_candidates:
             try:
                 decoded_bytes = base64.b64decode(token, validate=True)
                 decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
                 if decoded_text and len(decoded_text) >= 6:
                     for entity_type, pattern in active_profile.tier1_patterns:
                         if pattern.search(decoded_text):
-                            raw_spans.append((match.start(), match.end(), "BASE64_OBFUSCATED_PII", token))
+                            raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
                             break
             except Exception as exc:
                 logger.debug("Base64 candidate decode failed: %s", exc)

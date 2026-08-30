@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-0039f5fd-ac66-4a1c-9e0.web.app/spec/streaming-privacy-gateway/v1.0.0/report.schema.json",
+  "title": "Streaming Privacy Gateway Conformance Report v1.0.0",
+  "type": "object",
+  "required": [
+    "schema",
+    "specification",
+    "generated_at",
+    "implementation",
+    "source_revision",
+    "environment",
+    "checks",
+    "microbenchmarks",
+    "memory",
+    "passed",
+    "limitations"
+  ],
+  "properties": {
+    "schema": {"const": "llm-shield.streaming-privacy-conformance/v1.0.0"},
+    "specification": {
+      "type": "object",
+      "required": ["name", "version", "href"],
+      "properties": {
+        "name": {"const": "Streaming Privacy Gateway Conformance Specification"},
+        "version": {"const": "1.0.0"},
+        "href": {"type": "string", "format": "uri"}
+      },
+      "additionalProperties": false
+    },
+    "generated_at": {"type": "string", "format": "date-time"},
+    "implementation": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"}
+      }
+    },
+    "source_revision": {"type": "string", "minLength": 1},
+    "environment": {"type": "object"},
+    "checks": {
+      "type": "object",
+      "required": [
+        "fragmentation_safety",
+        "raw_pii_egress",
+        "sse_validity",
+        "rehydration_fidelity",
+        "audit_integrity",
+        "latency_measurement",
+        "memory_bounded"
+      ],
+      "properties": {
+        "fragmentation_safety": {"$ref": "#/$defs/check"},
+        "raw_pii_egress": {"$ref": "#/$defs/check"},
+        "sse_validity": {"$ref": "#/$defs/check"},
+        "rehydration_fidelity": {"$ref": "#/$defs/check"},
+        "audit_integrity": {"$ref": "#/$defs/check"},
+        "latency_measurement": {"$ref": "#/$defs/check"},
+        "memory_bounded": {"$ref": "#/$defs/check"}
+      },
+      "additionalProperties": false
+    },
+    "microbenchmarks": {"type": "object"},
+    "memory": {"type": "object"},
+    "passed": {"type": "boolean"},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": ["passed"],
+      "properties": {"passed": {"type": "boolean"}}
+    }
+  },
+  "additionalProperties": false
+}

@@ -172,6 +172,22 @@ def test_dlp_redos_base64_obfuscation():
     assert encoded_secret in redacted
 
 
+def test_oversized_base64_keeps_plaintext_boundary_detection():
+    """Skipping an encoded interior must not hide nearby plaintext PII."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    encoded_body = base64.b64encode(("attachment-data" * 1000).encode("utf-8")).decode("utf-8")
+
+    redacted = engine.redact_text(
+        f"Contact jane.doe@example.com | {encoded_body} | SSN 555-44-3333",
+        vault,
+    )
+
+    assert encoded_body in redacted
+    assert "jane.doe@example.com" not in redacted
+    assert "555-44-3333" not in redacted
+
+
 def test_tool_calls_and_embeddings_redaction():
     """Tests redaction inside agentic tool_calls and vector embeddings input fields."""
     engine = PIIEngine(enable_tier2=True, enable_tier3=True)

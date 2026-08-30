@@ -1,6 +1,6 @@
 """Compliance-Pack Bundler.
 
-Aggregates NIST OSCAL assessment artifacts, WORM-chained/Ed25519-signed audit
+Aggregates NIST OSCAL assessment artifacts, hash-chained/Ed25519-signed audit
 log evidence, and a SHA-256 file-integrity manifest into a single
 auditor-deliverable .zip archive, alongside a generated Markdown summary.
 """
@@ -8,6 +8,7 @@ auditor-deliverable .zip archive, alongside a generated Markdown summary.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import zipfile
@@ -23,7 +24,8 @@ _FRAMEWORK_NARRATIVES: Dict[str, Dict[str, str]] = {
             "This pack evidences technical safeguards under the HIPAA Security Rule: PII/PHI "
             "redaction at the point of egress (45 CFR §164.312(a)/(e)) and an audit-control "
             "mechanism (45 CFR §164.312(b)) implemented as a cryptographically hash-chained "
-            "and Ed25519-signed Write-Once-Read-Many (WORM) event log."
+            "and Ed25519-signed audit trail. Immutable WORM retention, when required, "
+            "is configured in the operator's evidence store."
         ),
     },
     "soc2": {
@@ -42,7 +44,7 @@ _FRAMEWORK_NARRATIVES: Dict[str, Dict[str, str]] = {
         "narrative": (
             "This pack bundles machine-readable NIST OSCAL assessment-results artifacts (control "
             "family AU: Audit and Accountability; PE-19: Information Leakage) generated from the "
-            "proxy's runtime governance decisions, chained to signed WORM audit evidence."
+            "proxy's runtime governance decisions, chained to signed tamper-evident audit records."
         ),
     },
 }
@@ -51,7 +53,7 @@ SUPPORTED_FRAMEWORKS = tuple(sorted(_FRAMEWORK_NARRATIVES))
 
 
 def _reconstruct_canonical_bytes(record: Dict[str, Any], exclude: tuple) -> bytes:
-    """Reconstructs the exact byte string that was hashed/signed for a WORM audit record.
+    """Reconstruct the exact byte string hashed and signed for an audit record.
 
     llm_shield_proxy.observability.audit appends "hash", then "signature" and
     "public_key_fingerprint", to an already-sorted JSON string rather than re-serializing
@@ -63,7 +65,7 @@ def _reconstruct_canonical_bytes(record: Dict[str, Any], exclude: tuple) -> byte
 
 
 def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = None) -> Dict[str, Any]:
-    """Parses a WORM-chained audit JSONL file, verifying SHA-256 hash-chain continuity and,
+    """Parse a hash-chained audit JSONL file, verifying SHA-256 continuity and,
     when a public key is supplied, Ed25519 receipt signatures."""
     summary: Dict[str, Any] = {
         "source_path": audit_log_path,
@@ -79,6 +81,10 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
         "first_timestamp": None,
         "last_timestamp": None,
         "fingerprints_seen": [],
+        "chain_ids_seen": [],
+        "first_sequence": None,
+        "last_sequence": None,
+        "terminal_hash": None,
     }
 
     if not audit_log_path:
@@ -99,7 +105,19 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
         summary["signature_checked"] = True
 
     fingerprints_seen: set = set()
+    chain_ids_seen: set = set()
     prior_hash: Optional[str] = None
+    prior_chain_id: Optional[str] = None
+    prior_sequence: Optional[int] = None
+    expected_fingerprint: Optional[str] = None
+    if verifier_key is not None:
+        from cryptography.hazmat.primitives import serialization
+
+        public_raw = verifier_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        expected_fingerprint = hashlib.sha256(public_raw).hexdigest()
 
     with path.open("r", encoding="utf-8") as fh:
         for line_no, raw_line in enumerate(fh, start=1):
@@ -133,18 +151,49 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                 if expected_hash != record_hash:
                     summary["chain_valid"] = False
                     summary["chain_breaks"].append({"line": line_no, "reason": "hash_mismatch", "event": event_name})
+            else:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append({"line": line_no, "reason": "missing_hash", "event": event_name})
 
-            if prior_hash is not None and record.get("previous_hash") != prior_hash:
+            chain_id = record.get("chain_id")
+            if chain_id:
+                chain_ids_seen.add(str(chain_id))
+            same_chain = prior_chain_id is None or chain_id is None or chain_id == prior_chain_id
+            if same_chain and prior_hash is not None and record.get("previous_hash") != prior_hash:
                 summary["chain_valid"] = False
                 summary["chain_breaks"].append(
                     {"line": line_no, "reason": "chain_discontinuity", "event": event_name}
                 )
+            sequence = record.get("sequence")
+            if sequence is not None:
+                try:
+                    sequence_int = int(sequence)
+                    if summary["first_sequence"] is None:
+                        summary["first_sequence"] = sequence_int
+                    summary["last_sequence"] = sequence_int
+                    if same_chain and prior_sequence is not None and sequence_int != prior_sequence + 1:
+                        summary["chain_valid"] = False
+                        summary["chain_breaks"].append(
+                            {"line": line_no, "reason": "sequence_discontinuity", "event": event_name}
+                        )
+                    prior_sequence = sequence_int
+                except (TypeError, ValueError):
+                    summary["chain_valid"] = False
+                    summary["chain_breaks"].append(
+                        {"line": line_no, "reason": "invalid_sequence", "event": event_name}
+                    )
             prior_hash = record_hash or prior_hash
+            prior_chain_id = str(chain_id) if chain_id else prior_chain_id
 
             fingerprint = record.get("public_key_fingerprint")
             signature = record.get("signature")
             if fingerprint:
                 fingerprints_seen.add(fingerprint)
+                if expected_fingerprint is not None and fingerprint != expected_fingerprint:
+                    summary["chain_valid"] = False
+                    summary["chain_breaks"].append(
+                        {"line": line_no, "reason": "public_key_fingerprint_mismatch", "event": event_name}
+                    )
 
             if signature:
                 if verifier_key is not None:
@@ -154,7 +203,7 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                     try:
                         verifier_key.verify(base64.b64decode(signature), canonical)
                         summary["signatures_valid"] += 1
-                    except InvalidSignature:
+                    except (InvalidSignature, ValueError, TypeError, binascii.Error):
                         summary["signatures_invalid"] += 1
                         summary["chain_valid"] = False
                         summary["chain_breaks"].append(
@@ -164,6 +213,8 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                 summary["unsigned_events"] += 1
 
     summary["fingerprints_seen"] = sorted(fingerprints_seen)
+    summary["chain_ids_seen"] = sorted(chain_ids_seen)
+    summary["terminal_hash"] = prior_hash
     return summary
 
 
@@ -247,7 +298,7 @@ def _render_markdown_summary(
         "",
         meta["narrative"],
         "",
-        "## WORM Audit Log Evidence",
+        "## Hash-Chained Audit Evidence",
         "",
         f"- Source: `{audit_summary.get('source_path') or 'not provided'}`",
         f"- Total events: {audit_summary['total_events']}",
