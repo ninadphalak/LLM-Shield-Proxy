@@ -22,6 +22,7 @@ from llm_shield_proxy.engines.masking import ScrubVault
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, scan_arguments
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, OPAPolicyResolver
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,9 @@ JSONRPC_INVALID_REQUEST = -32600
 JSONRPC_METHOD_NOT_FOUND = -32601
 JSONRPC_UPSTREAM_ERROR = -32000
 JSONRPC_TOOL_FORBIDDEN = -32003
+# Same reserved code as JSONRPC_TOOL_FORBIDDEN (both are server-error range policy
+# denials); named separately so call sites read as what they actually reject.
+JSONRPC_EGRESS_FORBIDDEN = -32003
 
 MAX_SANITIZE_DEPTH = 20
 MAX_BATCH_SIZE = 100
@@ -146,6 +150,8 @@ async def _process_single_call(
     blocked: set,
     virtual_key: str,
     upstream_url: Optional[str],
+    http_client: httpx.AsyncClient,
+    egress_policy: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
     """Processes one JSON-RPC 2.0 request object (batch item or the sole top-level request).
 
@@ -178,6 +184,38 @@ async def _process_single_call(
             )
             return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Tool forbidden for active role") if has_id else None
 
+        # SSRF / DNS-Rebinding Gate: every http(s) URL found anywhere in the raw (pre-sanitization)
+        # arguments is resolved and checked against the active egress policy before any upstream
+        # routing. Runs on the raw arguments, not the PII-sanitized copy below, so the host actually
+        # being evaluated is the one an upstream tool would actually receive.
+        try:
+            await scan_arguments(params.get("arguments", {}), egress_policy)
+        except EgressPolicyViolationError as exc:
+            AuditLogger.log_security_event(
+                event_type="mcp_egress_policy_violation",
+                severity="CRITICAL",
+                details={
+                    "reason": exc.reason,
+                    "tool_name": tool_name,
+                    "method": method,
+                    "blocked_url": exc.url,
+                    "blocked_host": exc.host,
+                    "resolved_ip": exc.matched_ip,
+                    "matched_rule": exc.matched_rule,
+                    "applied_role_name": egress_policy.get("role_name", virtual_key),
+                },
+                virtual_key_id=virtual_key,
+            )
+            return (
+                _jsonrpc_error(
+                    req_id,
+                    JSONRPC_EGRESS_FORBIDDEN,
+                    "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
+                )
+                if has_id
+                else None
+            )
+
     if not upstream_url:
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "No upstream MCP server configured") if has_id else None
 
@@ -199,15 +237,17 @@ async def _process_single_call(
     forward_payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": forward_params}
 
     try:
-        async with httpx.AsyncClient() as client:
-            upstream_res = await client.post(
-                upstream_url,
-                content=orjson.dumps(forward_payload),
-                headers={"content-type": "application/json"},
-                timeout=30.0,
-            )
-            upstream_res.raise_for_status()
-            upstream_json = orjson.loads(upstream_res.content)
+        # Reuse the app's shared, pooled HTTP/2 client rather than opening a fresh
+        # connection per call: under sustained agentic traffic a per-call client
+        # here would mean a fresh TCP/TLS handshake for every tool invocation.
+        upstream_res = await http_client.post(
+            upstream_url,
+            content=orjson.dumps(forward_payload),
+            headers={"content-type": "application/json"},
+            timeout=30.0,
+        )
+        upstream_res.raise_for_status()
+        upstream_json = orjson.loads(upstream_res.content)
     except Exception as exc:
         AuditLogger.log_security_event(
             event_type="mcp_upstream_failure",
@@ -242,9 +282,9 @@ async def _process_single_call(
     return upstream_json
 
 
-async def _resolve_role(policy_resolver: BasePolicyResolver, virtual_key: str) -> Tuple[set, set]:
+async def _resolve_role(policy_resolver: BasePolicyResolver, virtual_key: str) -> Tuple[set, set, Dict[str, Any]]:
     policy = await policy_resolver.resolve_policy(virtual_key)
-    return set(policy.get("allowed_tools", [])), set(policy.get("blocked_tools", []))
+    return set(policy.get("allowed_tools", [])), set(policy.get("blocked_tools", [])), policy
 
 
 @mcp_router.post("/v1/mcp")
@@ -274,7 +314,15 @@ async def mcp_gateway(
 
     virtual_key = _extract_virtual_key(x_shield_virtual_key, authorization)
     upstream_url = _resolve_upstream_url(x_shield_upstream_url)
-    allowed, blocked = await _resolve_role(policy_resolver, virtual_key)
+    allowed, blocked, egress_policy = await _resolve_role(policy_resolver, virtual_key)
+
+    http_client = getattr(request.app.state, "http_client", None)
+    if http_client is None:
+        # Defensive fallback for contexts without the app lifespan (e.g. isolated unit
+        # tests). Cached on app.state so repeated calls still share one pooled client
+        # instead of opening a fresh connection per request.
+        http_client = httpx.AsyncClient()
+        request.app.state.http_client = http_client
 
     if isinstance(req_data, list):
         if not req_data:
@@ -286,7 +334,7 @@ async def mcp_gateway(
 
         responses = []
         for item in req_data:
-            resp = await _process_single_call(item, allowed, blocked, virtual_key, upstream_url)
+            resp = await _process_single_call(item, allowed, blocked, virtual_key, upstream_url, http_client, egress_policy)
             if resp is not None:
                 responses.append(resp)
 
@@ -294,7 +342,7 @@ async def mcp_gateway(
             return Response(status_code=204)
         return JSONResponse(status_code=200, content=responses)
 
-    resp = await _process_single_call(req_data, allowed, blocked, virtual_key, upstream_url)
+    resp = await _process_single_call(req_data, allowed, blocked, virtual_key, upstream_url, http_client, egress_policy)
     if resp is None:
         return Response(status_code=204)
     return JSONResponse(status_code=200, content=resp)

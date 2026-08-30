@@ -246,6 +246,121 @@ def test_batch_json_rpc_requests_processed_independently(httpx_mock):
     mock_log.assert_called_once()
 
 
+def test_tools_call_ssrf_metadata_ip_blocked_and_does_not_route_upstream(httpx_mock):
+    """A tool argument targeting the cloud metadata IP is rejected fail-closed with -32003
+    before any upstream request is made. Uses a literal IP so the check never touches DNS."""
+    _override_policy({"allowed_tools": ["fetch_url"], "blocked_tools": []})
+
+    with patch("llm_shield_proxy.observability.audit.AuditLogger.log_security_event") as mock_log:
+        response = client.post(
+            "/v1/mcp",
+            headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+            json={
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {
+                    "name": "fetch_url",
+                    "arguments": {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/"},
+                },
+            },
+        )
+
+        mock_log.assert_called_once()
+        call_kwargs = mock_log.call_args[1]
+        assert call_kwargs["event_type"] == "mcp_egress_policy_violation"
+        assert call_kwargs["severity"] == "CRITICAL"
+        assert call_kwargs["details"]["resolved_ip"] == "169.254.169.254"
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == 30
+    assert body["error"]["code"] == -32003
+    assert "SSRF" in body["error"]["message"]
+
+    # No upstream request registered in httpx_mock: if the router had routed upstream, this would raise.
+    assert len(httpx_mock.get_requests()) == 0
+
+
+def test_tools_call_ssrf_loopback_ip_nested_in_arguments_blocked(httpx_mock):
+    """The URL scan walks the full argument tree, not just top-level string values."""
+    _override_policy({"allowed_tools": ["fetch_url"], "blocked_tools": []})
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "fetch_url",
+                "arguments": {"config": {"webhooks": ["http://127.0.0.1:6379/"]}},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error"]["code"] == -32003
+    assert len(httpx_mock.get_requests()) == 0
+
+
+def test_tools_call_public_url_argument_is_forwarded_upstream(httpx_mock):
+    """A tool argument containing an ordinary public URL is unaffected by the egress gate."""
+    _override_policy({"allowed_tools": ["fetch_url"], "blocked_tools": []})
+
+    httpx_mock.add_response(
+        method="POST",
+        url=UPSTREAM_URL,
+        json={"jsonrpc": "2.0", "id": 32, "result": {"ok": True}},
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {"name": "fetch_url", "arguments": {"url": "http://93.184.216.34/report"}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "error" not in body
+    assert len(httpx_mock.get_requests()) == 1
+
+
+def test_tools_call_ssrf_enterprise_cidr_override_blocks_custom_subnet(httpx_mock):
+    """A per-virtual-key `additional_denied_cidrs` entry blocks a non-RFC1918 subnet the
+    tenant has specifically flagged, even though it's otherwise a globally routable IP."""
+    _override_policy(
+        {
+            "allowed_tools": ["fetch_url"],
+            "blocked_tools": [],
+            "additional_denied_cidrs": ["34.200.0.0/16"],
+        }
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {"name": "fetch_url", "arguments": {"url": "http://34.200.5.7/"}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error"]["code"] == -32003
+    assert len(httpx_mock.get_requests()) == 0
+
+
 def test_batch_notifications_without_id_yield_no_response_entry(httpx_mock):
     """Batch items without an 'id' are JSON-RPC notifications and must not appear in the response array."""
     _override_policy({"allowed_tools": ["safe_tool"], "blocked_tools": []})
