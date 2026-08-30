@@ -46,6 +46,9 @@ class DecisionTraceExporter:
     def __init__(self, transports: list[BaseGRCTransport] | None = None):
         self.merkle_tree = MerkleTreeWORM()
         self.transports = transports or []
+        # Retains strong references to fire-and-forget dispatch tasks so they can't
+        # be garbage-collected mid-flight (see record_decision below).
+        self._background_tasks: set[asyncio.Task] = set()
 
     def record_decision(
         self,
@@ -131,7 +134,9 @@ class DecisionTraceExporter:
             try:
                 loop = asyncio.get_running_loop()
                 for transport in self.transports:
-                    loop.create_task(transport.dispatch(oscal_delta))
+                    task = loop.create_task(transport.dispatch(oscal_delta))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
             except RuntimeError:
                 # No event loop is running (e.g., in some synchronous tests)
                 logger.warning("No running event loop found; skipping async transport dispatch.")

@@ -50,6 +50,35 @@ roles:
     agent_identity_enforcer: "strict"
 ```
 
+## DPoP Replay Protection (RFC 9449 §11.1)
+
+Signature and freshness checks alone don't stop an eavesdropper from capturing a valid
+`(Workload JWT, DPoP proof)` pair off the wire and replaying it verbatim for the rest of
+the proof's freshness window -- the proof is still cryptographically valid, so signature
+verification wouldn't catch it. The Enforcer closes that gap with a server-side replay
+cache:
+
+* Every DPoP proof must carry a `jti` claim. A proof with no `jti` is rejected outright,
+  since it can never be checked for reuse.
+* On each request, the proxy computes `f"{jkt}:{jti}"` (the JWK thumbprint bound to the
+  proof, plus its unique ID) and checks it against an in-memory `TTLCache` (300s TTL,
+  matching the proof's own maximum freshness window). A cache hit means this exact proof
+  was already consumed -- the request is dropped with `HTTP 401 "DPoP proof replayed"`,
+  even though the JWT, DPoP signature, `htm`/`htu` binding, and `cnf.jkt` thumbprint all
+  check out.
+* The check runs *after* signature and freshness validation but *before* the `cnf.jkt`
+  binding check, so an unauthenticated caller can't cheaply flood the replay cache with
+  garbage `jti` values before the proof has been verified at all.
+* This is enforced regardless of `"lenient"` vs `"strict"` mode -- replay protection isn't
+  part of the `htm`/`htu` tier that lenient mode relaxes.
+
+Replay protection is per-process (the cache isn't currently shared across replicas via
+Redis), so a proof reused against a *different* pod within the TTL window would not be
+caught today. Treat this the same as any other per-process cache in the proxy (e.g. the
+in-memory rate limiter fallback): sufficient for single-replica or sticky-routing
+deployments, and a natural extension point (a Redis-backed `SETNX` with the same 300s TTL)
+for multi-replica fleets that need cross-pod replay detection.
+
 ## Plainspeak
 
 Imagine a company with 50 different AI agents performing automated tasks like reading emails or querying databases.

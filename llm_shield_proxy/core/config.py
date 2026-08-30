@@ -82,6 +82,14 @@ class Settings(BaseSettings):
         default=False, description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
     )
     OVERRIDE_CLIENT_AUTH: bool = Field(default=False, description="Strip client auth and inject UPSTREAM_API_KEY")
+    ENABLE_OPEN_BYOK_PASSTHROUGH: bool = Field(
+        default=False,
+        description=(
+            "Allow callers presenting an unrecognized key that merely looks like a provider key "
+            "(sk-proj-/sk-ant-/AIza prefix) to pass through as BYOK without matching VALID_VIRTUAL_KEYS. "
+            "Disabled by default: unauthenticated callers are rejected with 401 unless this is explicitly enabled."
+        ),
+    )
 
     # Rate Limiting
     ENABLE_RATE_LIMITING: bool = Field(default=False, description="Enable distributed Token Bucket rate limiter")

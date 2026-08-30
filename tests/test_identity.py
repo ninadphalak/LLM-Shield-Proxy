@@ -86,12 +86,12 @@ async def test_successful_validation(monkeypatch):
             if token == "my_token":
                 return {"iss": "https://my-issuer.com"}
             elif token == "my_dpop":
-                return {"htm": "POST", "htu": "https://my-api", "iat": time.time()}
+                return {"htm": "POST", "htu": "https://my-api", "iat": time.time(), "jti": "test-jti-1"}
 
         if token == "my_token":
             return {"sub": "agent_007", "cnf": {"jkt": "mock_thumbprint"}}
         elif token == "my_dpop":
-            return {"htm": "POST", "htu": "https://my-api", "iat": time.time()}
+            return {"htm": "POST", "htu": "https://my-api", "iat": time.time(), "jti": "test-jti-1"}
 
         return {}
 

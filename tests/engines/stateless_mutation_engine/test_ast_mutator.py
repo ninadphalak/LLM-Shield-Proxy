@@ -39,8 +39,11 @@ async def test_json_bomb_circuit_breaker(mutator):
 
     assert "Depth exceeded 40" in str(excinfo.value)
 
-    # Assert JSON Bomb circuit breaker trips in < 1.0 ms
-    assert (end - start) < 0.001
+    # mutate() now offloads traversal to a worker thread via asyncio.to_thread
+    # (so a large payload can't block the event loop for every other concurrent
+    # request), which trades the previous sub-millisecond bound for a small,
+    # constant thread-dispatch overhead. Still asserts the breaker trips fast.
+    assert (end - start) < 0.05
 
 
 @pytest.mark.asyncio

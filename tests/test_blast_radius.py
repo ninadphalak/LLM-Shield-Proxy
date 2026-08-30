@@ -91,8 +91,18 @@ async def test_replenish_rate(override_settings):
                 assert response3.status_code == 200
 
 @pytest.mark.asyncio
-async def test_fail_open_redis_failure(override_settings):
-    # Exceed burst capacity
+async def test_fail_closed_on_redis_failure(override_settings):
+    """Security regression test: the blast-radius (anti-exfiltration) limiter
+    must never fail OPEN on a Redis error.
+
+    Previously, any exception from the Redis Lua-script call (including a
+    stale-SHA NOSCRIPT after a Redis restart/failover -- a routine ops event,
+    not an edge case) caused check_blast_radius to return True unconditionally,
+    silently and permanently disabling exfiltration throttling for the rest of
+    the process's life. It must now degrade to the strict in-memory bucket
+    fallback (fail-closed) instead.
+    """
+    # Exceed burst capacity (100)
     emails = " ".join([f"test{i}@example.com" for i in range(150)])
     payload = {"messages": [{"role": "user", "content": emails}]}
 
@@ -114,5 +124,6 @@ async def test_fail_open_redis_failure(override_settings):
                     headers={"Authorization": "Bearer test_key"}
                 )
 
-    # Should fail open and process the request (200 OK)
-    assert response.status_code == 200
+    # Must fail CLOSED: a Redis outage must not disable exfiltration throttling.
+    assert response.status_code == 429
+    assert response.json()["error"]["type"] == "blast_radius_exceeded"

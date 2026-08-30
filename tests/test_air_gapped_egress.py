@@ -61,6 +61,9 @@ def test_air_gapped_mode_routes_to_gateway(override_settings, httpx_mock):
     # Assert the URL matches the resolved egress gateway but Host header is preserved
     assert str(req.url) == "http://10.0.0.5:8080/v1/chat/completions"
     assert req.headers.get("host") == "mock-gateway:8080"
+    # And the original gateway hostname is carried through for TLS SNI/cert
+    # verification, even though the socket connects to the pinned IP.
+    assert req.extensions.get("sni_hostname") == "mock-gateway"
 
 def test_air_gapped_mode_forwards_auth(override_settings, httpx_mock):
     settings.FORWARD_CLIENT_AUTH = True

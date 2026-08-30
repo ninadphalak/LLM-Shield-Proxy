@@ -18,7 +18,7 @@ LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** criti
 | **LLM08: Excessive Agency** | Mitigated by Granular Entity Policy Scopes (Role-Based Access Controls) restricting tool calls deterministically. |
 | **LLM10: Model Theft** | Mitigated by Dynamic Canary Watermarking & Steganography to track stolen outputs back to the source. |
 
-## 18-Vector Threat Matrix
+## 22-Vector Threat Matrix
 LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests** to ensure continuous **LLM Security Posture Management (LLM SPM)**.
 
 | Threat Vector / Attack Category | Adversarial Payload / Vector | Proxy Defense Mechanism | Verification Status |
@@ -41,6 +41,10 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 | **Insider Model Leaks** | Employees copying redacted/synthetic data to train local shadow IT models. | Dynamic Canary Watermarking & Steganography. | ✅ **PASSED** (`test_dynamic_canary_watermark_injection`) |
 | **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Cryptographic Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
 | **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Syntheticgraphic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_synthetic_masking_vault_bypass`) |
+| **DPoP Proof Replay** | Eavesdropper captures a valid `(JWT, DPoP)` pair and replays it inside its freshness window. | RFC 9449 `(jkt, jti)` replay cache (`TTLCache`, 300s TTL); a reused pair is rejected with `401 "DPoP proof replayed"` even though the proof is otherwise cryptographically valid. | ✅ **PASSED** (`test_dpop_replay_rejected_on_reuse`) |
+| **Unauthenticated BYOK Passthrough** | Caller presents a provider-shaped key (`sk-proj-*`) that matches no configured virtual key, hoping prefix-matching alone grants passthrough. | `ENABLE_OPEN_BYOK_PASSTHROUGH` (default `False`) gates the bypass; without it the request is rejected `401` before ever reaching the DLP pipeline. | ✅ **PASSED** (`test_byok_prefix_alone_rejected_by_default`) |
+| **Permissive CORS Origin Reflection** | Browser-based cross-origin request from an origin not on any allowlist. | `CORS_ALLOWED_ORIGINS` unset/empty now denies (`Access-Control-Allow-Origin: null`) by default instead of reflecting the caller's `Origin` or falling back to `*`. | ✅ **PASSED** (`test_cors_preflight_strict_default_denies_reflection`) |
+| **TLS Cert Validation Bypass on IP-Pinned SSRF Defense** | Dynamic HTTPS upstream override (`X-Upstream-Base-Url`) resolved and pinned to a validated IP for DNS-rebinding safety. | The original FQDN is preserved as the TLS SNI/certificate-verification hostname (`extensions={"sni_hostname": ...}`) even though the socket connects to the pinned IP -- so cert validation still succeeds against the real domain instead of failing (or requiring `INSECURE_SKIP_VERIFY`). | ✅ **PASSED** (`test_dynamic_upstream_override_pins_ip_but_preserves_sni`) |
 
 ## Deep Dive: Enterprise Security Features & Implementation
 
