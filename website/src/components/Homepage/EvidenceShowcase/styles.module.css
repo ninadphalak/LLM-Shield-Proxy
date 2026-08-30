@@ -1,0 +1,125 @@
+.section {
+  padding: 5rem 0;
+  background: #0d131b;
+  border-top: 1px solid #25303d;
+  border-bottom: 1px solid #25303d;
+}
+
+.header {
+  max-width: 850px;
+  margin: 0 auto 2.5rem;
+  text-align: center;
+}
+
+.eyebrow,
+.cardLabel {
+  color: var(--ifm-color-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0.65rem 0 1rem;
+  font-size: 2.25rem;
+}
+
+.subtitle {
+  color: #a8b3c1;
+  font-size: 1.08rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.card {
+  padding: 1.6rem;
+  border: 1px solid #303b48;
+  border-radius: 14px;
+  background: #111923;
+}
+
+.card h3 {
+  margin-top: 0.55rem;
+}
+
+.card p,
+.boundary {
+  color: #b3bdc9;
+}
+
+.boundary {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  border-left: 3px solid #f2b84b;
+  background: rgba(242, 184, 75, 0.08);
+  font-size: 0.9rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 1rem 0;
+}
+
+.chips span {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #344353;
+  border-radius: 999px;
+  color: #c6d0da;
+  font-size: 0.78rem;
+}
+
+.command {
+  overflow-x: auto;
+  margin: 1.1rem 0;
+  padding: 0.85rem;
+  border-radius: 8px;
+  background: #080c11;
+  color: #d8ffe9;
+  font-size: 0.82rem;
+}
+
+.openSource {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-top: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(0, 255, 157, 0.35);
+  border-radius: 14px;
+  background: rgba(0, 255, 157, 0.045);
+}
+
+.openSource p {
+  max-width: 760px;
+  margin: 0.4rem 0 0;
+  color: #b8c3cd;
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.65rem;
+}
+
+@media screen and (max-width: 800px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .openSource {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+}

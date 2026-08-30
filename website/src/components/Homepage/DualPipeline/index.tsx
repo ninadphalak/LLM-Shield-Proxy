@@ -14,7 +14,7 @@ export default function DualPipeline(): ReactNode {
           </Heading>
           <p className={styles.subtitle}>
             Most redaction tools only look at conversational text. But a growing share of GenAI
-            traffic is agents calling tools, functions, and other agents behind the scenes — and
+            traffic is agents calling tools, functions, and other agents behind the scenes - and
             that structured traffic carries sensitive data too. LLM-Shield-Proxy protects both,
             automatically, with no configuration required to tell them apart.
           </p>
@@ -28,7 +28,7 @@ export default function DualPipeline(): ReactNode {
             </Heading>
             <p className={styles.cardBody}>
               When a person is chatting with an AI assistant, you choose how sensitive data gets
-              handled — swap it for a realistic-looking fake, replace it with a plain tag, destroy
+              handled - swap it for a realistic-looking fake, replace it with a plain tag, destroy
               it outright, or encrypt it in place. You can change this per request, without
               restarting anything.
             </p>
@@ -43,8 +43,8 @@ export default function DualPipeline(): ReactNode {
               Machine ↔ Machine (agent tool calls)
             </Heading>
             <p className={styles.cardBody}>
-              When one AI system hands structured data to another — a tool call, a function
-              argument, a JSON-RPC message — the proxy automatically finds sensitive values hidden
+              When one AI system hands structured data to another - a tool call, a function
+              argument, a JSON-RPC message - the proxy automatically finds sensitive values hidden
               inside that structure, swaps in realistic-looking fakes, and can safely restore the
               originals afterward. It never stores anything and it never breaks the format the
               receiving system expects, so your agents don't crash.

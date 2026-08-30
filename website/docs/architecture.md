@@ -4,7 +4,7 @@
 
 ## 🏗️ Architecture & Cryptographic Data Flow (Executive Summary)
 
-This document details the underlying technical mechanics and data flow of the LLM-Shield-Proxy, establishing the mathematical and systemic foundation for our global regulatory compliance posture.
+This document describes the proxy's technical mechanics and evidence boundaries. The features can support regulatory controls; they do not establish compliance by themselves.
 
 ## Architectural Traffic Flow
 
@@ -16,7 +16,7 @@ The LLM-Shield-Proxy operates as an in-VPC mathematical sanitization layer. The 
 |   Client    |=======> |  +-----------------------------------------------------+  |=======>  | External LLM  |
 | Application |         |  | 1. Ingress Scanning & 3-Tier Cascade Redaction      |  |          | (OpenAI,      |
 |             | <=======|  |    - C++ google-re2 DFA Regex (O(N) linear time)  |  | <======= |  Anthropic,   |
-+-------------+  (SSE)  |  |    - Vectorized Shannon Entropy Scanner (&lt;6 µs)     |  |  (SSE)   |  Gemini,      |
++-------------+  (SSE)  |  |    - Local Shannon Entropy Scanner                 |  |  (SSE)   |  Gemini,      |
                         |  |    - Quantized ONNX BERT-NER (in-memory)            |  |          |  vLLM)        |
                         |  +-------------------------+---------------------------+  |          +---------------+
                         |                            |                              |
@@ -27,7 +27,7 @@ The LLM-Shield-Proxy operates as an in-VPC mathematical sanitization layer. The 
                         |  +-------------------------+---------------------------+  |
                         |                            |                              |
                         |  +-------------------------v---------------------------+  |
-                        |  | 3. WORM Audit Logging & GRC Dispatch                |  |
+                        |  | 3. Signed Audit Evidence & GRC Dispatch             |  |
                         |  |    - SHA-256 Sequential Merkle Hash Chaining        |  |
                         |  |    - RFC 6902 JSON Patch Differential Logs          |  |
                         |  |    - Universal Decision Trace Exporter (NIST OSCAL) |=============> To Vanta, Drata,
@@ -52,7 +52,7 @@ The LLM-Shield-Proxy operates as an in-VPC mathematical sanitization layer. The 
 ### Stage 1: Ingress Scanning & 3-Tier Cascade Redaction
 Upon ingress, payloads are intercepted by a highly optimized redaction engine:
 1. **Tier 1 (Structured Identifiers):** Pre-compiled C++ `google-re2` Deterministic Finite Automaton (DFA) regex engine guarantees O(N) linear time execution, making it fundamentally immune to Regular Expression Denial of Service (ReDoS) attacks. Handles SSNs, emails, IPs, and custom identifiers (`BYOR` - Bring Your Own Regex).
-2. **Tier 2 (Unstructured Secrets):** Vectorized Shannon Entropy scanner operates at O(N) bit density with &lt;6 µs latency to detect embedded cryptographic secrets, API keys, and high-entropy tokens.
+2. **Tier 2 (Unstructured Secrets):** The Shannon entropy scanner identifies secret-like high-entropy candidates. Measure it on the exact payload distribution and do not treat entropy alone as proof of a secret.
 3. **Tier 3 (Conversational Entities):** Quantized ONNX BERT-NER models execute natively in-memory (optional NLP mode) for context-aware entity extraction. Supports BYOM (Bring Your Own Model) for specialized architectures like BioBERT, ClinicalBERT, XLM-RoBERTa, and Legal-BERT.
 
 ### Stage 2: Stateless Envelope Encryption & Masking
@@ -64,21 +64,21 @@ To prevent PII egress to third-party LLMs without breaking token counts or atten
   - `SCRUB`: Hard deletion of offending tokens.
   - `STATELESS_CRYPTO`: Fully reversible encrypted envelopes.
 
-### Stage 3: WORM Merkle Chaining & Traceability
-To satisfy non-repudiation and traceability without retaining prompt data:
-- **WORM Audit Logging:** Employs SHA-256 sequential Merkle hash chaining, cryptographically linking each event to its predecessor to detect any tampering.
+### Stage 3: Tamper-Evident Chaining & Traceability
+To support integrity and traceability without retaining prompt data:
+- **Audit evidence:** SHA-256 predecessor links and Ed25519 signatures let offline verification detect changes within the supplied chain. Local storage is not WORM; immutable retention and external anchoring are deployment controls.
 - **Differential Logging:** RFC 6902 JSON patch audit logging records *which* entity categories were redacted, strictly avoiding the logging of raw PII.
 - **Proof of Non-Egress Receipt:** Calculates a rolling SHA-256 digest over SSE streams, emitting an HMAC-signed attestation proof.
 
 ### Stage 4: Sliding-Window SSE Rehydration
-For sub-millisecond streaming latency and seamless user experiences:
-- **SSE Sliding Buffers:** Employs a sub-millisecond sliding-window SSE lookahead buffer (&lt;4.3 µs overhead per chunk) retaining prefix overlap. This allows the proxy to accurately rehydrate fragmented encrypted tokens across fragmented Server-Sent Events (SSE) chunks without UI stalls.
+For incremental streaming and bounded retained state:
+- **SSE Sliding Buffers:** The lookahead buffer retains prefix overlap so placeholders fragmented across SSE events can be rehydrated. Historical component timings are not total proxy overhead; use the conformance and service-level protocols.
 - **Bounded Parsers:** Utilizes Rust-backed `orjson` streaming parsing with a bounded JSON recursion depth (`max_depth=40`) to inherently defeat stack-overflow attacks.
 
 ### Stage 5: Ephemeral Memory Eviction
 To achieve a true Zero-Data state:
 - **Zero-Data Mode:** Employs ephemeral, self-destructing in-memory vaults.
-- **Instant TTL:** Deterministic short-lived TTL eviction limits the proxy's memory footprint to &lt;85 MB RAM.
+- **TTL eviction:** Deterministic short-lived eviction bounds the lifetime of state. Process RSS depends on installation mode and workload.
 - **Zero Persistence:** Absolutely no prompt or PII data is ever written or persisted to local disk storage, eliminating data at rest liabilities.
 
 
@@ -86,34 +86,34 @@ To achieve a true Zero-Data state:
 
 ## 🔬 Deep Dive Mechanics
 
-LLM-Shield-Proxy is engineered as a stateless, asynchronous middleware data plane. It sits transparently between your enterprise applications and upstream Large Language Models, optimizing for microsecond latency overhead while performing heavy cryptographic and heuristic operations.
+LLM-Shield-Proxy is an asynchronous middleware data plane between enterprise applications and upstream models. Component and service-level overhead are reported separately.
 
-This document details the exact architectural mechanics of the underlying C++ and Rust-backed engines, demonstrating why LLM-Shield achieves unprecedented &lt;6ms end-to-end token latency.
+The sections below identify the bounded algorithms and native components that should be evaluated in a reproducible deployment benchmark.
 
 ## 1. ⚙️ The Data Plane & Streaming Engine
 
 To process millions of tokens per minute without saturating the Python Global Interpreter Lock (GIL), the proxy abandons traditional standard libraries in favor of aggressively optimized native extensions.
 
-### Zero-Allocation Streaming JSON Lexer (`orjson` / Rust)
-* **Implementation Mechanics:** The `streaming/buffer.py` engine leverages `orjson` (a Rust-backed serializer). It parses fragmented Server-Sent Events (SSE) directly from raw TCP frames in-band. By bypassing intermediate Python dictionary allocations, the engine maps JSON directly to memory, guaranteeing that the Resident Set Size (RSS) remains strictly below `&lt;60MB` even under massive volumetric floods.
+### Bounded Streaming JSON Lexer (`orjson` / Rust)
+* **Implementation Mechanics:** The streaming engine uses `orjson` and processes fragmented SSE events incrementally. The conformance report checks retained-buffer bounds and measured allocation; no universal RSS ceiling is claimed.
 * **Flags:** [`MAX_SSE_LINE_LENGTH`](/docs/deployment)
 
 ### Resilient SSE Sliding-Window Buffer
 * **Implementation Mechanics:** Server-Sent Events (SSE) stream arbitrary token chunks. An entity like `[PERSON_1]` may arrive fragmented across `[PER`, `SON_`, and `1]`. The `SSERehydrationBuffer` is a custom asynchronous generator that dynamically retains trailing characters. The buffer bound is defined by $LL = max(0, max_token_length - 1), maintaining mathematical overlap and executing prefix-safe regex rehydration without dropping streams or blocking the event loop.
 
 ### Context-Aware MCP Discovery Interception
-* **Implementation Mechanics:** To support Stateless MCP architecture and Progressive Discovery (SEP-2549), the proxy utilizes `MCPDiscoveryPrunerMiddleware`. It streams JSON-RPC tool catalogs through our Rust-backed `orjson` lexer, performing O(1) RBAC `frozenset` evaluations to redact unauthorized tools. The payload is piped downstream in 64KB chunks to perfectly respect ASGI backpressure and maintain the strictly capped `&lt;85 MB` RAM process footprint.
+* **Implementation Mechanics:** To support stateless MCP architecture and progressive discovery, `MCPDiscoveryPrunerMiddleware` evaluates JSON-RPC tool catalogs against RBAC `frozenset` values and emits bounded chunks with ASGI backpressure. Measure process memory under the intended catalog and concurrency distribution.
 
 ### Dual-Pipeline Routing & Dynamic Schema Rewriting (Machine-to-Machine)
 * **Implementation Mechanics:** In `main.py`, the ingress layer strictly forks traffic based on payload structure. If it detects `payload.get("jsonrpc") == "2.0"`, it bypasses the standard text regex configuration and forces the **AST-Aware Semantic Firewall**.
 * **Detection & Substitution:** Inside the structured JSON strings, PII is detected via the **Shannon Entropy Scanner** and Regex. The proxy then uses **canonical locale substitution** to generate a structurally coherent synthetic substitute to preserve downstream LLM attention weights and structural integrity.
-* **Dynamic Schema Injection:** To preserve the structure of autonomous agent JSON while applying encryption, the proxy dynamically rewrites the OpenAI/MCP tool schema on the fly. It injects cryptographic cipher context (like `_ctx_hash_prop`) into the `properties` map and appends it to the `required` schema array. Because the injected hidden field is legally required by the schema, the downstream LLM is mathematically forced by its own output-parser to echo the hidden fields back in its response. This guarantees 100% stateless rehydration across multiple proxy replicas (zero Redis dependency) without dropping data.
+* **Dynamic Schema Injection:** The proxy can add cryptographic context fields to an OpenAI/MCP tool schema and mark them required. Provider behavior is not mathematically guaranteed; conformance and integration tests must verify echo and rehydration behavior for each selected model/provider.
 ## 2. 🛡️ The 3-Tier Redaction Cascade
 
 The engine pipelines payload text through three consecutive filters, balancing compute cost against redaction recall.
 
 ### Tier 1: DFA Pre-compiled Regex (`google-re2`)
-* **Implementation Mechanics:** Using the `re2` C++ engine, all custom regexes and predefined identifiers are compiled into Deterministic Finite Automatons (DFAs) at startup. This guarantees O(N) linear time execution. It mathematically immunizes the proxy against Regular Expression Denial of Service (ReDoS) attacks, processing 10,000-word payloads in `&lt;0.03ms`.
+* **Implementation Mechanics:** When available, the `re2` engine compiles supported patterns to avoid catastrophic backtracking. Unsupported constructs and fallback-engine behavior must be checked at startup. Throughput is workload-specific.
 
 ### Tier 2: Shannon Entropy
 
@@ -134,7 +134,7 @@ Because LLM-Shield is a strict Zero-Data proxy, PII to Tag mappings must be main
 * **Flags:** [`REDIS_URL`](/docs/deployment), [`SESSION_TTL_SECONDS`](/docs/deployment)
 
 ### In-Band Stateless Syntheticgraphic Masking
-* **Implementation Mechanics:** For organizations without Redis, the proxy operates in 100% stateless mode. Entities are encrypted using AES-256-GCM envelope encryption. The encrypted ciphertext is converted to Base62 and passed *into* the LLM prompt. The downstream SSE stream returns the ciphertext, and the proxy decrypts it on the fly using a 256-bit DEK, eliminating the need for state completely.
+* **Implementation Mechanics:** For organizations without Redis, protected values can be encrypted into the payload using AES-256-GCM. Successful rehydration depends on the upstream returning the protected envelope intact and must be integration-tested with the configured provider.
 * **Flags:** [`SHIELD_DEFAULT_MASKING_MODE`](/docs/deployment)
 
 ## 4. 🌐 Service Mesh & Multi-Provider Translation
@@ -173,15 +173,15 @@ Attackers frequently use invisible Unicode characters and encoding tricks to byp
 Modern LLMs operate over multi-turn agentic workflows, embeddings, and vision inputs.
 * **Multi-Part Message Content:** Universally traverses mixed content arrays (`[{"type": "text"}, {"type": "image_url"}]`), sanitizing prompt text without corrupting binary image data.
 * **Recursive Tool Calls & Arguments:** Deeply inspects and redacts JSON strings inside `tool_calls[*].function.arguments`.
-* **JSON Recursion Bomb Defense:** Enforces a hard `max_depth = 20` traversal limit, returning `400 Bad Request` in `&lt;1ms` against stack-overflow payload attacks.
+* **JSON Recursion Bomb Defense:** Enforces a hard `max_depth = 20` traversal limit and rejects over-depth payloads with `400 Bad Request`.
 
 ## 7. ⚖️ Governance, AI Security & Compliance Tracing
 
 To satisfy stringent enterprise regulations and maintain a strict **Zero Trust AI** architecture without degrading stream latency, the **LLM Firewall** decouples policy resolution from the execution plane. This ensures continuous **AI Governance** and robust **LLM Security Posture Management (LLM SPM)**.
 
 ### Pluggable Tool-Call RBAC Engine (Autonomous Agent Security)
-* **Implementation Mechanics:** The **AI Gateway** proxy uses a custom Zero-Allocation Streaming Pushdown Automaton to parse SSE chunks in `&lt;1.0µs` and extract tool execution keys (`name` or `method`). The extracted tools are validated against an asynchronously resolved `BasePolicyResolver` (e.g., `RedisPolicyResolver`). If an unauthorized tool is detected mid-stream, the proxy instantly synthesizes a deterministic rejection chunk and severs the upstream socket, providing impenetrable **Autonomous Agent Security**.
+* **Implementation Mechanics:** A bounded streaming parser extracts tool execution keys (`name` or `method`) across SSE chunks. The keys are validated against a `BasePolicyResolver`; denied calls produce a rejection event. Latency and bypass resistance require deployment-specific tests.
 * **Further Details:** Read the full implementation reference in [docs/pluggable-rbac-engine.md](docs/pluggable-rbac-engine.md).
 
 ### Merkle-Attested Trace Exporter (OSCAL & OTel for SOC 2 / ISO 42001)
-* **Implementation Mechanics:** Every RBAC decision and **Data Loss Prevention (DLP)** redaction event is deterministically serialized using `orjson.dumps(..., option=orjson.OPT_SORT_KEYS)` to prevent log injection (e.g., null bytes). The record is then appended to a local WORM-compliant Merkle Tree, maintaining a cryptographic hash chain of all events. These records are simultaneously emitted as OpenTelemetry (OTel) gRPC spans and exported as NIST OSCAL (Open Security Controls Assessment Language) machine-readable JSON artifacts, drastically simplifying **SOC 2 Compliance for AI** and **ISO 42001 AI Management System** audits.
+* **Implementation Mechanics:** RBAC and **Data Loss Prevention (DLP)** events are deterministically serialized and linked in a tamper-evident SHA-256 chain. Durable modes append signed records to local JSONL; immutable WORM retention, if required, is supplied by the deployment's evidence store. Events can also be exported as OpenTelemetry spans and NIST OSCAL machine-readable artifacts to support control assessment.

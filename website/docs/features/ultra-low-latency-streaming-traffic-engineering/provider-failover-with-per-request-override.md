@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Evaluates routing headers in `&lt;0.5 µs` via `contextvars`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Retries are managed via asynchronous jitter, ensuring failed requests do not block the connection pool.
 
 ## Configuration Flags

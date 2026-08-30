@@ -31,7 +31,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Adds merely `~4.23 µs` of latency per SSE delta chunk.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Operates as a pure Python asynchronous generator, completely bypassing blocking I/O calls.
 
 ## Configuration Flags
@@ -50,7 +50,7 @@ View diagram on GitHub mobile 📱 -->
 A: Absolutely not. The proxy emits standard OpenAI-compliant SSE streams (`data: {...}`). Your existing React/Next.js frontend using `ai` (Vercel AI SDK) or `fetch` will consume it perfectly, completely unaware that the data was de-masked on the fly.
 
 **Q: What happens if the upstream provider sends malformed SSE JSON?**
-A: The Rust-backed zero-allocation lexer (`orjson`) is highly resilient. If it encounters structurally invalid JSON inside the `data:` block, the sliding window attempts to repair the stream boundary. If irreparable, it safely flushes the buffer and gracefully terminates the socket, preventing corruption.
+A: Invalid JSON is handled according to the stream parser's tested error path. The conformance suite separately checks SSE syntax and reconstruction; the buffer must not be described as a general JSON repair mechanism.
 
 **Q: Does this work for Anthropic's Claude as well?**
 A: Yes! The proxy's Multi-Provider Translator automatically normalizes Anthropic's complex `content_block_delta` SSE chunks into the standard sliding-window structure, de-masks them, and streams them out.

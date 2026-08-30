@@ -8,7 +8,7 @@
 ## How It Works
 AI Agents are inherently unpredictable. Without strict enforcement, an agent might decide to execute `drop_database_table` instead of `select_users`.
 
-1. **Streaming JSON Interception:** As the LLM streams its decision to use a tool, the proxy uses a Zero-Allocation Pushdown Automaton to inspect the `name` or `method` field of the `tool_calls` payload.
+1. **Streaming JSON Interception:** As the LLM streams its decision to use a tool, the proxy uses a bounded-state parser to inspect the `name` or `method` field of the `tool_calls` payload.
 2. **Policy Resolution:** The tool name is validated against a pluggable backend (e.g., a Redis Policy Store, HashiCorp Vault, or Open Policy Agent (OPA)).
 3. **Instant Circuit Breaking:** If the Virtual Key associated with the request is not authorized to execute the specific tool, the proxy deterministically rejects the tool call, synthesizing a safe failure response to the agent and dropping the upstream socket.
 
@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Tool extraction and local policy validation occurs in `&lt;1.0 µs`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely lightweight execution enforcing Zero Trust without delaying agent interactions.
 
 ## Configuration Flags

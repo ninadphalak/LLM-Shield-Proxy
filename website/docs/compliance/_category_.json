@@ -4,7 +4,7 @@
   "link": {
     "type": "generated-index",
     "title": "Compliance Frameworks",
-    "description": "How LLM-Shield-Proxy's technical controls map to HIPAA, SOC 2, GDPR, the EU AI Act, and NIST/ISO/FIPS standards. These pages describe technical safeguards the proxy provides — deploying it is one control among the many a compliance program requires, not a substitute for a full audit or certification.",
+    "description": "How LLM-Shield-Proxy's technical controls map to HIPAA, SOC 2, GDPR, the EU AI Act, and NIST/ISO/FIPS standards. These pages describe technical safeguards the proxy provides - deploying it is one control among the many a compliance program requires, not a substitute for a full audit or certification.",
     "slug": "/compliance"
   }
 }

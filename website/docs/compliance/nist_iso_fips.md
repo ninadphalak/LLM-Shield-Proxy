@@ -15,9 +15,9 @@ Manually mapping LLM events to compliance controls is impossible at scale. The p
 - **Automated Mapping:** The proxy's **GRC Dispatcher** captures low-level interception and redaction events and maps these AI system decisions to automated **NIST OSCAL (Open Security Controls Assessment Language)** compliance artifacts.
 - **GRC Integration:** These OSCAL artifacts, alongside OpenTelemetry `gen_ai.*` spans, are continuously dispatched to external GRC and observability tools (e.g., Vanta, Drata, Datadog). This provides auditors with a real-time, provable dashboard of the system's risk posture.
 
-### WORM Logging & Traceability
+### Tamper-Evident Logging & Traceability
 As required by NIST Audit and Accountability (AU) controls:
-- **Merkle Hash Chaining:** All security events utilize SHA-256 sequential Merkle hash chaining, guaranteeing WORM (Write Once, Read Many) integrity and non-repudiation of the audit trail.
+- **Hash chaining and signatures:** Security events can use sequential SHA-256 linking and Ed25519 signatures for offline integrity and authenticity checks. These mechanisms do not make local storage WORM; immutable retention must be configured separately.
 - **RFC 6902 Differential Logs:** Logs strictly record the categories of data manipulated (JSON patch differential logs) ensuring that the logging infrastructure itself does not become a toxic data asset.
 
 ## FIPS 140-3 Integrity Controls

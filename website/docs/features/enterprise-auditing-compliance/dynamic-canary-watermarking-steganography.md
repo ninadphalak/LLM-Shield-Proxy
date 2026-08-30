@@ -29,7 +29,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** String injection executes in `&lt;1µs` per stream chunk.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Adds roughly 1-2 bytes per injected bit, resulting in negligible bandwidth overhead.
 
 ## Configuration Flags

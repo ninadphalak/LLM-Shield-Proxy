@@ -10,7 +10,7 @@ When the proxy intercepts a request, it must traverse the JSON payload to find s
 
 1. **Streaming Lexer Interception:** As the Rust-backed `orjson` parser deserializes the payload, the proxy tracks the recursive depth of the Abstract Syntax Tree (AST).
 2. **Hard-Capped Traversal:** The engine enforces a strict recursive depth limit (`max_depth = 40` by default).
-3. **Instant Rejection:** If the parser detects an object or array nesting level exceeding this limit, the traversal immediately halts, and the proxy drops the connection, returning an HTTP `400 Bad Request` to the client in `&lt;1ms`.
+3. **Bounded Rejection:** If the parser detects an object or array nesting level exceeding this limit, traversal halts and the proxy returns HTTP `400 Bad Request`.
 
 
 ```mermaid
@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Depth checking is O(1) per node and adds negligible overhead to the standard parsing pass.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Protects the Python event loop from blocking recursively, ensuring multi-tenant proxy stability.
 
 ## Configuration Flags

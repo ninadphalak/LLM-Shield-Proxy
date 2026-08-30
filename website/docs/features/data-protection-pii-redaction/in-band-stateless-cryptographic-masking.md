@@ -43,7 +43,7 @@ The encryption is completely stateless. All proxy replicas share a master symmet
 Because the nonce travels with the data, the returning SSE stream from the LLM can be routed by a load balancer to a completely different proxy replica (e.g., Replica B). Replica B simply extracts the nonce from the cipher-token and uses the shared master key in memory to decrypt it instantly. This eliminates the need for sticky sessions or a synchronized state store like Redis.
 
 ## Performance Profile
-- **Execution Speed:** `~1.76 µs` per encrypt/decrypt cycle.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely lightweight, adding negligible latency to the stream.
 
 ## Configuration Flags

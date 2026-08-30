@@ -14,7 +14,7 @@ type Phase = 'idle' | 'typing' | 'sent' | 'received';
 const MODE_OPTIONS: {value: MaskMode; label: string; blurb: string}[] = [
   {value: 'SYNTHETIC', label: 'Synthetic', blurb: 'Realistic fake values that preserve tone and token count.'},
   {value: 'STRUCTURAL_TAG', label: 'Structural', blurb: 'Explicit bracketed tags like [PERSON_1].'},
-  {value: 'SCRUB', label: 'Scrub', blurb: 'One-way destruction — nothing is kept, so nothing comes back.'},
+  {value: 'SCRUB', label: 'Scrub', blurb: 'One-way destruction - nothing is kept, so nothing comes back.'},
   {value: 'STATELESS_CRYPTO', label: 'AES-256-GCM', blurb: 'In-band authenticated ciphertext. Zero Redis dependency.'},
 ];
 
@@ -31,21 +31,21 @@ const ENTITY_COLORS: Record<string, string> = {
 const PHASE_LABEL: Record<Phase, string> = {
   idle: 'Type a prompt, or load an example below, to begin',
   typing: '⌨️ Typing…',
-  sent: '🛰️ Redacted payload sent to LLM — awaiting response…',
-  received: '✅ Response received — PII rehydrated for your screen',
+  sent: '🛰️ Redacted payload sent to LLM - awaiting response…',
+  received: '✅ Response received - PII rehydrated for your screen',
 };
 
 const AGENT_PHASE_LABEL: Record<Phase, string> = {
   idle: 'Pick a Tier 3 example above to load a tool-call payload',
   typing: '⏳ Building JSON-RPC payload…',
-  sent: '🛰️ Redacted payload sent to LLM — awaiting response…',
-  received: '✅ Response received — PII rehydrated for the calling agent',
+  sent: '🛰️ Redacted payload sent to LLM - awaiting response…',
+  received: '✅ Response received - PII rehydrated for the calling agent',
 };
 
 type TerminalPart = {text: string; kind: 'comment' | 'sensitive' | 'protected' | 'restored' | null};
 
 const TERMINAL_LINES: TerminalPart[] = [
-  {text: '# Before — talking straight to the provider\n', kind: 'comment'},
+  {text: '# Before - talking straight to the provider\n', kind: 'comment'},
   {text: '$ curl https://api.openai.com/v1/chat/completions \\\n', kind: null},
   {text: '    -H "Authorization: Bearer $OPENAI_API_KEY" \\\n', kind: null},
   {text: '    -d \'{"model":"gpt-4o","messages":[{"role":"user","content":"Update record for ', kind: null},
@@ -53,7 +53,7 @@ const TERMINAL_LINES: TerminalPart[] = [
   {text: ', SSN ', kind: null},
   {text: '456-12-7890', kind: 'sensitive'},
   {text: '"}]}\'\n\n', kind: null},
-  {text: '# After — point the same SDK at LLM-Shield-Proxy. Nothing else changes.\n', kind: 'comment'},
+  {text: '# After - point the same SDK at LLM-Shield-Proxy. Nothing else changes.\n', kind: 'comment'},
   {text: '$ curl ', kind: null},
   {text: 'https://shield.internal.acme.corp', kind: 'protected'},
   {text: '/v1/chat/completions \\\n', kind: null},
@@ -166,7 +166,7 @@ function MaskedPayload({segments}: {segments: RedactionResult['segments']}): Rea
 }
 
 function RehydratedPayload({segments, mode}: {segments: RedactionResult['segments']; mode: MaskMode}): ReactNode {
-  // SCRUB is one-way by design — the proxy never stores what it destroyed, so
+  // SCRUB is one-way by design - the proxy never stores what it destroyed, so
   // there is nothing to restore. Showing the real values here would misrepresent
   // how the mode actually behaves in production.
   const canRehydrate = mode !== 'SCRUB';
@@ -199,9 +199,9 @@ function RehydratedPayload({segments, mode}: {segments: RedactionResult['segment
 type TrafficType = 'CHAT' | 'AGENT';
 
 const AGENT_BLURB =
-  'Structured JSON-RPC / MCP tool calls always use AES-256-GCM (Stateless Crypto) — Scrub and Structural ' +
+  'Structured JSON-RPC / MCP tool calls always use AES-256-GCM (Stateless Crypto) - Scrub and Structural ' +
   'Tags would break the payload schema. Tier 1 regex, Tier 2 synthesis, and Tier 3 NER still scan every ' +
-  'string value inside the JSON tree exactly as they do for chat text — switch the Tier 3 example above ' +
+  'string value inside the JSON tree exactly as they do for chat text - switch the Tier 3 example above ' +
   'to see it fire on different fields.';
 
 export default function InteractiveShieldDemo(): ReactNode {
@@ -220,7 +220,7 @@ export default function InteractiveShieldDemo(): ReactNode {
   const backdropRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Real-time highlighting inside the input box itself — recomputed on every
+  // Real-time highlighting inside the input box itself - recomputed on every
   // keystroke, independent of the debounced "send to LLM" simulation below.
   const liveResult = useMemo(() => analyzeAndMask(text, mode), [text, mode]);
 
@@ -262,15 +262,15 @@ export default function InteractiveShieldDemo(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <div className={styles.header}>
-          <span className={styles.eyebrow}>Try it yourself — no signup, no server, no data leaves your browser</span>
+          <span className={styles.eyebrow}>Try it yourself - no signup, no server, no data leaves your browser</span>
           <Heading as="h2" className={styles.title}>
             Type real PII. Watch it never reach the LLM.
           </Heading>
           <p className={styles.subtitle}>
             This is a live, 100% client-side preview of Tier 1 (regex) and Tier 2 (format-preserving
-            synthesis) detection — nothing here calls a real LLM or leaves your machine. The
+            synthesis) detection - nothing here calls a real LLM or leaves your machine. The
             production engine adds a local ONNX NER model (Tier 3) for free-text names and
-            organizations, and genuine AES-256-GCM for the AES-256-GCM mode — and runs that identical
+            organizations, and genuine AES-256-GCM for the AES-256-GCM mode - and runs that identical
             three-tier cascade on every string value inside structured JSON-RPC / tool-call traffic too,
             not a separate or reduced pipeline. Switch <strong>Traffic type</strong> to{' '}
             <strong>Agent tool call</strong> below to see it fire inside a JSON payload.
@@ -295,7 +295,7 @@ export default function InteractiveShieldDemo(): ReactNode {
               className={styles.select}
               value={mode}
               disabled={isAgentMode}
-              title={isAgentMode ? 'Locked — structured JSON-RPC payloads always use AES-256-GCM' : undefined}
+              title={isAgentMode ? 'Locked - structured JSON-RPC payloads always use AES-256-GCM' : undefined}
               onChange={(e) => setMaskModeSelection(e.target.value as MaskMode)}>
               {MODE_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -354,7 +354,7 @@ export default function InteractiveShieldDemo(): ReactNode {
                         {AGENT_JSON_SUFFIX}
                       </>
                     ) : (
-                      <span className={styles.emptyState}>No sensitive entities detected — sent as-is.</span>
+                      <span className={styles.emptyState}>No sensitive entities detected - sent as-is.</span>
                     )
                   ) : (
                     <span className={styles.emptyState}>Waiting for the tool call to build…</span>
@@ -372,11 +372,11 @@ export default function InteractiveShieldDemo(): ReactNode {
                         {AGENT_JSON_SUFFIX}
                       </>
                     ) : (
-                      <span className={styles.emptyState}>Nothing to rehydrate — no entities were masked.</span>
+                      <span className={styles.emptyState}>Nothing to rehydrate - no entities were masked.</span>
                     )
                   ) : phase === 'sent' ? (
                     <span className={styles.pending}>
-                      <span className={styles.spinner} /> Non-blocking — proxy is holding the mapping while
+                      <span className={styles.spinner} /> Non-blocking - proxy is holding the mapping while
                       the LLM responds…
                     </span>
                   ) : (
@@ -400,10 +400,10 @@ export default function InteractiveShieldDemo(): ReactNode {
             </div>
             <p className={styles.agentCaption}>
               This is the exact same Tier 1/2/3 cascade as the chat demo, run against the{' '}
-              <code>notes</code> string inside a real JSON-RPC <code>tools/call</code> envelope — the proxy
+              <code>notes</code> string inside a real JSON-RPC <code>tools/call</code> envelope - the proxy
               recursively scans every string value in the payload tree, not just top-level or
               "known" fields. Structured tool calls always use <strong>AES-256-GCM (Stateless Crypto)</strong>{' '}
-              — never Scrub or Structural Tags — because those would alter the payload's shape and could
+              - never Scrub or Structural Tags - because those would alter the payload's shape and could
               break the calling agent's schema. The proxy restores the original value before handing the
               response back. No Redis, no database, no long-term storage.
             </p>
@@ -439,7 +439,7 @@ export default function InteractiveShieldDemo(): ReactNode {
                     sentResult.totalEntities > 0 ? (
                       <MaskedPayload segments={sentResult.segments} />
                     ) : (
-                      <span className={styles.emptyState}>No sensitive entities detected — sent as-is.</span>
+                      <span className={styles.emptyState}>No sensitive entities detected - sent as-is.</span>
                     )
                   ) : (
                     <span className={styles.emptyState}>Waiting for you to stop typing…</span>
@@ -454,11 +454,11 @@ export default function InteractiveShieldDemo(): ReactNode {
                     sentResult.totalEntities > 0 ? (
                       <RehydratedPayload segments={sentResult.segments} mode={mode} />
                     ) : (
-                      <span className={styles.emptyState}>Nothing to rehydrate — no entities were masked.</span>
+                      <span className={styles.emptyState}>Nothing to rehydrate - no entities were masked.</span>
                     )
                   ) : phase === 'sent' ? (
                     <span className={styles.pending}>
-                      <span className={styles.spinner} /> Non-blocking — proxy is holding the mapping while
+                      <span className={styles.spinner} /> Non-blocking - proxy is holding the mapping while
                       the LLM responds…
                     </span>
                   ) : (
@@ -482,7 +482,7 @@ export default function InteractiveShieldDemo(): ReactNode {
             </div>
             {mode === 'SCRUB' && phase === 'received' && sentResult && sentResult.totalEntities > 0 && (
               <p className={styles.scrubNote}>
-                Scrub mode destroys the original values on the way in — there's nothing stored to restore,
+                Scrub mode destroys the original values on the way in - there's nothing stored to restore,
                 so the response above still shows the redacted placeholders. Switch to Synthetic,
                 Structural, or AES-256-GCM to see full rehydration.
               </p>
@@ -493,10 +493,10 @@ export default function InteractiveShieldDemo(): ReactNode {
         <div className={styles.terminalSection}>
           <span className={styles.eyebrow}>Zero code changes</span>
           <Heading as="h3" className={styles.subsectionTitle}>
-            Point your existing SDK at the proxy — that's the whole integration
+            Point your existing SDK at the proxy - that's the whole integration
           </Heading>
           <p className={styles.terminalIntro}>
-            Same request. Same SDK. The only change is the <code>base_url</code> — everything upstream
+            Same request. Same SDK. The only change is the <code>base_url</code> - everything upstream
             of the proxy is invisible to your existing agents, scripts, and machine-to-machine tool calls.
           </p>
           <div className={styles.terminal}>

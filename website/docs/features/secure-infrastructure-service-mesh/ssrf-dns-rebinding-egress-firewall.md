@@ -4,7 +4,7 @@
 
 ## What It Does
 
-Autonomous agents don't just read text — via MCP `tools/call`, they hand the proxy URLs
+Autonomous agents don't just read text - via MCP `tools/call`, they hand the proxy URLs
 to fetch: webhooks, callback endpoints, "summarize this page" links. An agent that has been
 prompt-injected (or a malicious tool definition) can weaponize that into
 **Server-Side Request Forgery**: pointing a fetch at `http://169.254.169.254/latest/meta-data/`
@@ -20,20 +20,20 @@ violation, not passed through.
 ## How It Works
 
 1. **AST-walk argument discovery.** `find_urls()` recursively walks `params.arguments`
-   (nested dicts/lists included) collecting every `http(s)://` substring — the same
+   (nested dicts/lists included) collecting every `http(s)://` substring - the same
    AST-walk shape the [3-Tier PII cascade](/docs/guides/mcp-tool-governance) already uses
    for redaction, run on the *raw* pre-sanitization arguments so the host actually being
    evaluated is the one an upstream tool would receive.
 2. **Full DNS-rebinding-safe resolution.** For each URL, `evaluate_url()` resolves the
    hostname to *every* A/AAAA record it has (`socket.getaddrinfo` via the asyncio executor,
-   under a `wait_for` timeout) and checks **all of them** — not just the first. An attacker
+   under a `wait_for` timeout) and checks **all of them** - not just the first. An attacker
    who answers with one public IP and one `169.254.169.254` record is caught on the second
    record alone.
 3. **Baseline denylist, always on.** RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
    `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local/cloud metadata
-   (`169.254.0.0/16` — where `169.254.169.254` lives), CGNAT, and the IETF
+   (`169.254.0.0/16` - where `169.254.169.254` lives), CGNAT, and the IETF
    documentation/reserved ranges (plus IPv6 equivalents) are blocked unconditionally. There
-   is no policy override that re-opens them — only `additional_denied_cidrs` to add more.
+   is no policy override that re-opens them - only `additional_denied_cidrs` to add more.
 4. **Per-virtual-key policy.** `evaluate_url(url, policy)` takes the exact same `dict`
    `BasePolicyResolver.resolve_policy()` already returns for `allowed_tools`/`blocked_tools`
    (see [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine)), extended with
@@ -49,10 +49,10 @@ violation, not passed through.
 
    `DEFAULT_BLOCK` (the default when a resolver supplies none of these keys) permits any
    host whose resolved IP isn't in a denied CIDR. `ALLOWLIST_ONLY` additionally requires the
-   hostname to match a glob in `allowed_domains` (`fnmatch`-style — `*.internal.corp` matches
+   hostname to match a glob in `allowed_domains` (`fnmatch`-style - `*.internal.corp` matches
    `tools.internal.corp` but not the bare `internal.corp`) before its IP is even checked.
 5. **Literal IPs skip DNS entirely.** `http://169.254.169.254/...` is checked directly
-   against the CIDR set — an attacker doesn't need a rebinding hostname if the literal IP
+   against the CIDR set - an attacker doesn't need a rebinding hostname if the literal IP
    already gets through, so literal and resolved paths share the same check.
 
 ```mermaid
@@ -60,7 +60,7 @@ sequenceDiagram
     participant Agent as AI Agent
     participant Shield as LLM-Shield-Proxy (/v1/mcp)
     participant DNS as Resolver
-    participant Audit as AuditLogger (WORM + Ed25519)
+    participant Audit as AuditLogger (hash chain + Ed25519)
     participant Tool as Internal Tool Server
 
     Agent->>Shield: tools/call "fetch_url"<br/>{url: "http://rebind.example.com/"}
@@ -86,13 +86,13 @@ sequenceDiagram
 | URL scheme isn't `http`/`https`, or has no host | **Blocked** |
 
 There is no path in `evaluate_url()` where a resolver error or empty answer results in the
-request being allowed through — every `except` branch raises `EgressPolicyViolationError`
+request being allowed through - every `except` branch raises `EgressPolicyViolationError`
 rather than falling through to "assume safe."
 
 ## Wiring `policies.yaml` into the egress gate
 
 Per-virtual-key egress policy flows through the same `YamlPolicyResolver` recipe documented
-in [MCP Tool Governance](/docs/guides/mcp-tool-governance) — just surface the extra keys
+in [MCP Tool Governance](/docs/guides/mcp-tool-governance) - just surface the extra keys
 alongside `allowed_tools`/`blocked_tools`:
 
 ```python
@@ -157,30 +157,30 @@ and emits a CRITICAL, hash-chained, Ed25519-signed audit event (see
 
 ## Configuration Flags
 
-No standalone `.env` flags — the gate runs unconditionally on every `tools/call` (baseline
+No standalone `.env` flags - the gate runs unconditionally on every `tools/call` (baseline
 denylist always applies), and per-tenant tuning is entirely policy-driven via the
 `egress_mode` / `allowed_domains` / `additional_denied_cidrs` keys above.
 
 ## Critical Logic & Edge Cases
 
 * **Sanitization order:** the scan runs on raw arguments, *before* the PII sanitization
-  cascade — a redacted/synthetic copy of a URL isn't necessarily the host that would
+  cascade - a redacted/synthetic copy of a URL isn't necessarily the host that would
   actually be requested, so the check has to see the real value.
 * **IPv4-mapped IPv6 bypass:** an address like `::ffff:169.254.169.254` is unwrapped to its
   embedded IPv4 form before CIDR matching, closing the classic mapped-address bypass.
-* **`-32003` is shared** with the tool-RBAC forbidden error (`JSONRPC_TOOL_FORBIDDEN`) — both
+* **`-32003` is shared** with the tool-RBAC forbidden error (`JSONRPC_TOOL_FORBIDDEN`) - both
   are policy denials in the JSON-RPC 2.0 reserved server-error range; the `message` field
   distinguishes them for client-side handling.
-* **`resources/read` is out of scope for this gate** — it targets `tools/call` arguments
+* **`resources/read` is out of scope for this gate** - it targets `tools/call` arguments
   specifically, matching where MCP tool schemas typically carry attacker-influenced URLs.
 
 ## Related Docs
 
-- [MCP Tool Governance](/docs/guides/mcp-tool-governance) — the `/v1/mcp` gateway this gate runs inside.
-- [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) — the `BasePolicyResolver` contract this gate's policy dict extends.
-- [Role-Based Policy-as-Code & Hot-Reloading](/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading.md) — `policies.yaml` mechanics.
+- [MCP Tool Governance](/docs/guides/mcp-tool-governance) - the `/v1/mcp` gateway this gate runs inside.
+- [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) - the `BasePolicyResolver` contract this gate's policy dict extends.
+- [Role-Based Policy-as-Code & Hot-Reloading](/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading.md) - `policies.yaml` mechanics.
 
 ## Related Tests
 
-- [`tests/test_egress_guard.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_egress_guard.py) — CIDR matching, wildcard domains, DNS-rebinding simulation, allowlist-only mode, fail-closed DNS failure paths.
-- [`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) — end-to-end `-32003` short-circuit and audit wiring through `/v1/mcp`.
+- [`tests/test_egress_guard.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_egress_guard.py) - CIDR matching, wildcard domains, DNS-rebinding simulation, allowlist-only mode, fail-closed DNS failure paths.
+- [`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) - end-to-end `-32003` short-circuit and audit wiring through `/v1/mcp`.

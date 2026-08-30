@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Rerouting logic takes `&lt;1ms`. The total latency delay perceived by the client is solely dependent on the `HTTP_TIMEOUT_SECONDS` configured for the primary attempt.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Retries utilize native `asyncio` to prevent thread blocking.
 
 ## Configuration Flags

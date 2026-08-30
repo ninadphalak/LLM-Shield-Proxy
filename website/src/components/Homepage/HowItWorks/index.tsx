@@ -6,12 +6,12 @@ const STEPS: {n: string; title: string; body: string}[] = [
   {
     n: '01',
     title: 'Point your SDK at the proxy',
-    body: 'Change one base_url. No rewrites, no new SDKs — the proxy speaks the OpenAI API spec and translates to Anthropic, Gemini, and vLLM under the hood.',
+    body: 'Change one base_url. No rewrites, no new SDKs - the proxy speaks the OpenAI API spec and translates to Anthropic, Gemini, and vLLM under the hood.',
   },
   {
     n: '02',
     title: 'Detect, in your VPC',
-    body: 'A 3-tier cascade — pre-compiled regex, Shannon-entropy secret scanning, and optional local ONNX NER — finds PII, PHI, and raw secrets before anything leaves your network.',
+    body: 'A 3-tier cascade - pre-compiled regex, Shannon-entropy secret scanning, and optional local ONNX NER - finds PII, PHI, and raw secrets before anything leaves your network.',
   },
   {
     n: '03',
@@ -21,7 +21,7 @@ const STEPS: {n: string; title: string; body: string}[] = [
   {
     n: '04',
     title: 'Stream back, rehydrated',
-    body: 'As the response streams in over SSE, a sliding-window buffer catches tokens split across chunks and restores the original values in real time — with no visible delay.',
+    body: 'As the response streams over SSE, a bounded sliding window retains ambiguous placeholder prefixes and restores authorized values while preserving incremental delivery. Measure latency in your deployment profile.',
   },
 ];
 

@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Zero-Dependency Kubernetes Mutating Webhook** allows platform engineering teams to seamlessly inject the LLM-Shield-Proxy into existing workloads. It operates natively as a Kubernetes Admission Controller, automatically intercepting pod deployments and modifying their environment variables to route traffic through the proxy—without requiring developers to change their code.
+The **Zero-Dependency Kubernetes Mutating Webhook** allows platform engineering teams to seamlessly inject the LLM-Shield-Proxy into existing workloads. It operates natively as a Kubernetes Admission Controller, automatically intercepting pod deployments and modifying their environment variables to route traffic through the proxy-without requiring developers to change their code.
 
 ## How It Works
 If you have 100 microservices using OpenAI, forcing 100 teams to manually update their `OPENAI_BASE_URL` in their repositories is a nightmare.
@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Webhook JSON parsing and patching executes in `&lt;2ms`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Runs seamlessly inside the existing FastAPI event loop. No external binaries or sidecars are required to host the webhook.
 
 ## Configuration Flags

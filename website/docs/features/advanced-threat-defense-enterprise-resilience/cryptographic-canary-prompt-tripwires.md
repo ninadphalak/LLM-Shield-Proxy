@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Matches standard regex validation speeds (`&lt;1ms`).
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Uses the existing sliding-window buffer, incurring zero additional allocation overhead.
 
 ## Critical Logic & Edge Cases

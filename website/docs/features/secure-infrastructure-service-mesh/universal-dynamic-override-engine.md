@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Universal Dynamic Override Engine** gives clients and administrators absolute flexibility by allowing them to override nearly any global `.env` configuration (like masking modes, failover URLs, or downstream telemetry flags) on a per-tenant, per-request basis—without adding massive, bloated parameter lists to internal Python functions.
+The **Universal Dynamic Override Engine** gives clients and administrators absolute flexibility by allowing them to override nearly any global `.env` configuration (like masking modes, failover URLs, or downstream telemetry flags) on a per-tenant, per-request basis-without adding massive, bloated parameter lists to internal Python functions.
 
 ## How It Works
 Passing a user's specific override preferences down through 15 layers of nested function calls (Router -> Middleware -> Redaction Engine -> SSE Buffer -> Network Egress) creates messy, unmaintainable code.
@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Context variable getters execute in pure C-level CPython space in `&lt;0.01µs`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Replaces the need for deep dictionary passing, saving CPU cycles and garbage collection overhead.
 
 ## Critical Logic & Edge Cases

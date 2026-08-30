@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Backoff calculation is instantaneous (`&lt;0.1ms`).
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Suspends the specific `asyncio` task using `asyncio.sleep()`, yielding control back to the event loop so other concurrent requests can continue processing unhindered.
 
 ## Configuration Flags

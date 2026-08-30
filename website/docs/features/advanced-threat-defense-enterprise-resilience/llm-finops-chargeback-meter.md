@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Metric enrichment occurs in `O(1)` time.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Completely offloaded to a background thread using a `queue.Queue(maxsize=5000)`. If Prometheus is down or the queue backs up, it safely drops metrics rather than blocking live traffic.
 
 ## Configuration Flags

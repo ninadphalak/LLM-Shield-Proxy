@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** File checking uses zero-cost `stat` calls. The memory swap takes `&lt;0.1µs`.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Validating the Pydantic models takes a few milliseconds but runs concurrently on a separate worker thread to protect the main proxy loop.
 
 ## Configuration Flags

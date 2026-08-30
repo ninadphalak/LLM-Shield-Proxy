@@ -2,7 +2,7 @@
 
 [⬅️ Back to Policy-as-Code](/docs/policies) · [Feature Catalog](/docs/features-overview)
 
-Autonomous agents (Claude Desktop, Cursor, LangChain, CrewAI) don't just chat — they call
+Autonomous agents (Claude Desktop, Cursor, LangChain, CrewAI) don't just chat - they call
 tools. The Model Context Protocol (MCP) turns that into wire traffic: JSON-RPC 2.0 requests
 carrying arguments like customer records, SSNs, and API keys, routed to internal tool servers
 that can read databases, execute code, or send email. That traffic needs the same governance
@@ -13,14 +13,14 @@ LLM-Shield-Proxy terminates this traffic at a dedicated gateway, `POST /v1/mcp`
 ([`llm_shield_proxy/api/mcp_router.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/llm_shield_proxy/api/mcp_router.py)),
 enforcing four things on every request before it ever reaches your tool server:
 
-1. **Virtual Key RBAC** — a fail-closed allow/block check on the specific tool being called.
-2. **SSRF / DNS-rebinding egress screening** — every `http(s)://` URL found anywhere in
+1. **Virtual Key RBAC** - a fail-closed allow/block check on the specific tool being called.
+2. **SSRF / DNS-rebinding egress screening** - every `http(s)://` URL found anywhere in
    `tools/call` arguments is resolved (all A/AAAA records, not just the first) and checked
    against a per-virtual-key CIDR/domain policy before the request is ever proxied. See
    [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall).
-3. **AST-aware PII/secret redaction** — a recursive walk of the entire JSON-RPC payload (not
+3. **AST-aware PII/secret redaction** - a recursive walk of the entire JSON-RPC payload (not
    just top-level strings), sanitizing arguments outbound and tool results inbound.
-4. **Dynamic catalog pruning** — `tools/list` responses are filtered so an agent never even
+4. **Dynamic catalog pruning** - `tools/list` responses are filtered so an agent never even
    *sees* a tool it isn't authorized to call, reducing prompt-injection surface and hallucinated
    tool selection.
 
@@ -44,7 +44,7 @@ sequenceDiagram
     Shield->>RBAC: resolve_policy(virtual_key)
     RBAC-->>Shield: allowed_tools / blocked_tools / egress policy
     Note over Shield: Fail-closed gate:<br/>tool authorized, continue
-    Note over Shield: SSRF gate: AST-walk params.arguments for http(s) URLs<br/>(none here) — no-op pass-through
+    Note over Shield: SSRF gate: AST-walk params.arguments for http(s) URLs<br/>(none here) - no-op pass-through
 
     Note over Shield: AST-walk params.arguments<br/>3-Tier PII cascade (regex, entropy, ONNX-NER)<br/>Synthetic Vault: SSN/email → format-preserving fakes
     Shield->>Tool: forward sanitized JSON-RPC request<br/>(same id, arguments replaced)
@@ -56,7 +56,7 @@ sequenceDiagram
 > **Why "scrub" and not "rehydrate" on the way back?** The proxy's chat/completion path
 > rehydrates masked values because the *same* text round-trips through the LLM and back to
 > the same user. A tool call is different: the value the tool server returns is **new** data
-> (a row from a database, a file's contents) — there is nothing to rehydrate. So the outbound
+> (a row from a database, a file's contents) - there is nothing to rehydrate. So the outbound
 > leg uses a one-way `ScrubVault` (`[REDACTED]`-style) instead of the reversible `Vault` used
 > inbound, because this is terminal, agent/human-facing text, not a payload that has to satisfy
 > a strict tool-call schema on the other end.
@@ -68,7 +68,7 @@ sequenceDiagram
     participant Agent as AI Agent
     participant Shield as LLM-Shield-Proxy (/v1/mcp)
     participant RBAC as Policy Resolver
-    participant Audit as AuditLogger (WORM + Ed25519)
+    participant Audit as AuditLogger (hash chain + Ed25519)
     participant Tool as Internal Tool Server
 
     Agent->>Shield: POST /v1/mcp<br/>tools/call "shell_exec"<br/>{cmd: "rm -rf /data"}
@@ -77,7 +77,7 @@ sequenceDiagram
     Note over Shield: _is_tool_forbidden("shell_exec") == true<br/>Gate trips BEFORE sanitization or upstream I/O
     Shield->>Audit: log_security_event(mcp_tool_forbidden, CRITICAL)
     Note over Audit: SHA-256 hash-chained to previous entry,<br/>signed with Ed25519, public key fingerprint attached
-    Shield--xTool: (never contacted — no upstream request is made)
+    Shield--xTool: (never contacted - no upstream request is made)
     Shield-->>Agent: JSON-RPC error -32003<br/>"Tool forbidden for active role"
 ```
 
@@ -88,24 +88,24 @@ agent hammering a blocked tool costs the proxy a dict lookup, not an upstream ro
 ### 1.3 SSRF-blocked tool call (egress policy violation)
 
 An *allowed* tool can still be rejected if an argument targets a forbidden network
-destination — the RBAC check only knows the tool's *name*, not what it's about to fetch:
+destination - the RBAC check only knows the tool's *name*, not what it's about to fetch:
 
 ```mermaid
 sequenceDiagram
     participant Agent as AI Agent
     participant Shield as LLM-Shield-Proxy (/v1/mcp)
     participant DNS as Resolver
-    participant Audit as AuditLogger (WORM + Ed25519)
+    participant Audit as AuditLogger (hash chain + Ed25519)
     participant Tool as Internal Tool Server
 
     Agent->>Shield: POST /v1/mcp<br/>tools/call "fetch_url" (allowed tool)<br/>{url: "http://rebind.example.com/"}
-    Note over Shield: RBAC gate passes — "fetch_url" is authorized
+    Note over Shield: RBAC gate passes - "fetch_url" is authorized
     Shield->>DNS: resolve ALL A/AAAA records for rebind.example.com
     DNS-->>Shield: [93.184.216.34, 169.254.169.254]
-    Note over Shield: Any record in a denied CIDR trips the gate —<br/>DNS-rebinding-safe: every record checked, not just the first
+    Note over Shield: Any record in a denied CIDR trips the gate -<br/>DNS-rebinding-safe: every record checked, not just the first
     Shield->>Audit: log_security_event(mcp_egress_policy_violation, CRITICAL)
     Note over Audit: SHA-256 hash-chained to previous entry,<br/>signed with Ed25519, public key fingerprint attached
-    Shield--xTool: (never contacted — no upstream request is made)
+    Shield--xTool: (never contacted - no upstream request is made)
     Shield-->>Agent: JSON-RPC error -32003<br/>"SSRF Policy Violation: Target IP/Host forbidden by egress policy"
 ```
 
@@ -118,12 +118,12 @@ for the full CIDR/domain policy schema and fail-closed semantics
 ## 2. Drop-in `policies.yaml` Configuration
 
 MCP tool governance uses the same `BasePolicyResolver` contract documented in
-[Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine): any resolver — in-memory,
-OPA, HashiCorp Vault, or your own — just has to return a `dict` for a given virtual key. At
+[Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine): any resolver - in-memory,
+OPA, HashiCorp Vault, or your own - just has to return a `dict` for a given virtual key. At
 minimum that's `{"allowed_tools": [...], "blocked_tools": [...]}`; the
 [SSRF egress firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall)
-reads three more optional keys off the same dict — `egress_mode`, `allowed_domains`, and
-`additional_denied_cidrs` — so one resolver call drives both tool RBAC and network egress.
+reads three more optional keys off the same dict - `egress_mode`, `allowed_domains`, and
+`additional_denied_cidrs` - so one resolver call drives both tool RBAC and network egress.
 
 > ⚠️ **Fail-open gotcha, read this first.** The bundled `InMemoryPolicyResolver` (the default
 > when `OPA_URL` is unset) always returns `{"allowed_tools": [], "blocked_tools": []}`. Per the
@@ -135,13 +135,13 @@ reads three more optional keys off the same dict — `egress_mode`, `allowed_dom
 > drives the gate. Don't ship the in-memory default as-is.
 
 Below is a complete, production-ready `policies.yaml` defining three enterprise roles with
-granular tool allow-lists, PII entity scopes, and per-role rate limits — using the same
+granular tool allow-lists, PII entity scopes, and per-role rate limits - using the same
 Universal Dynamic Override Engine that powers [Role-Based Policy-as-Code](/docs/policies), so
 every key below is just a `Settings` field override, no special-cased schema.
 
 ```yaml
 # =========================================================
-# LLM-Shield-Proxy — MCP Tool Governance Policy
+# LLM-Shield-Proxy - MCP Tool Governance Policy
 # =========================================================
 roles:
   # ---------------------------------------------------------
@@ -177,7 +177,7 @@ roles:
     blocked_tools:
       - shell_exec
       - modify_billing_account
-    # Analysts work with bulk records — keep values format-preserving synthetic so
+    # Analysts work with bulk records - keep values format-preserving synthetic so
     # downstream BI tools/schemas don't choke on redaction markers, but cap blast radius.
     allowed_entities: ["EMAIL", "PHONE_NUMBER", "SSN"]
     SHIELD_DEFAULT_MASKING_MODE: SYNTHETIC
@@ -198,7 +198,7 @@ roles:
     allowed_entities: ["*"]  # full visibility for break-glass investigations
     SHIELD_DEFAULT_MASKING_MODE: SCRUB
     ENABLE_CANARY_TRIPWIRE: true   # catch prompt-extraction attempts against the admin agent
-    RATE_LIMIT_RPM: 60             # tightest rate limit of the three — most sensitive role
+    RATE_LIMIT_RPM: 60             # tightest rate limit of the three - most sensitive role
     # Egress: admins can reach the internal tool mesh and the vendor APIs those tools call,
     # but nothing else. additional_denied_cidrs adds a specific internal subnet even
     # allowlisted hosts still can't resolve into (see the SSRF firewall doc linked below).
@@ -224,7 +224,7 @@ virtual_keys:
 file drive `/v1/mcp`, drop in a small resolver and override the router's dependency:
 
 ```python
-# app_startup.py — wire policies.yaml directly into the MCP gateway
+# app_startup.py - wire policies.yaml directly into the MCP gateway
 from llm_shield_proxy.api.main import app
 from llm_shield_proxy.api.mcp_router import get_mcp_policy_resolver
 from llm_shield_proxy.core.config import settings
@@ -250,14 +250,14 @@ app.dependency_overrides[get_mcp_policy_resolver] = lambda: YamlPolicyResolver()
 ```
 
 This is the exact override pattern the test suite uses to isolate policy behavior in
-[`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) —
+[`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) -
 safe to run the same way in production via a small startup hook or ASGI lifespan.
 
 ---
 
 ## 3. Wire-Level JSON-RPC 2.0 Examples
 
-### 3.1 Authorized `tools/call` — SSN and email in arguments
+### 3.1 Authorized `tools/call` - SSN and email in arguments
 
 **Inbound** (Agent → Proxy, `POST /v1/mcp`):
 
@@ -277,7 +277,7 @@ safe to run the same way in production via a small startup hook or ASGI lifespan
 }
 ```
 
-**Sanitized Upstream** (Proxy → Internal Tool Server) — every string in `arguments` is
+**Sanitized Upstream** (Proxy → Internal Tool Server) - every string in `arguments` is
 AST-walked through the 3-Tier cascade and replaced with a **format-preserving synthetic**
 value, so the tool server's own schema validation (e.g. Pydantic `EmailStr`, SSN regex) still
 passes:
@@ -298,7 +298,7 @@ passes:
 }
 ```
 
-**Outbound** (Proxy → Agent) — the tool server's own result is independently AST-walked and
+**Outbound** (Proxy → Agent) - the tool server's own result is independently AST-walked and
 scrubbed before it reaches the agent, in case the record it returns contains other customers'
 PII:
 
@@ -317,7 +317,7 @@ PII:
 }
 ```
 
-### 3.2 Forbidden tool call — error response
+### 3.2 Forbidden tool call - error response
 
 Request for a tool that is in `blocked_tools` (or simply absent from a non-empty
 `allowed_tools`):
@@ -334,7 +334,7 @@ Request for a tool that is in `blocked_tools` (or simply absent from a non-empty
 }
 ```
 
-Response — rejected before sanitization or upstream routing, per the sequence diagram in §1.2:
+Response - rejected before sanitization or upstream routing, per the sequence diagram in §1.2:
 
 ```json
 {
@@ -348,13 +348,13 @@ Response — rejected before sanitization or upstream routing, per the sequence 
 ```
 
 `-32003` sits in the JSON-RPC 2.0 reserved server-error range (`-32000` to `-32099`) rather
-than colliding with the spec's own `-32600`–`-32601` request/method errors, so client SDKs that
+than colliding with the spec's own `-32600`-`-32601` request/method errors, so client SDKs that
 switch on error code ranges won't misclassify a policy denial as a malformed request.
 
-### 3.3 Allowed tool, forbidden destination — SSRF/egress error response
+### 3.3 Allowed tool, forbidden destination - SSRF/egress error response
 
 `fetch_url` itself is authorized (in `allowed_tools`), but the URL argument resolves to the
-cloud metadata IP — the RBAC gate has nothing to say about this, so the SSRF gate is what
+cloud metadata IP - the RBAC gate has nothing to say about this, so the SSRF gate is what
 catches it, per the sequence diagram in §1.3:
 
 ```json
@@ -380,13 +380,13 @@ catches it, per the sequence diagram in §1.3:
 }
 ```
 
-Same reserved error code as §3.2 — both are policy denials that never reach the upstream tool
+Same reserved error code as §3.2 - both are policy denials that never reach the upstream tool
 server, distinguished by `message` on the client side. A hostname that only *resolves* to a
 forbidden IP (rather than naming one literally) is rejected identically; see
 [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall)
 for the DNS-rebinding case where only one of several resolved records is malicious.
 
-### 3.4 `tools/list` — dynamic catalog pruning
+### 3.4 `tools/list` - dynamic catalog pruning
 
 **Input manifest** (raw response from the internal tool server, before the gate):
 
@@ -406,7 +406,7 @@ for the DNS-rebinding case where only one of several resolved records is malicio
 }
 ```
 
-**Output manifest** (what a `tier_1_support` virtual key actually receives) — only the
+**Output manifest** (what a `tier_1_support` virtual key actually receives) - only the
 `tools` array is filtered; `nextCursor` and any other sibling keys pass through untouched so
 client-side pagination state is never corrupted by RBAC filtering:
 
@@ -425,7 +425,7 @@ client-side pagination state is never corrupted by RBAC filtering:
 ```
 
 The agent's own model context never even contains `delete_customer_record` or `shell_exec` as
-candidate tools — this is strictly stronger than relying on the LLM to "choose not to" call a
+candidate tools - this is strictly stronger than relying on the LLM to "choose not to" call a
 tool it can see, and it shrinks the prompt.
 
 ---
@@ -482,7 +482,7 @@ Cursor supports remote MCP servers with a direct `url` + `headers` transport, no
 
 ### 4.3 LangChain / CrewAI (Python agent integration)
 
-Both frameworks accept a plain callable/tool wrapper — point it at `/v1/mcp` with the virtual
+Both frameworks accept a plain callable/tool wrapper - point it at `/v1/mcp` with the virtual
 key header and let the proxy handle RBAC and sanitization transparently:
 
 ```python
@@ -524,11 +524,11 @@ async def call_shielded_tool(tool_name: str, arguments: dict, request_id: int = 
 
 ## 5. Compliance & Forensics Evidence
 
-Every RBAC decision on `/v1/mcp` — allow *and* deny — emits a structured audit event through
+Every RBAC decision on `/v1/mcp` - allow *and* deny - emits a structured audit event through
 `AuditLogger.log_security_event`, which is SHA-256 hash-chained to the previous event and
 signed with Ed25519 on a dedicated background thread (never the request path), per
 [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts).
-Here is the exact WORM entry emitted for the forbidden `shell_exec` call in §3.2:
+Here is the signed hash-chain entry emitted for the forbidden `shell_exec` call in §3.2:
 
 ```jsonc
 {
@@ -539,7 +539,7 @@ Here is the exact WORM entry emitted for the forbidden `shell_exec` call in §3.
   "instance_id": "shield-mcp-gw-7c9f8d6b6-k2xqp",
   "process_id": 1,
 
-  // Which caller triggered this decision — maps back to the policies.yaml role.
+  // Which caller triggered this decision - maps back to the policies.yaml role.
   "virtual_key_id": "vk-prod-support-001",
   "severity": "CRITICAL",
 
@@ -556,21 +556,21 @@ Here is the exact WORM entry emitted for the forbidden `shell_exec` call in §3.
   "hash": "3b9e02c1a4f77d0e9c5a8b1f6d2e0a41...",
 
   // Non-repudiation: signed with an Ed25519 key held only by this proxy instance.
-  // Verify offline against GET /api/v1/audit/pubkey — no access to the proxy required.
+  // Verify offline against GET /api/v1/audit/pubkey - no access to the proxy required.
   "signature": "MEUCIQDx7f3a9b1c2e4d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e...",
   "public_key_fingerprint": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef01"
 }
 ```
 
-An auditor with only the published public key (`GET /api/v1/audit/pubkey`) — no access to the
-proxy or its infrastructure — can independently verify this exact record was emitted by this
+An auditor with only the published public key (`GET /api/v1/audit/pubkey`) - no access to the
+proxy or its infrastructure - can independently verify this exact record was emitted by this
 exact proxy instance, and that no entry in the chain before or after it has been altered. The
 `llm-shield-proxy compliance-report` CLI (see
 [Compliance-Pack CLI Export](/docs/features/enterprise-auditing-compliance/compliance-pack-cli-export))
 automates this verification and bundles it into an auditor-ready `.zip`.
 
-The SSRF gate emits the same shape of WORM entry under a distinct `event` name, with the
-resolved IP and the CIDR rule it tripped attached in `details` — this is the receipt for the
+The SSRF gate emits the same signed hash-chain shape under a distinct `event` name, with the
+resolved IP and the CIDR rule it tripped attached in `details` - this is the receipt for the
 `rebind.example.com` call in §1.3/§3.3:
 
 ```jsonc
@@ -603,16 +603,16 @@ resolved IP and the CIDR rule it tripped attached in `details` — this is the r
 
 ## Related Docs
 
-- [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall) — the `egress_mode`/`allowed_domains`/`additional_denied_cidrs` policy schema, DNS-rebinding-safe resolution, and fail-closed semantics behind §1.3/§3.3.
-- [Role-Based Policy-as-Code (RBAC)](/docs/policies) — the underlying `policies.yaml` engine and Universal Override system.
-- [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) — the `BasePolicyResolver` interface and OPA/Vault adapters.
-- [Context-Aware Tool Catalog Pruner](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner) — the caching layer behind `tools/list` pruning.
-- [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts) — the signing pipeline behind every audit event shown above.
+- [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall) - the `egress_mode`/`allowed_domains`/`additional_denied_cidrs` policy schema, DNS-rebinding-safe resolution, and fail-closed semantics behind §1.3/§3.3.
+- [Role-Based Policy-as-Code (RBAC)](/docs/policies) - the underlying `policies.yaml` engine and Universal Override system.
+- [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) - the `BasePolicyResolver` interface and OPA/Vault adapters.
+- [Context-Aware Tool Catalog Pruner](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner) - the caching layer behind `tools/list` pruning.
+- [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts) - the signing pipeline behind every audit event shown above.
 
 ## Related Tests
 
-- [`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) —
+- [`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) -
   RBAC gating, SSRF/egress gating (`test_tools_call_ssrf_*`, `test_tools_call_public_url_*`),
   inbound/outbound sanitization, `tools/list` pruning, pagination-safety, and JSON-RPC 2.0 batch semantics.
-- [`tests/test_egress_guard.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_egress_guard.py) —
+- [`tests/test_egress_guard.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_egress_guard.py) -
   the SSRF firewall in isolation: CIDR matching, wildcard-domain allowlists, DNS-rebinding simulation, and fail-closed DNS failure/timeout paths.

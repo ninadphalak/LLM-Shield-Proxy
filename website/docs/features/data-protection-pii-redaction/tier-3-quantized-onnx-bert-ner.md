@@ -3,14 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Tier 3 Quantized ONNX BERT-NER** is the final, most sophisticated layer of the 3-Tier cascade. While Tier 1 and Tier 2 handle structured patterns and secrets, Tier 3 uses Deep Learning for contextual free-text extraction. It identifies conversational PII (e.g., Patient Names, Organization Names, and Locations) buried in unstructured paragraphs, ensuring strict HIPAA and GDPR compliance for healthcare and legal workloads.
+The **Tier 3 Quantized ONNX BERT-NER** is the optional contextual layer of the cascade. While Tier 1 and Tier 2 handle structured patterns and secret candidates, Tier 3 can identify selected conversational entities using an operator-supplied model. This may support HIPAA/GDPR safeguards; accuracy and compliance depend on the model, corpus, configuration, and surrounding program.
 
 ## How It Works
-Traditional NLP libraries (like spaCy, PyTorch, or Transformers) consume 1GB+ of RAM and add 100ms+ of latency, destroying real-time AI streaming. LLM-Shield-Proxy solves this by utilizing the **C++ ONNX Runtime**.
+Contextual entity models add deployment-specific memory and inference cost. This optional tier uses ONNX Runtime so operators can select and benchmark a local model that fits their accuracy and resource requirements.
 
-1. **Quantization:** The BERT-NER transformer weights are heavily quantized, drastically reducing memory footprint while maintaining >95% F1 Recall.
+1. **Quantization:** Quantized weights can reduce model size and inference cost. F1/recall must be reported for the exact model, labeled corpus, split, and threshold; the project does not currently claim a universal `>95%` value.
 2. **Native Execution:** The model executes natively in-memory via the ONNX runtime, entirely bypassing the Python Global Interpreter Lock (GIL).
-3. **Lazy-Loading:** The neural pipeline is strictly lazy-loaded. If disabled, it gracefully bypasses neural inference with zero startup overhead, keeping the proxy's baseline memory strictly under `&lt;85 MB`.
+3. **Lazy loading:** If the tier is disabled, its model is not loaded. Measure RSS and latency with the exact enabled model and runtime.
 
 
 ```mermaid
@@ -26,8 +26,8 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** `~12.50 ms` median latency per 50-token chunk inference.
-- **Overhead:** Adds ~45MB to the resident RAM footprint when enabled.
+- **Execution speed:** Model, hardware, input, batching, and runtime dependent.
+- **Memory:** Report peak RSS for the exact model artifact and deployment configuration.
 
 ## Configuration Flags
 
@@ -46,7 +46,7 @@ View diagram on GitHub mobile 📱 -->
 A: Yes! This is the "Bring Your Own Model" (BYOM) feature. You can export any Hugging Face model (e.g., BioBERT, ClinicalBERT) to ONNX, point `ONNX_MODEL_PATH` to the directory, and the proxy will use it for contextual extraction.
 
 **Q: Does enabling this break the microsecond streaming latency?**
-A: It adds roughly 12ms of latency to chunks containing entities. While slightly slower than the microsecond Tier 1/2 engines, 12ms is entirely imperceptible to humans during a live Server-Sent Events (SSE) stream, maintaining the real-time UX.
+A: It adds model- and host-dependent inference time. Benchmark the exact ONNX file, provider, payload distribution, and concurrency, and report service-level p50/p95/p99.
 
 
 ## Plainspeak

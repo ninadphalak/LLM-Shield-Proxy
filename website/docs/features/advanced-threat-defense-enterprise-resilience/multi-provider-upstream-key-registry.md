@@ -28,7 +28,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Dictionary hostname lookup executes in O(1) time (`&lt;0.1µs`).
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Completely in-memory, requiring no database lookups during the critical request path.
 
 ## Configuration Flags

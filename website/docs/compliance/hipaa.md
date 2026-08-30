@@ -13,7 +13,7 @@ The primary mechanism for HIPAA compliance is the absolute pre-egress sanitizati
 ### Tier-1 & Tier-2 Local Redaction
 Before any prompt is dispatched to a third-party cloud LLM, it is processed locally:
 - **Tier 1 (Structured Identifiers):** Utilizing a pre-compiled C++ `google-re2` DFA regex engine, the proxy executes O(N) linear time scans to instantly redact structured ePHI such as Social Security Numbers, Medical Record Numbers, phone numbers, and IP addresses. Custom regular expressions (BYOR) can be added via `custom_regex.yaml` to target specific internal hospital IDs.
-- **Tier 2 (Unstructured Data):** A vectorized Shannon Entropy scanner operates at &lt;6 µs to detect and redact unstructured high-entropy identifiers.
+- **Tier 2 (Unstructured Data):** A Shannon entropy heuristic identifies high-entropy secret-like candidates for configured handling.
 
 ### Clinical Context Awareness (Tier-3 ONNX BERT-NER)
 Medical data is often conversational and unstructured (e.g., doctor's notes). The proxy utilizes a **Quantized ONNX BERT-NER** model executing natively in-memory.
@@ -26,6 +26,6 @@ If a use case requires the LLM to reference a specific patient entity without kn
 ### Encrypted In-Transit Envelopes
 - Detected ePHI is masked using **AES-256-GCM envelope encryption** directly within the payload.
 - The external LLM receives a cryptographically secure cipher-token (e.g., `[[AES:GCM:8f7a9...]]`). It processes the clinical reasoning based on the surrounding text, and the proxy decrypts the cipher-token dynamically as the SSE stream returns to the clinician.
-- This guarantees that no usable ePHI is transmitted to or stored by the external LLM provider, perfectly aligning with transmission security rules.
+- Boundary conformance tests can verify that declared unredacted ePHI fixtures do not reach the configured upstream. Detection coverage and the organization's HIPAA obligations require separate validation.
 
 *(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details on the cryptographic lifecycle).*

@@ -6,7 +6,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'LLM-Shield-Proxy',
-  tagline: 'Ultra-Low Latency Generative AI Sanitization for Highly Regulated Enterprise Infrastructure',
+  tagline: 'Open, reproducible streaming privacy and audit evidence for enterprise LLM infrastructure',
   favicon: 'img/favicon.svg',
 
   // Set the production url of your site here
@@ -52,7 +52,7 @@ const config: Config = {
       {
         name: 'keywords',
         content:
-          'PII redaction, LLM proxy, AI gateway, DLP for LLMs, HIPAA, SOC 2, GDPR, zero-egress, streaming SSE redaction, PHI, PCI, LLM firewall, AI security',
+          'streaming privacy gateway, PII redaction, LLM proxy, AI gateway, open conformance specification, audit evidence, OSCAL 1.2, MCP governance, SSE rehydration, Apache 2.0',
       },
     ],
     colorMode: {
@@ -74,6 +74,16 @@ const config: Config = {
           label: 'Documentation',
         },
         {
+          to: '/docs/conformance',
+          label: 'Conformance Lab',
+          position: 'left',
+        },
+        {
+          to: '/docs/research-publications',
+          label: 'Research',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/ninadphalak/LLM-Shield-Proxy',
           label: 'GitHub',
           position: 'right',
@@ -87,6 +97,14 @@ const config: Config = {
           title: 'Docs',
           items: [
             {
+              label: 'Conformance Specification',
+              to: '/docs/conformance/specification-v1',
+            },
+            {
+              label: 'Published Results',
+              to: '/docs/conformance/results',
+            },
+            {
               label: 'Architecture',
               to: '/docs/architecture',
             },
@@ -97,6 +115,10 @@ const config: Config = {
             {
               label: 'Compliance',
               to: '/docs/compliance-overview',
+            },
+            {
+              label: 'Evidence Plane Status',
+              to: '/docs/evidence-plane-status',
             },
             {
               label: 'Deployment',
@@ -132,6 +154,10 @@ const config: Config = {
         {
           title: 'Project',
           items: [
+            {
+              label: 'Glossary',
+              to: '/docs/glossary',
+            },
             {
               label: 'License (Apache 2.0)',
               href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/LICENSE',

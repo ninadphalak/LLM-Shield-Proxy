@@ -5,13 +5,13 @@
 ## What It Does
 LLM-Shield-Proxy features a highly optimized Pluggable RBAC Engine for tool-call governance. Starting in version 1.3, it supports asynchronous, high-performance resolvers for **Open Policy Agent (OPA)** and **HashiCorp Vault**.
 
-Traditional API gateways query policy engines synchronously. If a policy engine or secret store is under heavy load or experiences network latency, that latency is passed directly to the LLM streaming client. For ultra-low latency streaming architecture, a 50ms-100ms penalty on the first byte is unacceptable. This feature solves this by implementing an atomic, non-blocking **Stale-While-Revalidate** caching mechanism, guaranteeing sub-millisecond policy resolution without stalling the event loop.
+Remote policy engines can add first-byte latency when they are slow or unavailable. This resolver uses bounded asynchronous queries and stale-while-revalidate caching; measure the resulting latency and verify its fail-closed behavior in the target environment.
 
 ## How It Works
 The OPA and Vault resolvers operate on a deterministic architecture designed for zero synchronous blocking:
 
 1. **O(1) Atomic Dictionary Swaps:** Resolved tenant policies are stored in a local `MappingProxyType` dictionary, ensuring zero-locking read access and microsecond lookup speeds.
-2. **Asynchronous Background Refresh:** When an incoming stream requests a policy, the proxy checks the cache TTL. If expired, it immediately returns the *stale* policy from cache (0ms latency penalty) while spawning an asynchronous background task (`_safe_background_fetch`) to query the external policy server.
+2. **Asynchronous Background Refresh:** When an incoming stream requests a policy, the proxy checks the cache TTL. If expired, it can return the stale policy while spawning an asynchronous background task (`_safe_background_fetch`) to query the external policy server.
 3. **Strict Network Deadlines:** Uncached queries to external providers use a strict `&lt;50ms` timeout to ensure the event loop is never stalled.
 
 ```mermaid
@@ -30,7 +30,7 @@ flowchart TD
 ```
 
 ## Performance Profile
-- **Execution Speed:** O(1) memory lookup when cached, resulting in `0ms` network latency penalty on the hot path.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Maintains zero local file descriptor leaks during high-volume background polling by utilizing HTTP/2 persistent connection pooling (`httpx.AsyncClient`) via the FastAPI application lifespan.
 
 ## Configuration Flags
@@ -45,7 +45,7 @@ flowchart TD
 
 ## Critical Logic & Edge Cases
 * **Thundering Herd Prevention:** The background fetch uses an `_inflight` state tracker. If 1,000 concurrent streaming requests hit the proxy for the same expired tenant key, only *one* background task is dispatched to OPA or Vault, shielding your backend infrastructure from spike loads.
-* **Fail-Closed Resilience:** If the background task encounters a network error, `CancelledError`, or unhandled exception, it logs a WORM-compliant `rbac_background_fetch_critical_failure` event to the audit trail (without leaking Vault secrets) and gracefully sets a short 5-second TTL retry window to prevent permanent cache staleness.
+* **Fail-Closed Resilience:** If the background task encounters a network error, `CancelledError`, or unhandled exception, it emits a privacy-safe `rbac_background_fetch_critical_failure` audit event and sets a short retry window to prevent permanent cache staleness.
 
 ## FAQ
 
@@ -56,7 +56,7 @@ A: No, for existing sessions. If a user's policy is already in the cache, the pr
 A: Because the tenant is not in the cache, the request blocks for a strict 50ms timeout. If OPA does not respond, the proxy fails closed, returning a deterministic `_FAIL_CLOSED_` policy that explicitly denies all tool-call access to ensure security is never compromised.
 
 **Q: Are Vault tokens or OPA responses logged to the console?**
-A: No. The integration includes a `log_security_event` method that emits structured, tampered-proof WORM JSON logs for audit purposes without leaking raw payloads or secrets into standard output.
+A: No. The integration includes a `log_security_event` method that emits privacy-safe, structured, signed hash-chain records. The default process-local path is best-effort; immutable WORM retention requires a separately configured store.
 
 ## Plainspeak
 This feature connects the proxy's security checks to the massive, enterprise-grade permission databases that large companies already use (like HashiCorp Vault or Open Policy Agent).

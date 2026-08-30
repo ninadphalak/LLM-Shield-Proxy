@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-This feature explicitly targets strict Federal (FedRAMP High / DoD IL5) compliance requirements. It ensures the proxy continuously validates its own cryptographic health via **Known Answer Tests (KAT)** per FIPS 140-3 standards, and emits granular, mathematically precise **RFC 6902 JSON Patch** structures to prove exactly *how* a payload was mutated.
+This feature provides cryptographic implementation self-tests and structured mutation metadata that can support federal control evidence. A Known Answer Test is not FIPS 140-3 validation, FedRAMP authorization, or DoD IL5 approval; those depend on the validated module, platform, configuration, and assessment boundary.
 
 ## How It Works
 Federal auditors require absolute proof that crypto engines are functioning correctly and that data modifications are precisely tracked.
@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** KAT executes only on startup/intervals. RFC 6902 diff generation takes `&lt;2µs` using fast-path AST evaluation.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Extremely low.
 
 ## Configuration Flags
@@ -37,7 +37,7 @@ View diagram on GitHub mobile 📱 -->
 | `ENABLE_RFC6902_LOGGING` | Toggles the generation of differential JSON patches in the audit logs. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Host OS Dependency:** The proxy's FIPS compliance heavily relies on the underlying Python interpreter being compiled against a FIPS-validated OpenSSL module (e.g., running the proxy on Ubuntu Pro FIPS or Red Hat Enterprise Linux).
+* **Host OS dependency:** A FIPS claim requires an appropriately validated cryptographic module operated within its security policy. The proxy's self-test does not confer that status on Python, OpenSSL, the host, or the deployment.
 * **Data Privacy in Diffs:** Even in differential logging, the *original* sensitive value is never logged. The JSON patch explicitly shows the `value` being injected (the synthetic name or `***`), but never the `old_value` that was removed, preserving the integrity of the logging pipeline.
 
 ## FAQ

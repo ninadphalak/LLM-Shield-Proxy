@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** In-memory span enrichment executes in `O(1)` (`&lt;0.5µs`).
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Uses standard `opentelemetry-api` asynchronous batched exporters to prevent the network from blocking the event loop.
 
 ## Configuration Flags
@@ -46,8 +46,8 @@ View diagram on GitHub mobile 📱 -->
 **Q: Can I view these decision traces in Datadog or New Relic?**
 A: Yes! By pointing the `OTEL_EXPORTER_OTLP_ENDPOINT` to your Datadog Agent or New Relic OTLP ingest endpoint, all the proxy's security decisions will natively appear as events within their tracing UI.
 
-**Q: Does this replace the WORM-Compliant Audit Logs?**
-A: No. OTel Traces are designed for developer observability, debugging, and performance monitoring (they are typically sampled and have short retention). WORM-Compliant logs are for strict legal compliance and are never sampled. The proxy runs both simultaneously.
+**Q: Does this replace signed audit evidence?**
+A: No. OTel traces are designed for observability and may be sampled or retained briefly. The audit chain is a separate evidence path; use durable delivery and independently configured immutable retention where required.
 
 
 ## Plainspeak

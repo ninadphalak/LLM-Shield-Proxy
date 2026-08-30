@@ -26,7 +26,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Evaluated in `&lt;1ms` utilizing an atomic Redis `evalsha` Lua script.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Eliminates race conditions in distributed multi-pod environments without requiring distributed locks.
 
 ## Configuration Flags

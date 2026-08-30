@@ -25,7 +25,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Read/Write operations execute in `&lt;1ms` over local VPC networks.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Uses Redis connection pooling to maintain persistent sockets and avoid TCP handshake latency.
 
 ## Configuration Flags

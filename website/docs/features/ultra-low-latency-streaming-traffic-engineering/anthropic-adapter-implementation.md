@@ -27,8 +27,8 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Schema mapping adds nearly zero latency, operating in O(N) relative to the number of message objects in the array.
-- **Overhead:** Uses zero-allocation techniques to prevent massive payload duplication in memory.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
+- **Overhead:** Avoids unnecessary full-payload duplication; measure allocations and RSS for the intended payload distribution.
 
 ## Configuration Flags
 The adapter engages automatically when the proxy detects an Anthropic target URL.

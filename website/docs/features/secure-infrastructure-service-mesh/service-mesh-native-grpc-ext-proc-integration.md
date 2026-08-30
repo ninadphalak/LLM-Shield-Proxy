@@ -25,7 +25,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Bypasses TCP/IP entirely. Data transfer over UDS occurs in microseconds.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Eliminates the need for the proxy to manage outbound TLS/HTTPS connections, offloading that entirely to Envoy.
 
 ## Configuration Flags

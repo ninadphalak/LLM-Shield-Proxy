@@ -18,7 +18,7 @@ const FeatureList: FeatureItem[] = [
     icon: '🔒',
     description: (
       <>
-        Intercept and sanitize real-time LLM streams within your own VPC. Raw PHI and PII never traverse the public internet, supporting SOC 2 and HIPAA technical safeguards.
+        Transform protected values locally and test the exact serialized configured-upstream boundary. Supports privacy-control programs without claiming detector-perfect coverage.
       </>
     ),
     link: '/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy'
@@ -28,7 +28,7 @@ const FeatureList: FeatureItem[] = [
     icon: '⚡',
     description: (
       <>
-        Patent-pending sliding-window buffer reconstructs fragmented tokens across Server-Sent Events with &lt;5 ms overhead, maintaining a real-time UX.
+        A bounded sliding-window buffer reconstructs placeholders across fragmented Server-Sent Events. Publish scoped latency distributions with the open conformance runner.
       </>
     ),
     link: '/docs/features/ultra-low-latency-streaming-traffic-engineering/sub-millisecond-sse-sliding-window-buffer'
@@ -48,17 +48,17 @@ const FeatureList: FeatureItem[] = [
     icon: '🔌',
     description: (
       <>
-        A dedicated JSON-RPC 2.0 gateway for Claude Desktop, Cursor, and agent frameworks — per-role tool allow-lists, AST-aware argument/result redaction, and dynamic tools/list pruning.
+        A dedicated JSON-RPC 2.0 gateway for Claude Desktop, Cursor, and agent frameworks - per-role tool allow-lists, AST-aware argument/result redaction, and dynamic tools/list pruning.
       </>
     ),
     link: '/docs/guides/mcp-tool-governance'
   },
   {
-    title: 'Auditing & Compliance',
+    title: 'Audit Evidence & OSCAL',
     icon: '🧾',
     description: (
       <>
-        FIPS 140-3 KAT verification, cryptographically-chained WORM audit logging, and NIST OSCAL artifact generation for your GRC platform.
+        Signed process-local hash chains, optional durable JSONL delivery, offline verification, and OSCAL 1.2 artifacts that support control evidence. Immutable WORM retention is external.
       </>
     ),
     link: '/docs/features/enterprise-auditing-compliance'

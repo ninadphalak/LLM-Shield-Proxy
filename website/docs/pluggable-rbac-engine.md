@@ -3,7 +3,7 @@
 ## Architectural Overview
 To satisfy enterprise constraints, the Tool-Call RBAC Engine in LLM-Shield-Proxy decouples the **Control Plane** (where policies are stored) from the **Data Plane** (where policies are enforced).
 
-Because the proxy uses a Zero-Allocation Streaming Pushdown Automaton to parse SSE chunks in `&lt;1.0µs`, the policy resolution engine must be strictly asynchronous, non-blocking, and pluggable.
+Because policy resolution sits on a streaming request path, its remote operations must be asynchronous, bounded, and fail closed.
 
 ## 1. The Abstract Base Class (ABC)
 The core interface is defined by `BasePolicyResolver`. All enterprise adapters must inherit from this and implement the async resolution method.
@@ -24,7 +24,7 @@ class BasePolicyResolver(ABC):
 
 The default out-of-the-box implementation uses a stateless Redis TTL vault. This ensures the proxy can evaluate tool executions mid-stream without incurring external HTTP latency.
 
-* **Implementation Detail:** Uses standard asyncio Redis clients (`redis.asyncio`) and `orjson` for ultra-fast zero ORM deserialization to maintain the `&lt;55MB` RAM constraint.
+* **Implementation Detail:** Uses asyncio Redis clients (`redis.asyncio`) and `orjson`; measure process RSS and resolver latency under the intended concurrency.
 * **Fail-Closed Logic:** If the `shield:rbac:{virtual_key}` is missing or expired, the resolver defaults to empty allowance arrays, instantly severing the upstream agent socket.
 
 ## 3. Enterprise Infrastructure Adapters (Stubs)

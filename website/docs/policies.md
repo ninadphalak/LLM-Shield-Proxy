@@ -33,7 +33,7 @@ While you can override network limits (e.g., `RATE_LIMIT_RPM`, `MAX_PAYLOAD_SIZE
 4. **`ENABLE_TIER3_ONNX_NER`** (bool):
    - **What it does:** Activates a Deep Learning AI model (Named Entity Recognition) to read the text and find complex sensitive data based on context, not just simple patterns.
    - **How it helps:** Finds hidden PII (Personally Identifiable Information) that standard regular expressions miss. However, it takes slightly longer to run.
-   - **When to use:** Enable this when strict data privacy (like HIPAA compliance) is required. Disable it for internal tools where speed is more important than deep privacy scanning.
+   - **When to use:** Enable it when the risk analysis requires contextual detection, including workloads subject to HIPAA safeguards. The selected model still needs corpus-specific validation and does not establish compliance.
 
 
 
@@ -80,7 +80,7 @@ roles:
     ENABLE_BLAST_RADIUS_LIMITS: false
     # We still want to track how much money the engineers are spending
     ENABLE_FINOPS_METERING: true
-    # Disable the heavy AI model so the proxy is lightning fast (~6 microsecond delay)
+    # Disable the optional neural model to reduce work on the request path
     ENABLE_TIER3_ONNX_NER: false
 
   # ---------------------------------------------------------
@@ -117,7 +117,7 @@ virtual_keys:
 ## Enterprise Recommendations & Best Practices
 
 * **Zero-Trust Architecture:** Omit the `default_role` key in production. This guarantees that unknown or unmapped virtual keys are strictly denied access (`FAIL_CLOSED`), ensuring only explicitly authorized tenants can route through the proxy.
-* **Latency Optimization:** For internal tools or trusted developer sandboxes, disable `ENABLE_TIER3_ONNX_NER`. This bypasses the heavy neural pipeline, reducing latency overhead to less than `~6 µs` per chunk (Tier 1 & Tier 2 only).
+* **Latency Optimization:** For internal tools or trusted developer sandboxes, disable `ENABLE_TIER3_ONNX_NER` to bypass neural inference. Measure end-to-end overhead in your deployment.
 * **Forensics & Insider Threats:** Always enable `ENABLE_CANARY_TRIPWIRE` for third-party or untrusted downstream applications. This silently injects a cryptographic honeytoken that, if leaked or repeated by the LLM, allows you to definitively trace the prompt extraction attempt.
 
 ## Frequently Asked Questions (FAQ)
@@ -129,7 +129,7 @@ No. The proxy updates automatically. The file is checked every 5 seconds (config
 Active requests keep the exact rules they had when the connection started. Only new requests receive the updated rules. Active user streams are never interrupted.
 
 **Q: What if I have thousands of virtual keys? Will it slow down the proxy?**
-No. The proxy uses an O(1) dictionary mapping in memory. This means looking up a user's policy takes the exact same amount of time whether you have 10 users or 100,000 users (taking less than `0.1 µs`).
+The local mapping uses a dictionary lookup, but complete policy-resolution latency depends on cache state, resolver type, concurrency, and external services. Measure it under the intended deployment profile.
 
 **Q: What if I accidentally make a typo or syntax error in my `policies.yaml` file?**
 The proxy will log a warning that the YAML file is broken, but it will safely ignore the broken file. It will continue serving traffic using the last-known valid policies in memory. It will never crash or accidentally disable security.

@@ -25,7 +25,7 @@ export default function TrustBar(): ReactNode {
           </div>
         </div>
         <p className={styles.disclaimer}>
-          These are technical controls mapped to each framework's requirements — see how in the docs.
+          These are technical controls mapped to each framework's requirements - see how in the docs.
           Deploying this proxy is one control among many a full compliance program requires; it is not a
           certification.
         </p>

@@ -29,7 +29,7 @@ View diagram on GitHub mobile 📱 -->
 
 
 ## Performance Profile
-- **Execution Speed:** Triggers instantaneously upon signal receipt.
+- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
 - **Overhead:** Zero overhead during normal operation.
 
 ## Configuration Flags

@@ -2,12 +2,11 @@
 
 Microsoft Presidio is a solid open-source PII detection SDK, but it was built as a batch
 NLP toolkit, not a real-time LLM traffic gateway. Bolting it in front of a streaming chat
-completion endpoint means loading spaCy/PyTorch models (**1GB+ RAM**) and paying
-**50-150ms of blocking latency per request** — enough to visibly stall Server-Sent Events
-streaming.
+completion endpoint requires the application team to integrate detection, response-stream handling,
+state, and policy enforcement into its request path.
 
 LLM-Shield-Proxy is a drop-in reverse proxy: point your existing `OPENAI_BASE_URL` (or
-equivalent) at it, and it transparently redacts PII/PHI/secrets in both directions —
+equivalent) at it, and it transparently redacts PII/PHI/secrets in both directions -
 without you touching your Presidio `AnalyzerEngine`/`AnonymizerEngine` call sites at all.
 
 This guide gets you from "Presidio in the request path" to "LLM-Shield-Proxy in front of
@@ -17,12 +16,12 @@ your LLM provider" in about 10 minutes.
 
 | | Microsoft Presidio (in-process) | LLM-Shield-Proxy (sidecar proxy) |
 | :--- | :--- | :--- |
-| **Deployment model** | Python library called inline in your app | Reverse proxy / sidecar — zero app-code coupling |
-| **Memory footprint** | 1GB+ RAM (spaCy/PyTorch NLP pipeline) | **&lt;85 MB RAM** (compiled regex + Shannon entropy engine) |
-| **Per-request latency** | 50-150ms (blocks the request) | **&lt;6 µs** Tier-2 entropy scan; full payload redaction in low-single-digit ms |
-| **Streaming (SSE) support** | Not native — requires buffering the full response | Native sliding-window SSE rehydration, sub-millisecond overhead per chunk |
+| **Deployment model** | Python library called inline in your app | Reverse proxy / sidecar - zero app-code coupling |
+| **Memory footprint** | Depends on selected analyzers and models | Standard mode avoids a neural runtime; measure both candidates with the same workload |
+| **Latency** | Depends on analyzer, model, and integration | Isolated entropy and full request paths are reported separately; compare both products under the same service-level protocol |
+| **Streaming (SSE) support** | Requires integration-specific handling | Native bounded sliding-window SSE rehydration; overhead is environment-scoped |
 | **Secret detection** | Requires custom recognizers | Built-in Tier-2 Shannon-entropy scanner for unformatted API keys/hashes/tokens |
-| **Audit trail** | None built-in | WORM SHA-256 hash-chained, Ed25519-signed audit receipts out of the box |
+| **Audit trail** | No equivalent gateway trail by default | Process-local SHA-256 hash chain and Ed25519 receipts; durable local mode is opt-in and WORM retention is external |
 
 ## Step 1: The 1-Line Python SDK Change
 
@@ -38,7 +37,7 @@ client = OpenAI(
 ```
 
 Change the `base_url` to point at your LLM-Shield-Proxy instance. That's the entire code
-change — no Presidio `AnalyzerEngine()` / `AnonymizerEngine()` calls to rip out of your
+change - no Presidio `AnalyzerEngine()` / `AnonymizerEngine()` calls to rip out of your
 request path, no custom recognizers to port:
 
 ```python
@@ -50,7 +49,7 @@ client = OpenAI(
 )
 ```
 
-Everything else — streaming, tool calls, function calling, retries — behaves exactly as
+Everything else - streaming, tool calls, function calling, retries - behaves exactly as
 before. The proxy redacts PII on the way out and transparently rehydrates it on the way
 back in, so your application code never sees masked tokens.
 
@@ -71,7 +70,7 @@ services:
     environment:
       - UPSTREAM_BASE_URL=https://api.openai.com
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # Optional: enable Tier 3 contextual NER for free-text names/orgs (adds ~45-65MB RAM)
+      # Optional: enable Tier 3 contextual NER; benchmark the selected model's RSS and latency
       # - ENABLE_TIER3_ONNX_NER=true
     restart: unless-stopped
     healthcheck:
@@ -106,41 +105,41 @@ Presidio entity types, use this table to re-map them:
 
 **Notes:**
 - Tier 1 and Tier 2 (regex + Shannon entropy) ship enabled by default in the base
-  `pip install llm-shield-proxy` package — this is what gives the `<85 MB` / `<6 µs`
-  numbers below.
+  `pip install llm-shield-proxy` package. Measure RSS and latency in your environment.
 - Tier 3 (`ENABLE_TIER3_ONNX_NER=true`, `pip install "llm-shield-proxy[ner]"`) adds a
   quantized ONNX BERT-NER model for conversational entities (names, organizations) that
-  Presidio would normally catch via spaCy — at a fraction of Presidio's memory cost.
+  Presidio would normally catch via an NLP analyzer. Compare memory and quality using the same corpus.
 - LLM-Shield-Proxy additionally detects unformatted high-entropy secrets (raw API keys,
-  hashes, tokens) via Shannon entropy analysis — a class of secret Presidio's
+  hashes, tokens) via Shannon entropy analysis - a class of secret Presidio's
   pattern-based recognizers typically miss unless you hand-write a regex for every key
   format.
 
 ## Benchmark Callout
 
-Numbers below are from LLM-Shield-Proxy's own [reproducible benchmark
-suite](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/benchmark.py),
-re-run automatically on every push via [`.github/workflows/benchmark.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/benchmark.yml)
-so the claims stay independently checkable rather than a one-time marketing snapshot:
+The comparison below follows LLM-Shield-Proxy's public [conformance
+protocol](/docs/conformance/specification-v1), re-run automatically on every push via
+[`.github/workflows/benchmark.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/benchmark.yml).
+The published result separates component observations from service-level claims so the
+scope stays independently checkable:
 
 | Metric | Microsoft Presidio (spaCy/PyTorch) | LLM-Shield-Proxy |
 | :--- | :--- | :--- |
-| **Resident memory** | 1GB – 2GB RAM | **&lt;85 MB RAM** |
-| **Per-request latency overhead** | 50 – 150 ms | **&lt;6 µs** (Tier-2 entropy scan) |
-| **Streaming (SSE) support** | Requires full-response buffering | Native sub-millisecond sliding-window rehydration |
+| **Resident memory** | Deployment and analyzer dependent | Measure peak RSS with the same corpus and service topology |
+| **Latency** | Analyzer and integration dependent | Isolated entropy and service-level paths are measured separately |
+| **Streaming (SSE) support** | Requires integration-specific handling | Native bounded sliding-window rehydration |
 
 ## What You Keep, What You Gain
 
-You keep: your existing LLM client code (`openai`, `anthropic`, LangChain, LiteLLM —
+You keep: your existing LLM client code (`openai`, `anthropic`, LangChain, LiteLLM -
 anything that takes a `base_url`), your provider API keys, your prompts.
 
-You gain: a zero-egress redaction layer with a **&lt;85 MB** footprint, native SSE
-streaming support, a WORM SHA-256 hash-chained and **Ed25519-signed audit trail** for
+You gain: a testable configured-upstream redaction layer, native SSE
+streaming support, a SHA-256 hash-chained and **Ed25519-signed audit trail** for
 every redaction decision, and NIST OSCAL-formatted compliance evidence you can export
 in one command (`llm-shield-proxy compliance-report --framework=hipaa`).
 
 ## Next Steps
 
-- [Deployment Topologies](/docs/deployment) — VPC and air-gapped egress gateway setups.
-- [Enterprise Auditing & Compliance](/docs/features/enterprise-auditing-compliance) — WORM hash chaining, signed receipts, and OSCAL export.
-- [LiteLLM & Ollama Recipe](/docs/litellm-ollama-recipe) — if you're routing through LiteLLM or running local models.
+- [Deployment Topologies](/docs/deployment) - VPC and air-gapped egress gateway setups.
+- [Enterprise Auditing & Compliance](/docs/features/enterprise-auditing-compliance) - tamper-evident chaining, signed receipts, and OSCAL export; immutable retention is a deployment control.
+- [LiteLLM & Ollama Recipe](/docs/litellm-ollama-recipe) - if you're routing through LiteLLM or running local models.
