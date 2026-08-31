@@ -191,6 +191,43 @@ class ConfigHandler(FileSystemEventHandler):
             settings.reload()
 
 
+def build_upstream_client() -> httpx.AsyncClient:
+    """Construct the upstream AsyncClient.
+
+    Single source of truth for the pool's configuration. The lifespan pool and
+    `get_http_client`'s lazy fallback used to build their clients from two
+    copies of this block that had silently diverged on `http2`, so any request
+    served by the fallback dropped to HTTP/1.1 without a signal.
+    """
+    verify: bool | str = True
+    if settings.INSECURE_SKIP_VERIFY:
+        verify = False
+    elif settings.CA_BUNDLE_FILE:
+        verify = settings.CA_BUNDLE_FILE
+    elif settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH:
+        verify = settings.SSL_CA_BUNDLE_PATH
+
+    cert = None
+    if settings.OUTBOUND_CLIENT_CERT and settings.OUTBOUND_CLIENT_KEY:
+        cert = (settings.OUTBOUND_CLIENT_CERT, settings.OUTBOUND_CLIENT_KEY)
+    elif settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
+        cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
+
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            timeout=settings.HTTP_TIMEOUT_SECONDS,
+            connect=settings.HTTP_CONNECT_TIMEOUT_SECONDS,
+        ),
+        limits=httpx.Limits(
+            max_keepalive_connections=settings.HTTP_MAX_KEEPALIVE_CONNECTIONS,
+            max_connections=settings.HTTP_MAX_CONNECTIONS,
+        ),
+        http2=True,
+        verify=verify,
+        cert=cert,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manages application lifecycle, shared HTTP connection pools, and background observers."""
@@ -260,35 +297,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             settings.WORKERS,
         )
 
-    verify: bool | str = True
-    if settings.INSECURE_SKIP_VERIFY:
-        verify = False
-    elif settings.CA_BUNDLE_FILE:
-        verify = settings.CA_BUNDLE_FILE
-    elif settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH:
-        verify = settings.SSL_CA_BUNDLE_PATH
-
-    cert = None
-    if settings.OUTBOUND_CLIENT_CERT and settings.OUTBOUND_CLIENT_KEY:
-        cert = (settings.OUTBOUND_CLIENT_CERT, settings.OUTBOUND_CLIENT_KEY)
-    elif settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
-        cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
-
-    limits = httpx.Limits(
-        max_keepalive_connections=settings.HTTP_MAX_KEEPALIVE_CONNECTIONS,
-        max_connections=settings.HTTP_MAX_CONNECTIONS,
-    )
-    timeout = httpx.Timeout(
-        timeout=settings.HTTP_TIMEOUT_SECONDS,
-        connect=settings.HTTP_CONNECT_TIMEOUT_SECONDS,
-    )
-    app.state.http_client = httpx.AsyncClient(
-        timeout=timeout,
-        limits=limits,
-        http2=True,
-        verify=verify,
-        cert=cert,
-    )
+    app.state.http_client = build_upstream_client()
 
     observer = Observer()
     observer.schedule(ConfigHandler(), path=".", recursive=False)
@@ -400,6 +409,29 @@ app.include_router(audit_router)
 app.include_router(mcp_router)
 
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+}
+
+
+def apply_security_headers(response: Response, request_id: Optional[str] = None) -> Response:
+    """Stamp the security headers, and the correlation ID when we have one.
+
+    Both `security_and_tracing_middleware` and `global_exception_handler` call
+    this. The handler needs its own call because Starlette runs it inside
+    `ServerErrorMiddleware`, which sits *outside* the user middleware stack --
+    so a sanitized 500 never passes back through the middleware and used to
+    carry neither the security headers nor an X-Request-ID.
+    """
+    for header, value in SECURITY_HEADERS.items():
+        response.headers[header] = value
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
+    return response
+
+
 @app.middleware("http")
 async def security_and_tracing_middleware(request: Request, call_next: Any) -> Response:
     """Attaches correlation request IDs and enterprise HTTP security headers."""
@@ -418,11 +450,7 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         request.state.request_id = request_id
 
         response: Response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        return response
+        return apply_security_headers(response, request_id)
     finally:
         # Lock wraps both the decrement and the drain-signal check to prevent a TOCTOU
         # race where active_requests transitions 1â†’0 between the read and set() calls.
@@ -459,45 +487,20 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         method=request.method,
         exc=exc,
     )
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={"error": {"message": "Internal Server Error", "type": "server_error"}},
     )
+    # `request_id` is "n/a" only if the exception beat the middleware to
+    # assigning one; don't echo that placeholder back as a correlation ID.
+    return apply_security_headers(response, request_id if request_id != "n/a" else None)
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
     """Retrieves or lazily initializes the shared AsyncClient from app state."""
     client = getattr(request.app.state, "http_client", None)
     if client is None or getattr(client, "is_closed", False):
-        limits = httpx.Limits(
-            max_keepalive_connections=settings.HTTP_MAX_KEEPALIVE_CONNECTIONS,
-            max_connections=settings.HTTP_MAX_CONNECTIONS,
-        )
-        timeout = httpx.Timeout(
-            timeout=settings.HTTP_TIMEOUT_SECONDS,
-            connect=settings.HTTP_CONNECT_TIMEOUT_SECONDS,
-        )
-        verify: bool | str = True
-        if settings.INSECURE_SKIP_VERIFY:
-            verify = False
-        elif settings.CA_BUNDLE_FILE:
-            verify = settings.CA_BUNDLE_FILE
-        elif settings.ENABLE_MTLS and settings.SSL_CA_BUNDLE_PATH:
-            verify = settings.SSL_CA_BUNDLE_PATH
-
-        cert = None
-        if settings.OUTBOUND_CLIENT_CERT and settings.OUTBOUND_CLIENT_KEY:
-            cert = (settings.OUTBOUND_CLIENT_CERT, settings.OUTBOUND_CLIENT_KEY)
-        elif settings.ENABLE_MTLS and settings.SSL_CLIENT_CERT_PATH and settings.SSL_CLIENT_KEY_PATH:
-            cert = (settings.SSL_CLIENT_CERT_PATH, settings.SSL_CLIENT_KEY_PATH)
-
-        client = httpx.AsyncClient(
-            timeout=timeout,
-            limits=limits,
-            http2=False,
-            verify=verify,
-            cert=cert,
-        )
+        client = build_upstream_client()
         request.app.state.http_client = client
     return client
 
