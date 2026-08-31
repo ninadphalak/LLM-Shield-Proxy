@@ -43,9 +43,24 @@ llm-shield-proxy audit-verify \
 
 The command exits non-zero when continuity or signature verification fails. Retain the trusted public key separately from the audit file.
 
+**Exit 0 requires signature verification.** The record hash is an unkeyed SHA-256, so
+anyone can compute a self-consistent chain over records they wrote themselves; continuity
+alone is not evidence of authenticity. Running without `--pubkey-file` therefore exits
+non-zero and reports `Authenticity: NOT VERIFIED`. Pass `--allow-unsigned` to accept a
+consistency-only result deliberately.
+
+The output also prints the terminal sequence number and terminal hash. Record them
+externally: comparing them against an independently held anchor is the only way to detect
+a deleted suffix.
+
+An empty or all-blank audit file is reported as invalid rather than as a clean zero-event
+chain, and a file carrying more than one `chain_id` is rejected — one file is one worker's
+chain, and mixing chains removes every record's predecessor.
+
 ## Security boundaries
 
 - Hash chaining detects modification relative to adjacent records that are present. Deleting an unanchored suffix cannot be detected from the shortened file alone; periodically anchor the final hash and sequence in an independent system.
+- A record's declared `initial_hash` is chosen by whoever wrote the record. It marks a well-formed chain start; it is not evidence of origin. Authenticity comes only from the Ed25519 signature.
 - Ed25519 authenticates records against the supplied public key. Key custody, rotation, and archival remain operator responsibilities.
 - The event schema contains security metadata, not matched PII values or prompt bodies.
 - `fsync` confirms an operating-system persistence request. It does not prove storage-device durability or regulatory retention.

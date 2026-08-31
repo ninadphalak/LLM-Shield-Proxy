@@ -2,9 +2,9 @@
 
 Maintainer working-tree self-test; not an independent result or a release artifact.
 
-- Harness/source label: `7e959d9d8f9ff6b85e05d9d9ce4642ad3cfb3fed+working-tree`
+- Harness/source label: `5fa1c6ebcdad8ebbccd0ba30035bd276f8785c25+working-tree`
 - Package label: `1.3.4+working-tree`
-- Report SHA-256: `792d987b62c39502678fd072a87c8528e2e3b266e0c2963629e52fc0024b785d`
+- Report SHA-256: `cd60d8679bd49dcfc9486e9f12450dc96ab98892d18a8c491ff5d37a7e4dd397`
 - Target: Uvicorn on `127.0.0.1:8899`
 - Controlled upstream: `http://127.0.0.1:8765/v1`
 - Request iterations: 3

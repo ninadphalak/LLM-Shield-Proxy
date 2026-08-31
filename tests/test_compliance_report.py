@@ -39,7 +39,7 @@ def _write_signed_worm_log(tmp_path, tamper: bool = False, invalidate_signature:
     ).hexdigest()
 
     lines = []
-    previous_hash = "0" * 68
+    previous_hash = "0" * 64  # a SHA-256 digest is 64 hex chars; the chain genesis value
     for i in range(3):
         base_dict = {
             "timestamp": f"2026-01-0{i + 1}T00:00:00+00:00",

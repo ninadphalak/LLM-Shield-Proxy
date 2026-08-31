@@ -1,55 +1,53 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://project-0039f5fd-ac66-4a1c-9e0.web.app/spec/streaming-privacy-gateway/v1.0.0/report.schema.json",
-  "title": "Streaming Privacy Gateway Conformance Report v1.0.0",
+  "$id": "https://project-0039f5fd-ac66-4a1c-9e0.web.app/spec/streaming-privacy-gateway/v1.0.0/http-profile.schema.json",
+  "title": "Streaming Privacy Gateway HTTP Profile Report v1.0.0",
   "type": "object",
   "required": [
     "schema",
-    "specification",
     "generated_at",
+    "profile",
     "implementation",
-    "source_revision",
+    "target",
+    "harness_revision",
     "environment",
+    "capture",
     "checks",
-    "microbenchmarks",
-    "memory",
     "passed",
     "limitations"
   ],
   "properties": {
     "schema": {
-      "const": "llm-shield.streaming-privacy-conformance/v1.0.0"
-    },
-    "specification": {
-      "type": "object",
-      "required": [
-        "name",
-        "version",
-        "href"
-      ],
-      "properties": {
-        "name": {
-          "const": "Streaming Privacy Gateway Conformance Specification"
-        },
-        "version": {
-          "const": "1.0.0"
-        },
-        "href": {
-          "type": "string",
-          "format": "uri"
-        }
-      },
-      "additionalProperties": false
+      "const": "llm-shield.streaming-privacy-http-profile/v1.0.0"
     },
     "generated_at": {
       "type": "string",
       "format": "date-time"
     },
+    "profile": {
+      "type": "object",
+      "required": [
+        "name",
+        "scope"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "implementation": {
       "type": "object",
       "required": [
         "name",
-        "version"
+        "version",
+        "labels_are_operator_supplied"
       ],
       "properties": {
         "name": {
@@ -59,11 +57,42 @@
         "version": {
           "type": "string",
           "minLength": 1
+        },
+        "labels_are_operator_supplied": {
+          "const": true
         }
       },
       "additionalProperties": false
     },
-    "source_revision": {
+    "target": {
+      "type": "object",
+      "required": [
+        "base_url",
+        "model",
+        "raw_pass_through_baseline"
+      ],
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extra_header_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "raw_pass_through_baseline": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "harness_revision": {
       "type": "string",
       "minLength": 1
     },
@@ -95,92 +124,52 @@
         }
       }
     },
+    "capture": {
+      "type": "object",
+      "required": [
+        "bind_host",
+        "port"
+      ],
+      "properties": {
+        "bind_host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer"
+        },
+        "target_must_be_preconfigured_for": {
+          "type": "string"
+        }
+      }
+    },
     "checks": {
       "type": "object",
       "required": [
+        "configured_upstream_boundary",
         "fragmentation_safety",
-        "raw_pii_egress",
         "sse_validity",
-        "rehydration_fidelity",
-        "audit_integrity",
-        "latency_measurement",
-        "memory_bounded"
+        "response_fidelity",
+        "client_observed_latency"
       ],
       "properties": {
+        "configured_upstream_boundary": {
+          "$ref": "#/$defs/boundary_check"
+        },
         "fragmentation_safety": {
           "$ref": "#/$defs/check"
-        },
-        "raw_pii_egress": {
-          "$ref": "#/$defs/egress_check"
         },
         "sse_validity": {
           "$ref": "#/$defs/check"
         },
-        "rehydration_fidelity": {
+        "response_fidelity": {
           "$ref": "#/$defs/check"
         },
-        "audit_integrity": {
-          "$ref": "#/$defs/check"
-        },
-        "latency_measurement": {
-          "$ref": "#/$defs/check"
-        },
-        "memory_bounded": {
+        "client_observed_latency": {
           "$ref": "#/$defs/check"
         }
       },
       "additionalProperties": false
-    },
-    "microbenchmarks": {
-      "type": "object",
-      "description": "Measured timings. Required so a report cannot claim latency_measurement passed with no samples behind it.",
-      "required": [
-        "iterations",
-        "scope",
-        "unit"
-      ],
-      "properties": {
-        "iterations": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "scope": {
-          "type": "string",
-          "minLength": 1
-        },
-        "unit": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "memory": {
-      "type": "object",
-      "description": "Measured allocation figures and the retention bound actually checked.",
-      "required": [
-        "scope",
-        "iterations",
-        "retained_characters",
-        "retention_bound_characters"
-      ],
-      "properties": {
-        "scope": {
-          "type": "string",
-          "minLength": 1
-        },
-        "iterations": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "retained_characters": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "retention_bound_characters": {
-          "type": "integer",
-          "minimum": 0
-        }
-      }
     },
     "passed": {
       "type": "boolean"
@@ -196,79 +185,39 @@
   },
   "allOf": [
     {
-      "$ref": "#/$defs/passed_requires_fragmentation_safety"
-    },
-    {
-      "$ref": "#/$defs/passed_requires_raw_pii_egress"
-    },
-    {
-      "$ref": "#/$defs/passed_requires_sse_validity"
-    },
-    {
-      "$ref": "#/$defs/passed_requires_rehydration_fidelity"
-    },
-    {
-      "$ref": "#/$defs/passed_requires_audit_integrity"
-    },
-    {
-      "$ref": "#/$defs/passed_requires_latency_measurement"
-    },
-    {
-      "$ref": "#/$defs/passed_requires_memory_bounded"
-    }
-  ],
-  "$defs": {
-    "check": {
-      "type": "object",
-      "required": [
-        "passed"
-      ],
-      "properties": {
-        "passed": {
-          "type": "boolean"
-        }
-      }
-    },
-    "egress_check": {
-      "type": "object",
-      "required": [
-        "passed"
-      ],
-      "properties": {
-        "passed": {
-          "type": "boolean"
-        },
-        "leaked_entity_types": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "allOf": [
-        {
-          "if": {
+      "if": {
+        "properties": {
+          "checks": {
             "properties": {
-              "passed": {
-                "const": true
+              "configured_upstream_boundary": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
               }
             },
             "required": [
-              "passed"
+              "configured_upstream_boundary"
             ]
-          },
-          "then": {
-            "properties": {
-              "leaked_entity_types": {
-                "type": "array",
-                "maxItems": 0
-              }
-            }
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
           }
         }
-      ]
+      }
     },
-    "passed_requires_fragmentation_safety": {
+    {
       "if": {
         "properties": {
           "checks": {
@@ -301,40 +250,7 @@
         }
       }
     },
-    "passed_requires_raw_pii_egress": {
-      "if": {
-        "properties": {
-          "checks": {
-            "properties": {
-              "raw_pii_egress": {
-                "properties": {
-                  "passed": {
-                    "const": false
-                  }
-                },
-                "required": [
-                  "passed"
-                ]
-              }
-            },
-            "required": [
-              "raw_pii_egress"
-            ]
-          }
-        },
-        "required": [
-          "checks"
-        ]
-      },
-      "then": {
-        "properties": {
-          "passed": {
-            "const": false
-          }
-        }
-      }
-    },
-    "passed_requires_sse_validity": {
+    {
       "if": {
         "properties": {
           "checks": {
@@ -367,12 +283,12 @@
         }
       }
     },
-    "passed_requires_rehydration_fidelity": {
+    {
       "if": {
         "properties": {
           "checks": {
             "properties": {
-              "rehydration_fidelity": {
+              "response_fidelity": {
                 "properties": {
                   "passed": {
                     "const": false
@@ -384,7 +300,7 @@
               }
             },
             "required": [
-              "rehydration_fidelity"
+              "response_fidelity"
             ]
           }
         },
@@ -400,12 +316,12 @@
         }
       }
     },
-    "passed_requires_audit_integrity": {
+    {
       "if": {
         "properties": {
           "checks": {
             "properties": {
-              "audit_integrity": {
+              "client_observed_latency": {
                 "properties": {
                   "passed": {
                     "const": false
@@ -417,7 +333,7 @@
               }
             },
             "required": [
-              "audit_integrity"
+              "client_observed_latency"
             ]
           }
         },
@@ -430,74 +346,98 @@
           "passed": {
             "const": false
           }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": [
+        "passed"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
         }
       }
     },
-    "passed_requires_latency_measurement": {
-      "if": {
-        "properties": {
-          "checks": {
+    "boundary_check": {
+      "type": "object",
+      "required": [
+        "passed",
+        "captured_requests",
+        "correlated_requests",
+        "uninspectable_requests",
+        "leaked_entity_types"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "captured_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "correlated_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uninspectable_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "leaked_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "upstream_paths_observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "marker_words_required": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "marker_words_total": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
             "properties": {
-              "latency_measurement": {
-                "properties": {
-                  "passed": {
-                    "const": false
-                  }
-                },
-                "required": [
-                  "passed"
-                ]
+              "passed": {
+                "const": true
               }
             },
             "required": [
-              "latency_measurement"
+              "passed"
             ]
-          }
-        },
-        "required": [
-          "checks"
-        ]
-      },
-      "then": {
-        "properties": {
-          "passed": {
-            "const": false
-          }
-        }
-      }
-    },
-    "passed_requires_memory_bounded": {
-      "if": {
-        "properties": {
-          "checks": {
+          },
+          "then": {
             "properties": {
-              "memory_bounded": {
-                "properties": {
-                  "passed": {
-                    "const": false
-                  }
-                },
-                "required": [
-                  "passed"
-                ]
+              "leaked_entity_types": {
+                "maxItems": 0
+              },
+              "uninspectable_requests": {
+                "const": 0
+              },
+              "correlated_requests": {
+                "minimum": 1
+              },
+              "captured_requests": {
+                "minimum": 1
               }
-            },
-            "required": [
-              "memory_bounded"
-            ]
-          }
-        },
-        "required": [
-          "checks"
-        ]
-      },
-      "then": {
-        "properties": {
-          "passed": {
-            "const": false
+            }
           }
         }
-      }
+      ]
     },
     "attestation": {
       "type": "object",

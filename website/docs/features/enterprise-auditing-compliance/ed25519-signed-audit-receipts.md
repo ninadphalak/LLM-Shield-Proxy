@@ -29,6 +29,12 @@ Use the bundled verifier rather than reconstructing canonical serialization manu
 llm-shield-proxy audit-verify --audit-log audit.jsonl --pubkey-file audit-public-key.pem
 ```
 
+`--pubkey-file` is what makes the result meaningful. Without it the verifier can only
+confirm that an unkeyed hash chain is self-consistent, which a forger reproduces at will,
+so the command exits non-zero unless `--allow-unsigned` is passed. When a key is supplied,
+any record lacking a signature fails the whole file rather than being counted as merely
+unsigned.
+
 ## Performance and failure behavior
 
 In the default `best_effort` mode, hashing and signing run on the audit worker and the request does not wait for persistence. In `durable` or `required` mode, the caller waits for an acknowledged append; a sink failure or timeout is surfaced. Measure this trade-off on the storage used in production rather than relying on a generic signing-latency claim.
