@@ -36,6 +36,39 @@ Confirm that:
 
 Use `benchmarks/REPORTING.md` for a production-shaped comparison. Publish unsuccessful runs and deviations alongside successful results.
 
+## Run the OpenAI-compatible HTTP profile
+
+Configure the gateway under test so its upstream base URL is the harness capture service:
+
+```text
+http://127.0.0.1:8765/v1              # gateway runs on the host
+http://host.docker.internal:8765/v1   # common Docker Desktop host route
+```
+
+Then run:
+
+```bash
+CONFORMANCE_TARGET_API_KEY=local-evaluation-key \
+llm-shield-proxy benchmark \
+  --target-base-url http://127.0.0.1:8000/v1 \
+  --target-name implementation-under-test \
+  --target-version pinned-version \
+  --iterations 10 \
+  --json-out HTTP_CONFORMANCE.json
+```
+
+The command starts a controlled capture upstream on `127.0.0.1:8765`, sends the synthetic
+request through the target, and stops the capture server afterward. If a container must reach the
+host, bind deliberately with `--capture-host 0.0.0.0` and restrict access with the host firewall.
+The report never includes the API key, extra header values, or protected fixture values.
+
+Use `--target-base-url capture://self` to publish a raw OpenAI-compatible baseline. It is expected
+to fail the configured-upstream privacy check; that negative control proves the results format can
+represent a loss rather than only successful project runs.
+
+This profile does not install or configure the target. Publish the target image/package digest,
+gateway configuration with secrets removed, command, raw JSON report, and any deviation.
+
 ## Contribute an independent reproduction
 
 Open a GitHub Discussion or pull request containing the unmodified JSON artifact, host/runtime description, command, and a statement of affiliation or conflict of interest. Independent artifacts will be listed separately from project-maintainer results.

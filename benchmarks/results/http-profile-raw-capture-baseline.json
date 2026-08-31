@@ -1,0 +1,69 @@
+{
+  "capture": {
+    "bind_host": "127.0.0.1",
+    "port": 8765,
+    "target_must_be_preconfigured_for": "http://127.0.0.1:8765/v1"
+  },
+  "checks": {
+    "client_observed_latency": {
+      "iterations": 3,
+      "mean": 28.426266624592245,
+      "p50": 24.288199958391488,
+      "p95": 24.288199958391488,
+      "p99": 24.288199958391488,
+      "passed": true,
+      "threshold_enforced": false,
+      "unit": "milliseconds"
+    },
+    "configured_upstream_boundary": {
+      "captured_requests": 3,
+      "leaked_entity_types": [
+        "EMAIL",
+        "SSN",
+        "CREDIT_CARD"
+      ],
+      "passed": false,
+      "payload_content_included": false
+    },
+    "fragmentation_safety": {
+      "events_observed": 103,
+      "one_character_events_requested": true,
+      "passed": true
+    },
+    "response_fidelity": {
+      "expected_value_reconstructed": true,
+      "passed": true,
+      "payload_content_included": false
+    },
+    "sse_validity": {
+      "done_markers": 1,
+      "errors": [],
+      "invalid_events": 0,
+      "passed": true
+    }
+  },
+  "environment": {
+    "implementation": "cpython",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "python": "3.14.7"
+  },
+  "generated_at": "2026-08-30T12:00:00Z",
+  "harness_revision": "7e959d9d8f9ff6b85e05d9d9ce4642ad3cfb3fed+working-tree",
+  "implementation": {
+    "name": "raw-capture-baseline",
+    "version": "v1"
+  },
+  "limitations": [
+    "The target must be configured to use the harness capture server as its upstream.",
+    "This HTTP profile does not evaluate gateway process RSS, audit evidence, or public-model behavior.",
+    "The synthetic fixture does not establish population-level detector accuracy.",
+    "Client-observed latency includes local HTTP and capture-server work and has no universal threshold."
+  ],
+  "passed": false,
+  "profile": {
+    "name": "OpenAI-compatible HTTP gateway profile",
+    "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+  },
+  "schema": "llm-shield.streaming-privacy-http-profile/v1.0.0"
+}

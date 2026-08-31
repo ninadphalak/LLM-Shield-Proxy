@@ -1,0 +1,22 @@
+services:
+  litellm:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest}
+    command: ["--config", "/app/config.yaml"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-demo}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+
+  llm-shield:
+    build:
+      context: ../../..
+    ports:
+      - "8000:8000"
+    environment:
+      UPSTREAM_BASE_URL: http://litellm:4000
+      UPSTREAM_API_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-demo}
+      OVERRIDE_CLIENT_AUTH: "true"
+      TELEMETRY_ENABLED: "false"
+    depends_on:
+      - litellm

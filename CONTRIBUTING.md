@@ -9,12 +9,13 @@ All contributors are expected to uphold respectful, inclusive, and professional 
 
 ## Pull Request Guidelines & Latency Benchmarking
 
-To maintain our enterprise zero-latency guarantees, all Pull Requests must adhere to strict performance standards:
+To protect the bounded streaming path, pull requests must preserve the published correctness and measurement contracts:
 
-1. **Sub-Millisecond Performance Benchmark:**
-   - LLM-Shield-Proxy guarantees zero-egress, ultra-low latency PII detection.
-   - All Pull Requests must be manually reviewed and performance-benchmarked by the core maintainer (**Ninad Phalak**) for sub-millisecond overhead before merging.
-   - Any PR introducing significant memory leaks, latency regressions (> 1ms overhead for Tier 1 compiled regex), or blocking CPU operations will be rejected.
+1. **Performance and Memory Benchmarking:**
+   - Do not introduce unbounded buffering or market component timings as end-to-end proxy latency.
+   - Add or update configured-upstream conformance fixtures when changing redaction behavior.
+   - Changes to the request or streaming path must include workload, environment, sample count, and distributional results from the published benchmark protocol.
+   - Pull requests that introduce unbounded memory growth, unexplained latency regressions, or blocking event-loop work must address those findings before merge.
 
 2. **Automated Testing:**
    - Ensure all existing unit and integration tests pass cleanly (`py -m pytest tests/`).

@@ -8,6 +8,7 @@ assessment artifacts.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
@@ -250,10 +251,33 @@ def checkpoint_verify_main(argv: Optional[Sequence[str]] = None) -> int:
 def build_benchmark_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llm-shield-proxy benchmark",
-        description="Run the local streaming privacy conformance and microbenchmark harness.",
+        description="Run the local implementation profile or an OpenAI-compatible HTTP gateway profile.",
     )
     parser.add_argument("--iterations", type=int, default=2_000, help="Measured iterations (default: %(default)s).")
     parser.add_argument("--json-out", default="./CONFORMANCE_LATEST.json", help="Machine-readable result path.")
+    parser.add_argument(
+        "--target-base-url",
+        default=None,
+        help="OpenAI-compatible /v1 base URL. Omit for the local implementation profile; use capture://self for a raw baseline.",
+    )
+    parser.add_argument(
+        "--target-api-key",
+        default=os.getenv("CONFORMANCE_TARGET_API_KEY", "conformance-key"),
+        help="Target credential (default: CONFORMANCE_TARGET_API_KEY or a synthetic local value).",
+    )
+    parser.add_argument("--target-model", default="conformance-model", help="Model name sent to the target gateway.")
+    parser.add_argument("--target-name", default="external-openai-compatible-endpoint")
+    parser.add_argument("--target-version", default="unspecified")
+    parser.add_argument(
+        "--target-header",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Additional target request header; repeat as needed. Values are not written to the report.",
+    )
+    parser.add_argument("--capture-host", default="127.0.0.1", help="Controlled upstream bind host.")
+    parser.add_argument("--capture-port", type=int, default=8765, help="Controlled upstream bind port.")
+    parser.add_argument("--timeout-seconds", type=float, default=30.0)
     return parser
 
 
@@ -271,7 +295,32 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     from llm_shield_proxy.conformance import run_conformance, write_conformance_report
 
     try:
-        report = run_conformance(args.iterations)
+        if args.target_base_url:
+            headers = {}
+            for item in args.target_header:
+                if "=" not in item:
+                    raise ValueError("--target-header must use NAME=VALUE")
+                name, value = item.split("=", 1)
+                if not name.strip():
+                    raise ValueError("--target-header name must not be empty")
+                headers[name.strip()] = value
+
+            from llm_shield_proxy.conformance_http import run_http_conformance
+
+            report = run_http_conformance(
+                args.target_base_url,
+                api_key=args.target_api_key,
+                model=args.target_model,
+                implementation_name=args.target_name,
+                implementation_version=args.target_version,
+                iterations=args.iterations,
+                timeout_seconds=args.timeout_seconds,
+                capture_host=args.capture_host,
+                capture_port=args.capture_port,
+                extra_headers=headers,
+            )
+        else:
+            report = run_conformance(args.iterations)
         destination = write_conformance_report(report, args.json_out)
     except (OSError, ValueError) as exc:
         print(f"Benchmark failed: {exc}", file=sys.stderr)
@@ -280,8 +329,12 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Conformance report written to {destination}")
     print(f"  Passed:       {report['passed']}")
     print(f"  Checks:       {len(report['checks'])}")
-    print(f"  Iterations:   {report['microbenchmarks']['iterations']}")
-    print("  Timing scope: local in-process operations only")
+    if args.target_base_url:
+        print(f"  Iterations:   {report['checks']['client_observed_latency']['iterations']}")
+        print("  Timing scope: client -> target -> controlled capture upstream -> target -> client")
+    else:
+        print(f"  Iterations:   {report['microbenchmarks']['iterations']}")
+        print("  Timing scope: local in-process operations only")
     return 0 if report["passed"] else 1
 
 

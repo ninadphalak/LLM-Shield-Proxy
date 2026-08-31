@@ -1,0 +1,61 @@
+name: SPG specification proposal
+description: Propose a normative change or counterexample for the Streaming Privacy Gateway specification.
+title: "[SPG proposal]: "
+labels:
+  - specification
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals are implementation-neutral. Disclose affiliations and include fixtures that another implementation can run.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Failure mode or ambiguity
+      description: What observable problem, counterexample, or ambiguity does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: normative
+    attributes:
+      label: Proposed normative behavior
+      description: State the behavior without relying on LLM-Shield-Proxy internals.
+    validations:
+      required: true
+  - type: textarea
+    id: fixtures
+    attributes:
+      label: Positive and negative fixtures
+      description: Provide or link at least one passing fixture and one counterexample or failing fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: schema
+    attributes:
+      label: Report-schema impact
+      description: List new, changed, or removed fields. Write "none" when there is no impact.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration
+      description: Could an existing conforming implementation or report change status?
+    validations:
+      required: true
+  - type: textarea
+    id: affiliation
+    attributes:
+      label: Affiliation, funding, and conflicts
+      description: Identify implementation ownership, employer interest, sponsorship, or other relevant conflicts.
+    validations:
+      required: true
+  - type: checkboxes
+    id: process
+    attributes:
+      label: Process acknowledgement
+      options:
+        - label: I understand normative proposals normally remain open for at least 14 calendar days.
+          required: true
+        - label: I agree that rejected alternatives and material objections may remain in the public decision record.
+          required: true

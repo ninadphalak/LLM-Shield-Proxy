@@ -1,0 +1,24 @@
+services:
+  llm-shield:
+    build:
+      context: ../../..
+    environment:
+      UPSTREAM_BASE_URL: https://api.openai.com
+      UPSTREAM_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+      OVERRIDE_CLIENT_AUTH: "true"
+      TELEMETRY_ENABLED: "false"
+
+  open-webui:
+    image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    ports:
+      - "3000:8080"
+    environment:
+      OPENAI_API_BASE_URL: http://llm-shield:8000/v1
+      OPENAI_API_KEY: sk-shield-local-evaluation
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      - llm-shield
+
+volumes:
+  open-webui-data:
