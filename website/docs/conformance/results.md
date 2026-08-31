@@ -6,9 +6,9 @@ The repository includes a machine-readable v1.0.0 pre-release report at `benchma
 
 **Run:** 2026-08-30 on Windows 11, CPython 3.14.7, AMD64; 10,000 timing samples per operation.
 
-**Source label:** `e2b68294e5fed1a4e7a3905c0fd97dc1a02d564c+working-tree`
+**Source label:** `7e959d9d8f9ff6b85e05d9d9ce4642ad3cfb3fed+working-tree`
 
-**SHA-256:** `8da1a5752ae312e0569d08899560fef2b22d4e5f666ccdf1db8c1fd8894b22bb`
+**SHA-256:** `351c8db11b114b681ec05bc5e759a7b4969206a5231bcf67e4ad88b1a9df196d`
 
 Because the implementation changes are not yet committed, this is a transparent **maintainer pre-release self-test**, not a release-grade independently reproducible result. CI should regenerate the report from an exact commit SHA before a formal release.
 
@@ -26,8 +26,8 @@ Because the implementation changes are not yet committed, this is a transparent 
 
 | Operation | p50 | p95 | p99 |
 | :--- | ---: | ---: | ---: |
-| Empty-vault buffer | 26.9 us | 53.1 us | 73.5 us |
-| Protected-token buffer | 41.4 us | 74.0 us | 102.7 us |
+| Empty-vault buffer | 23.1 us | 41.4 us | 57.6 us |
+| Protected-token buffer | 34.3 us | 58.8 us | 84.2 us |
 
 These are Windows in-process Python operation timings. They exclude ASGI, HTTP, TLS, network, upstream/model, concurrency, and durable audit I/O. The measured Python allocation peak was 4,656 bytes for the declared allocation scope; it is not process RSS.
 
@@ -36,3 +36,23 @@ These are Windows in-process Python operation timings. They exclude ASGI, HTTP, 
 No unaffiliated reproduction has been published yet. This is an explicit evidence gap and the highest-priority community contribution.
 
 [Reproduce the report](./reproducing) and submit the raw artifact. Do not send representative enterprise traffic or confidential prompts.
+
+## Cross-implementation HTTP results
+
+The table is intentionally public before it is full. “Not run” is not a pass or a failure; it is
+an explicit work item. Results will link the raw report, pinned target revision/image, and
+redacted configuration.
+
+| Target | Version/configuration | HTTP profile | Artifact |
+| :--- | :--- | :--- | :--- |
+| Raw capture endpoint | Harness negative control | Fail as expected: raw protected fixtures reach capture | [`http-profile-raw-capture-baseline.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-raw-capture-baseline.json) |
+| LLM-Shield-Proxy | `1.3.4+working-tree`; maintainer self-test | Pass: 5/5 HTTP-profile checks | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) |
+| LiteLLM | Pending maintainer-neutral configuration | Not run | — |
+| Portkey | Pending maintainer-neutral configuration | Not run | — |
+| Presidio in front of an OpenAI-compatible mock | Pending adapter/configuration | Not run | — |
+| Cloudflare AI Gateway | Pending testable configuration and account boundary | Not run | — |
+
+Raw OpenAI should not receive synthetic protected fixtures merely to populate a table. The local
+capture endpoint supplies the correct pass-through negative control without transmitting those
+values to a public provider. Additional targets are added only after their complete reproducible
+configuration is available.

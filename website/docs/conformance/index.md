@@ -1,5 +1,8 @@
 # Open Streaming-Privacy Conformance Lab
 
+The [specification governance process](/docs/conformance/governance) defines normative changes,
+independent review, conflicts, versioning, and result labels.
+
 The Open Conformance Lab is the vendor-neutral evidence surface for streaming privacy gateways. It separates correctness, security boundaries, and environment-scoped measurements so implementers can reproduce a claim instead of trusting a product tagline.
 
 The lab is Apache-2.0 licensed. The specification, vectors, runner, report schema, and implementation are inspectable and reusable without a license fee, account, hosted service, or paid edition.
@@ -16,7 +19,19 @@ The lab is Apache-2.0 licensed. The specification, vectors, runner, report schem
 | Latency | Are warmup, scope, iterations, unit, and distribution statistics published without presenting an isolated operation as end-to-end latency? |
 | Memory | Is retained streaming state bounded and is the measurement labeled correctly as allocation data or process RSS? |
 
-Read the normative [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), review the [latest reproducible result](./results), or [reproduce it locally](./reproducing).
+Read the normative [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), review the [published results table](./results), or [reproduce the local and HTTP profiles](./reproducing).
+
+## Cross-implementation HTTP profile
+
+The endpoint-neutral profile sends a synthetic fixture through an OpenAI-compatible gateway to a
+harness-owned capture upstream. The capture checks the serialized upstream request, emits the
+observed content as one-character SSE events, and lets the harness verify downstream SSE and
+reconstruction. This design can evaluate different gateways without importing their detector or
+streaming classes.
+
+The HTTP profile is narrower than the seven-domain local profile: it does not remotely infer
+process RSS or audit integrity. Those properties require separate artifacts rather than a
+fabricated pass.
 
 ## Claim levels
 

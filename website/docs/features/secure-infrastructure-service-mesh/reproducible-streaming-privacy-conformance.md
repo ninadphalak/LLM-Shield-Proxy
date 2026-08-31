@@ -15,6 +15,25 @@ llm-shield-proxy benchmark --iterations 2000 --json-out CONFORMANCE_LATEST.json
 
 The JSON report records schema version, source revision when available, runtime/platform details, iteration count, pass/fail evidence, allocation observations, and p50/p95/p99 timing distributions. It deliberately excludes the actual test PII and reconstructed placeholder values.
 
+## Endpoint-neutral gateway profile
+
+The same CLI can exercise an external OpenAI-compatible gateway over HTTP when that gateway is
+configured to forward to the harness-owned capture upstream:
+
+```bash
+llm-shield-proxy benchmark \
+  --target-base-url http://127.0.0.1:8000/v1 \
+  --target-name gateway-under-test \
+  --target-version pinned-version \
+  --iterations 10 \
+  --json-out HTTP_CONFORMANCE.json
+```
+
+The capture returns the transformed prompt as one-character SSE events. The report checks the
+configured-upstream boundary, SSE validity, fragmentation behavior, response fidelity, and
+client-observed local latency. It leaves process memory and audit integrity outside this HTTP
+profile because those properties require target-specific evidence.
+
 ## What the timing numbers mean
 
 These are local in-process microbenchmarks. They exclude ASGI middleware, HTTP parsing, TLS, network latency, upstream model time, concurrency, and durable audit I/O. Do not describe them as end-to-end proxy latency. Publish raw machine-readable artifacts and compare like-for-like environments instead of promoting a single best run.
