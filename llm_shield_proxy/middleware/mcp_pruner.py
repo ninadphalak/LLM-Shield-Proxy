@@ -150,8 +150,14 @@ class MCPDiscoveryPrunerMiddleware:
             allowed = set(policy.get("allowed_tools", []))
             blocked = set(policy.get("blocked_tools", []))
 
+            # An absent counter must read as a generation INCR can never return.
+            # Redis INCR on a missing key yields 1, so defaulting the read to
+            # "1" made a tenant's FIRST tools/list_changed a no-op: the cache
+            # key was identical before and after the bump, and a stale catalog
+            # kept being served for the rest of the TTL. "0" is outside INCR's
+            # range, so every notification changes the key.
             policy_version_bytes = await self.redis_client.get(f"mcp:policy_version:{tenant_id}")
-            policy_version = policy_version_bytes.decode("utf-8") if policy_version_bytes else "1"
+            policy_version = policy_version_bytes.decode("utf-8") if policy_version_bytes else "0"
 
             # Key Isolation: mcp:tools:{tenant_id}:{hash}
             hash_input = (upstream_url + policy_version).encode("utf-8")
