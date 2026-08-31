@@ -18,6 +18,24 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
 
+    # A real Redis server, so RedisVaultStore and the MCP tool pruner are
+    # exercised against the infrastructure they target instead of AsyncMock.
+    # tests/test_redis_integration.py skips itself when SHIELD_TEST_REDIS_URL is
+    # unset, which is how it stays runnable on a developer machine.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      SHIELD_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -33,6 +51,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install ruff bandit pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
+          # hypercorn is the HTTP/2-capable ASGI server used as the upstream in
+          # tests/test_http2_upstream.py; uvicorn cannot serve HTTP/2.
+          pip install hypercorn
           pip install -e .
 
       - name: Run Ruff Linting & Formatting Check
@@ -43,6 +64,164 @@ jobs:
         run: |
           bandit -r llm_shield_proxy/ -s B101,B104,B311
 
-      - name: Run Full Test Suite (Unit & Logic Tests)
+      - name: Verify the Redis service is reachable
+        # Fails loudly rather than letting the Redis tests skip themselves and
+        # report a green build with nothing exercised.
+        run: |
+          python - <<'PY'
+          import os, redis
+          client = redis.from_url(os.environ["SHIELD_TEST_REDIS_URL"])
+          assert client.ping()
+          print("redis server version:", client.info()["redis_version"])
+          PY
+
+      - name: Run Full Test Suite (Unit, Logic, Redis & HTTP/2 Integration)
         run: |
           pytest -v --ignore=tests/k8s --ignore=tests/k8s_ootb --ignore=tests/ootb
+
+      - name: Assert the Redis integration tests were not skipped
+        run: |
+          pytest -q tests/test_redis_integration.py --no-header -rN | tee redis-report.txt
+          grep -qE '[0-9]+ passed' redis-report.txt
+          if grep -qE '[0-9]+ skipped' redis-report.txt; then
+            echo "::error::Redis integration tests skipped; the service container was not used"
+            exit 1
+          fi
+
+  container-tests:
+    name: Out-of-the-Box Container & Wheel Tests
+    runs-on: ubuntu-latest
+    # Docker is preinstalled on ubuntu-latest, so the standalone-container and
+    # SIGTERM graceful-shutdown tests that skip on a developer machine run for
+    # real here. Kept in its own job because it builds an image and a wheel and
+    # does not need the Python matrix.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil build
+          pip install -e .
+
+      - name: Confirm Docker is usable
+        run: docker version
+
+      - name: Run out-of-the-box container tests
+        env:
+          # Turns "Docker unavailable" from a skip into a hard failure, so this
+          # job cannot pass without having actually started the container.
+          SHIELD_REQUIRE_DOCKER: "1"
+        run: |
+          pytest -v tests/ootb
+
+  tier3-onnx:
+    name: Tier 3 ONNX NER (real inference)
+    runs-on: ubuntu-latest
+    # Kept separate so the ~135 MB model and the onnxruntime install do not
+    # slow the matrix job. The model is pinned to a commit, checksum-verified
+    # and cached, so a silently swapped upstream artifact fails the build.
+    env:
+      ONNX_REPO: Xenova/distilbert-base-multilingual-cased-ner-hrl
+      ONNX_REVISION: c2a4dbf593c57f47004c5bc2d3770d311aee9c43
+      ONNX_MODEL_SHA256: 24a0b98f4dd4cd92842f5a541272f86f760225a64a29928eddef14bdb2edb986
+      ONNX_TOKENIZER_SHA256: bf1b59b7b11c95f194f51708d918eea378e09d05f84c0e1656dc5180e8117088
+      SHIELD_TEST_ONNX_MODEL_DIR: ${{ github.workspace }}/.onnx-ner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Restore cached NER model
+        id: onnx-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.onnx-ner
+          key: onnx-ner-${{ env.ONNX_REVISION }}-quantized
+
+      - name: Download the pinned NER model
+        if: steps.onnx-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$SHIELD_TEST_ONNX_MODEL_DIR"
+          base="https://huggingface.co/${ONNX_REPO}/resolve/${ONNX_REVISION}"
+          curl -fsSL "$base/onnx/model_quantized.onnx" -o "$SHIELD_TEST_ONNX_MODEL_DIR/model.onnx"
+          curl -fsSL "$base/tokenizer.json" -o "$SHIELD_TEST_ONNX_MODEL_DIR/tokenizer.json"
+
+      - name: Verify the model checksums
+        run: |
+          cd "$SHIELD_TEST_ONNX_MODEL_DIR"
+          echo "${ONNX_MODEL_SHA256}  model.onnx" | sha256sum -c -
+          echo "${ONNX_TOKENIZER_SHA256}  tokenizer.json" | sha256sum -c -
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
+          # onnxruntime, tokenizers and numpy: the `ner` extra Tier 3 needs.
+          pip install -e ".[ner]"
+
+      - name: Run Tier 3 inference tests
+        env:
+          # Without this the module would skip itself if the model or the `ner`
+          # extra were missing, and the job would pass having run nothing.
+          SHIELD_REQUIRE_ONNX: "1"
+        run: |
+          pytest -v tests/test_tier3_onnx_ner.py
+
+  chart-verification:
+    name: Helm Render & Prometheus Rule Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install promtool
+        env:
+          PROMETHEUS_VERSION: "3.1.0"
+        run: |
+          curl -fsSL -o prometheus.tar.gz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          tar -xzf prometheus.tar.gz
+          sudo install "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
+          promtool --version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
+          pip install -e .
+
+      - name: Render charts and validate alert rules
+        env:
+          # Without this the module would skip itself if helm or promtool were
+          # missing, and the job would pass having rendered nothing.
+          SHIELD_REQUIRE_HELM: "1"
+        run: |
+          pytest -v tests/test_helm_render_and_alerts.py
