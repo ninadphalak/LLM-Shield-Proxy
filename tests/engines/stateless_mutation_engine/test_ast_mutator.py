@@ -47,11 +47,11 @@ async def test_json_bomb_circuit_breaker(mutator):
 
 
 @pytest.mark.asyncio
-async def test_heterogeneous_array_structural_parity(mutator):
+async def test_heterogeneous_array_structural_parity(mutator, cipher):
     """
     Test: Complex Heterogeneous Arrays
     Verify non-sensitive types remain identical, sensitive strings are masked,
-    array length is unchanged, and JSON syntax is 100% valid.
+    array length is unchanged, and the result parses as JSON.
     """
     payload = {
         "jsonrpc": "2.0",
@@ -77,10 +77,11 @@ async def test_heterogeneous_array_structural_parity(mutator):
     assert isinstance(arr[3]["_shield_val"], str)
     assert len(arr[3]["_shield_val"]) > 0
 
-    # Nested dictionary in array mutated
-    assert isinstance(arr[4]["sub_key"], dict)
-    assert arr[4]["sub_key"]["_shield_val"] != "[REDACTED]"
-    assert isinstance(arr[4]["sub_key"]["_shield_val"], str)
+    # Nested dictionary strings retain their type and receive sibling context.
+    assert isinstance(arr[4]["sub_key"], str)
+    assert arr[4]["sub_key"] != "[REDACTED]"
+    assert "_ctx_hash_sub_key" in arr[4]
+    assert cipher.decrypt(arr[4]["_ctx_hash_sub_key"], "sub_key") == "secret 123-45-6789"
 
 
 @pytest.mark.asyncio
@@ -124,13 +125,12 @@ async def test_sibling_injection_and_schema_rewriting(mutator, cipher):
 
     args = mutated["params"]["arguments"]
     assert args["age"] == 30
-    assert "_shield_val" in args["customer_ssn"]
-    assert args["customer_ssn"]["_shield_val"] != "[REDACTED]"
-    assert isinstance(args["customer_ssn"]["_shield_val"], str)
-    assert "_shield_ctx" in args["customer_ssn"]
+    assert args["customer_ssn"] != "[REDACTED]"
+    assert isinstance(args["customer_ssn"], str)
+    assert "_ctx_hash_customer_ssn" in args
 
     # Verify crypto context binding
-    decrypted = cipher.decrypt(args["customer_ssn"]["_shield_ctx"], "$.params.arguments.customer_ssn")
+    decrypted = cipher.decrypt(args["_ctx_hash_customer_ssn"], "customer_ssn")
     assert decrypted == "User ssn is 123-45-6789"
 
 
@@ -157,6 +157,44 @@ async def test_key_immutability_and_stateless(mutator):
     assert mutated["params"]["123-45-6789"] == "this string is completely safe"
 
     # Values containing PII are mutated
-    assert isinstance(mutated["params"]["safe_key"], dict)
-    assert mutated["params"]["safe_key"]["_shield_val"] != "[REDACTED]"
-    assert isinstance(mutated["params"]["safe_key"]["_shield_val"], str)
+    assert isinstance(mutated["params"]["safe_key"], str)
+    assert mutated["params"]["safe_key"] != "[REDACTED]"
+    assert "_ctx_hash_safe_key" in mutated["params"]
+
+
+@pytest.mark.asyncio
+async def test_reserved_context_field_collision_fails_closed(mutator):
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "email": "person@example.com",
+            "_ctx_hash_email": "attacker-controlled",
+        },
+    }
+
+    with pytest.raises(ValueError, match="Reserved stateless context field"):
+        await mutator.mutate(orjson.dumps(payload))
+
+
+def test_schema_rewriter_finds_nested_tool_schema():
+    request = {
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"email": {"type": "string"}},
+                        "required": ["email"],
+                    },
+                },
+            }
+        ]
+    }
+
+    rewritten = DynamicSchemaRewriter.rewrite(request)
+    parameters = rewritten["tools"][0]["function"]["parameters"]
+    assert "_ctx_hash_email" in parameters["properties"]
+    assert "_ctx_hash_email" in parameters["required"]

@@ -1,4 +1,4 @@
-"""Envoy ext_proc gRPC Service for zero-egress LLM shielding over UDS."""
+"""Envoy ext_proc gRPC service for configured LLM payload transformation over UDS."""
 
 import asyncio
 import codecs
@@ -52,15 +52,8 @@ class ExtProcService(ExternalProcessorBase):
 
         try:
             while True:
-                try:
-                    # Enforce application-layer timeouts on UDS gRPC streams
-                    async with asyncio.timeout(5.0):
-                        request = await stream.recv_message()
-                        if request is None:
-                            break
-                except asyncio.TimeoutError:
-                    logger.error("gRPC Stream Timeout: Terminating degraded IPC connection.")
-                    await stream.cancel()
+                request = await stream.recv_message()
+                if request is None:
                     break
 
                 if request.request_body.body:

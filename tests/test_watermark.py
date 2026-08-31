@@ -43,6 +43,20 @@ def test_config_fail_fast():
     assert s.ENABLE_WATERMARKING is True
 
 
+def test_canary_config_requires_secret():
+    """Canary directives must not use a shared fallback signing key."""
+    with pytest.raises(ValidationError) as exc:
+        Settings(ENABLE_CANARY_TRIPWIRE=True, SHIELD_WATERMARK_SECRET=None, VALID_VIRTUAL_KEYS="test")
+    assert "SHIELD_WATERMARK_SECRET" in str(exc.value)
+
+    s = Settings(
+        ENABLE_CANARY_TRIPWIRE=True,
+        SHIELD_WATERMARK_SECRET="test-secret",
+        VALID_VIRTUAL_KEYS="test",
+    )
+    assert s.CANARY_TOKEN is not None
+
+
 @pytest.mark.asyncio
 async def test_synthetic_final_chunk_injection():
     """Assert watermark is injected as a synthetic final chunk before [DONE]."""

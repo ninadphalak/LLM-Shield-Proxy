@@ -27,7 +27,7 @@ class StatelessASTVisitor:
     async def mutate(self, payload: bytes) -> bytes:
         """Sanitizes a JSON-RPC/MCP payload off the event loop.
 
-        The traversal below is 100% synchronous CPU work (JSON parse, stack-based
+        The traversal below is synchronous CPU work (JSON parse, stack-based
         walk, per-string PII detection). Running it directly on the event loop
         would stall every other concurrent request for the duration of a single
         large tool-call payload, so it's offloaded to a worker thread.
@@ -52,7 +52,8 @@ class StatelessASTVisitor:
                 raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}")
 
             if isinstance(node, dict):
-                for k, v in node.items():
+                context_fields = {}
+                for k, v in list(node.items()):
                     # Preserve JSON-RPC structural keys entirely
                     if k in ("jsonrpc", "method", "id"):
                         continue
@@ -63,16 +64,16 @@ class StatelessASTVisitor:
                         stack.append((v, f"{path}.{k}", depth + 1))
                     elif isinstance(v, str):
                         if self._detect_pii(v):
-                            aad = f"{path}.{k}"
-                            cipher_text = self.cipher.encrypt(v, aad)
-
-                            # Substitute the visible string with Faker values (or tags based on config)
-                            # rather than hardcoding [REDACTED]
                             from llm_shield_proxy.engines.vault import Vault
                             ephemeral_vault = Vault(synthetic=settings.ENABLE_SYNTHETIC_SWAPPING)
                             faked_v = pii_engine.redact_text(v, ephemeral_vault)
+                            ctx_key = f"_ctx_hash_{k}"
+                            if ctx_key in node:
+                                raise ValueError(f"Reserved stateless context field already present at {path}.{ctx_key}")
+                            node[k] = faked_v
+                            context_fields[ctx_key] = self.cipher.encrypt(v, k)
 
-                            node[k] = {"_shield_val": faked_v, "_shield_ctx": cipher_text}
+                node.update(context_fields)
 
             elif isinstance(node, list):
                 for i in range(len(node)):
@@ -83,13 +84,10 @@ class StatelessASTVisitor:
                         stack.append((v, f"{path}[{i}]", depth + 1))
                     elif isinstance(v, str):
                         if self._detect_pii(v):
-                            aad = f"{path}[{i}]"
-                            cipher_text = self.cipher.encrypt(v, aad)
-
                             from llm_shield_proxy.engines.vault import Vault
                             ephemeral_vault = Vault(synthetic=settings.ENABLE_SYNTHETIC_SWAPPING)
                             faked_v = pii_engine.redact_text(v, ephemeral_vault)
-
+                            cipher_text = self.cipher.encrypt(v, faked_v)
                             node[i] = {"_shield_val": faked_v, "_shield_ctx": cipher_text}
 
         return orjson.dumps(data)

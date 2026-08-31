@@ -1,21 +1,65 @@
+{{- if .Values.webhook.enabled }}
+{{- $fullname := include "llm-shield-proxy.fullname" . -}}
+{{- $secretName := printf "%s-webhook-cert" $fullname -}}
+{{- $ca := genCA "llm-shield-proxy-ca" 3650 -}}
+{{- $cn := printf "%s.%s.svc" $fullname .Release.Namespace -}}
+{{- $altName := printf "%s.%s.svc.cluster.local" $fullname .Release.Namespace -}}
+{{- $cert := genSignedCert $cn nil (list $altName $cn) 3650 $ca -}}
+{{- $caCert := $ca.Cert | b64enc -}}
+{{- $tlsCert := $cert.Cert | b64enc -}}
+{{- $tlsKey := $cert.Key | b64enc -}}
+{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $secretName -}}
+{{- if and $existingSecret (not .Values.webhook.certManager.enabled) -}}
+{{- $caCert = index $existingSecret.data "ca.crt" -}}
+{{- $tlsCert = index $existingSecret.data "tls.crt" -}}
+{{- $tlsKey = index $existingSecret.data "tls.key" -}}
+{{- end -}}
+{{- if .Values.webhook.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ $secretName }}
+  dnsNames:
+    - {{ printf "%s.%s.svc" $fullname .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $fullname .Release.Namespace | quote }}
+  issuerRef:
+    name: {{ required "webhook.certManager.issuerRef.name is required when cert-manager is enabled" .Values.webhook.certManager.issuerRef.name | quote }}
+    kind: {{ .Values.webhook.certManager.issuerRef.kind | quote }}
+---
+{{- else }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+type: kubernetes.io/tls
+data:
+  ca.crt: {{ $caCert }}
+  tls.crt: {{ $tlsCert }}
+  tls.key: {{ $tlsKey }}
+---
+{{- end }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ include "llm-shield-proxy.fullname" . }}
+  name: {{ $fullname }}
   {{- if .Values.webhook.certManager.enabled }}
   annotations:
-    cert-manager.io/inject-ca-from: "{{ .Release.Namespace }}/{{ include "llm-shield-proxy.fullname" . }}-webhook-cert"
+    cert-manager.io/inject-ca-from: "{{ .Release.Namespace }}/{{ $secretName }}"
   {{- end }}
 webhooks:
   - name: inject.llm-shield.io
     clientConfig:
       service:
-        name: {{ include "llm-shield-proxy.fullname" . }}
+        name: {{ $fullname }}
         namespace: {{ .Release.Namespace }}
-        path: "/mutate"
+        path: "/v1/k8s/mutate"
+        port: {{ .Values.service.httpPort }}
       {{- if not .Values.webhook.certManager.enabled }}
-      {{- $ca := genCA "llm-shield-proxy-ca" 3650 }}
-      caBundle: {{ $ca.Cert | b64enc }}
+      caBundle: {{ $caCert }}
       {{- end }}
     rules:
       - operations: ["CREATE"]
@@ -23,7 +67,10 @@ webhooks:
         apiVersions: ["v1"]
         resources: ["pods"]
     sideEffects: None
+    failurePolicy: Fail
+    timeoutSeconds: 10
     admissionReviewVersions: ["v1"]
     objectSelector:
       matchLabels:
         llm-shield.io/inject: "true"
+{{- end }}

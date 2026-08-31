@@ -8,8 +8,8 @@ from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessP
 
 class StatelessStreamingLexer:
     """
-    Zero-Allocation Streaming Lexer for v3 PII Rehydration.
-    Handles SSE fragmented chunks and O(1) space lookahead buffering.
+    Bounded-lookahead streaming lexer for v3 PII rehydration.
+    Handles fragmented chunks while retaining a fixed trailing window.
     """
     def __init__(self, cipher: StatelessPIICipher):
         self.cipher = cipher
@@ -113,7 +113,7 @@ class StatelessStreamingLexer:
 class NonStreamingRehydrator:
     """
     Non-recursive iterative JSON stack rehydrator for complete payloads.
-    Memory footprint bounded strictly by O(1) pre-allocated stack.
+    Stack use grows with the number of nested containers up to the depth limit.
     """
     def __init__(self, cipher: StatelessPIICipher):
         self.cipher = cipher

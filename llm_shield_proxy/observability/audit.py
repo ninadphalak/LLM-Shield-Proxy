@@ -133,7 +133,7 @@ async def get_audit_public_key() -> Dict[str, str]:
 class AuditLogger:
     """Enterprise Structured Audit Logger with Segmented Hash Chaining.
 
-    Maintains a tamper-evident SHA-256 hash chain of all audit events.
+    Chains audit events supplied to this logger using SHA-256 predecessor links.
     In zero-dependency mode, the chain is Segmented (per-process in RAM).
     In best-effort mode, a Pod restart creates a new chain. A configured durable
     sink recovers the previous hash, sequence, and chain identifier.

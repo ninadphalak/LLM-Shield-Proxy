@@ -1,7 +1,7 @@
-"""Enterprise LLM-Shield Proxy Application Gateway.
+"""LLM-Shield Proxy application gateway.
 
-Zero-Egress privacy redaction middleware providing high-throughput PII masking,
-session-isolated token vaults, and prefix-free SSE stream rehydration.
+Transforms configured protected values before the selected upstream boundary and
+rehydrates supported values on the inspected response path.
 """
 
 from __future__ import annotations
@@ -388,7 +388,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="LLM-Shield Proxy",
-    description="Enterprise Zero-Egress Privacy Redaction Middleware Proxy",
+    description="Streaming privacy transformation proxy for OpenAI-compatible traffic",
     version=APP_VERSION,
     lifespan=lifespan,
 )
@@ -957,10 +957,23 @@ async def _proxy_catch_all_internal(
                 is_json_rpc = isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
                 if is_json_rpc:
                     is_v3 = True
-                    # Initialize v3 Stateless Engine
-                    # Derive a 32-byte key from the watermark secret or fallback
-                    raw_secret = settings.SHIELD_WATERMARK_SECRET or "default_shield_secret_for_v3_engine"
-                    key = hashlib.sha256(raw_secret.encode('utf-8')).digest()
+                    # Initialize the stateless engine with the configured encryption
+                    # key. Missing or invalid key material fails this request closed;
+                    # a public fallback key would make the ciphertext recoverable.
+                    from llm_shield_proxy.engines.crypto_vault import get_crypto_dek
+
+                    try:
+                        key = get_crypto_dek()
+                    except ValueError:
+                        return JSONResponse(
+                            status_code=503,
+                            content={
+                                "error": {
+                                    "message": "Stateless encryption key is unavailable.",
+                                    "type": "security_configuration_error",
+                                }
+                            },
+                        )
 
                     v3_cipher = StatelessPIICipher(key=key, version=1, session_id=x_session_id)
                     mutator = StatelessASTVisitor(v3_cipher)
@@ -1037,7 +1050,7 @@ async def _proxy_catch_all_internal(
                 # Inject Canary Tripwire Token after PII redaction to prevent stripping invisible Unicode
                 if enable_canary_tripwire and settings.CANARY_TOKEN:
                     directive = generate_watermark_text(
-                        secret=settings.SHIELD_WATERMARK_SECRET or "default",
+                        secret=settings.SHIELD_WATERMARK_SECRET,
                         session_id=x_session_id or "unknown_session",
                         virtual_key_id=virtual_key_id,
                     )
