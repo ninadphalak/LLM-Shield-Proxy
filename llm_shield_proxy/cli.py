@@ -371,7 +371,7 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                     raise ValueError("--target-header name must not be empty")
                 headers[name.strip()] = value
 
-            from llm_shield_proxy.conformance_http import run_http_conformance
+            from llm_shield_proxy.conformance.http_profile import run_http_conformance
 
             report = run_http_conformance(
                 args.target_base_url,

@@ -42,11 +42,13 @@ def _write_signed_worm_log(tmp_path, tamper: bool = False, invalidate_signature:
     previous_hash = "0" * 64  # a SHA-256 digest is 64 hex chars; the chain genesis value
     for i in range(3):
         base_dict = {
+            "chain_id": "test-chain",
             "timestamp": f"2026-01-0{i + 1}T00:00:00+00:00",
             "event": "PII_REDACTION_EVENT",
             "severity": "INFO",
             "instance_id": "test-instance",
             "previous_hash": previous_hash,
+            "sequence": i + 1,
         }
         event_str = json.dumps(base_dict, sort_keys=True)
         new_hash = hashlib.sha256(event_str.encode("utf-8")).hexdigest()
@@ -137,8 +139,8 @@ def test_verify_worm_log_detects_sequence_gap(tmp_path):
     for index, record in enumerate(records, start=1):
         record["chain_id"] = "test-chain"
         record["sequence"] = index if index < 3 else 4
-    # Adding fields invalidates hashes too, but the verifier must independently
-    # report the sequence discontinuity.
+    # Changing the sequence invalidates the last hash too, but the verifier must
+    # independently report the sequence discontinuity.
     log_path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
 
     summary = verify_worm_log(str(log_path), pubkey_path.read_text(encoding="utf-8"))

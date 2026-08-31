@@ -72,7 +72,14 @@ _NONCE_MIN_MATCHES = 3
 
 
 def _make_nonce() -> str:
-    return "-".join(secrets.choice(_NONCE_WORDS) for _ in range(_NONCE_WORD_COUNT))
+    # Draw without replacement. _marker_matches counts distinct words, so a run
+    # containing only one or two distinct draws can never meet the threshold even
+    # when a conforming gateway forwards the entire marker unchanged.
+    remaining = list(_NONCE_WORDS)
+    chosen = []
+    for _ in range(_NONCE_WORD_COUNT):
+        chosen.append(remaining.pop(secrets.randbelow(len(remaining))))
+    return "-".join(chosen)
 
 
 def _build_prompt(nonce: str) -> str:
@@ -200,9 +207,8 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
 def _leaked_entities(records: list[dict[str, Any]]) -> list[str]:
     """Entity types whose fixture value reached the upstream in any recoverable form."""
     leaked: set[str] = set()
-    for record in records:
-        strings: list[str] = record["strings"]
-        values: list[str] = record["values"]
+
+    def inspect(strings: list[str], values: list[str]) -> None:
         haystacks = (
             "".join(strings),
             "".join(values),
@@ -218,6 +224,23 @@ def _leaked_entities(records: list[dict[str, Any]]) -> list[str]:
             normalized = _normalize(value)
             if any(value in hay or normalized in hay for hay in haystacks):
                 leaked.add(entity)
+
+    for record in records:
+        strings: list[str] = record["strings"]
+        values: list[str] = record["values"]
+        inspect(strings, values)
+
+    # A stateful upstream can reassemble one logical value from ordered requests.
+    # Join each data channel independently across records so ordinary method/header
+    # metadata does not break a body-to-body (or trailer-to-trailer) reconstruction.
+    for channel in ("request", "headers", "framing", "body"):
+        strings = [
+            item for record in records for item in record.get(f"{channel}_strings", [])
+        ]
+        values = [
+            item for record in records for item in record.get(f"{channel}_values", [])
+        ]
+        inspect(strings, values)
     return sorted(leaked)
 
 
@@ -287,8 +310,55 @@ def _handler_for(state: _CaptureState):
     class CaptureHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
+        def handle_one_request(self) -> None:
+            self._capture_recorded = False
+            super().handle_one_request()
+
         def log_message(self, _format: str, *_args: Any) -> None:
             return
+
+        def send_error(
+            self,
+            code: int,
+            message: Optional[str] = None,
+            explain: Optional[str] = None,
+        ) -> None:
+            # parse_request can reject an unsupported HTTP version or malformed
+            # request before verb dispatch. Record that connection as uninspectable;
+            # otherwise a decoy valid POST can hide arbitrary unparsed transport data.
+            if not getattr(self, "_capture_recorded", False):
+                found = _Inspection()
+                raw_request_line = getattr(self, "raw_requestline", b"")
+                if isinstance(raw_request_line, bytes):
+                    _collect(raw_request_line.decode("latin-1", "replace"), found)
+                else:
+                    _collect(str(raw_request_line), found)
+                headers = getattr(self, "headers", None)
+                if headers is not None:
+                    for header_name, header_value in headers.items():
+                        _collect(str(header_name), found)
+                        _collect(unquote_plus(str(header_value)), found)
+                state.append(
+                    {
+                        "path": getattr(self, "path", ""),
+                        "method": getattr(self, "command", ""),
+                        "parsed": False,
+                        "strings": found.strings,
+                        "values": found.values,
+                        "request_strings": list(found.strings),
+                        "request_values": list(found.values),
+                        "headers_strings": [],
+                        "headers_values": [],
+                        "framing_strings": [],
+                        "framing_values": [],
+                        "body_strings": [],
+                        "body_values": [],
+                        "byte_length": 0,
+                        "error": f"http_protocol_error_{code}",
+                    }
+                )
+                self._capture_recorded = True
+            super().send_error(code, message, explain)
 
         def do_GET(self) -> None:  # noqa: N802
             self._capture()
@@ -304,7 +374,7 @@ def _handler_for(state: _CaptureState):
                 return
             self.send_error(404)
 
-        def _read_body(self) -> tuple[bytes, Optional[str]]:
+        def _read_body(self) -> tuple[bytes, Optional[str], list[str]]:
             """Read the body under either framing.
 
             BaseHTTPRequestHandler does not decode Transfer-Encoding: chunked, and
@@ -313,41 +383,69 @@ def _handler_for(state: _CaptureState):
             otherwise be indistinguishable from a clean one.
             """
             transfer_encoding = (self.headers.get("transfer-encoding") or "").lower()
+            framing_metadata: list[str] = []
             if "chunked" in transfer_encoding:
                 chunks: list[bytes] = []
                 total = 0
+                metadata_bytes = 0
                 while True:
-                    size_line = self.rfile.readline(65536).strip()
-                    if not size_line:
-                        return b"".join(chunks), "truncated_chunked_body"
+                    raw_size_line = self.rfile.readline(65536)
+                    if not raw_size_line:
+                        return b"".join(chunks), "truncated_chunked_body", framing_metadata
+                    if len(raw_size_line) == 65536 and not raw_size_line.endswith(b"\n"):
+                        return b"".join(chunks), "chunk_metadata_too_large", framing_metadata
+                    metadata_bytes += len(raw_size_line)
+                    if metadata_bytes > _MAX_CAPTURE_BYTES:
+                        return b"".join(chunks), "chunk_metadata_too_large", framing_metadata
+                    size_line = raw_size_line.strip()
+                    size_token, separator, extension = size_line.partition(b";")
+                    if separator:
+                        framing_metadata.append(unquote_plus(extension.decode("latin-1")))
                     try:
-                        size = int(size_line.split(b";")[0], 16)
+                        size = int(size_token, 16)
                     except ValueError:
-                        return b"".join(chunks), "malformed_chunk_header"
+                        return b"".join(chunks), "malformed_chunk_header", framing_metadata
                     if size == 0:
                         while True:
                             trailer = self.rfile.readline(65536)
                             if trailer in (b"\r\n", b"\n", b""):
                                 break
-                        return b"".join(chunks), None
+                            if len(trailer) == 65536 and not trailer.endswith(b"\n"):
+                                return b"".join(chunks), "trailer_too_large", framing_metadata
+                            metadata_bytes += len(trailer)
+                            if metadata_bytes > _MAX_CAPTURE_BYTES:
+                                return b"".join(chunks), "trailer_too_large", framing_metadata
+                            framing_metadata.append(
+                                unquote_plus(trailer.decode("latin-1").strip())
+                            )
+                        return b"".join(chunks), None, framing_metadata
                     total += size
                     if total > _MAX_CAPTURE_BYTES:
-                        return b"".join(chunks), "body_too_large"
-                    chunks.append(self.rfile.read(size))
-                    self.rfile.read(2)
+                        return b"".join(chunks), "body_too_large", framing_metadata
+                    chunk = self.rfile.read(size)
+                    if len(chunk) != size:
+                        return b"".join(chunks), "truncated_chunked_body", framing_metadata
+                    chunks.append(chunk)
+                    if self.rfile.read(2) != b"\r\n":
+                        return b"".join(chunks), "malformed_chunk_terminator", framing_metadata
             raw_length = self.headers.get("content-length")
             if raw_length is None:
-                return b"", "missing_framing"
+                return b"", "missing_framing", framing_metadata
             try:
                 length = int(raw_length)
             except ValueError:
-                return b"", "invalid_content_length"
+                return b"", "invalid_content_length", framing_metadata
+            if length < 0:
+                return b"", "invalid_content_length", framing_metadata
             if length > _MAX_CAPTURE_BYTES:
-                return b"", "body_too_large"
-            return self.rfile.read(length), None
+                return b"", "body_too_large", framing_metadata
+            body = self.rfile.read(length)
+            if len(body) != length:
+                return body, "truncated_body", framing_metadata
+            return body, None, framing_metadata
 
         def _capture(self) -> tuple[dict[str, Any], Any]:
-            body, framing_error = self._read_body()
+            body, framing_error, framing_metadata = self._read_body()
             body, encoding_error = _decode_content_encoding(
                 body, self.headers.get("content-encoding", "")
             )
@@ -362,20 +460,35 @@ def _handler_for(state: _CaptureState):
             }
             payload = None
             found = _Inspection()
-            # The request line is inspected too: a query string is as much an egress
-            # channel as a body, and it is where a GET would carry the payload.
+            request_string_start, request_value_start = len(found.strings), len(found.values)
+            # Every component of the request line is inspected. A query string is as
+            # much an egress channel as a body, and custom methods are attacker-chosen.
+            _collect(self.command, found)
             _collect(unquote_plus(self.path), found)
+            record["request_strings"] = found.strings[request_string_start:]
+            record["request_values"] = found.values[request_value_start:]
             # So are request headers. A gateway can redact the visible message field
             # and carry the raw values in metadata headers instead; the upstream
             # receives them either way, so an unwalked header is an unwatched channel.
+            header_string_start, header_value_start = len(found.strings), len(found.values)
             for header_name, header_value in self.headers.items():
                 _collect(str(header_name), found)
                 _collect(unquote_plus(str(header_value)), found)
+            record["headers_strings"] = found.strings[header_string_start:]
+            record["headers_values"] = found.values[header_value_start:]
+            framing_string_start, framing_value_start = len(found.strings), len(found.values)
+            for item in framing_metadata:
+                _collect(item, found)
+            record["framing_strings"] = found.strings[framing_string_start:]
+            record["framing_values"] = found.values[framing_value_start:]
+            record["body_strings"] = []
+            record["body_values"] = []
             try:
                 payload = json.loads(body)
+                body_string_start, body_value_start = len(found.strings), len(found.values)
                 _collect(payload, found)
-                record["strings"] = found.strings
-                record["values"] = found.values
+                record["body_strings"] = found.strings[body_string_start:]
+                record["body_values"] = found.values[body_value_start:]
                 if found.truncated:
                     # Fail closed. A body too deep or too large to walk has NOT been
                     # shown to be clean, and a target can choose how deep to nest.
@@ -385,17 +498,18 @@ def _handler_for(state: _CaptureState):
                 # when they happen to parse as JSON on their own.
                 record["parsed"] = not record["error"]
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-                record["strings"] = found.strings
-                record["values"] = found.values
                 if body.strip():
                     record["error"] = record["error"] or f"unparsable_body:{type(exc).__name__}"
                 else:
                     # A bodyless request (a GET, say) is fully inspected via its
                     # request line; absence of JSON is not an inspection failure.
                     record["parsed"] = not found.truncated
+            record["strings"] = found.strings
+            record["values"] = found.values
             # Always recorded, parsed or not: an inspection failure must be able to
             # fail the boundary check rather than silently count as a clean capture.
             state.append(record)
+            self._capture_recorded = True
             return record, payload
 
         def do_POST(self) -> None:  # noqa: N802
@@ -441,6 +555,14 @@ def _handler_for(state: _CaptureState):
         do_DELETE = do_PUT
         do_OPTIONS = do_PUT
 
+        def __getattr__(self, name: str):
+            # BaseHTTPRequestHandler otherwise emits 501 before _capture for HEAD,
+            # TRACE, CONNECT, and arbitrary extension methods. The bytes reached the
+            # upstream boundary and must be inspected even when the route is refused.
+            if name.startswith("do_"):
+                return self.do_PUT
+            raise AttributeError(name)
+
     return CaptureHandler
 
 
@@ -452,6 +574,7 @@ async def _exercise_target(
     timeout_seconds: float,
     extra_headers: dict[str, str],
     prompt: str,
+    session_namespace: str,
 ) -> dict[str, Any]:
     url = urljoin(target_base_url.rstrip("/") + "/", "chat/completions")
     headers = {"authorization": f"Bearer {api_key}", **extra_headers}
@@ -477,7 +600,13 @@ async def _exercise_target(
                 async with client.stream(
                     "POST",
                     url,
-                    headers={**headers, "x-session-id": f"conformance-{iteration}"},
+                    # Namespace sessions by run. Reusing conformance-0/1/2 across
+                    # invocations makes a compliant loop circuit breaker reject a
+                    # later profile even though every request was redacted correctly.
+                    headers={
+                        **headers,
+                        "x-session-id": f"conformance-{session_namespace}-{iteration}",
+                    },
                     json={
                         "model": model,
                         "messages": [{"role": "user", "content": prompt}],
@@ -575,6 +704,7 @@ def run_http_conformance(
                 timeout_seconds,
                 extra_headers or {},
                 prompt,
+                nonce,
             )
         )
     finally:
@@ -592,6 +722,7 @@ def run_http_conformance(
     ]
     uninspectable = [record for record in captured if not record["parsed"]]
     paths = sorted({str(record["path"]).split("?")[0] for record in captured})
+    methods = sorted({str(record["method"]) for record in captured})
     latency = _percentiles(exercise["durations_ms"])
     checks = {
         "configured_upstream_boundary": {
@@ -604,13 +735,16 @@ def run_http_conformance(
             ),
             "leaked_entity_types": leaked_types,
             "upstream_paths_observed": paths,
+            "upstream_methods_observed": methods,
             "marker_words_required": _NONCE_MIN_MATCHES,
             "marker_words_total": len(marker_words),
             "inspection_scope": (
-                "every request to the capture origin on any path or method: request line "
-                "plus body, after transfer-encoding and content-encoding decoding, walked "
-                "recursively over all JSON types, with base64/hex/percent-encoded runs and "
-                "character-code arrays decoded, matched literally and with separators removed"
+                "every HTTP/1.x request to the capture origin on any path or method: request "
+                "line, headers, chunk extensions, trailers, and body, after transfer-encoding "
+                "and content-encoding decoding, walked recursively over all JSON types, with "
+                "base64/hex/percent-encoded runs and character-code arrays decoded, matched "
+                "literally and with separators removed, including ordered per-channel joins "
+                "across captured requests"
             ),
             "payload_content_included": False,
         },
@@ -630,6 +764,7 @@ def run_http_conformance(
             ),
             "invalid_events": exercise["invalid_events"],
             "done_markers_valid": exercise["done_markers_valid"],
+            "content_type_valid": exercise["content_type_valid"],
             "status_codes": exercise["status_codes"],
             "errors": exercise["errors"],
         },
@@ -638,6 +773,7 @@ def run_http_conformance(
             "expected_value_reconstructed": exercise["text_matches"],
             "iterations_matching": exercise["iterations_matching"],
             "iterations_completed": exercise["iterations_completed"],
+            "iterations_requested": exercise["iterations_requested"],
             "payload_content_included": False,
         },
         "client_observed_latency": {
@@ -648,7 +784,7 @@ def run_http_conformance(
             **latency,
         },
     }
-    from llm_shield_proxy.conformance import build_attestation
+    from llm_shield_proxy.conformance.local import build_attestation
 
     attestation = build_attestation()
     report: dict[str, Any] = {
@@ -689,13 +825,25 @@ def run_http_conformance(
             "The synthetic fixture does not establish population-level detector accuracy.",
             "Client-observed latency includes local HTTP and capture-server work and has no universal threshold.",
             "Implementation name and version are operator-supplied labels, not measured identity.",
+            "Authentication, rate-limit, blast-radius, and other gateway policy controls must "
+            "permit the requested evaluation traffic; a policy rejection is a profile non-pass, "
+            "not evidence that protected data leaked.",
             "Fragmentation safety verifies more than one event, which does not distinguish "
             "per-token streaming from a fully buffered response emitted as a few chunks.",
             "Any attestation block is self-reported run metadata, not third-party verification.",
             "Leak detection covers the configured capture origin only. Egress to any other "
             "destination is outside what this profile can observe.",
-            "Inspection recovers encoded and fragmented values, but a value split across "
-            "non-adjacent fields of a body is not reassembled.",
+            "The capture server observes HTTP/1.x. Unsupported or malformed protocol attempts "
+            "are failed closed as uninspectable rather than decoded as HTTP/2 or HTTP/3.",
+            "Capture requests exceeding the byte, nesting, node, or decode budgets are failed "
+            "closed as uninspectable; a non-pass from that condition is not evidence of a leak.",
+            "The observation window ends after the client iterations finish; egress deliberately "
+            "deferred until after capture shutdown is outside this finite run.",
+            "The profile inspects HTTP application data, not covert encodings in request counts, "
+            "ordering, timing, connection metadata, packetization, or DNS/TLS metadata.",
+            "Inspection recovers encoded and fragmented values within a request and ordered "
+            "fragments in the same channel across requests, but does not reassemble arbitrary "
+            "fragments separated by unrelated values or moved between channel types.",
         ],
     }
     if attestation is not None:

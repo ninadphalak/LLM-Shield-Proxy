@@ -108,25 +108,25 @@
       ],
       "properties": {
         "fragmentation_safety": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/fragmentation_check"
         },
         "raw_pii_egress": {
           "$ref": "#/$defs/egress_check"
         },
         "sse_validity": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/sse_check"
         },
         "rehydration_fidelity": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/rehydration_check"
         },
         "audit_integrity": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/audit_check"
         },
         "latency_measurement": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/latency_check"
         },
         "memory_bounded": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/memory_check"
         }
       },
       "additionalProperties": false
@@ -137,7 +137,10 @@
       "required": [
         "iterations",
         "scope",
-        "unit"
+        "unit",
+        "no_op",
+        "empty_vault_buffer",
+        "protected_token_buffer"
       ],
       "properties": {
         "iterations": {
@@ -149,10 +152,19 @@
           "minLength": 1
         },
         "unit": {
-          "type": "string",
-          "minLength": 1
+          "const": "nanoseconds"
+        },
+        "no_op": {
+          "$ref": "#/$defs/distribution"
+        },
+        "empty_vault_buffer": {
+          "$ref": "#/$defs/distribution"
+        },
+        "protected_token_buffer": {
+          "$ref": "#/$defs/distribution"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "memory": {
       "type": "object",
@@ -160,6 +172,8 @@
       "required": [
         "scope",
         "iterations",
+        "current_bytes",
+        "peak_bytes",
         "retained_characters",
         "retention_bound_characters"
       ],
@@ -172,6 +186,14 @@
           "type": "integer",
           "minimum": 1
         },
+        "current_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "peak_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
         "retained_characters": {
           "type": "integer",
           "minimum": 0
@@ -180,7 +202,8 @@
           "type": "integer",
           "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "passed": {
       "type": "boolean"
@@ -218,32 +241,69 @@
     }
   ],
   "$defs": {
-    "check": {
+    "distribution": {
       "type": "object",
       "required": [
-        "passed"
+        "mean",
+        "p50",
+        "p95",
+        "p99"
       ],
       "properties": {
-        "passed": {
-          "type": "boolean"
-        }
-      }
+        "mean": {"type": "number", "minimum": 0},
+        "p50": {"type": "number", "minimum": 0},
+        "p95": {"type": "number", "minimum": 0},
+        "p99": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "fragmentation_check": {
+      "type": "object",
+      "required": ["passed", "partitions_tested", "failures", "invariant"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "partitions_tested": {"type": "integer", "minimum": 1},
+        "failures": {"type": "array", "items": {"type": "object"}},
+        "invariant": {"type": "string", "minLength": 1}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {"properties": {"failures": {"maxItems": 0}}},
+      "additionalProperties": false
     },
     "egress_check": {
       "type": "object",
       "required": [
-        "passed"
+        "passed",
+        "boundary",
+        "protected_entity_types",
+        "detected_entity_counts",
+        "leaked_entity_types",
+        "payload_content_included"
       ],
       "properties": {
-        "passed": {
-          "type": "boolean"
+        "passed": {"type": "boolean"},
+        "boundary": {"type": "string", "minLength": 1},
+        "protected_entity_types": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "detected_entity_counts": {
+          "type": "object",
+          "required": ["EMAIL", "SSN", "CREDIT_CARD"],
+          "properties": {
+            "EMAIL": {"type": "integer", "minimum": 0},
+            "SSN": {"type": "integer", "minimum": 0},
+            "CREDIT_CARD": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": {"type": "integer", "minimum": 0}
         },
         "leaked_entity_types": {
           "type": "array",
           "items": {
             "type": "string"
           }
-        }
+        },
+        "payload_content_included": {"const": false}
       },
       "allOf": [
         {
@@ -259,6 +319,13 @@
           },
           "then": {
             "properties": {
+              "detected_entity_counts": {
+                "properties": {
+                  "EMAIL": {"minimum": 1},
+                  "SSN": {"minimum": 1},
+                  "CREDIT_CARD": {"minimum": 1}
+                }
+              },
               "leaked_entity_types": {
                 "type": "array",
                 "maxItems": 0
@@ -266,7 +333,112 @@
             }
           }
         }
-      ]
+      ],
+      "additionalProperties": false
+    },
+    "sse_check": {
+      "type": "object",
+      "required": [
+        "passed", "provider_shape", "json_events_checked", "invalid_json_events",
+        "done_markers", "stream_terminated_with_blank_line", "utf8_mid_codepoint_split_preserved"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "provider_shape": {"type": "string", "minLength": 1},
+        "json_events_checked": {"type": "integer", "minimum": 0},
+        "invalid_json_events": {"type": "integer", "minimum": 0},
+        "done_markers": {"type": "integer", "minimum": 0},
+        "stream_terminated_with_blank_line": {"type": "boolean"},
+        "utf8_mid_codepoint_split_preserved": {"type": "boolean"}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {
+        "properties": {
+          "json_events_checked": {"minimum": 1},
+          "invalid_json_events": {"const": 0},
+          "done_markers": {"const": 1},
+          "stream_terminated_with_blank_line": {"const": true},
+          "utf8_mid_codepoint_split_preserved": {"const": true}
+        }
+      },
+      "additionalProperties": false
+    },
+    "rehydration_check": {
+      "type": "object",
+      "required": [
+        "passed", "expected_value_reconstructed", "protected_placeholder_present",
+        "payload_content_included"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "expected_value_reconstructed": {"type": "boolean"},
+        "protected_placeholder_present": {"type": "boolean"},
+        "payload_content_included": {"const": false}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {
+        "properties": {
+          "expected_value_reconstructed": {"const": true},
+          "protected_placeholder_present": {"const": false}
+        }
+      },
+      "additionalProperties": false
+    },
+    "audit_check": {
+      "type": "object",
+      "required": [
+        "passed", "records_verified", "signatures_verified", "sequence_continuity_verified",
+        "tamper_negative_control_detected", "record_content_included"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "records_verified": {"type": "integer", "minimum": 1},
+        "signatures_verified": {"type": "integer", "minimum": 0},
+        "sequence_continuity_verified": {"type": "boolean"},
+        "tamper_negative_control_detected": {"type": "boolean"},
+        "record_content_included": {"const": false}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {
+        "properties": {
+          "signatures_verified": {"minimum": 1},
+          "sequence_continuity_verified": {"const": true},
+          "tamper_negative_control_detected": {"const": true}
+        }
+      },
+      "additionalProperties": false
+    },
+    "latency_check": {
+      "type": "object",
+      "required": ["passed", "threshold_enforced", "samples_per_operation", "scope"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "threshold_enforced": {"const": false},
+        "samples_per_operation": {"type": "integer", "minimum": 1},
+        "scope": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "memory_check": {
+      "type": "object",
+      "required": [
+        "passed", "rss_threshold_enforced", "allocation_measurement_recorded",
+        "retention_bound_verified"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "rss_threshold_enforced": {"const": false},
+        "allocation_measurement_recorded": {"type": "boolean"},
+        "retention_bound_verified": {"type": "boolean"}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {
+        "properties": {
+          "allocation_measurement_recorded": {"const": true},
+          "retention_bound_verified": {"const": true}
+        }
+      },
+      "additionalProperties": false
     },
     "passed_requires_fragmentation_safety": {
       "if": {
@@ -501,7 +673,7 @@
     },
     "attestation": {
       "type": "object",
-      "description": "Provenance for this run. Absent when the harness had no CI context. Self-reported unless verification names an independently checkable mechanism.",
+      "description": "Self-reported provenance for this run; absent when the harness had no CI context. Independently verified provenance requires a future schema with proof fields.",
       "required": [
         "verification",
         "runner",
@@ -509,13 +681,8 @@
       ],
       "properties": {
         "verification": {
-          "description": "self-reported: values copied from the run environment, forgeable by whoever ran the harness. Any other value must name a mechanism a third party can check independently.",
-          "type": "string",
-          "enum": [
-            "self-reported",
-            "github-oidc",
-            "sigstore"
-          ]
+          "description": "Values are copied from the run environment and are forgeable by whoever ran the harness. Independently verified mechanisms require a future schema with proof fields.",
+          "const": "self-reported"
         },
         "runner": {
           "type": "string",

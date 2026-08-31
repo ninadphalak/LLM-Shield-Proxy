@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from llm_shield_proxy.conformance_http import (
+from llm_shield_proxy.conformance.http_profile import (
     _NONCE_MIN_MATCHES,
     _NONCE_WORD_COUNT,
     PROTECTED_VALUES,
@@ -71,6 +71,40 @@ def _post(url, body, headers=None):
         return urllib.request.urlopen(request, timeout=30).read()
     except urllib.error.HTTPError as exc:
         return exc.read()
+
+
+def _raw_request(port, request):
+    """Send an exact HTTP/1.x request and return its response body."""
+    with socket.create_connection(("127.0.0.1", port), timeout=30) as connection:
+        connection.settimeout(30)
+        connection.sendall(request)
+        response = bytearray()
+        while True:
+            chunk = connection.recv(65536)
+            if not chunk:
+                break
+            response.extend(chunk)
+    return bytes(response).partition(b"\r\n\r\n")[2]
+
+
+def _chunked_post(port, body, *, extension="", trailers=None):
+    trailers = trailers or {}
+    trailer_declaration = ""
+    if trailers:
+        trailer_declaration = "Trailer: " + ", ".join(trailers) + "\r\n"
+    trailer_block = "".join(f"{name}: {value}\r\n" for name, value in trailers.items())
+    request = (
+        "POST /v1/chat/completions HTTP/1.1\r\n"
+        f"Host: 127.0.0.1:{port}\r\n"
+        "Content-Type: application/json\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        f"{trailer_declaration}"
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode("ascii")
+    request += f"{len(body):X}{extension}\r\n".encode("ascii") + body + b"\r\n"
+    request += b"0\r\n" + trailer_block.encode("ascii") + b"\r\n"
+    return _raw_request(port, request)
 
 
 def _hide(mode, values):
@@ -148,12 +182,55 @@ def _leaking_gateway(mode, capture_port):
                     f"http://127.0.0.1:{capture_port}/v1/chat/completions?trace={RAW[1]}",
                     json.dumps(body).encode(),
                 )
-            else:
+            elif mode == "unsupported_method_channel":
+                # BaseHTTPRequestHandler parses this request, but a handler that only
+                # defines a fixed verb list emits 501 before the capture hook runs.
+                raw_headers = "".join(
+                    f"x-orig-{index}: {value}\r\n" for index, value in enumerate(RAW)
+                )
+                _raw_request(
+                    capture_port,
+                    (
+                        "HEAD /v1/telemetry HTTP/1.1\r\n"
+                        f"Host: 127.0.0.1:{capture_port}\r\n"
+                        f"{raw_headers}"
+                        "Connection: close\r\n\r\n"
+                    ).encode("ascii"),
+                )
+            elif mode == "cross_request_fragments":
+                # A stateful upstream can reassemble a field carried over ordered
+                # requests. No individual request contains a protected value.
+                for value in RAW:
+                    middle = len(value) // 2
+                    for part in (value[:middle], value[middle:]):
+                        fragment = json.dumps({"piece": part}).encode()
+                        _raw_request(
+                            capture_port,
+                            (
+                                "POST /v1/fragments HTTP/1.0\r\n"
+                                f"Content-Length: {len(fragment)}\r\n"
+                                "Content-Type: application/json\r\n\r\n"
+                            ).encode("ascii")
+                            + fragment,
+                        )
+            elif mode not in ("trailer_channel", "chunk_extension_channel"):
                 body["telemetry"] = _hide(mode, RAW)
             payload = json.dumps(body).encode()
-            if mode == "gzip":
-                payload, headers["content-encoding"] = gzip.compress(payload), "gzip"
-            response = _post(upstream, payload, headers)
+            if mode == "trailer_channel":
+                response = _chunked_post(
+                    capture_port,
+                    payload,
+                    trailers={f"x-orig-{index}": value for index, value in enumerate(RAW)},
+                )
+            elif mode == "chunk_extension_channel":
+                extension = "".join(
+                    f';x-orig-{index}="{value}"' for index, value in enumerate(RAW)
+                )
+                response = _chunked_post(capture_port, payload, extension=extension)
+            else:
+                if mode == "gzip":
+                    payload, headers["content-encoding"] = gzip.compress(payload), "gzip"
+                response = _post(upstream, payload, headers)
 
             text = "".join(
                 json.loads(line[5:])["choices"][0]["delta"]["content"]
@@ -204,6 +281,10 @@ LEAK_MODES = [
     "sibling_endpoint",
     "query_string",
     "header_channel",
+    "trailer_channel",
+    "chunk_extension_channel",
+    "unsupported_method_channel",
+    "cross_request_fragments",
 ]
 
 
@@ -365,7 +446,7 @@ def test_raw_pass_through_baseline_is_recorded_as_failing(capture_port):
 # --- the inverse: conforming gateways the harness must not fail ---------------------
 
 
-def _conforming_gateway(port, redact_words=frozenset()):
+def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None):
     """Redacts every protected value, forwards nothing raw, rehydrates the response."""
 
     class ConformingGateway(BaseHTTPRequestHandler):
@@ -385,9 +466,12 @@ def _conforming_gateway(port, redact_words=frozenset()):
                     token = f"[PERSON_{index}]"
                     restored[token] = word
                     masked = masked.replace(word, token)
+            upstream_payload = {"model": "m", "messages": [{"role": "user", "content": masked}]}
+            if extra_payload is not None:
+                upstream_payload["metadata"] = extra_payload
             response = _post(
                 f"http://127.0.0.1:{port}/v1/chat/completions",
-                json.dumps({"model": "m", "messages": [{"role": "user", "content": masked}]}).encode(),
+                json.dumps(upstream_payload).encode(),
             )
             text = "".join(
                 json.loads(line[5:])["choices"][0]["delta"]["content"]
@@ -416,9 +500,258 @@ def test_conforming_gateway_passes(capture_port):
     assert report["passed"] is True, report["checks"]
 
 
+def test_generated_marker_words_are_distinct(monkeypatch):
+    """Duplicate draws can leave fewer distinct words than correlation requires."""
+    from llm_shield_proxy.conformance import http_profile as conformance_http
+
+    monkeypatch.setattr(conformance_http.secrets, "choice", lambda words: words[0])
+    monkeypatch.setattr(conformance_http.secrets, "randbelow", lambda _limit: 0, raising=False)
+    marker = conformance_http._make_nonce().split("-")
+    assert len(marker) == _NONCE_WORD_COUNT
+    assert len(set(marker)) == _NONCE_WORD_COUNT
+
+
+def test_duplicate_marker_draw_cannot_fail_a_conforming_gateway(capture_port, monkeypatch):
+    from llm_shield_proxy.conformance import http_profile as conformance_http
+
+    # Before draws were made without replacement, this possible run contained only
+    # two distinct words and could never meet the three-word correlation threshold.
+    monkeypatch.setattr(conformance_http.secrets, "choice", lambda words: words[0])
+    monkeypatch.setattr(conformance_http.secrets, "randbelow", lambda _limit: 0)
+    report = _run(_conforming_gateway(capture_port), capture_port)
+    assert report["passed"] is True, report["checks"]
+
+
+def test_every_iteration_contributes_to_response_fidelity(capture_port):
+    """A good last response must not erase an earlier wrong reconstruction."""
+
+    class LastOnlyGateway(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        requests = 0
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            masked = prompt
+            for raw, token in MASK.items():
+                masked = masked.replace(raw, token)
+            _post(
+                f"http://127.0.0.1:{capture_port}/v1/chat/completions",
+                json.dumps({"model": "m", "messages": [{"role": "user", "content": masked}]}).encode(),
+            )
+            type(self).requests += 1
+            text = "wrong-but-still-fragmented" if self.requests == 1 else prompt
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in text:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    report = _run(LastOnlyGateway, capture_port, iterations=2)
+    fidelity = report["checks"]["response_fidelity"]
+    assert fidelity["iterations_matching"] == 1
+    assert fidelity["passed"] is False
+    assert report["passed"] is False
+
+
+def test_sessions_are_namespaced_across_profile_invocations(capture_port):
+    """A compliant loop breaker must not mistake separate profile runs for one loop."""
+    active_capture = {"port": capture_port}
+
+    class StatefulConformingGateway(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        seen_sessions = set()
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            session_id = self.headers.get("x-session-id")
+            if session_id in self.seen_sessions:
+                payload = b'{"error":"agent_loop_detected"}'
+                self.send_response(429)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(payload)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            self.seen_sessions.add(session_id)
+
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            masked = prompt
+            for raw, token in MASK.items():
+                masked = masked.replace(raw, token)
+            _post(
+                f"http://127.0.0.1:{active_capture['port']}/v1/chat/completions",
+                json.dumps({"model": "m", "messages": [{"role": "user", "content": masked}]}).encode(),
+            )
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in prompt:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StatefulConformingGateway)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    reports = []
+    try:
+        for port in (capture_port, _free_port()):
+            active_capture["port"] = port
+            reports.append(
+                run_http_conformance(
+                    f"http://127.0.0.1:{server.server_address[1]}/v1",
+                    iterations=2,
+                    capture_port=port,
+                )
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert all(report["passed"] for report in reports), [report["checks"] for report in reports]
+    assert len(StatefulConformingGateway.seen_sessions) == 4
+
+
+def test_unsupported_http_transport_fails_closed(capture_port):
+    """A parser rejection must be evidence of a blind spot, not an invisible request."""
+
+    class UnsupportedProtocolGateway(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            masked = prompt
+            for raw, token in MASK.items():
+                masked = masked.replace(raw, token)
+            raw_headers = "".join(
+                f"x-orig-{index}: {value}\r\n" for index, value in enumerate(RAW)
+            )
+            _raw_request(
+                capture_port,
+                (
+                    "POST /v1/transport HTTP/2.0\r\n"
+                    f"{raw_headers}\r\n"
+                ).encode("ascii"),
+            )
+            _post(
+                f"http://127.0.0.1:{capture_port}/v1/chat/completions",
+                json.dumps({"model": "m", "messages": [{"role": "user", "content": masked}]}).encode(),
+            )
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in prompt:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    report = _run(UnsupportedProtocolGateway, capture_port)
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert report["passed"] is False
+    assert boundary["uninspectable_requests"] >= 1
+    assert "http_protocol_error_505" in boundary["uninspectable_reasons"]
+
+
+def test_clean_request_over_inspection_budget_is_an_explicit_non_pass(capture_port):
+    """Fail-closed is intentional, but must be distinguishable from a detected leak."""
+    benign = {"leaf": "ordinary metadata"}
+    for _ in range(80):
+        benign = {"nested": benign}
+
+    report = _run(_conforming_gateway(capture_port, extra_payload=benign), capture_port)
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert report["passed"] is False
+    assert boundary["leaked_entity_types"] == []
+    assert boundary["uninspectable_requests"] >= 1
+    assert any("failed closed as uninspectable" in item for item in report["limitations"])
+
+
+def test_egress_deferred_until_after_capture_shutdown_is_disclosed(capture_port):
+    """A finite external observation cannot certify behavior after it has stopped."""
+    attempted = threading.Event()
+    timers = []
+
+    class DelayedGateway(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            masked = prompt
+            for raw, token in MASK.items():
+                masked = masked.replace(raw, token)
+            _post(
+                f"http://127.0.0.1:{capture_port}/v1/chat/completions",
+                json.dumps({"model": "m", "messages": [{"role": "user", "content": masked}]}).encode(),
+            )
+
+            def delayed_leak():
+                try:
+                    payload = json.dumps({"raw": RAW}).encode()
+                    with socket.create_connection(("127.0.0.1", capture_port), timeout=1) as connection:
+                        connection.settimeout(1)
+                        connection.sendall(
+                            (
+                                "POST /v1/telemetry HTTP/1.0\r\n"
+                                f"Content-Length: {len(payload)}\r\n"
+                                "Content-Type: application/json\r\n\r\n"
+                            ).encode("ascii")
+                            + payload
+                        )
+                except Exception:
+                    pass
+                finally:
+                    attempted.set()
+
+            timer = threading.Timer(2.0, delayed_leak)
+            timer.daemon = True
+            timers.append(timer)
+            timer.start()
+
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in prompt:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    report = _run(DelayedGateway, capture_port)
+    for timer in timers:
+        timer.join(timeout=3)
+    assert attempted.is_set()
+    assert report["passed"] is True
+    assert any("observation window ends" in item for item in report["limitations"])
+    assert any("request counts" in item for item in report["limitations"])
+
+
 def test_marker_words_are_not_given_names():
     """A marker word a conforming PERSON detector redacts is a false-positive source."""
-    from llm_shield_proxy.conformance_http import _NONCE_WORDS
+    from llm_shield_proxy.conformance.http_profile import _NONCE_WORDS
 
     collisions = sorted(GIVEN_NAMES.intersection(_NONCE_WORDS))
     assert not collisions, f"marker words a name detector would redact: {collisions}"
@@ -429,7 +762,7 @@ def test_correlation_survives_partial_marker_redaction(capture_port):
     redactable = _NONCE_WORD_COUNT - _NONCE_MIN_MATCHES
     assert redactable >= 1, "the marker must tolerate at least one redacted word"
 
-    from llm_shield_proxy import conformance_http
+    from llm_shield_proxy.conformance import http_profile as conformance_http
 
     seen = {}
     original = conformance_http._build_prompt
@@ -451,4 +784,3 @@ def test_correlation_survives_partial_marker_redaction(capture_port):
     boundary = report["checks"]["configured_upstream_boundary"]
     assert boundary["correlated_requests"] >= 1, f"redacting {sorted(words)} broke correlation"
     assert report["passed"] is True, report["checks"]
-

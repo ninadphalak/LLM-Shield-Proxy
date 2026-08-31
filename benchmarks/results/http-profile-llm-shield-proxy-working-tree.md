@@ -10,7 +10,8 @@ Maintainer working-tree self-test; not an independent result or a release artifa
 - Request iterations: 3
 - Detector/masking path: default Tier 1/2 configuration and default `SYNTHETIC` masking
 - External telemetry and anonymous usage tracking: disabled
-- Envoy `ext_proc` and FinOps metering: disabled for this HTTP profile
+- Rate limiting, blast-radius limiting, Envoy `ext_proc`, and FinOps metering: disabled for this
+  HTTP profile so repeated synthetic requests are not rejected by an orthogonal policy control
 
 Secrets and synthetic request values are not included in the report or this configuration record.
 The target used evaluation-only `OVERRIDE_CLIENT_AUTH=true` and injected a non-production key for
@@ -28,6 +29,8 @@ TELEMETRY_ENABLED=false
 ANONYMOUS_USAGE_TRACKING=false
 ENABLE_EXT_PROC=false
 ENABLE_FINOPS_METERING=false
+ENABLE_RATE_LIMITING=false
+ENABLE_BLAST_RADIUS_LIMITS=false
 ```
 
 Harness command:
