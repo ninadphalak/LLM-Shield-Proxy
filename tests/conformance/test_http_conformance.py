@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from llm_shield_proxy.conformance import write_conformance_report
-from llm_shield_proxy.conformance_http import run_http_conformance
+from llm_shield_proxy.conformance.http_profile import run_http_conformance
 
 
 def test_http_profile_can_measure_and_fail_a_raw_openai_compatible_endpoint(tmp_path):

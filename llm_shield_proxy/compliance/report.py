@@ -121,9 +121,12 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
 
     verifier_key = None
     if pubkey_pem:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
         from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
         verifier_key = load_pem_public_key(pubkey_pem.encode("utf-8"))
+        if not isinstance(verifier_key, Ed25519PublicKey):
+            raise ValueError("Audit verification requires an Ed25519 public key")
         summary["signature_checked"] = True
 
     fingerprints_seen: set = set()
@@ -188,9 +191,21 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                 summary["chain_breaks"].append({"line": line_no, "reason": "missing_hash", "event": event_name})
 
             chain_id = record.get("chain_id")
-            if chain_id:
-                chain_ids_seen.add(str(chain_id))
-            chain_key = str(chain_id) if chain_id else ""
+            if chain_id is None:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "missing_chain_id", "event": event_name}
+                )
+                chain_key = f"__invalid_chain_at_line_{line_no}"
+            elif not isinstance(chain_id, str) or not chain_id:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "invalid_chain_id", "event": event_name}
+                )
+                chain_key = f"__invalid_chain_at_line_{line_no}"
+            else:
+                chain_ids_seen.add(chain_id)
+                chain_key = chain_id
             chain_hash = chain_prior_hash.get(chain_key)
             prior_sequence = chain_prior_sequence.get(chain_key)
             if chain_hash is not None and record.get("previous_hash") != chain_hash:
@@ -212,35 +227,61 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                 )
                 summary["unanchored_chains"] += 1
             sequence = record.get("sequence")
-            if sequence is not None:
-                try:
-                    sequence_int = int(sequence)
-                    if summary["first_sequence"] is None:
-                        summary["first_sequence"] = sequence_int
-                    summary["last_sequence"] = sequence_int
-                    if prior_sequence is not None and sequence_int != prior_sequence + 1:
-                        summary["chain_valid"] = False
-                        summary["chain_breaks"].append(
-                            {"line": line_no, "reason": "sequence_discontinuity", "event": event_name}
-                        )
-                    elif prior_sequence is None and sequence_int != 1:
-                        summary["chain_valid"] = False
-                        summary["chain_breaks"].append(
-                            {"line": line_no, "reason": "non_initial_sequence_start", "event": event_name}
-                        )
-                    chain_prior_sequence[chain_key] = sequence_int
-                except (TypeError, ValueError):
+            if sequence is None:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "missing_sequence", "event": event_name}
+                )
+            elif not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "invalid_sequence", "event": event_name}
+                )
+            else:
+                sequence_int = sequence
+                if summary["first_sequence"] is None:
+                    summary["first_sequence"] = sequence_int
+                summary["last_sequence"] = sequence_int
+                if prior_sequence is not None and sequence_int != prior_sequence + 1:
                     summary["chain_valid"] = False
                     summary["chain_breaks"].append(
-                        {"line": line_no, "reason": "invalid_sequence", "event": event_name}
+                        {"line": line_no, "reason": "sequence_discontinuity", "event": event_name}
                     )
+                elif prior_sequence is None and sequence_int != 1:
+                    summary["chain_valid"] = False
+                    summary["chain_breaks"].append(
+                        {"line": line_no, "reason": "non_initial_sequence_start", "event": event_name}
+                    )
+                chain_prior_sequence[chain_key] = sequence_int
             if record_hash:
                 chain_prior_hash[chain_key] = record_hash
             prior_hash = record_hash or prior_hash
 
             fingerprint = record.get("public_key_fingerprint")
             signature = record.get("signature")
-            if fingerprint:
+            signature_present = signature is not None and signature != ""
+            fingerprint_present = fingerprint is not None and fingerprint != ""
+            if signature_present and not fingerprint_present:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "missing_public_key_fingerprint", "event": event_name}
+                )
+            if fingerprint_present and not signature_present:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "missing_signature", "event": event_name}
+                )
+            fingerprint_valid = bool(
+                isinstance(fingerprint, str)
+                and len(fingerprint) == 64
+                and all(character in "0123456789abcdef" for character in fingerprint)
+            )
+            if fingerprint_present and not fingerprint_valid:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "invalid_public_key_fingerprint", "event": event_name}
+                )
+            elif fingerprint_present:
                 fingerprints_seen.add(fingerprint)
                 if expected_fingerprint is not None and fingerprint != expected_fingerprint:
                     summary["chain_valid"] = False
@@ -248,15 +289,29 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                         {"line": line_no, "reason": "public_key_fingerprint_mismatch", "event": event_name}
                     )
 
-            if signature:
-                if verifier_key is not None:
+            if signature_present:
+                decoded_signature = None
+                try:
+                    if not isinstance(signature, str):
+                        raise TypeError("signature must be a string")
+                    decoded_signature = base64.b64decode(signature, validate=True)
+                    if len(decoded_signature) != 64:
+                        raise ValueError("Ed25519 signatures are 64 bytes")
+                except (ValueError, TypeError, binascii.Error):
+                    decoded_signature = None
+                    summary["signatures_invalid"] += 1
+                    summary["chain_valid"] = False
+                    summary["chain_breaks"].append(
+                        {"line": line_no, "reason": "invalid_signature_encoding", "event": event_name}
+                    )
+                if verifier_key is not None and decoded_signature is not None:
                     from cryptography.exceptions import InvalidSignature
 
                     canonical = _reconstruct_canonical_bytes(record, exclude=("signature", "public_key_fingerprint"))
                     try:
-                        verifier_key.verify(base64.b64decode(signature), canonical)
+                        verifier_key.verify(decoded_signature, canonical)
                         summary["signatures_valid"] += 1
-                    except (InvalidSignature, ValueError, TypeError, binascii.Error):
+                    except InvalidSignature:
                         summary["signatures_invalid"] += 1
                         summary["chain_valid"] = False
                         summary["chain_breaks"].append(

@@ -132,8 +132,6 @@ def _signing_pair():
 
 def _signed(private, fingerprint, sequence, previous_hash, event="PROXY_EVENT"):
     """Build a record the way AuditLogger does: append to an already-sorted string."""
-    import base64
-
     body = {
         "chain_id": "prod",
         "event": event,
@@ -142,6 +140,12 @@ def _signed(private, fingerprint, sequence, previous_hash, event="PROXY_EVENT"):
         "severity": "INFO",
         "timestamp": f"2026-01-01T00:00:0{sequence}Z",
     }
+    return _signed_body(private, fingerprint, body)
+
+
+def _signed_body(private, fingerprint, body):
+    import base64
+
     canonical = json.dumps(body, sort_keys=True)
     record_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     hashed = f'{canonical[:-1]}, "hash": "{record_hash}"}}'
@@ -225,6 +229,74 @@ def test_signed_chain_is_authentic(tmp_path):
     assert result["chain_valid"] is True
     assert result["authenticity_verified"] is True
     assert result["signatures_valid"] == 3
+
+
+def test_signature_base64_is_not_permissively_rewritten(tmp_path):
+    """Non-base64 suffixes change the stored signature and must not be ignored."""
+    private, pem, fingerprint = _signing_pair()
+    record, _ = _signed(private, fingerprint, 1, GENESIS)
+    record["signature"] += "!!!!"
+
+    result = verify_worm_log(_write(tmp_path, [record]), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert result["signatures_invalid"] == 1
+
+
+def test_signature_and_fingerprint_must_remain_paired(tmp_path):
+    """The fingerprint is part of AuditLogger's signed-record envelope."""
+    private, pem, fingerprint = _signing_pair()
+    record, _ = _signed(private, fingerprint, 1, GENESIS)
+    del record["public_key_fingerprint"]
+
+    result = verify_worm_log(_write(tmp_path, [record]), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert any(b["reason"] == "missing_public_key_fingerprint" for b in result["chain_breaks"])
+
+
+def test_declared_fingerprint_must_match_verification_key(tmp_path):
+    """Fingerprint enforcement is load-bearing even though it is outside the signature."""
+    private, pem, fingerprint = _signing_pair()
+    record, _ = _signed(private, fingerprint, 1, GENESIS)
+    record["public_key_fingerprint"] = "0" * 64
+
+    result = verify_worm_log(_write(tmp_path, [record]), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert any(b["reason"] == "public_key_fingerprint_mismatch" for b in result["chain_breaks"])
+
+
+@pytest.mark.parametrize("missing", ["chain_id", "sequence"])
+def test_signed_record_requires_chain_structure(tmp_path, missing):
+    """A valid signature does not make a structurally incomplete chain intact."""
+    private, pem, fingerprint = _signing_pair()
+    body = {
+        "chain_id": "prod",
+        "event": "PROXY_EVENT",
+        "previous_hash": GENESIS,
+        "sequence": 1,
+        "severity": "INFO",
+        "timestamp": "2026-01-01T00:00:01Z",
+    }
+    del body[missing]
+    record, _ = _signed_body(private, fingerprint, body)
+
+    result = verify_worm_log(_write(tmp_path, [record]), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert any(b["reason"] == f"missing_{missing}" for b in result["chain_breaks"])
+
+
+def test_rotated_segment_without_its_predecessor_is_unanchored(tmp_path):
+    private, pem, fingerprint = _signing_pair()
+    first, previous = _signed(private, fingerprint, 1, GENESIS)
+    second, _ = _signed(private, fingerprint, 2, previous)
+
+    result = verify_worm_log(_write(tmp_path, [second]), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert any(b["reason"] == "unanchored_chain_start" for b in result["chain_breaks"])
 
 
 def _cli(tmp_path, records, pem=None, extra=()):

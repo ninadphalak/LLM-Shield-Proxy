@@ -13,7 +13,8 @@ import pytest
 jsonschema = pytest.importorskip("jsonschema")
 from jsonschema import Draft202012Validator  # noqa: E402
 
-SPEC_DIR = Path(__file__).resolve().parents[1] / "spec" / "v1.0.0"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SPEC_DIR = REPO_ROOT / "spec" / "v1.0.0"
 REPORT_SCHEMA = json.loads((SPEC_DIR / "report.schema.json").read_text(encoding="utf-8"))
 HTTP_SCHEMA = json.loads((SPEC_DIR / "http-profile.schema.json").read_text(encoding="utf-8"))
 
@@ -83,8 +84,48 @@ def test_attestation_must_declare_its_verification_basis(local_report):
     assert _errors(REPORT_SCHEMA, document)
 
 
+@pytest.mark.parametrize("verification", ["github-oidc", "sigstore"])
+def test_attestation_cannot_claim_an_unimplemented_verification_mechanism(
+    local_report, verification
+):
+    """No proof field exists yet, so these labels would be an unsupported claim."""
+    document = copy.deepcopy(local_report)
+    document["attestation"] = {
+        "verification": verification,
+        "runner": "self-asserted-runner",
+        "commit_sha": "7e959d9",
+    }
+    assert _errors(REPORT_SCHEMA, document)
+
+
+def test_passing_local_report_requires_check_measurements(local_report):
+    """Bare true flags plus decorative top-level numbers are not measurements."""
+    hollow = copy.deepcopy(local_report)
+    hollow["checks"] = {name: {"passed": True} for name in CHECK_NAMES}
+    hollow["microbenchmarks"] = {
+        "iterations": 1,
+        "scope": "claimed measurement",
+        "unit": "nanoseconds",
+    }
+    hollow["memory"] = {
+        "scope": "claimed measurement",
+        "iterations": 1,
+        "retained_characters": 0,
+        "retention_bound_characters": 0,
+    }
+    hollow["passed"] = True
+    assert _errors(REPORT_SCHEMA, hollow)
+
+
+@pytest.mark.parametrize("field", ["iterations", "scope", "unit"])
+def test_each_microbenchmark_basis_field_is_required(local_report, field):
+    document = copy.deepcopy(local_report)
+    del document["microbenchmarks"][field]
+    assert _errors(REPORT_SCHEMA, document)
+
+
 def test_committed_artifacts_validate():
-    results = Path(__file__).resolve().parents[1] / "benchmarks" / "results"
+    results = REPO_ROOT / "benchmarks" / "results"
     for path in sorted(results.glob("*.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
         schema = HTTP_SCHEMA if "http-profile" in document.get("schema", "") else REPORT_SCHEMA
@@ -114,7 +155,7 @@ def test_measurement_evidence_cannot_be_stripped(local_report):
 
 def test_boundary_counts_must_be_internally_consistent():
     """A request cannot be correlated to this run without having been captured."""
-    results = Path(__file__).resolve().parents[1] / "benchmarks" / "results"
+    results = REPO_ROOT / "benchmarks" / "results"
     source = next(p for p in results.glob("*.json") if "http-profile" in p.name)
     document = json.loads(source.read_text(encoding="utf-8"))
 
@@ -130,7 +171,7 @@ def test_boundary_counts_must_be_internally_consistent():
 
 
 def test_boundary_pass_requires_no_leak_and_no_blind_spot():
-    results = Path(__file__).resolve().parents[1] / "benchmarks" / "results"
+    results = REPO_ROOT / "benchmarks" / "results"
     source = next(p for p in results.glob("*.json") if "http-profile" in p.name)
     document = json.loads(source.read_text(encoding="utf-8"))
 
@@ -147,8 +188,29 @@ def test_boundary_pass_requires_no_leak_and_no_blind_spot():
 
 
 def test_emitted_http_report_validates():
-    from llm_shield_proxy.conformance_http import run_http_conformance
+    from llm_shield_proxy.conformance.http_profile import run_http_conformance
 
     report = run_http_conformance("capture://self", iterations=1, capture_port=8793)
     assert _errors(HTTP_SCHEMA, report) == []
     assert report["passed"] is False
+
+
+def test_passing_http_report_requires_per_check_evidence():
+    from llm_shield_proxy.conformance.http_profile import run_http_conformance
+
+    hollow = run_http_conformance("capture://self", iterations=1, capture_port=8794)
+    hollow["checks"] = {
+        "configured_upstream_boundary": {
+            "passed": True,
+            "captured_requests": 1,
+            "correlated_requests": 1,
+            "uninspectable_requests": 0,
+            "leaked_entity_types": [],
+        },
+        "fragmentation_safety": {"passed": True},
+        "sse_validity": {"passed": True},
+        "response_fidelity": {"passed": True},
+        "client_observed_latency": {"passed": True},
+    }
+    hollow["passed"] = True
+    assert _errors(HTTP_SCHEMA, hollow)

@@ -157,16 +157,16 @@
           "$ref": "#/$defs/boundary_check"
         },
         "fragmentation_safety": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/fragmentation_check"
         },
         "sse_validity": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/sse_check"
         },
         "response_fidelity": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/response_check"
         },
         "client_observed_latency": {
-          "$ref": "#/$defs/check"
+          "$ref": "#/$defs/latency_check"
         }
       },
       "additionalProperties": false
@@ -351,16 +351,90 @@
     }
   ],
   "$defs": {
-    "check": {
+    "fragmentation_check": {
       "type": "object",
       "required": [
-        "passed"
+        "passed",
+        "one_character_events_requested",
+        "events_observed",
+        "events_observed_max",
+        "coalescing_not_distinguished"
       ],
       "properties": {
-        "passed": {
-          "type": "boolean"
+        "passed": {"type": "boolean"},
+        "one_character_events_requested": {"const": true},
+        "events_observed": {"type": "integer", "minimum": 0},
+        "events_observed_max": {"type": "integer", "minimum": 0},
+        "coalescing_not_distinguished": {"const": true}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {"properties": {"events_observed": {"minimum": 2}}},
+      "additionalProperties": false
+    },
+    "sse_check": {
+      "type": "object",
+      "required": [
+        "passed", "invalid_events", "done_markers_valid", "status_codes", "errors"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "invalid_events": {"type": "integer", "minimum": 0},
+        "done_markers_valid": {"type": "boolean"},
+        "content_type_valid": {"type": "boolean"},
+        "status_codes": {"type": "array", "items": {"type": "integer"}},
+        "errors": {"type": "array", "items": {"type": "string"}}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {
+        "properties": {
+          "invalid_events": {"const": 0},
+          "done_markers_valid": {"const": true},
+          "content_type_valid": {"const": true},
+          "errors": {"maxItems": 0}
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "response_check": {
+      "type": "object",
+      "required": [
+        "passed", "expected_value_reconstructed", "iterations_matching",
+        "iterations_completed", "payload_content_included"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "expected_value_reconstructed": {"type": "boolean"},
+        "iterations_matching": {"type": "integer", "minimum": 0},
+        "iterations_completed": {"type": "integer", "minimum": 0},
+        "iterations_requested": {"type": "integer", "minimum": 1},
+        "payload_content_included": {"const": false}
+      },
+      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "then": {
+        "properties": {
+          "expected_value_reconstructed": {"const": true},
+          "iterations_matching": {"minimum": 1},
+          "iterations_completed": {"minimum": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "latency_check": {
+      "type": "object",
+      "required": [
+        "passed", "threshold_enforced", "unit", "iterations", "mean", "p50", "p95", "p99"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "threshold_enforced": {"const": false},
+        "unit": {"const": "milliseconds"},
+        "iterations": {"type": "integer", "minimum": 1},
+        "mean": {"type": "number", "minimum": 0},
+        "p50": {"type": "number", "minimum": 0},
+        "p95": {"type": "number", "minimum": 0},
+        "p99": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
     },
     "boundary_check": {
       "type": "object",
@@ -369,7 +443,13 @@
         "captured_requests",
         "correlated_requests",
         "uninspectable_requests",
-        "leaked_entity_types"
+        "uninspectable_reasons",
+        "leaked_entity_types",
+        "upstream_paths_observed",
+        "marker_words_required",
+        "marker_words_total",
+        "inspection_scope",
+        "payload_content_included"
       ],
       "properties": {
         "passed": {
@@ -387,6 +467,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "uninspectable_reasons": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
         "leaked_entity_types": {
           "type": "array",
           "items": {
@@ -399,6 +483,10 @@
             "type": "string"
           }
         },
+        "upstream_methods_observed": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
         "marker_words_required": {
           "type": "integer",
           "minimum": 1
@@ -406,7 +494,9 @@
         "marker_words_total": {
           "type": "integer",
           "minimum": 1
-        }
+        },
+        "inspection_scope": {"type": "string", "minLength": 1},
+        "payload_content_included": {"const": false}
       },
       "allOf": [
         {
@@ -437,11 +527,12 @@
             }
           }
         }
-      ]
+      ],
+      "additionalProperties": false
     },
     "attestation": {
       "type": "object",
-      "description": "Provenance for this run. Absent when the harness had no CI context. Self-reported unless verification names an independently checkable mechanism.",
+      "description": "Self-reported provenance for this run; absent when the harness had no CI context. Independently verified provenance requires a future schema with proof fields.",
       "required": [
         "verification",
         "runner",
@@ -449,13 +540,8 @@
       ],
       "properties": {
         "verification": {
-          "description": "self-reported: values copied from the run environment, forgeable by whoever ran the harness. Any other value must name a mechanism a third party can check independently.",
-          "type": "string",
-          "enum": [
-            "self-reported",
-            "github-oidc",
-            "sigstore"
-          ]
+          "description": "Values are copied from the run environment and are forgeable by whoever ran the harness. Independently verified mechanisms require a future schema with proof fields.",
+          "const": "self-reported"
         },
         "runner": {
           "type": "string",
