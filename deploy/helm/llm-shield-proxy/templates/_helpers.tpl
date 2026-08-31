@@ -22,3 +22,33 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
+{{- define "llm-shield-proxy.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Selector labels. These identify the workload and must stay stable: a
+Deployment's selector is immutable after creation.
+*/}}
+{{- define "llm-shield-proxy.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "llm-shield-proxy.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Common labels applied to chart resources. prometheus-rule.yaml includes this;
+it was previously undefined, which made `helm template
+--set prometheus.prometheusRule.enabled=true` fail outright.
+*/}}
+{{- define "llm-shield-proxy.labels" -}}
+helm.sh/chart: {{ include "llm-shield-proxy.chart" . }}
+{{ include "llm-shield-proxy.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
