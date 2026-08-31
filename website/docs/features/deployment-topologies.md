@@ -42,7 +42,7 @@ flowchart LR
 
 ## 2. Air-Gapped Egress Gateway Mode
 
-For organizations with **Zero-Internet** policies (where workloads have absolutely no outbound internet access), LLM-Shield-Proxy can be configured to route traffic through an internal Egress Gateway (e.g., Squid, Envoy, or a corporate proxy) before it reaches the internet.
+For organizations whose workload network policy denies direct internet egress, LLM-Shield-Proxy can route its configured upstream client through an internal egress gateway such as Squid, Envoy, or a corporate proxy. Enforce and test the deny policy outside the application as well.
 
 ```mermaid
 flowchart LR

@@ -12,7 +12,7 @@ The proxy natively exposes OpenTelemetry/Prometheus metrics at `/metrics` (or on
 | :--- | :--- | :--- |
 | `llm_shield_latency_ms` | Operator-defined SLO | Internal proxy processing exceeded the threshold validated for this deployment. **Mitigation:** Check CPU saturation, detector configuration, audit mode, and event-loop lag; scale replicas when appropriate. |
 | `llm_shield_redaction_count_total` | `> 300% anomaly` | A sudden, massive spike in redacted entities. **Mitigation:** This usually indicates an upstream agent has gone rogue and is dumping raw databases into the prompt, or an active exfiltration attempt. Trigger automated SOC alert. |
-| `redis_connection_errors_total` | `> 0` | The proxy cannot reach the ephemeral Redis Vault. **Mitigation:** If using `STATEFUL` mode, the proxy operates on a `FAIL_CLOSED` principle and will drop traffic to prevent data leaks. Check Redis network policies. |
+| `redis_connection_errors_total` | `> 0` | A Redis path reported a connection error. **Mitigation:** Check Redis network policy and exercise the exact masking, rate-limit, blast-radius, RBAC, and failure-mode paths in use; they do not all share one fallback behavior. |
 | `llm_shield_agent_breaker_trips` | `> 10 / min` | The Composite Agent Loop Circuit Breaker is actively halting autonomous agents (like AutoGen or CrewAI) that are stuck in recursive loops. |
 
 ## 💾 2. Empirical Redis Vault Sizing Guide
@@ -22,7 +22,7 @@ If you are using the Stateful Redis Vault (`REDIS_URL`), provision enough RAM on
 Size Redis from measured bytes per active mapping, mappings per session, concurrent sessions, allocator overhead, replication, persistence, and failover headroom. Capture `used_memory`, `used_memory_rss`, evictions, and key counts during a workload-shaped soak test; do not use a universal per-session estimate.
 
 > [!TIP]
-> **TTL Eviction is Mandatory.** Ensure your `SESSION_TTL_SECONDS` is set to match your maximum expected conversational context window (e.g., 3600 seconds for 1 hour). Redis will automatically sweep expired session maps, keeping your memory footprint flat regardless of overall traffic volume.
+> **Configure TTL deliberately.** Set `SESSION_TTL_SECONDS` for the expected conversation and recovery window. Redis expiry makes mappings eligible for removal; memory, persistence, replicas, backups, and eviction timing depend on the Redis deployment and traffic profile.
 
 ## 🔍 3. Incident Response & Log Forensics
 
@@ -31,4 +31,4 @@ If a data leak is suspected, Security Analysts must trace the payload without th
 1.  **Extract the Canary:** Check the leaked output for the Dynamic Canary Watermark (injected via zero-width characters or specific deterministic synthetics).
 2.  **Query the audit chain:** Query your centralized log aggregator for the hash-chained, signed records emitted by the proxy and verify continuity against a trusted key and external anchor.
 3.  **Correlate the Hash:** Search for the `_ctx_hash_prop` or the HMAC-SHA256 hash found in the watermark.
-4.  **Identify the Actor:** The structured log will reveal the exact `WorkloadIdentity` (JWT sub), Timestamp, and IP that originated the request, proving egress provenance without ever revealing the plaintext PII in the logs.
+4.  **Correlate recorded identity:** Review the recorded workload identity, timestamp, request ID, and network metadata. These fields report what the configured boundary observed; verify authentication, proxy trust, clock synchronization, log completeness, and key custody before drawing attribution conclusions.

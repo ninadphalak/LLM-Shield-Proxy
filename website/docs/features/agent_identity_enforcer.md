@@ -1,6 +1,6 @@
 # Agent Identity Enforcer
 
-The Agent Identity Enforcer is an edge-level zero-trust middleware for LLM-Shield-Proxy. It guarantees mathematically proven machine-to-machine identities for autonomous agent workflows by acting as a strict, cryptographic ingress barrier.
+The Agent Identity Enforcer validates configured workload-identity and proof-of-possession inputs before supported agent operations. Its assurance depends on issuer trust, key custody, audience and claim validation, replay storage, clock handling, and deployment configuration.
 
 ## Architectural Overview
 
@@ -36,9 +36,9 @@ To globally configure the Enforcer, set the environment variable to one of the f
 ```env
 AGENT_IDENTITY_ENFORCER="off"
 ```
-* `"off"`: Identity verification is bypassed completely (Default).
+* `"off"`: The identity-enforcement middleware does not require these proofs (default); other authentication layers may still apply.
 * `"lenient"`: Verifies the base JWT/Identity and signature, but skips the strict DPoP URI (htu) and Method (htm) validations.
-* `"strict"`: Fully secures the proxy by strictly validating the JWT, binding the DPoP key to the `cnf.jkt` claim, and enforcing HTTP Method and URI matches. **Note:** Keeping this in strict mode will immediately drop (HTTP 401) any malformed or non-compliant agent requests.
+* `"strict"`: Validates the configured JWT and DPoP checks, including `cnf.jkt`, method, URI, freshness, and replay state. It protects that authentication path only; issuer/audience policy, key discovery, cache behavior, proxies, and authorization remain separate boundaries.
 
 For per-tenant enforcement, configure your `policies.yaml`:
 ```yaml
@@ -59,7 +59,7 @@ verification wouldn't catch it. The Enforcer closes that gap with a server-side 
 cache:
 
 * Every DPoP proof must carry a `jti` claim. A proof with no `jti` is rejected outright,
-  since it can never be checked for reuse.
+  because the verifier cannot check that proof for reuse.
 * On each request, the proxy computes `f"{jkt}:{jti}"` (the JWK thumbprint bound to the
   proof, plus its unique ID) and checks it against an in-memory `TTLCache` (300s TTL,
   matching the proof's own maximum freshness window). A cache hit means this exact proof

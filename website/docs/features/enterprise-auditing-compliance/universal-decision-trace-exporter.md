@@ -3,14 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Universal Decision Trace Exporter** provides unified observability across all security boundaries. Rather than having scattered logs in one system and network traces in another, this engine aggregates every single security decision (regex matches, policy evaluations, and tool-call RBAC blocks) and seamlessly weaves them into your existing OpenTelemetry (OTel) distributed traces.
+The **Decision Trace Exporter** adds supported proxy decision metadata to OpenTelemetry (OTel) traces. It covers instrumented paths and enabled exporters, not every security boundary or decision.
 
 ## How It Works
 Modern cloud infrastructure relies heavily on distributed tracing (Jaeger, Zipkin, Datadog) to understand request lifecycles.
 
-1. **Span Enrichment:** When the proxy initiates a trace span for an incoming HTTP request, the Decision Trace Exporter attaches to the active context.
-2. **Lifecycle Aggregation:** Every time the Tier 1, 2, or 3 engines make a redaction decision, or the RBAC engine blocks a tool, an "event" is dynamically appended to the active OTel Span.
-3. **Structured Export:** When the request completes, the span is exported via gRPC/HTTP directly to the OpenTelemetry Collector, carrying all the security metadata perfectly synchronized with the network latency data.
+1. **Explicit invocation:** A caller constructs `DecisionTraceExporter` and calls `record_decision(...)`; the current catch-all and MCP routes do not invoke it automatically.
+2. **Span emission:** That method creates a `gen_ai.client.operation.tool_call` span and attaches the fields present in its arguments.
+3. **Optional transport dispatch:** Caller-supplied GRC transports receive a single-event OSCAL payload in background tasks. Sampling, queue limits, failures, and downstream processing can omit or delay data.
 
 
 ```mermaid
@@ -28,23 +28,22 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Uses standard `opentelemetry-api` asynchronous batched exporters to prevent the network from blocking the event loop.
+- **Overhead:** Depends on the configured OpenTelemetry provider/processors and any caller-supplied transports. The class itself does not guarantee a batch processor.
 
 ## Configuration Flags
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | The URL of your OpenTelemetry Collector. | [View in deployment.md](/docs/deployment) |
-| `ENABLE_DECISION_TRACES` | Toggles the deep enrichment of security events into spans. | [View in deployment.md](/docs/deployment) |
+The proxy's current telemetry settings are `TELEMETRY_ENABLED`, `TELEMETRY_ENDPOINT_URL`, and `TELEMETRY_API_KEY`. There is no `ENABLE_DECISION_TRACES` setting, and the runtime routes do not automatically wire this exporter.
 
 ## Critical Logic & Edge Cases
-* **Data Sanitization:** The exporter strictly enforces that the actual PII strings (e.g., the real credit card number) are NEVER appended to the OTel Span events. It only logs the metadata (e.g., `decision: redact`, `entity_type: CREDIT_CARD`, `engine: tier_1`).
-* **Trace Context Propagation:** It fully supports W3C `traceparent` headers. If your frontend application generates a trace ID and sends it via HTTP header, the proxy seamlessly adopts it, ensuring a single continuous trace from the React UI all the way to the OpenAI server.
+* **Data minimization:** The exporter is designed to emit decision metadata rather than matched values. Validate exceptions, custom attributes, resource metadata, processors, and downstream exporters with no-PII tests.
+* **Trace context propagation:** The proxy parses supported W3C `traceparent` input and can continue that trace locally. Whether the context remains continuous through ingress, proxy, upstream provider, and collectors depends on each component's propagation and trust policy.
 
 ## FAQ
 
 **Q: Can I view these decision traces in Datadog or New Relic?**
-A: Yes! By pointing the `OTEL_EXPORTER_OTLP_ENDPOINT` to your Datadog Agent or New Relic OTLP ingest endpoint, all the proxy's security decisions will natively appear as events within their tracing UI.
+A: These products accept OTLP in supported configurations, but endpoint format, authentication, processors, sampling, and field mapping differ. Validate with a no-PII test event and confirm which attributes arrive before production use.
 
 **Q: Does this replace signed audit evidence?**
 A: No. OTel traces are designed for observability and may be sampled or retained briefly. The audit chain is a separate evidence path; use durable delivery and independently configured immutable retention where required.
@@ -53,7 +52,7 @@ A: No. OTel traces are designed for observability and may be sampled or retained
 ## Plainspeak
 This feature translates the proxy's complex security decisions into a standard format that corporate monitoring tools can easily understand.
 
-Instead of hiding its security actions in messy text files, this feature packages every decision (like why it blocked a specific word) into highly structured, government-standard data packets. It then broadcasts these packets so that your company's existing dashboards and monitoring screens can display the security data beautifully and clearly.
+This feature packages selected decision metadata into OpenTelemetry spans so a configured collector can process it. Treat the resulting traces as sampled observability data, not a complete or durable audit record.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).

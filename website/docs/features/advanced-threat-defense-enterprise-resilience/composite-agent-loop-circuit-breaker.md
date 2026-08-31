@@ -3,14 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Composite Agent Loop Circuit Breaker** is an advanced safeguard designed for autonomous multi-agent systems (like AutoGen, LangGraph, or CrewAI). It dynamically tracks the recursive depth and tool-call patterns of an agent. If an agent gets stuck in an infinite "hallucination loop" (repeatedly calling the same tool and failing), the proxy physically severs the connection to stop the LLM from burning through your billing quotas.
+The **Composite Agent Loop Circuit Breaker** tracks configured request and tool-call signals. When a configured threshold is reached, it terminates the affected flow. It is a bounded heuristic, not a complete detector for every looping or high-cost agent behavior.
 
 ## How It Works
-When autonomous agents are given tools, they can get stuck. For example: an agent writes a SQL query, it fails, the agent apologizes, writes the exact same bad SQL query, it fails, and this repeats infinitely at \$0.03 per token.
+When autonomous agents are given tools, they can repeat failed actions until another limit intervenes. For example, an agent may resubmit the same SQL query and consume additional tokens and tool capacity.
 
 1. **Stateful Trajectory Tracking:** The proxy utilizes the [Stateless Redis TTL Vault](/docs/features/data-protection-pii-redaction/stateless-redis-ttl-vault) to track a hash of the `tool_calls` array for a specific `session_id`.
 2. **Loop Detection:** If the proxy observes the exact same tool payload being executed more than `N` times consecutively within the same short-lived session, it flags a hallucination loop.
-3. **Circuit Breaking:** The proxy forcefully breaks the loop by returning an injected system message to the agent: `SYSTEM OVERRIDE: Maximum recursive tool retries exceeded. Proceed without this tool.` or, if configured strictly, drops the HTTP connection entirely with a 429.
+3. **Circuit Breaking:** On the catch-all HTTP path, the proxy returns HTTP 429 with `X-Shield-Circuit-Breaker: TRIPPED` after the configured duplicate threshold. It does not inject a replacement system message.
 
 
 ```mermaid
@@ -27,32 +27,32 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Leverages the existing session TTL infrastructure, meaning it requires zero additional database tables.
+- **Storage:** Reuses the configured session TTL store and does not introduce a relational-table migration. It still adds keys, reads, writes, memory, and network work to that store.
 
 ## Configuration Flags
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
 | `ENABLE_AGENT_BREAKER` | Toggles the loop detection engine. | [View in deployment.md](/docs/deployment) |
-| `MAX_AGENT_RECURSION` | Maximum consecutive identical tool payloads allowed (default 3). | [View in deployment.md](/docs/deployment) |
+| `AGENT_BREAKER_THRESHOLD` | Consecutive duplicate threshold (default 3). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Payload Hashing:** To avoid storing large tool payloads in memory, the proxy hashes the AST of the `tool_calls` payload. It ignores timestamp variances but is highly sensitive to semantic changes. If the agent changes even one character in a SQL query, it is considered a *new* attempt and the loop counter resets.
-* **Graceful Degradation:** The preferred intervention is injecting a synthetic system message rather than dropping the socket. This allows the LLM to realize the tool is broken and dynamically pivot to a new strategy, preserving the overall task context.
+* **Payload comparison:** The implementation computes bounded serialized-request signals and tool-call hashes. Semantically equivalent payloads with different serialization or content can be treated as different attempts, and distinct short requests can produce heuristic false positives.
+* **Intervention:** The implemented intervention is an HTTP 429 response. Client or agent code decides whether to retry, alter the tool call, or stop.
 
 ## FAQ
 
 **Q: Will this break LangChain agents that intentionally call a tool multiple times?**
-A: If the agent calls a tool multiple times with *different* arguments (e.g., paginating through a database), the circuit breaker will ignore it. It only triggers when the agent executes the *exact same* arguments repeatedly, which is a definitive sign of a hallucinated failure loop.
+A: The configured identical-payload rule does not count calls whose normalized arguments differ. Repeated identical arguments are a heuristic signal, not definitive proof of a hallucination; legitimate polling or idempotent retries may need an exception or different threshold.
 
 **Q: How does the proxy know what "session" an agent is in?**
 A: Client applications must pass a consistent `X-Session-ID` header. The proxy uses this header to isolate loop tracking.
 
 
 ## Plainspeak
-This feature acts as an emergency stop button for autonomous AI agents that get stuck in infinite loops.
+This feature provides a threshold-based stop for one class of repeated agent action.
 
-Sometimes, an AI agent is given a complex task and it gets confused, endlessly repeating the same useless actions (like searching for the same file over and over) without making progress. If left alone, this runs up a massive bill. This circuit breaker automatically detects when an AI is stuck in a repeating cycle and violently cuts the power, saving money and preventing server exhaustion.
+Sometimes an agent repeats the same action without making progress. The circuit breaker compares the signals it is configured to track and intervenes after a threshold; it can miss changing loops and can flag legitimate repetition, so pair it with time, token, and tool budgets.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_circuit_breaker.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_circuit_breaker.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_circuit_breaker.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_circuit_breaker.py).

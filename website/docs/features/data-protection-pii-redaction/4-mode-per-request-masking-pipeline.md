@@ -9,9 +9,9 @@ The **4-Mode Per-Request Masking Pipeline** empowers client applications to dyna
 The proxy intercepts the `X-Shield-Masking-Mode` header and dynamically overrides the global `.env` configuration for the duration of that specific request using thread-safe `contextvars`.
 
 The available modes are:
-1. **`SYNTHETIC` (Default):** Replaces entities with mathematically coherent canonical locale substitutes (e.g., fake SSNs, fake names) to preserve downstream LLM attention weights and syntax.
+1. **`SYNTHETIC` (Default):** Replaces detected entities with deterministic, format-aware substitutes (e.g., synthetic SSNs or names) intended to retain useful downstream syntax. Task quality is workload-dependent.
 2. **`STRUCTURAL_TAG`:** Replaces entities with explicit, bracketed placeholder tokens (e.g., `[PERSON_1]`, `[EMAIL_1]`). Ideal for legacy compliance pipelines or explicit regex auditing.
-3. **`SCRUB`:** Performs a hard redaction, completely removing the text or replacing it with `***`. Useful when the context of the sensitive data is entirely irrelevant to the LLM's task.
+3. **`SCRUB`:** Replaces a detected value with `***` and does not create a rehydration mapping for it. Other copies outside this transformation can still exist.
 4. **`STATELESS_CRYPTO`:** Secures data in-transit using AES-256-GCM envelope encryption directly within the payload, bypassing the need for Redis storage.
 
 
@@ -36,25 +36,25 @@ View diagram on GitHub mobile 📱 -->
 | `SHIELD_DEFAULT_MASKING_MODE` | The global default mode if the client does not specify the header. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Thread-Safety:** Because the proxy processes thousands of concurrent streaming requests, overriding a setting via a header must not affect other active streams. The proxy uses Python's `contextvars.ContextVar` and `copy_context().run()` to ensure the mode override is strictly isolated to the specific asyncio task handling the request.
+* **Request isolation:** Overrides use `contextvars.ContextVar` and explicit context propagation. Concurrency tests must cover task creation, background work, cleanup, and exception paths to detect context bleed.
 * **Vault Interoperability:** If a request switches to `STATELESS_CRYPTO`, the proxy intelligently bypasses the Redis TTL Vault for that specific payload, avoiding unnecessary network calls.
 
 ## FAQ
 
 **Q: Will allowing clients to set this header bypass security?**
-A: No. The header only dictates *how* the data is masked (the formatting), not *what* data is masked. The underlying Granular Entity Policy Scopes and Tier 1/2/3 engines still forcefully enforce what data is redacted regardless of the format chosen.
+A: The header selects a masking representation, while entity selection comes from the active detector/profile configuration. Validate that authentication and policy prevent unauthorized mode changes and test each mode separately; representation can affect downstream schema and rehydration behavior.
 
 **Q: Can I force all clients to use a specific mode and ignore the header?**
 A: Yes. You can define a strict `enforced_masking_mode` within `policies.yaml` for a specific security role, which will override and ignore any header supplied by the client application.
 
 **Q: Why use `SCRUB` if it destroys the LLM context?**
-A: `SCRUB` is highly efficient and guarantees zero token bloat. If you are using an LLM to summarize a document where the specific names are completely irrelevant (e.g., summarizing meeting minutes into action items), scrubbing saves tokens and maximizes privacy.
+A: `SCRUB` replaces a detected value with a short marker and does not support rehydration. Token count and downstream task quality depend on the tokenizer, marker, and workload.
 
 
 ## Plainspeak
-This feature gives you the ultimate flexibility to choose exactly how sensitive data is hidden on a case-by-case basis.
+This feature lets an authorized caller or policy choose among the supported masking representations. Entity detection, downstream compatibility, and authorization remain separate concerns.
 
-Instead of being locked into one method, you can tell the system what to do for each individual request. You can choose to replace the data with a realistic fake (Synthetic), a standard placeholder tag, completely black it out (Scrub), or scramble it with a password so you can read it later (Crypto). This means developers have full control over the privacy technique they want to use at any given moment.
+Authorized requests can select among synthetic substitution, structural tags, one-way scrub, and configured cryptographic masking. Policy should restrict which callers may override the default.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

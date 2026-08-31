@@ -10,7 +10,7 @@ A common vulnerability when creating Unix Domain Sockets in Linux is the TOCTOU 
 
 1. **Pre-Emptive Umask:** Before the proxy instructs the OS to create the UDS file, it explicitly executes `os.umask(0o117)`.
 2. **Atomic Creation:** The kernel uses the umask to atomically create the socket file with strict `rw-rw----` (660) permissions natively.
-3. **Race Condition Eliminated:** Because the file is created with restricted permissions from the very first CPU cycle, the TOCTOU window is physically impossible.
+3. **Reduced permission window:** Applying a restrictive process umask before socket creation avoids the specific create-then-chmod window. It does not address compromised peer containers, shared UID/GID choices, host administrators, or every local IPC threat.
 4. **Context Restoration:** The proxy immediately restores the original umask so that subsequent file operations (like audit logging) behave normally.
 
 
@@ -34,11 +34,11 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `UDS_SOCKET_PATH` | The path for the Unix Domain Socket (e.g., `/var/run/shield.sock`). | [View in deployment.md](/docs/deployment) |
+| `EXT_PROC_SOCK_PATH` | The Unix Domain Socket path (default `/var/run/llm-shield/ext_proc.sock`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **File Cleanup:** The proxy binds to signal handlers to ensure that if the proxy crashes or receives a `SIGTERM`, it executes `os.unlink()` to delete the `.sock` file from the filesystem. This prevents "Address already in use" errors on subsequent restarts.
-* **Docker Context:** This protection is most relevant when the proxy shares a volume mount (like an `emptyDir`) with another container (e.g., an Envoy sidecar) in a Kubernetes pod. It ensures only containers running as the correct UID/GID can access the memory buffers.
+* **File Cleanup:** Handled shutdown paths unlink the socket. Abrupt termination can leave a stale path, so startup must also handle stale sockets safely.
+* **Container context:** This protection is most relevant on a shared volume such as `emptyDir`. UID/GID, mount permissions, Linux security controls, and host administration determine which peers can access the socket.
 
 ## FAQ
 
@@ -49,7 +49,7 @@ A: No. This specific hardening technique only applies when you are using the [Se
 ## Plainspeak
 This feature closes a tiny, split-second window of vulnerability when the proxy turns on.
 
-When a program creates a communication pipe (a socket), there is sometimes a millisecond delay between creating the pipe and locking it with a password. A very fast hacker on the same machine could jump into the pipe during that unprotected millisecond. This feature uses advanced operating system commands to ensure the pipe is born completely locked down from the very first nanosecond.
+Applying a restrictive umask before creating the Unix socket avoids a create-then-chmod permission window. It is one local hardening measure rather than a complete defense against a compromised host or peer container.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

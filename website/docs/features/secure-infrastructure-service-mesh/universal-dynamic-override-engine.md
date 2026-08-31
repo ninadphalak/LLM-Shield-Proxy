@@ -1,16 +1,16 @@
-# Universal Dynamic Override Engine
+# Request-Scoped Dynamic Override Engine
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Universal Dynamic Override Engine** gives clients and administrators absolute flexibility by allowing them to override nearly any global `.env` configuration (like masking modes, failover URLs, or downstream telemetry flags) on a per-tenant, per-request basis-without adding massive, bloated parameter lists to internal Python functions.
+The **Request-Scoped Dynamic Override Engine** exposes a documented allowlist of settings through policy and request context. Security-sensitive, process-start, connection-pool, and resource-lifecycle settings are not automatically safe to override; add tests before extending the allowlist.
 
 ## How It Works
 Passing a user's specific override preferences down through 15 layers of nested function calls (Router -> Middleware -> Redaction Engine -> SSE Buffer -> Network Egress) creates messy, unmaintainable code.
 
 1. **Context Initialization:** When a request is received, the proxy extracts specific HTTP headers (like `X-Shield-Masking-Mode`) or tenant-specific settings from the policy YAML.
 2. **Contextvars Injection:** These overrides are injected into Python `contextvars.ContextVar` objects at the very top of the call stack.
-3. **O(1) Retrieval:** Deep within the SSE Sliding Buffer, when the system needs to know which masking mode to use, it queries the `ContextVar`. The Python runtime instantly returns the value specific to that single `asyncio` task, completely eliminating global state bleed.
+3. **Request-local retrieval:** The streaming path reads the request's `ContextVar` value without a network lookup. Correct isolation still depends on setting and resetting context at every task and background-work boundary.
 
 
 ```mermaid
@@ -28,22 +28,22 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Replaces the need for deep dictionary passing, saving CPU cycles and garbage collection overhead.
+- **Overhead:** `ContextVar` lookup and context propagation still perform work. Compare the selected design in a representative profile before claiming a performance benefit.
 
 ## Critical Logic & Edge Cases
-* **Thread-Safety Off-Loop:** Standard `contextvars` do not automatically propagate when you execute blocking code in a ThreadPoolExecutor (like pushing logs). The proxy employs `copy_context().run()` to explicitly carry the tenant's context into background threads, ensuring metrics and audit logs are tagged correctly.
-* **Priority Hierarchy:** The engine enforces a strict resolution priority: 1. `policies.yaml` Forced Setting > 2. Client HTTP Header Override > 3. Global `.env` Default.
+* **Off-loop context:** `contextvars` do not automatically propagate through every executor pattern. Documented off-loop paths can use `copy_context().run()`; add concurrency tests for new background paths.
+* **Resolution priority:** Priority is defined per supported setting and code path. Do not infer a project-wide hierarchy for fields resolved at startup or outside request context.
 
 ## FAQ
 
 **Q: Can a client use this to override their rate limits?**
-A: No! The engine only allows overrides for explicitly whitelisted behaviors (like Masking Mode or Fallback URLs). Rate limits, API keys, and security scopes are tightly locked to the `policies.yaml` RBAC engine and cannot be overridden by client headers.
+A: Client headers should be restricted to explicitly documented fields such as the masking-mode header. Verify the current allowlist and authentication path in code and tests; do not expose keys, rate limits, destinations, or security scopes without a separate threat review.
 
 
 ## Plainspeak
-This feature gives you the ultimate flexibility to change the proxy's behavior on the fly, for specific users, without rewriting the main code.
+This feature supports selected request-scoped behavior without passing each value through every function signature.
 
-Normally, the rules of a proxy (like "always block Social Security Numbers") apply equally to everyone. This engine allows a specific user or app to send a special instruction (an "override") that says, "For this one specific question, use a different rule." It applies this temporary override seamlessly without messing up the rules for anyone else using the system at the same time.
+The engine supports request-scoped overrides for authorized settings. Operators must restrict which identities and fields can override policy and test task isolation under concurrency.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

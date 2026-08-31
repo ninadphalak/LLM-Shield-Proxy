@@ -31,7 +31,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="llm-shield-proxy",
-        description="LLM-Shield-Proxy: Enterprise Zero-Egress Privacy Redaction Proxy",
+        description="LLM-Shield-Proxy: streaming privacy transformation proxy",
     )
     parser.add_argument(
         "--host",

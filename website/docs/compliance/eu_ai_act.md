@@ -15,7 +15,7 @@ The proxy can generate privacy-safe audit metadata linked with sequential SHA-25
 - **Stream attestation receipt:** The proxy can compute a rolling SHA-256 digest over an SSE stream and emit an HMAC-signed receipt. It establishes integrity for the observed stream under the configured key; it is not independent proof of every upstream system's behavior.
 
 ### NIST OSCAL Decision Traces
-The **Universal Decision Trace Exporter** formats these cryptographic events into automated NIST OSCAL (SP 800-53 Rev. 5) assessment results and OpenTelemetry `gen_ai.*` spans. This allows seamless ingestion into GRC systems (Vanta, Drata) for continuous, provable record-keeping.
+The evidence tooling can emit OSCAL assessment-results artifacts and OpenTelemetry spans for supported events. GRC ingestion requires a separately implemented connector and field mapping; the artifacts do not establish continuous or complete record-keeping by themselves.
 
 ## Satisfying Article 14: Human Oversight and Agent Containment
 

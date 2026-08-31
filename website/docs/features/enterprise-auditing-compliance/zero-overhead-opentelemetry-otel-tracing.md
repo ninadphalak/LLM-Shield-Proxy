@@ -1,59 +1,39 @@
-# Zero-Overhead OpenTelemetry (OTel) Tracing
+# Bounded Asynchronous OpenTelemetry Tracing
 
-[⬅️ Back to Features Catalog](/docs/features-overview)
+[Back to Features Catalog](/docs/features-overview)
 
-## What It Does
-**Zero-Overhead OpenTelemetry (OTel) Tracing** allows the LLM-Shield-Proxy to emit deep, distributed network traces without introducing any latency penalties to the critical data path. It ensures that observability never comes at the cost of performance, even when handling thousands of concurrent LLM streams.
+## Purpose
 
-## How It Works
-Traditional implementations of OpenTelemetry in Python often block the main thread when exporting trace data to the collector over the network, drastically reducing the proxy's tokens-per-second (TPS) throughput.
+The tracing integration propagates supported W3C trace context and uses OpenTelemetry's
+`BatchSpanProcessor` to move exporter network I/O away from the ASGI request task. This reduces
+request-path exporter work; it does not create zero-overhead or lossless tracing.
 
-1. **W3C Header Propagation:** The proxy intercepts incoming W3C `traceparent` headers and initializes an active span.
-2. **Contextvars Isolation:** The active span is bound to the specific `asyncio` task using `contextvars`, completely isolating it from other concurrent user requests.
-3. **Background Export:** Instead of using synchronous network calls, the proxy utilizes the `opentelemetry-sdk`'s `BatchSpanProcessor`. This processor queues completed spans in memory and flushes them to the OTLP collector asynchronously using a dedicated background daemon thread.
+## Execution model
 
+1. Supported request paths extract W3C `traceparent` context.
+2. The application creates and updates spans on the request path.
+3. Completed spans enter the SDK's bounded batch processor.
+4. A background worker exports batches to the configured OTLP endpoint.
 
-```mermaid
-flowchart TD
-    A[Client Request w/ traceparent] --> B(FastAPI Middleware)
-    B --> C[Execute LLM Request]
-    C --> D(Complete Span)
-    D --> E(In-Memory Batch Queue)
-    E -.->|Background Thread| F[OTLP Collector]
-```
+Span creation, attribute processing, context propagation, queue operations, serialization, memory,
+and synchronization still consume resources. When the exporter or collector is slow, the queue can
+fill and spans can be delayed or dropped according to SDK configuration.
 
+## Configuration and validation
 
-View diagram on GitHub mobile 📱 -->
+Configure sampling, queue size, batch size, exporter timeout, endpoint, and credentials using the
+documented OpenTelemetry settings. Include the exact configuration in load tests and confirm:
 
+- request latency with tracing disabled and enabled;
+- queue and drop behavior when the collector is unavailable;
+- shutdown flushing behavior;
+- memory under the intended span rate; and
+- that attributes, events, exceptions, and resource metadata contain no protected values.
 
-## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Background thread execution completely shields the Python GIL (Global Interpreter Lock) from network I/O latency.
+Async or background export does not mean the instrumentation is outside the Python process or
+unaffected by CPU and memory contention.
 
-## Configuration Flags
+## Related implementation and tests
 
-| Environment Variable | Description | Linked Deployment Guide |
-| :--- | :--- | :--- |
-| `OTEL_TRACES_SAMPLER` | Configures trace sampling (e.g., `always_on`, `parentbased_traceidratio`). | [View in deployment.md](/docs/deployment) |
-| `OTEL_BSP_MAX_QUEUE_SIZE` | The maximum number of spans to buffer in memory before dropping (default 2048). | [View in deployment.md](/docs/deployment) |
-
-## Critical Logic & Edge Cases
-* **Graceful Degradation:** If the downstream OTLP collector (e.g., Jaeger) goes offline, the in-memory queue will eventually fill up. The proxy gracefully drops new spans with a silent telemetry error rather than crashing the pod or blocking user traffic.
-* **Sampling:** For high-volume enterprise deployments, emitting a trace for every single token chunk is excessively expensive. The proxy fully respects OTel ratio samplers (e.g., sampling 5% of requests) to manage observability costs.
-
-## FAQ
-
-**Q: Is there any scenario where OTel will slow down the user's prompt generation?**
-A: No. Because the `BatchSpanProcessor` offloads the HTTP/gRPC export to a separate OS thread, a slow Jaeger collector will never cause a delay in the proxy's `asyncio` event loop.
-
-**Q: Do I have to install a sidecar agent to use this?**
-A: No. The proxy supports direct OTLP/HTTP and OTLP/gRPC exports. While a sidecar (like the OpenTelemetry Collector) is recommended for production robustness, you can point the proxy directly to Datadog, Honeycomb, or New Relic ingestion endpoints.
-
-
-## Plainspeak
-This feature acts like an ultra-lightweight GPS tracker attached to every request, without slowing down the vehicle.
-
-To monitor the health of the system, we need to track exactly how many milliseconds a request spends in each part of the proxy. However, the act of tracking can sometimes accidentally slow down the system! This feature solves that by assigning the heavy lifting of tracking to a completely separate background worker, ensuring the main traffic flows at maximum speed without any tracking delays.
-
-## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tracing.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_tracing.py).
+- `llm_shield_proxy/observability/tracing.py`
+- `tests/test_tracing.py`

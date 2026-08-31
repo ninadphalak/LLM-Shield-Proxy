@@ -10,7 +10,7 @@ AI Agents are inherently unpredictable. Without strict enforcement, an agent mig
 
 1. **Streaming JSON Interception:** As the LLM streams its decision to use a tool, the proxy uses a bounded-state parser to inspect the `name` or `method` field of the `tool_calls` payload.
 2. **Policy Resolution:** The tool name is validated against a pluggable backend (e.g., a Redis Policy Store, HashiCorp Vault, or Open Policy Agent (OPA)).
-3. **Instant Circuit Breaking:** If the Virtual Key associated with the request is not authorized to execute the specific tool, the proxy deterministically rejects the tool call, synthesizing a safe failure response to the agent and dropping the upstream socket.
+3. **Denial path:** If the resolved policy does not allow the requested tool, the supported path returns the documented denial response before forwarding that tool call. Parser, resolver, and transport failure modes require separate tests.
 
 
 ```mermaid
@@ -37,17 +37,17 @@ View diagram on GitHub mobile 📱 -->
 | `ENABLE_AGENT_BREAKER` | Toggles autonomous loop protection and tool interception. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Fail-Closed Default:** If a tool is not explicitly listed in a user's `allowed_tools` array, the execution is universally blocked.
+* **Allowlist behavior:** With a non-empty `allowed_tools` policy on the documented resolver/path, an unlisted tool is denied. The built-in MCP in-memory resolver can be permissive when no allowlist is wired; verify resolver configuration at startup.
 * **Graceful Degradation:** When rejecting a tool call, the proxy does not simply return an HTTP 500. It injects a synthetic JSON-RPC error back into the stream, telling the LLM "You do not have permission to use this tool," allowing the agent to dynamically recover and choose a different action.
 
 ## FAQ
 
 **Q: Can I integrate this with Open Policy Agent (OPA)?**
-A: The RBAC engine is explicitly designed as a `BasePolicyResolver` interface. While Redis and YAML are provided out of the box, you can seamlessly extend the interface to ping an external OPA endpoint for highly dynamic, context-aware decisions.
+A: `BasePolicyResolver` is an extension point. An external OPA integration must define authentication, timeouts, caching, decision schema, revocation, failure mode, and no-PII telemetry before production use.
 
 **Q: Does this secure Model Context Protocol (MCP) servers?**
-A: Absolutely. By deploying the proxy between your LLM and your MCP servers, you enforce a strict authorization boundary, preventing malicious prompts from leveraging your agent's MCP permissions to exfiltrate data.
+A: The gateway can enforce configured tool and egress policies on traffic routed through it. It does not prevent prompt injection, detector misses, stolen credentials, direct/bypass connections, or an allowed tool from returning sensitive data; combine it with network and application controls.
 
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).

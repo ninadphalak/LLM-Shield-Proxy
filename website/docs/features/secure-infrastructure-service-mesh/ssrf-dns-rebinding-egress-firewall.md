@@ -29,7 +29,7 @@ violation, not passed through.
    under a `wait_for` timeout) and checks **all of them** - not just the first. An attacker
    who answers with one public IP and one `169.254.169.254` record is caught on the second
    record alone.
-3. **Baseline denylist, always on.** RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
+3. **Baseline denylist.** The current guard applies RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
    `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local/cloud metadata
    (`169.254.0.0/16` - where `169.254.169.254` lives), CGNAT, and the IETF
    documentation/reserved ranges (plus IPv6 equivalents) are blocked unconditionally. There
@@ -69,7 +69,7 @@ sequenceDiagram
     DNS-->>Shield: [93.184.216.34, 169.254.169.254]
     Note over Shield: Any record in a denied CIDR trips the gate
     Shield->>Audit: log_security_event(mcp_egress_policy_violation, CRITICAL)
-    Shield--xTool: never contacted
+    Shield--xTool: router returns before an upstream call
     Shield-->>Agent: JSON-RPC error -32003<br/>"SSRF Policy Violation: Target IP/Host forbidden by egress policy"
 ```
 
@@ -116,7 +116,7 @@ roles:
     # This tenant's tools only ever need to reach the internal data mesh + GitHub API.
     egress_mode: ALLOWLIST_ONLY
     allowed_domains: ["*.internal.corp", "api.github.com"]
-    additional_denied_cidrs: ["10.50.0.0/16"]  # a specific internal subnet this role must never reach
+    additional_denied_cidrs: ["10.50.0.0/16"]  # deny this subnet on the governed path
 ```
 
 ## Error Response & Audit Receipt
@@ -158,7 +158,7 @@ and emits a CRITICAL, hash-chained, Ed25519-signed audit event (see
 ## Configuration Flags
 
 No standalone `.env` flags - the gate runs unconditionally on every `tools/call` (baseline
-denylist always applies), and per-tenant tuning is entirely policy-driven via the
+denylist applies in the current guard implementation), and per-tenant tuning is policy-driven via the
 `egress_mode` / `allowed_domains` / `additional_denied_cidrs` keys above.
 
 ## Critical Logic & Edge Cases

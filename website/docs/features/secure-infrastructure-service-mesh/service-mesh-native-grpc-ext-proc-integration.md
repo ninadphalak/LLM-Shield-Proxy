@@ -10,7 +10,7 @@ Routing traffic out of a service mesh to an external HTTP proxy and back adds re
 
 1. **Envoy Delegation:** When an application inside the mesh sends an HTTP request to OpenAI, the Envoy sidecar intercepts it and delegates it to the LLM-Shield-Proxy via a high-speed gRPC stream over a Unix Domain Socket (UDS).
 2. **Buffer Mutation:** The proxy receives the raw HTTP body buffers via gRPC, applies the Tier 1/2/3 PII masking, and streams the mutated buffers back to Envoy.
-3. **Transparent Egress:** Envoy then forwards the sanitized payload to the upstream LLM. The client application is completely unaware the mutation occurred.
+3. **Envoy forwarding:** Envoy forwards the processor's result according to its filter configuration. Applications may observe changed bodies, headers, timing, status, or error behavior and should be integration-tested.
 
 
 ```mermaid
@@ -32,8 +32,8 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_GRPC_EXT_PROC` | Toggles the gRPC server instead of the HTTP server. | [View in deployment.md](/docs/deployment) |
-| `UDS_SOCKET_PATH` | The path for the Unix Domain Socket (e.g., `/var/run/shield.sock`). | [View in deployment.md](/docs/deployment) |
+| `ENABLE_EXT_PROC` | Enables the ext_proc gRPC hook alongside the HTTP application lifecycle. | [View in deployment.md](/docs/deployment) |
+| `EXT_PROC_SOCK_PATH` | The Unix Domain Socket path (default `/var/run/llm-shield/ext_proc.sock`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Streaming Responses:** The `ext_proc` protocol supports bidirectional streaming. The proxy processes Envoy's incoming `ResponseBody` chunks sequentially, applying the SSE Sliding-Window Buffer logic directly to the gRPC messages.
@@ -42,7 +42,7 @@ View diagram on GitHub mobile 📱 -->
 ## FAQ
 
 **Q: Can I run this without Istio or Envoy?**
-A: Absolutely. The default mode is the standalone HTTP FastAPI server. The gRPC `ext_proc` integration is an advanced feature explicitly for enterprise service mesh architectures.
+A: Yes. The FastAPI HTTP path and Envoy `ext_proc` path are separate deployment options. Enable and validate only the path the topology uses, including its authentication, failure policy, body modes, and streaming behavior.
 
 
 ## Plainspeak
@@ -51,4 +51,4 @@ This feature allows the proxy to operate like a high-speed internal organ of the
 Normally, sending data out to a security proxy and back wastes precious milliseconds. This feature allows the proxy to "plug in" directly to the deep plumbing of an advanced network (a Service Mesh). The data flows straight through it natively without having to leave the fast lane, making the security checks almost entirely invisible to the network speed.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_grpc_ext_proc.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_grpc_ext_proc.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_grpc_ext_proc.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_grpc_ext_proc.py).

@@ -9,7 +9,7 @@ The **Antifragile Exponential Retries** feature shields client applications from
 If a client app simply retries immediately after a `429`, it contributes to a "thundering herd" problem, causing the API provider to throttle them further.
 
 1. **Jittered Backoff:** The proxy uses the `tenacity` library to implement `wait_exponential_jitter`. If the first request fails, the proxy waits ~1 second. If the second fails, it waits ~2 seconds, then ~4 seconds, up to a configurable maximum.
-2. **Randomized Jitter:** A random millisecond "jitter" is added to every sleep cycle. This ensures that if 1,000 proxy pods get throttled simultaneously, they don't all wake up and retry at the exact same millisecond.
+2. **Randomized Jitter:** A random delay spreads retry attempts and reduces synchronized retry bursts; collisions and correlated load can still occur.
 3. **Respecting `Retry-After`:** If the upstream provider includes a strict `Retry-After` HTTP header, the proxy intelligently parses it and suspends the specific request task for that exact duration.
 
 
@@ -38,7 +38,7 @@ View diagram on GitHub mobile 📱 -->
 | `MAX_RETRIES` | The maximum number of retry attempts before returning the error to the client (default 3). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Non-Recoverable Errors:** The proxy explicitly configures the `tenacity` engine to *never* retry on client errors like `400 Bad Request` or `401 Unauthorized`. Retrying these is futile and wastes resources.
+* **Non-Recoverable Errors:** The configured retry predicate excludes handled client errors such as `400 Bad Request` and `401 Unauthorized`. Add tests when changing the exception or status-code mapping.
 * **Streaming Idempotency:** Text generation is fundamentally idempotent. However, if the proxy is handling a state-mutating tool execution (like executing a SQL insert on behalf of an agent), it relies on the downstream system's idempotency keys.
 
 ## FAQ
@@ -56,4 +56,4 @@ This feature teaches the system how to be patient and polite when the internet i
 Sometimes a server gets overwhelmed and drops a connection. Instead of immediately hammering the server with a million retry requests (which just makes the crash worse), this feature forces the proxy to wait a little bit, then try again. If it fails again, it waits a little bit *longer*. This elegant, increasing delay gives the broken server time to recover.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_antifragile_dispatcher.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_antifragile_dispatcher.py).

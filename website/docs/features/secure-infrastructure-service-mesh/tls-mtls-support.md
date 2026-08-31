@@ -1,6 +1,6 @@
 # Comprehensive TLS & mTLS Support
 
-LLM-Shield-Proxy provides comprehensive Transport Layer Security (TLS) and Mutual TLS (mTLS) support for securing prompts over the network, fully supporting zero-trust and air-gapped VPC deployments.
+LLM-Shield-Proxy exposes documented inbound TLS/mTLS and outbound trust/client-certificate options. A secure deployment also requires protocol/cipher policy, identity mapping, revocation, key custody, rotation, ingress behavior, and network controls.
 
 ## Architectural Overview
 
@@ -39,7 +39,7 @@ llm-shield-proxy --tls-cert-file /path/to/server.crt --tls-key-file /path/to/ser
 ### Inbound Mutual TLS (mTLS)
 To enforce strict zero-trust authentication, require connecting clients to present a valid certificate signed by a specific Certificate Authority (CA).
 
-By providing `--client-ca-file`, the proxy instructs the socket to use `ssl.CERT_REQUIRED`. This guarantees that the connection will forcefully drop at the TCP/TLS layer before any HTTP data is even processed if the client lacks a valid certificate.
+Providing `--client-ca-file` configures `ssl.CERT_REQUIRED`, so the TLS handshake rejects clients that do not present a certificate accepted by the configured trust store. Certificate validity still depends on trust, revocation strategy, identity mapping, and server configuration.
 ```bash
 llm-shield-proxy \
   --tls-cert-file /path/to/server.crt \
@@ -78,5 +78,5 @@ llm-shield-proxy
 **The Problem:** When building enterprise AI systems, data must be encrypted in transit. Simply using standard HTTPS verifies that the server is legitimate, but it doesn't verify the *client*. Furthermore, standard internet CA roots do not work inside highly secure, air-gapped VPCs where external internet traffic is blocked.
 
 **The Solution:** This feature provides complete end-to-end cryptographic control.
-1. **Inbound mTLS** ensures that only authorized corporate machines holding a specific cryptographic ID card can even *connect* to the proxy.
-2. **Outbound Custom CAs & mTLS** allow the proxy to securely communicate with internal corporate firewalls without relying on public internet infrastructure, while simultaneously proving its own identity to those internal firewalls.
+1. **Inbound mTLS** requires a client certificate accepted by the configured trust store before HTTP handling. Authorization still requires mapping the certificate identity to policy.
+2. **Outbound custom CAs and mTLS** let the proxy present a configured client certificate and validate servers against a selected trust bundle. This authenticates certificate possession and chain acceptance; authorization, revocation, name constraints, key custody, and network routing remain separate controls.

@@ -12,7 +12,7 @@ The OPA and Vault resolvers operate on a deterministic architecture designed for
 
 1. **O(1) Atomic Dictionary Swaps:** Resolved tenant policies are stored in a local `MappingProxyType` dictionary, ensuring zero-locking read access and microsecond lookup speeds.
 2. **Asynchronous Background Refresh:** When an incoming stream requests a policy, the proxy checks the cache TTL. If expired, it can return the stale policy while spawning an asynchronous background task (`_safe_background_fetch`) to query the external policy server.
-3. **Strict Network Deadlines:** Uncached queries to external providers use a strict `&lt;50ms` timeout to ensure the event loop is never stalled.
+3. **Network Deadlines:** Uncached queries use configured timeouts. Async I/O avoids blocking the event-loop thread, but callers still wait for resolution and consume connection and task resources.
 
 ```mermaid
 flowchart TD
@@ -20,7 +20,7 @@ flowchart TD
     B -->|No| C[Fetch from OPA/Vault &lt;50ms]
     C --> D[Update Cache & Return]
     B -->|Yes| E(Has TTL Expired?)
-    E -->|No| F[Return Cached Policy Instantly]
+    E -->|No| F[Return eligible cached policy]
     E -->|Yes| G[Spawn Background Task]
     G --> F
     G -.-> H(In-flight Lock Active?)
@@ -50,10 +50,10 @@ flowchart TD
 ## FAQ
 
 **Q: Will users notice a delay if the OPA server is down?**
-A: No, for existing sessions. If a user's policy is already in the cache, the proxy serves the stale policy instantly. The background fetch will fail, log the failure, and try again in 5 seconds without blocking the user.
+A: Cached-policy behavior depends on resolver configuration, cache age, and failure mode. Document the stale-while-revalidate window, test expiry and revocation, and decide whether the selected control should fail closed instead.
 
 **Q: What happens if a brand new tenant connects and OPA is unreachable?**
-A: Because the tenant is not in the cache, the request blocks for a strict 50ms timeout. If OPA does not respond, the proxy fails closed, returning a deterministic `_FAIL_CLOSED_` policy that explicitly denies all tool-call access to ensure security is never compromised.
+A: An uncached request waits up to the configured deadline. For the documented fail-closed resolver path, timeout returns a deny policy; verify exception, cancellation, cache, and fallback behavior for the selected resolver.
 
 **Q: Are Vault tokens or OPA responses logged to the console?**
 A: No. The integration includes a `log_security_event` method that emits privacy-safe, structured, signed hash-chain records. The default process-local path is best-effort; immutable WORM retention requires a separately configured store.
@@ -61,7 +61,7 @@ A: No. The integration includes a `log_security_event` method that emits privacy
 ## Plainspeak
 This feature connects the proxy's security checks to the massive, enterprise-grade permission databases that large companies already use (like HashiCorp Vault or Open Policy Agent).
 
-Instead of forcing a company to recreate all of their security rules from scratch inside the proxy, this feature acts as a lightning-fast bridge. It instantly asks the company's main security database, "Is this user allowed to do this?" and securely caches the answer so it doesn't slow down the chat.
+The resolver can query an external policy or secret system and cache supported results. Authorization latency, cache staleness, revocation, availability, and failure behavior require deployment-specific tests.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

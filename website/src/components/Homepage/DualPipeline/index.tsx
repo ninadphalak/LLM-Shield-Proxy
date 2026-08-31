@@ -45,9 +45,9 @@ export default function DualPipeline(): ReactNode {
             <p className={styles.cardBody}>
               When one AI system hands structured data to another - a tool call, a function
               argument, a JSON-RPC message - the proxy automatically finds sensitive values hidden
-              inside that structure, swaps in realistic-looking fakes, and can safely restore the
-              originals afterward. It never stores anything and it never breaks the format the
-              receiving system expects, so your agents don't crash.
+              inside that structure, replaces selected values, and can restore authorized values
+              afterward. Parsing and re-serializing the structure reduces syntax-corruption risk;
+              provider echo and rehydration behavior must be tested for the selected integration.
             </p>
             <Link to="/docs/features/data-protection-pii-redaction/stateless-ast-aware-semantic-pii-firewall" className={styles.cardLink}>
               See the stateless agent firewall →

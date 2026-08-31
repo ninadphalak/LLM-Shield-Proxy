@@ -41,16 +41,18 @@ function HomepageHeader() {
         </p>
         <p className={styles.heroSubMeta}>{siteConfig.tagline}</p>
         <div className={styles.buttons}>
-          <Link className="button button--secondary button--lg" to="/docs/deployment">
-            Install and run locally
+          <Link className="button button--secondary button--lg" to="/docs/design-partner-pilot">
+            Apply for a private pilot
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            href="https://github.com/ninadphalak/LLM-Shield-Proxy">
-            ⭐ GitHub Repository
+            to="/docs/guides/pilot-assessment">
+            Run the local assessment
           </Link>
         </div>
-        <p className={styles.heroMeta}>Every line is inspectable. The proxy is completely free.</p>
+        <p className={styles.heroMeta}>
+          Apache-2.0 source and the conformance checks are publicly inspectable.
+        </p>
       </div>
     </header>
   );

@@ -7,7 +7,7 @@ Dumping massive tool catalogs into an LLM's context window inflates token costs 
 * **O(1) RBAC Pruning:** Tool access is evaluated against tenant-specific `frozenset` collections. Unauthorized tool signatures are silently redacted from the `result.tools` array before the payload reaches the LLM.
 * **Multi-Tenant Redis Caching:** Filtered tool definitions are cached using `redis.asyncio` with composite BLAKE3 keys (`mcp:tools:{tenant_id}:{upstream_hash}`).
 * **Dynamic TTL Clamping:** The proxy dynamically parses the upstream `_meta.ttlMs` cache metadata. It enforces a safety floor of 30 seconds and a ceiling of 3600 seconds, defaulting to 300 seconds if the upstream server provides no TTL.
-* **Event-Driven Invalidation:** The engine intercepts `notifications/tools/list_changed` JSON-RPC packets, automatically triggering an immediate cache flush for the affected tenant to ensure zero-staleness access control.
+* **Event-Driven Invalidation:** A handled `notifications/tools/list_changed` message invalidates the affected cache entry. Delivery loss, races, TTL, multi-process caches, and resolver propagation can still produce stale observations.
 
 ## Plainspeak
 This feature prevents the AI from getting confused or distracted by giving it too many tool options at once.

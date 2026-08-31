@@ -166,7 +166,7 @@ function MaskedPayload({segments}: {segments: RedactionResult['segments']}): Rea
 }
 
 function RehydratedPayload({segments, mode}: {segments: RedactionResult['segments']; mode: MaskMode}): ReactNode {
-  // SCRUB is one-way by design - the proxy never stores what it destroyed, so
+  // SCRUB is one-way by design - this demo does not retain the replaced value, so
   // there is nothing to restore. Showing the real values here would misrepresent
   // how the mode actually behaves in production.
   const canRehydrate = mode !== 'SCRUB';
@@ -199,7 +199,7 @@ function RehydratedPayload({segments, mode}: {segments: RedactionResult['segment
 type TrafficType = 'CHAT' | 'AGENT';
 
 const AGENT_BLURB =
-  'Structured JSON-RPC / MCP tool calls always use AES-256-GCM (Stateless Crypto) - Scrub and Structural ' +
+  'This structured JSON-RPC / MCP demo uses AES-256-GCM (Stateless Crypto) - Scrub and Structural ' +
   'Tags would break the payload schema. Tier 1 regex, Tier 2 synthesis, and Tier 3 NER still scan every ' +
   'string value inside the JSON tree exactly as they do for chat text - switch the Tier 3 example above ' +
   'to see it fire on different fields.';
@@ -264,14 +264,14 @@ export default function InteractiveShieldDemo(): ReactNode {
         <div className={styles.header}>
           <span className={styles.eyebrow}>Try it yourself - no signup, no server, no data leaves your browser</span>
           <Heading as="h2" className={styles.title}>
-            Type real PII. Watch it never reach the LLM.
+            Use the synthetic examples below to preview configured masking in your browser.
           </Heading>
           <p className={styles.subtitle}>
-            This is a live, 100% client-side preview of Tier 1 (regex) and Tier 2 (format-preserving
+            This browser-local preview demonstrates Tier 1 (regex) and Tier 2 (format-preserving
             synthesis) detection - nothing here calls a real LLM or leaves your machine. The
             production engine adds a local ONNX NER model (Tier 3) for free-text names and
             organizations, and genuine AES-256-GCM for the AES-256-GCM mode - and runs that identical
-            three-tier cascade on every string value inside structured JSON-RPC / tool-call traffic too,
+            three-tier cascade on supported string values inside structured JSON-RPC / tool-call traffic too,
             not a separate or reduced pipeline. Switch <strong>Traffic type</strong> to{' '}
             <strong>Agent tool call</strong> below to see it fire inside a JSON payload.
           </p>
@@ -295,7 +295,7 @@ export default function InteractiveShieldDemo(): ReactNode {
               className={styles.select}
               value={mode}
               disabled={isAgentMode}
-              title={isAgentMode ? 'Locked - structured JSON-RPC payloads always use AES-256-GCM' : undefined}
+              title={isAgentMode ? 'This structured JSON-RPC demo uses AES-256-GCM' : undefined}
               onChange={(e) => setMaskModeSelection(e.target.value as MaskMode)}>
               {MODE_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -402,8 +402,8 @@ export default function InteractiveShieldDemo(): ReactNode {
               This is the exact same Tier 1/2/3 cascade as the chat demo, run against the{' '}
               <code>notes</code> string inside a real JSON-RPC <code>tools/call</code> envelope - the proxy
               recursively scans every string value in the payload tree, not just top-level or
-              "known" fields. Structured tool calls always use <strong>AES-256-GCM (Stateless Crypto)</strong>{' '}
-              - never Scrub or Structural Tags - because those would alter the payload's shape and could
+              "known" fields. This structured tool-call demo uses <strong>AES-256-GCM (Stateless Crypto)</strong>{' '}
+              instead of Scrub or Structural Tags because those modes can alter the payload's expected values and
               break the calling agent's schema. The proxy restores the original value before handing the
               response back. No Redis, no database, no long-term storage.
             </p>

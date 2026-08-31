@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Multi-Provider Translators** feature enables LLM-Shield-Proxy to act as a universal API gateway. It allows client applications to use standard OpenAI SDKs and payload schemas while transparently routing traffic to non-OpenAI providers (like Anthropic Claude or Google Gemini) with full, native compatibility.
+The **Multi-Provider Translators** feature adapts supported OpenAI-style request and streaming fields to selected non-OpenAI provider formats. Compatibility is limited to implemented and tested fields; it is not a universal API contract.
 
 ## How It Works
 Client applications shouldn't need to rewrite their network logic when switching LLM providers. The proxy handles this dynamically at the network edge:
@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Highly optimized `orjson` serialization ensures payload restructuring doesn't block the asyncio event loop.
+- **Overhead:** Uses `orjson` for serialization. Translation is still CPU and allocation work; measure it and offload any workload that can monopolize the event-loop thread.
 
 ## Configuration Flags
 
@@ -38,21 +38,19 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **Role Alternation:** Some providers (like Anthropic) enforce strict alternating `user` and `assistant` roles. The translator automatically collapses consecutive `user` messages into a single block to prevent API 400 errors.
-* **Feature Parity:** If the client requests an OpenAI feature not supported by the upstream provider (e.g., `logit_bias` on certain models), the proxy safely strips the unsupported parameter to ensure successful execution.
+* **Feature parity:** Configured adapters can remove unsupported parameters, but removal can change semantics and does not establish that the upstream request will succeed.
 
 ## FAQ
 
 **Q: Do I need to change my `langchain` or `openai` Python SDK code?**
-A: No. You simply point the `base_url` to the proxy and keep writing standard OpenAI code. The proxy handles the translation seamlessly.
+A: For the supported path, start by pointing the client's `base_url` to the proxy. Then test authentication, model names, tools, structured output, streaming, errors, retries, and any provider-specific fields your application uses.
 
 **Q: How does this interact with PII redaction?**
-A: PII redaction happens *before* translation on the ingress, and *after* normalization on the egress. The translation layer is completely agnostic to whether the text is raw or synthetically masked.
+A: The documented ingress path transforms configured content before provider translation, and the response path normalizes provider output before supported rehydration. Exercise each provider envelope and content type because adapters can expose different fields.
 
 
 ## Plainspeak
-This feature acts as an automatic, universal translator between different AI companies.
-
-Every AI provider (like OpenAI or Anthropic) requires you to speak to them in a slightly different computer language. If you build your app for OpenAI, it usually breaks if you try to switch to Anthropic. This feature automatically translates your app's standard OpenAI requests into whatever language the target AI provider needs, allowing you to seamlessly swap between different AIs without rewriting any code.
+Providers expose different request fields, streaming events, tool semantics, and error behavior. The implemented adapters translate a documented subset; applications must test unsupported fields and semantic differences before switching providers.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).

@@ -1,18 +1,18 @@
-# Sub-Millisecond SSE Sliding-Window Buffer
+# SSE Sliding-Window Buffer
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Sub-Millisecond SSE Sliding-Window Buffer** is the patent-pending, core technological breakthrough of the LLM-Shield-Proxy. It solves the hardest problem in LLM security: securely redacting sensitive data from real-time Server-Sent Events (SSE) streams without destroying the "typing" visual effect that users expect from AI chatbots.
+The **SSE Sliding-Window Buffer** retains bounded trailing overlap so supported protected tokens can be reassembled when SSE event boundaries split them. The repository reports environment-scoped component timings; it does not guarantee sub-millisecond end-to-end service latency.
 
 ## How It Works
-Standard HTTP proxies fail on streaming responses because LLMs generate text one token at a time. A sensitive entity like `[PERSON_1]` might be split across three consecutive network packets: `[PER`, `SON_`, and `1]`. If a proxy evaluates packets individually, the data leaks. If it buffers the whole response, the user waits 10 seconds for the UI to load.
+Streaming transports can split a placeholder such as `[PERSON_1]` across events or byte chunks. A transformation that examines each chunk independently can miss the token, while whole-response buffering removes incremental delivery. Exact behavior and delay depend on framing, buffering, and the complete service path.
 
-LLM-Shield-Proxy solves this using a prefix-safe sliding window:
-1. **Dynamic Chunk Interception:** As raw TCP frames arrive from OpenAI, the buffer parses the SSE `data:` payloads.
+LLM-Shield-Proxy addresses the tested placeholder case with a sliding window:
+1. **SSE event processing:** As response bytes are received through the HTTP client, the stream parser processes supported SSE `data:` payloads; the application does not directly observe raw TCP frame boundaries.
 2. **Mathematical Overlap Retention:** The buffer evaluates the chunk against the Vault mappings, but *retains* a trailing overlap equal to $LL = max(0, max_token_length - 1).
-3. **Prefix-Safe Rehydration:** This ensures that if a token is split across chunks, the trailing piece is held in memory and concatenated with the next chunk before evaluation.
-4. **Instant Stream Release:** Safe tokens are immediately flushed to the client socket, resulting in zero perceived latency.
+3. **Prefix-aware rehydration:** The buffer retains bounded trailing prefixes so the published placeholder fixtures can be reconstructed across tested chunk splits.
+4. **Bounded release:** Content that falls outside the retained lookahead window can be yielded downstream. Network, parser, scheduling, inspection, and buffer delay remain measurable.
 
 
 ```mermaid
@@ -32,7 +32,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Operates as a pure Python asynchronous generator, completely bypassing blocking I/O calls.
+- **Overhead:** Operates as a Python asynchronous generator without intentional synchronous network I/O in the loop. Parsing, allocation, scheduling, and replacement work remain measurable.
 
 ## Configuration Flags
 
@@ -41,25 +41,25 @@ View diagram on GitHub mobile 📱 -->
 | `MAX_SSE_LINE_LENGTH` | Limits the maximum size of a single SSE frame to prevent buffer overflow attacks. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Slowloris Stream Attacks:** The buffer handles network timeouts gracefully. If the upstream LLM hangs mid-stream, the proxy's `httpx` timeouts and jitter implementations prevent the connection pool from stalling.
-* **Non-Latin Streaming:** The sliding window is fully script-aware, preventing sub-word collisions in Chinese, Japanese, and Korean text where whitespace boundaries do not exist to signify the end of a chunk.
+* **Slow or stalled streams:** HTTP client and proxy timeouts bound selected waits. Exercise slow headers, slow bodies, long model time-to-first-token, cancellation, pool exhaustion, and Envoy timeouts separately.
+* **Non-Latin streaming:** The implementation includes specific ASCII/CJK boundary handling and multilingual fixtures. It is not a complete Unicode word-segmentation engine; add corpus-specific tests for scripts, normalization forms, combining marks, and token collisions.
 
 ## FAQ
 
 **Q: Do I need to change my frontend code to support this streaming?**
-A: Absolutely not. The proxy emits standard OpenAI-compliant SSE streams (`data: {...}`). Your existing React/Next.js frontend using `ai` (Vercel AI SDK) or `fetch` will consume it perfectly, completely unaware that the data was de-masked on the fly.
+A: The conformance fixtures validate OpenAI-style SSE framing for the tested paths. Client libraries, provider extensions, malformed events, cancellation, and custom protocols require integration tests.
 
 **Q: What happens if the upstream provider sends malformed SSE JSON?**
 A: Invalid JSON is handled according to the stream parser's tested error path. The conformance suite separately checks SSE syntax and reconstruction; the buffer must not be described as a general JSON repair mechanism.
 
-**Q: Does this work for Anthropic's Claude as well?**
-A: Yes! The proxy's Multi-Provider Translator automatically normalizes Anthropic's complex `content_block_delta` SSE chunks into the standard sliding-window structure, de-masks them, and streams them out.
+**Q: Does this work for Anthropic responses?**
+A: The adapter handles a documented subset of Anthropic event shapes. Test the selected model, tools, content blocks, errors, stop events, fragmentation, and provider-version changes before relying on rehydration.
 
 
 ## Plainspeak
-This feature ensures the proxy can redact sensitive information without causing "choppy" or delayed text when you're watching an AI type out a response in real-time.
+This feature bounds placeholder lookahead while preserving incremental delivery in the tested fixtures. User-visible pacing and end-to-end latency depend on the complete service path.
 
-When an AI streams text, it sends words in tiny, fragmented chunks (like sending "S-O-C-I-A-L" one letter at a time). Standard security filters get confused by this because they can't see the whole word. This feature creates a super-fast "waiting room" that briefly holds the letters together just long enough to read the full word, redacting it if necessary, before instantly passing it along to your screen.
+An SSE response can split a sensitive token across chunks. The sliding window retains a configured suffix so supported matches can span boundaries, then yields older content. Coverage depends on window size, detector behavior, encoding, and provider framing; measure the added delay.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_streaming.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_streaming.py).

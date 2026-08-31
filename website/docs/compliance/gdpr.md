@@ -15,7 +15,7 @@ LLM-Shield-Proxy provides data-minimization, ephemeral-state, access-control, an
 - **TTL eviction:** Short-lived mappings expire according to configuration. This reduces retained data but is not, by itself, proof that every memory copy was cryptographically erased.
 
 ### Differential Logging
-Instead of logging raw PII for audit purposes (which violates minimization), the proxy utilizes **RFC 6902 JSON patch differential audit logging**. It records only the *categories* of data redacted (e.g., `[REMOVED_EMAIL]`) and the systemic action taken, never the underlying personal data.
+The proxy can use **RFC 6902 JSON patch differential audit logging** to record configured entity categories and actions without intentionally including matched values. Operators must verify exception, telemetry, and downstream logging paths as part of their data-minimization assessment.
 
 ## Article 25: Data Protection by Design and by Default
 
@@ -28,18 +28,18 @@ Privacy is engineered directly into the data payload before it ever leaves the V
 For standard text prompts, the proxy supports dynamic per-request masking via headers to maintain LLM accuracy without exposing real PII. This dictates how the proxy maps text to replacements (often utilizing an ephemeral Redis vault):
 - `SYNTHETIC`: Uses canonical locale swapping to inject synthetic realistic data that preserves BPE token counts and LLM attention weights.
 - `STRUCTURAL_TAG`: Replaces PII with tags like `[PERSON_1]`.
-- `SCRUB`: Executes a permanent hard deletion. On the outbound request to the LLM, the PII is replaced with a static `[REDACTED]` marker. On the inbound response back to the user, because the original data was completely destroyed, it cannot be rehydrated.
-- `STATELESS_CRYPTO`: Encrypts entities using fully reversible AES-256-GCM envelopes, allowing the downstream system to recover the PII while hiding it from the LLM (no Redis required).
+- `SCRUB`: Replaces a detected value with a static marker and does not create a rehydration mapping for that value. Other copies may still exist in source systems, process memory, logs, backups, or uninspected fields.
+- `STATELESS_CRYPTO`: Encrypts selected entities in AES-256-GCM envelopes without Redis. Recovery depends on intact tokens and the correct key/context; model transformation or token loss can prevent rehydration.
 
 ### Autonomous Agent Pipeline (Machine-to-Machine)
-When the proxy detects structured AI tool invocations (like `jsonrpc: 2.0`), it completely bypasses the Text-Prompt pipeline. Standard masking (like `SYNTHETIC`) corrupts JSON code. Therefore, for Machine-to-Machine traffic, the proxy **always** strictly enforces the AST-Aware Semantic Firewall. It parses the syntax tree and applies `STATELESS_SYNTHETIC` directly to the JSON values, guaranteeing no structural breakage and zero Redis dependency.
+When the proxy identifies a supported structured tool invocation, it routes the parsed payload through the AST-aware mutation path instead of applying raw string replacement. The path mutates selected values while preserving JSON serialization. Provider echo and authorized rehydration remain integration-specific and must be tested.
 
 ## Article 32: Security of Processing
 
-The proxy ensures state-of-the-art security via a **3-Tier Cascade Redaction Engine**:
-1. **Tier 1:** Pre-compiled C++ `google-re2` DFA regex engine (O(N) linear time, ReDoS-immune) for structured identifiers.
+The proxy provides a configurable **3-Tier Cascade Redaction Engine**:
+1. **Tier 1:** Pre-compiled `google-re2` patterns for supported structured identifiers; RE2 avoids catastrophic backtracking for accepted patterns.
 2. **Tier 2:** Shannon entropy heuristic to identify unstructured secret-like candidates.
 3. **Tier 3:** Quantized ONNX BERT-NER executing natively in-memory (with BYOM support for XLM-RoBERTa for multilingual GDPR contexts) to extract conversational entities before egress.
-4. **Tier 4 (Agent-to-Agent AI Firewall):** When autonomous AI agents talk to each other using complex code formats (like JSON-RPC or MCP), standard proxies break. The proxy acts as a firewall for this machine-to-machine traffic, instantly identifying and hiding nested PII without breaking the underlying code structure. (For technical details on this "Stateless PII Synthesis & Rehydration", see the [Stateless Mutation Engine](/docs/features-overview) in the features catalog).
+4. **Structured JSON-RPC/MCP transformation:** The stateless mutation engine walks supported nested JSON values and rewrites related schemas. It preserves tested payload shapes but can reject reserved-field collisions and depends on provider/tool echo behavior. See the [Stateless Mutation Engine](/docs/features-overview).
 
 *(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details).*

@@ -11,7 +11,7 @@ call which tool.**
 
 LLM-Shield-Proxy terminates this traffic at a dedicated gateway, `POST /v1/mcp`
 ([`llm_shield_proxy/api/mcp_router.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/llm_shield_proxy/api/mcp_router.py)),
-enforcing four things on every request before it ever reaches your tool server:
+applying four checks on the documented request paths before the corresponding upstream call:
 
 1. **Virtual Key RBAC** - a fail-closed allow/block check on the specific tool being called.
 2. **SSRF / DNS-rebinding egress screening** - every `http(s)://` URL found anywhere in
@@ -20,11 +20,11 @@ enforcing four things on every request before it ever reaches your tool server:
    [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall).
 3. **AST-aware PII/secret redaction** - a recursive walk of the entire JSON-RPC payload (not
    just top-level strings), sanitizing arguments outbound and tool results inbound.
-4. **Dynamic catalog pruning** - `tools/list` responses are filtered so an agent never even
+4. **Dynamic catalog pruning** - supported `tools/list` responses are filtered so the returned catalog does not
    *sees* a tool it isn't authorized to call, reducing prompt-injection surface and hallucinated
    tool selection.
 
-This guide covers the wire protocol, the policy schema, and drop-in client configuration for
+This guide covers the wire protocol, the policy schema, and starting client configuration for
 Claude Desktop, Cursor, and Python agent frameworks.
 
 ---
@@ -77,7 +77,7 @@ sequenceDiagram
     Note over Shield: _is_tool_forbidden("shell_exec") == true<br/>Gate trips BEFORE sanitization or upstream I/O
     Shield->>Audit: log_security_event(mcp_tool_forbidden, CRITICAL)
     Note over Audit: SHA-256 hash-chained to previous entry,<br/>signed with Ed25519, public key fingerprint attached
-    Shield--xTool: (never contacted - no upstream request is made)
+    Shield--xTool: (router returns before creating an upstream request)
     Shield-->>Agent: JSON-RPC error -32003<br/>"Tool forbidden for active role"
 ```
 
@@ -105,7 +105,7 @@ sequenceDiagram
     Note over Shield: Any record in a denied CIDR trips the gate -<br/>DNS-rebinding-safe: every record checked, not just the first
     Shield->>Audit: log_security_event(mcp_egress_policy_violation, CRITICAL)
     Note over Audit: SHA-256 hash-chained to previous entry,<br/>signed with Ed25519, public key fingerprint attached
-    Shield--xTool: (never contacted - no upstream request is made)
+    Shield--xTool: (router returns before creating an upstream request)
     Shield-->>Agent: JSON-RPC error -32003<br/>"SSRF Policy Violation: Target IP/Host forbidden by egress policy"
 ```
 
@@ -115,7 +115,7 @@ for the full CIDR/domain policy schema and fail-closed semantics
 
 ---
 
-## 2. Drop-in `policies.yaml` Configuration
+## 2. Starting `policies.yaml` Configuration
 
 MCP tool governance uses the same `BasePolicyResolver` contract documented in
 [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine): any resolver - in-memory,
@@ -126,7 +126,7 @@ reads three more optional keys off the same dict - `egress_mode`, `allowed_domai
 `additional_denied_cidrs` - so one resolver call drives both tool RBAC and network egress.
 
 > ⚠️ **Fail-open gotcha, read this first.** The bundled `InMemoryPolicyResolver` (the default
-> when `OPA_URL` is unset) always returns `{"allowed_tools": [], "blocked_tools": []}`. Per the
+> when `OPA_URL` is unset) returns `{"allowed_tools": [], "blocked_tools": []}` for the current implementation. Per the
 > gate's semantics (`_is_tool_forbidden`), **an empty `allowed_tools` list means "allow every
 > tool except what's explicitly blocked,"** not "deny everything." An empty allow-list is *not*
 > a safe default for an MCP gateway sitting in front of tools that can mutate data or execute
@@ -157,7 +157,7 @@ roles:
       - delete_customer_record
       - export_database
       - shell_exec
-    # PII scope: support agents see structural tags, never raw or synthetic values,
+    # PII scope: configure support-agent output for structural tags rather than raw or synthetic values,
     # and get the full Tier 3 ONNX-NER pass since ticket text is unstructured free text.
     allowed_entities: ["EMAIL", "PHONE_NUMBER"]
     blocked_entities: ["SSN", "CREDIT_CARD", "BANK_ACCOUNT"]
@@ -193,7 +193,7 @@ roles:
     # access, so we curate a deny-list of the most dangerous operations instead.
     allowed_tools: []
     blocked_tools:
-      - shell_exec          # never allow raw shell execution through the agent path
+      - shell_exec          # deny raw shell execution through this governed path
       - drop_database_table
     allowed_entities: ["*"]  # full visibility for break-glass investigations
     SHIELD_DEFAULT_MASKING_MODE: SCRUB
@@ -380,7 +380,7 @@ catches it, per the sequence diagram in §1.3:
 }
 ```
 
-Same reserved error code as §3.2 - both are policy denials that never reach the upstream tool
+Same reserved error code as §3.2 - for these handled denials, the router returns before the upstream tool
 server, distinguished by `message` on the client side. A hostname that only *resolves* to a
 forbidden IP (rather than naming one literally) is rejected identically; see
 [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall)
@@ -408,7 +408,7 @@ for the DNS-rebinding case where only one of several resolved records is malicio
 
 **Output manifest** (what a `tier_1_support` virtual key actually receives) - only the
 `tools` array is filtered; `nextCursor` and any other sibling keys pass through untouched so
-client-side pagination state is never corrupted by RBAC filtering:
+client-side pagination state remains consistent in the tested RBAC filtering cases:
 
 ```json
 {
@@ -424,7 +424,7 @@ client-side pagination state is never corrupted by RBAC filtering:
 }
 ```
 
-The agent's own model context never even contains `delete_customer_record` or `shell_exec` as
+The filtered catalog returned on this path omits `delete_customer_record` and `shell_exec` as
 candidate tools - this is strictly stronger than relying on the LLM to "choose not to" call a
 tool it can see, and it shrinks the prompt.
 
@@ -526,7 +526,7 @@ async def call_shielded_tool(tool_name: str, arguments: dict, request_id: int = 
 
 Every RBAC decision on `/v1/mcp` - allow *and* deny - emits a structured audit event through
 `AuditLogger.log_security_event`, which is SHA-256 hash-chained to the previous event and
-signed with Ed25519 on a dedicated background thread (never the request path), per
+signed with Ed25519 through the configured background path rather than synchronous signing in the request task, per
 [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts).
 Here is the signed hash-chain entry emitted for the forbidden `shell_exec` call in §3.2:
 
@@ -607,7 +607,7 @@ resolved IP and the CIDR rule it tripped attached in `details` - this is the rec
 - [Role-Based Policy-as-Code (RBAC)](/docs/policies) - the underlying `policies.yaml` engine and Universal Override system.
 - [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) - the `BasePolicyResolver` interface and OPA/Vault adapters.
 - [Context-Aware Tool Catalog Pruner](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner) - the caching layer behind `tools/list` pruning.
-- [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts) - the signing pipeline behind every audit event shown above.
+- [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts) - the signing pipeline used by the instrumented audit events shown above.
 
 ## Related Tests
 

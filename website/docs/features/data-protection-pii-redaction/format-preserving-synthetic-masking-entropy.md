@@ -14,13 +14,13 @@ Traditional structural tagging damages the performance of Large Language Models 
 2. **BPE Token Bloat:** Byte-Pair Encoding tokenizers split brackets and underscores into multiple tokens, increasing the cost of the prompt and slowing down generation.
 
 LLM-Shield-Proxy solves this utilizing robust canonical locale substitution combined with deterministic hashing:
-1. **Deterministic Seeding:** When a sensitive entity is found, its value is hashed. This hash is used as the random seed for the synthetic generator. This guarantees that "John" is always swapped for "Michael" within the same session, preserving referential integrity.
+1. **Deterministic Mapping:** Within the documented mapping scope, the same detected value is intended to receive the same substitute. Verify scope and multi-replica behavior for the selected vault mode.
 2. **Coherent Substitution:** Rather than generic structural strings, the underlying generation logic respects mathematical formats and regional locales:
    - **Credit Cards:** A real Visa card number is swapped with a validly checksummed (Luhn algorithm) synthetic Visa card number.
    - **Emails:** A real email like `alex.smith@company.com` is swapped with a syntactically correct placeholder like `johndoe@fictional.net`.
-   - **SSNs / Phone Numbers:** A real 9-digit SSN is swapped for a mathematically valid 9-digit synthetic SSN, preserving its dashes and spatial footprint.
-   *(Note: While high-entropy entities like Credit Cards and SSNs are automatically detected by Tier 1/2, detecting and substituting semantic entities like Personal Names requires enabling the [Tier 3 NLP Engine](../../deployment.md#advanced-feature-flags-compliance-security-and-engineering), which seamlessly hooks into this same canonical substitution pipeline).*
-3. **Seamless Rehydration:** When the LLM streams the synthetic token back ("Michael"), the SSE sliding window detects it and swaps it back to the original value ("John") before sending it to the user.
+   - **SSNs / Phone Numbers:** A detected value can be replaced with a format-aware synthetic value. A realistic format does not make the substitute a valid or issued identifier.
+   *(Tier 1/2 target configured structured formats and entropy candidates; semantic entities such as personal names require an enabled and validated [Tier 3 NLP model](../../deployment.md#advanced-feature-flags-compliance-security-and-engineering). Each tier can produce false positives and false negatives.)*
+3. **Supported rehydration:** When a returned synthetic token matches a retained mapping on the inspected response path, the sliding window can replace it with the original value. Transformed, truncated, or out-of-scope output may not match.
 
 
 ```mermaid
@@ -42,13 +42,13 @@ View diagram on GitHub mobile 📱 -->
 | `ENABLE_SYNTHETIC_SWAPPING` | Toggles between Synthetic Masking (`true`) and Structural Tagging (`false`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Referential Integrity:** If a user mentions the same patient name five times in a prompt, deterministic seeding guarantees the LLM receives the exact same synthetic name five times. The LLM's logic and memory are completely preserved.
-* **Stream Desynchronization:** Because synthetic names are unbracketed, the SSE buffer uses strict string matching and overlap trailing to ensure that split tokens (e.g. `Mich` and `ael`) are accurately caught during the outbound stream.
+* **Referential Consistency:** Repeated values can map to the same substitute within the configured scope. That can preserve some relationships, but it does not establish unchanged model reasoning or output quality.
+* **Stream fragmentation:** Because synthetic substitutes are unbracketed, ambiguous overlaps and collisions require explicit fixtures. The buffer tests registered mappings across fragmented delivery; it does not establish universal natural-language matching.
 
 ## FAQ
 
 **Q: Can I turn off synthetic masking and use standard bracket tags for auditing?**
-A: Yes. Set `ENABLE_SYNTHETIC_SWAPPING=false` in your `.env`. The proxy will instantly revert to structural tagging (e.g., `[PERSON_1]`, `[EMAIL_1]`). This is often preferred by legacy compliance pipelines that rely on explicit regex auditing.
+A: Set `ENABLE_SYNTHETIC_SWAPPING=false` to select structural tags such as `[PERSON_1]`. Confirm the effective setting at startup and test client/model handling of those tags.
 
 **Q: Does generating synthetic data slow down the request?**
 A: No. The proxy caches the generated synthetic entities in the active session's memory vault, meaning the substitution generator is only invoked once per unique entity, keeping latency near zero.
@@ -57,7 +57,7 @@ A: No. The proxy caches the generated synthetic entities in the active session's
 ## Plainspeak
 This feature creates realistic fake data to replace sensitive information.
 
-If you just replace a real name with "[CENSORED]", the AI reading it might get confused because the sentence structure is suddenly unnatural. Instead, this feature automatically swaps out a real name for a fake name (like replacing "John Doe" with "Alex Smith"), or a real credit card with a mathematically valid fake credit card. This keeps the AI completely oblivious to the fact that the data was redacted, allowing it to generate much better responses.
+Short structural markers and realistic-looking substitutes can affect models differently. Synthetic mode is intended to retain some surface format, but accuracy, privacy, token use, and task quality must be compared on representative fixtures.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

@@ -3,14 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Entity-Weighted Blast Radius Limits** protect enterprises from massive, bulk data exfiltration events. Instead of simply rate-limiting a user based on the *number* of API requests they make, this feature utilizes a Redis Token-Bucket circuit breaker that penalizes users based on the *density of sensitive data* (entities) present in their requests.
+**Entity-Weighted Blast Radius Limits** apply a token-bucket threshold to PII entities detected in supported inbound request paths. This can limit counted disclosures before upstream forwarding; it is not a complete exfiltration detector or a bound on undetected data.
 
 ## How It Works
 Traditional rate limiters (e.g., 100 requests per minute) are easily bypassed by an attacker submitting a single request containing 10,000 credit card numbers.
 
 1. **Entity Accounting:** During the 3-Tier Redaction Cascade, the proxy counts the exact number of PII entities identified (e.g., 50 SSNs, 12 API keys).
 2. **Weighted Deductions:** Rather than deducting "1" from the rate limit bucket for the HTTP request, the proxy deducts a weight relative to the entity count (e.g., deducting 62 points).
-3. **Circuit Breaking:** If an autonomous agent goes rogue or an insider threat attempts to summarize a massive database dump, the entity count instantly depletes their token bucket. The proxy triggers an `HTTP 429 Too Many Requests` (or drops the connection), effectively capping the "blast radius" of any single breach.
+3. **Threshold response:** When observed entity weights exhaust the configured bucket, the applicable path returns `HTTP 429` or stops later stream forwarding. This bounds counted events on that path, not the total impact of a breach or entities the detectors miss.
 
 
 ```mermaid
@@ -27,18 +27,19 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Eliminates race conditions in distributed multi-pod environments without requiring distributed locks.
+- **Concurrency boundary:** A Redis Lua operation is atomic on the selected Redis server. Multi-key, failover, identity, topology, and local-fallback behavior require deployment tests.
 
 ## Configuration Flags
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENTITY_RATE_LIMIT_BUCKET` | The maximum number of entities a user can process per minute (default 200). | [View in deployment.md](/docs/deployment) |
+| `BLAST_RADIUS_BURST_CAPACITY` | Maximum token-bucket capacity (default 100). | [View in deployment.md](/docs/deployment) |
+| `BLAST_RADIUS_REPLENISH_RATE_PER_MIN` | Bucket replenishment per minute (default 10). | [View in deployment.md](/docs/deployment) |
 | `REDIS_URL` | Required for distributed state synchronization. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Atomic Lua Evaluation:** The entire Token-Bucket deduction logic is written in a Lua script executed directly on the Redis server (`evalsha`). This guarantees 100% atomicity, meaning an attacker cannot bypass the limit by issuing hundreds of concurrent parallel requests.
-* **Granular Role Limits:** The blast radius limits are not globally static. Using `policies.yaml`, a `role_data_scientist` might be granted an entity limit of 10,000, while a `role_contractor` is hard-capped at 50, providing incredible Zero-Trust flexibility.
+* **Atomic Lua Evaluation:** Redis executes the token-bucket Lua operation atomically on a single server. This prevents races inside that operation, but enforcement still depends on key design, Redis availability, topology, identity integrity, and fail-closed error handling.
+* **Request-scoped configuration:** Only settings read through the dynamic settings proxy can vary by policy. Verify the blast-radius settings actually used by the limiter before describing role-specific thresholds.
 
 ## FAQ
 
@@ -46,13 +47,13 @@ View diagram on GitHub mobile 📱 -->
 A: If the proxy is running in single-node, stateless mode without Redis, it utilizes a local Python `asyncio` implementation of the Token-Bucket algorithm. While effective for a single pod, Redis is highly recommended for production clusters to enforce global limits.
 
 **Q: Does it count entities on the request (ingress) or response (egress)?**
-A: Both. The proxy deducts tokens for sensitive data detected in the user's prompt, and actively tracks de-masked entities streaming back from the LLM, ensuring bi-directional blast radius protection.
+A: The current catch-all integration deducts detected entities after inbound request redaction and before upstream forwarding. It does not count rehydrated response entities in the streaming return path.
 
 
 ## Plainspeak
-This feature prevents a catastrophic data leak by putting a strict limit on how much sensitive information can be moved at one time.
+This feature can stop a supported inbound request when its detected-entity weight exceeds the available bucket.
 
-Standard security limits only care about how many *questions* you ask (e.g., "10 questions a minute"). This feature is much smarter: it counts the actual *amount of sensitive data* (like counting how many Credit Card numbers) in the response. If an AI accidentally tries to output an entire database of 500 credit cards in a single response, this feature slams the brakes and blocks the massive leak, acting as a blast shield.
+Unlike a request-count limiter, this path weights a request by the entities the configured detectors found. Detector misses, unsupported payload paths, and outbound response content remain outside that specific bound.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_blast_radius.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_blast_radius.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_blast_radius.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_blast_radius.py).

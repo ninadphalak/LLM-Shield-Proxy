@@ -2,14 +2,14 @@
 
 # 🚀 Deployment: Infrastructure & Resiliency
 
-For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Topologies](docs/features/deployment-topologies.md)** guide.
+For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Topologies](/docs/features/deployment-topologies.md)** guide.
 
 
 ## 1. Service Mesh Native Interface
-* **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks, providing seamless inbound/outbound interception to maintain your **LLM Security Posture Management (LLM SPM)**.
+* **Implementation details:** Can be deployed beside Kubernetes service-mesh components. Traffic capture, bypass prevention, ports, identities, and added latency depend on the selected Istio/Linkerd and workload configuration.
 * **Relevant Flags**: Not explicitly flagged (relies on standard `HOST`/`PORT` socket configuration).
 
-## 2. Zero-Overhead OpenTelemetry Tracing
+## 2. Bounded Asynchronous OpenTelemetry Tracing
 * **Implementation Details**: OpenTelemetry tracing handles W3C `traceparent` propagation through a bounded asynchronous path. Measure its request-path and drop behavior in the selected exporter configuration; asynchronous does not mean zero overhead.
 * **Relevant Flags**:
   * [`TELEMETRY_ENABLED`](#advanced-feature-flags-compliance-security-and-engineering)
@@ -24,12 +24,12 @@ For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Top
 ## 4. Traffic Engineering & Resiliency
 * **Implementation Details**:
   * **Redis evalsha Token-Bucket Rate Limiter**: Pre-loaded Lua scripts handle high-throughput rate limiting (6000 RPM / 200 Burst). Linked to [`ENABLE_RATE_LIMITING`](#advanced-feature-flags-compliance-security-and-engineering), [`RATE_LIMIT_RPM`](#advanced-feature-flags-compliance-security-and-engineering), and [`RATE_LIMIT_BURST`](#advanced-feature-flags-compliance-security-and-engineering).
-  * **Kubernetes 25s SIGTERM Connection Draining**: Ensures active SSE streams finish transmission during pod termination before tearing down the socket. Linked to [`DRAIN_TIMEOUT_SECONDS`](#advanced-feature-flags-compliance-security-and-engineering).
+  * **Kubernetes SIGTERM Connection Draining**: Gives active SSE streams up to the configured drain timeout to finish before process termination. Streams that exceed the timeout can still be interrupted. Linked to [`DRAIN_TIMEOUT_SECONDS`](#advanced-feature-flags-compliance-security-and-engineering).
   * **Upstream Key Overriding**: Strips client keys and injects internal load-balanced provider API keys dynamically. Linked to [`OVERRIDE_CLIENT_AUTH`](#advanced-feature-flags-compliance-security-and-engineering).
 
-## 5. Zero-Dependency Kubernetes Mutating Webhook
-* **Implementation Details**: Intercepts Pod deployment manifests directly via a standalone Mutating Webhook to seamlessly inject the LLM-Shield sidecar container and mTLS certificates, requiring zero external dependencies.
-* **Relevant Flags**: N/A (Handled via Kubernetes MutatingAdmissionWebhook manifests).
+## 5. Kubernetes Mutating Webhook
+* **Implementation details:** The `/v1/k8s/mutate` route appends one proxy container to Pods labeled `llm-shield.io/inject=true`; it does not change application routing. The deploy Helm chart leaves `webhook.enabled=false` by default. Enabling it mounts a serving certificate and changes the chart's HTTP service to TLS because the webhook and proxy share one FastAPI listener.
+* **Relevant settings:** Helm values `webhook.enabled`, `webhook.sidecarImage`, and `webhook.certManager.*`; runtime setting `K8S_SIDECAR_IMAGE`.
 
 ## 6. Deep Component Health Probes and Prometheus Alert Rules
 * **Implementation Details**: Provides granular `/healthz`, `/livez`, and `/readyz` probes covering Redis connectivity and Vault mTLS states. Integrates directly with Prometheus Alertmanager via pre-packaged alert rules.
@@ -40,10 +40,10 @@ For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Top
 Configuration follows 12-factor environment-variable practices. Upstream routing, keys, thresholds, and pool sizes are managed via validated `pydantic-settings`:
 
 ### Hierarchical Policy-as-Code (RBAC)
-DevOps teams can now mount a `policies.yaml` file to dynamically map `virtual_key_id` client identities to distinct security roles. The proxy features a zero-downtime hot-reloading mechanism that continuously polls the file (defaulting to every 5 seconds) and applies modifications immediately without dropping active Server-Sent Event (SSE) streams. Unknown identifiers strictly enforce a Zero-Trust `FAIL_CLOSED` default.
+Operators can mount a `policies.yaml` file to map `virtual_key_id` client identities to supported security roles. A background poller reloads changed policy data on its configured interval. Validate update visibility, parse-error behavior, unknown identities, and in-flight SSE behavior in the selected worker and storage topology.
 
 **Universal Dynamic Override Engine:**
-DevOps teams are no longer limited to basic security toggles; they can now dynamically override any of the 30+ `.env` properties (like `MAX_PAYLOAD_SIZE_BYTES` or `RATE_LIMIT_RPM`) natively per `virtual_key_id` inside `policies.yaml`. This is powered by an ASGI-native `contextvars.ContextVar` architecture to achieve strictly isolated, O(1) thread-safe tenant configurations without global state leakage.
+Policies can supply request-scoped overrides for settings that the implementation reads through its dynamic settings proxy. This is not a promise that every `.env` field is safe or effective per request; allowlist and exercise the exact overrides used, including concurrent requests and background tasks.
 
 > **[View the Complete Policy-as-Code Guide & Templates 📜](/docs/policies)**: For detailed Role-Based Access Control (RBAC) templates, feature support matrices, and FAQs.
 
@@ -140,7 +140,7 @@ DevOps teams are no longer limited to basic security toggles; they can now dynam
 | **TLS/SSL (Outbound mTLS)** | `OUTBOUND_CLIENT_KEY` | `None` | Client key for proxy outbound mTLS. |
 
 > [!WARNING]
-> **Zero-Trust Default (`SHIELD_FAILURE_MODE`)**: The proxy is hardcoded to default to `FAIL_CLOSED`. This ensures that if the engine faults, a Redis connection drops, or a policy cannot be resolved, the connection is instantly severed to prevent PII egress. If you must set `SHIELD_FAILURE_MODE=FAIL_OPEN` for local development or a POC, be aware that **PII may leak** if the engine encounters an error. Never use `FAIL_OPEN` in production.
+> **Failure default (`SHIELD_FAILURE_MODE`)**: The redaction path defaults to `FAIL_CLOSED`, so handled engine failures terminate the affected request instead of forwarding it unchanged. Confirm the behavior of every enabled dependency and policy resolver in failure tests. `FAIL_OPEN` can forward untransformed data after an error and is unsuitable for a production privacy boundary.
 ## 8. 🔐 TLS and mTLS Deployment (Docker/Kubernetes)
 
 When deploying LLM-Shield-Proxy in production, you should mount TLS certificates securely.

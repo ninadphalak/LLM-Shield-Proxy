@@ -3,15 +3,15 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Request-ID Correlation & Sanitization** provides enterprise traceability across complex distributed microservices. It ensures every single LLM interaction can be traced from the frontend UI, through the proxy, to the upstream AI provider, and finally into the OpenTelemetry / Grafana dashboards using a unified, mathematically sanitized identifier.
+**Request-ID Correlation & Sanitization** normalizes a correlation identifier for supported request, response, and telemetry paths. End-to-end traceability depends on every participating component preserving and indexing the identifier.
 
 ## How It Works
-Without a unified ID, debugging a failed LLM request across multiple Kubernetes pods and upstream dashboards is nearly impossible.
+A consistent identifier can make multi-component debugging substantially easier when each component records it.
 
 1. **Ingress Extraction:** When a request arrives, the proxy looks for the `X-Request-ID` or `X-Correlation-ID` HTTP headers.
 2. **Regex Sanitization:** To prevent HTTP Header Injection attacks (CWE-113), the supplied ID is validated against a strict `^[a-zA-Z0-9-]{10,40}$` regex. If it contains invalid characters (like newlines or scripts), it is discarded.
 3. **UUID4 Generation:** If no valid header is found, the proxy automatically generates a cryptographically secure `UUID4`.
-4. **Context Propagation:** The verified ID is injected into Python's `contextvars`, automatically appending it to every log line, OpenTelemetry trace span, and upstream HTTP request header.
+4. **Supported propagation:** The normalized ID is stored on `request.state`, returned in the `X-Request-ID` response header, and passed explicitly into supported audit/error events. The current catch-all path does not promise automatic propagation to every log line, trace span, or upstream request.
 
 
 ```mermaid
@@ -36,13 +36,13 @@ View diagram on GitHub mobile 📱 -->
 This feature operates fundamentally at the middleware layer and requires no explicit configuration flags to activate.
 
 ## Critical Logic & Edge Cases
-* **Egress Echoing:** The finalized `X-Request-ID` is guaranteed to be returned to the client application in the HTTP Response Headers. This allows the frontend UI to display the exact trace ID to the user if an error occurs ("Please provide Error ID: 1234-abcd to IT Support").
-* **Log Obfuscation Defense:** By sanitizing the incoming header, the proxy guarantees attackers cannot inject forged newline characters into the ID to simulate fake log entries in Splunk or Datadog.
+* **Response echo:** The supported proxy response path adds the finalized `X-Request-ID`. Gateways and clients can remove or replace headers, so verify the complete path.
+* **Log-injection reduction:** Sanitizing control characters reduces request-ID log injection. Logging format, downstream parsing, and every other untrusted field still require defensive handling.
 
 ## FAQ
 
 **Q: Can I use standard W3C `traceparent` headers instead?**
-A: The proxy natively supports both! The `X-Request-ID` is used for application-level correlation and log tagging, while the W3C `traceparent` header is independently parsed and passed directly into the [Zero-Overhead OpenTelemetry Tracing](/docs/features/enterprise-auditing-compliance/zero-overhead-opentelemetry-otel-tracing) engine for strict distributed span tracking.
+A: `X-Request-ID` supports application correlation, while W3C `traceparent` supports distributed tracing. They have different trust and propagation rules; test both across the selected gateways and collectors. See [Asynchronous OpenTelemetry Tracing](/docs/features/enterprise-auditing-compliance/zero-overhead-opentelemetry-otel-tracing).
 
 **Q: Is the Request ID passed to OpenAI/Anthropic?**
 A: Yes. It is appended as a custom header on the upstream HTTP/2 connection. While OpenAI doesn't natively expose this in their standard dashboards, it provides critical proof during enterprise support tickets when correlating proxy traffic with upstream provider logs.
@@ -51,7 +51,7 @@ A: Yes. It is appended as a custom header on the upstream HTTP/2 connection. Whi
 ## Plainspeak
 This feature acts as a tracking number system for your data.
 
-When a user sends a message, it travels through a maze of different servers and programs. If something goes wrong, it's impossible to figure out where the error happened unless you can trace the message's exact path. This feature attaches a unique tracking ID to every single request. No matter where the data goes, IT engineers can use that tracking ID to find out exactly what happened to it.
+The proxy assigns or normalizes a tracking identifier that participating services can record. It is a correlation aid, not proof of every hop or event.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
