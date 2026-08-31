@@ -1,0 +1,5 @@
+# Conformance artifacts are checksummed. Byte-identical across platforms or the
+# published SHA-256 is unverifiable.
+*.json   text eol=lf
+*.sha256 text eol=lf
+*.jsonl  text eol=lf

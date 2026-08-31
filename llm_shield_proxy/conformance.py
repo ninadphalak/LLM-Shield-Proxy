@@ -20,7 +20,7 @@ import tracemalloc
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -338,6 +338,41 @@ def _memory_check(iterations: int) -> dict[str, Any]:
     }
 
 
+def _source_revision() -> str:
+    return os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown"
+
+
+def build_attestation() -> Optional[dict[str, Any]]:
+    """Provenance for this run, or None when there is no CI context to report.
+
+    Every value here is read from the run environment, so it is SELF-REPORTED: it
+    records who says they ran the harness, and is forgeable by whoever ran it. It is
+    not third-party attestation. Only a mechanism a verifier can check without
+    trusting the submitter (GitHub OIDC, Sigstore) may set another verification value.
+    """
+    commit_sha = os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION")
+    if not commit_sha:
+        return None
+    attestation: dict[str, Any] = {
+        "verification": "self-reported",
+        "runner": os.getenv("RUNNER_NAME") or os.getenv("RUNNER_OS") or platform.node() or "unknown",
+        "commit_sha": commit_sha,
+    }
+    repository = os.getenv("GITHUB_REPOSITORY")
+    run_id = os.getenv("GITHUB_RUN_ID")
+    if os.getenv("GITHUB_ACTIONS"):
+        attestation["ci_provider"] = "github-actions"
+    if repository:
+        attestation["repository"] = repository
+        if run_id:
+            server = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+            attestation["run_url"] = f"{server}/{repository}/actions/runs/{run_id}"
+    workflow_ref = os.getenv("GITHUB_WORKFLOW_REF")
+    if workflow_ref:
+        attestation["workflow_ref"] = workflow_ref
+    return attestation
+
+
 def run_conformance(iterations: int = 2_000) -> dict[str, Any]:
     """Run deterministic correctness checks and labeled local microbenchmarks."""
     if iterations < 10:
@@ -378,7 +413,7 @@ def run_conformance(iterations: int = 2_000) -> dict[str, Any]:
         },
         "generated_at": _timestamp(),
         "implementation": {"name": "llm-shield-proxy", "version": _package_version()},
-        "source_revision": os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown",
+        "source_revision": _source_revision(),
         "environment": {
             "python": platform.python_version(),
             "implementation": sys.implementation.name,
@@ -400,5 +435,9 @@ def run_conformance(iterations: int = 2_000) -> dict[str, Any]:
 def write_conformance_report(report: dict[str, Any], output_path: str) -> str:
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Explicit LF: Path.write_text uses text mode, which rewrites newlines to CRLF
+    # on Windows and makes the published SHA-256 of an artifact platform-dependent.
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    with destination.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload)
     return str(destination)

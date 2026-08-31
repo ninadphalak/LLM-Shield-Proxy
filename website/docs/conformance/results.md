@@ -8,7 +8,7 @@ The repository includes a machine-readable v1.0.0 pre-release report at `benchma
 
 **Source label:** `7e959d9d8f9ff6b85e05d9d9ce4642ad3cfb3fed+working-tree`
 
-**SHA-256:** `351c8db11b114b681ec05bc5e759a7b4969206a5231bcf67e4ad88b1a9df196d`
+**SHA-256:** `57ef55181da29df9a5d74b138f0e1f030170db204e012a482c7e950575cdfafe`
 
 Because the implementation changes are not yet committed, this is a transparent **maintainer pre-release self-test**, not a release-grade independently reproducible result. CI should regenerate the report from an exact commit SHA before a formal release.
 

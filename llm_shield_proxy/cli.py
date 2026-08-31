@@ -138,8 +138,17 @@ def build_audit_verify_parser() -> argparse.ArgumentParser:
         description="Verify a hash-chained, Ed25519-signed audit JSONL file.",
     )
     parser.add_argument("--audit-log", required=True, help="Audit JSONL path.")
-    parser.add_argument("--pubkey-file", default=None, help="Optional Ed25519 public-key PEM path.")
+    parser.add_argument("--pubkey-file", default=None, help="Ed25519 public-key PEM path.")
     parser.add_argument("--json-out", default=None, help="Optional path for the machine-readable verification summary.")
+    parser.add_argument(
+        "--allow-unsigned",
+        action="store_true",
+        help=(
+            "Exit 0 on hash continuity alone, without signature verification. "
+            "Continuity is not authenticity: the record hash is an unkeyed SHA-256 "
+            "that anyone can recompute over records they wrote themselves."
+        ),
+    )
     return parser
 
 
@@ -163,11 +172,51 @@ def audit_verify_main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"Audit events:       {result['total_events']}")
     print(f"Chain valid:        {result['chain_valid']}")
+    print(f"Authenticity:       {'verified' if result['authenticity_verified'] else 'NOT VERIFIED'}")
     print(f"Integrity issues:   {len(result['chain_breaks'])}")
+    print(f"Unsigned events:    {result['unsigned_events']}")
     if result["signature_checked"]:
         print(f"Valid signatures:   {result['signatures_valid']}")
         print(f"Invalid signatures: {result['signatures_invalid']}")
-    return 0 if result["chain_valid"] is True else 1
+    # Deleting a suffix leaves a shorter but internally consistent chain. Print the
+    # terminal state so it can be compared against an independently held anchor,
+    # which is the only way truncation is detectable.
+    print(f"Terminal sequence:  {result['last_sequence']}")
+    print(f"Terminal hash:      {result['terminal_hash']}")
+    print(f"Chain ids:          {', '.join(result['chain_ids_seen']) or '(none)'}")
+
+    if not result["signature_checked"]:
+        print(
+            "WARNING: no --pubkey-file supplied. Hash continuity alone is not evidence of "
+            "authenticity; anyone can recompute an unkeyed hash chain over records they "
+            "wrote themselves. This result attests internal consistency only.",
+            file=sys.stderr,
+        )
+    if result["unsigned_events"] and result["signature_checked"]:
+        print(
+            f"WARNING: {result['unsigned_events']} record(s) carry no signature.",
+            file=sys.stderr,
+        )
+    print(
+        "NOTE: records deleted from the END of a chain leave a valid shorter chain. "
+        "Compare the terminal sequence and hash above against an independently held "
+        "anchor to detect truncation.",
+        file=sys.stderr,
+    )
+
+    if result["chain_valid"] is not True:
+        return 1
+    # Exit 0 is what automation reads. It must mean the log was verified against a
+    # key, not merely that it is self-consistent.
+    if result["authenticity_verified"] or args.allow_unsigned:
+        return 0
+    print(
+        "FAILED: continuity holds but authenticity was not established. Supply "
+        "--pubkey-file to verify signatures, or --allow-unsigned to accept a "
+        "consistency-only result.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def build_audit_checkpoint_parser() -> argparse.ArgumentParser:
@@ -253,8 +302,19 @@ def build_benchmark_parser() -> argparse.ArgumentParser:
         prog="llm-shield-proxy benchmark",
         description="Run the local implementation profile or an OpenAI-compatible HTTP gateway profile.",
     )
-    parser.add_argument("--iterations", type=int, default=2_000, help="Measured iterations (default: %(default)s).")
-    parser.add_argument("--json-out", default="./CONFORMANCE_LATEST.json", help="Machine-readable result path.")
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help="Measured iterations (default: 2000 local profile, 3 HTTP profile). The HTTP "
+        "profile issues live requests to the target; raise it deliberately.",
+    )
+    parser.add_argument(
+        "--json-out",
+        default=None,
+        help="Machine-readable result path (default: CONFORMANCE_LATEST.json for the local "
+        "profile, CONFORMANCE_HTTP_LATEST.json for the HTTP profile).",
+    )
     parser.add_argument(
         "--target-base-url",
         default=None,
@@ -294,8 +354,14 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
 
     from llm_shield_proxy.conformance import run_conformance, write_conformance_report
 
+    http_profile = bool(args.target_base_url)
+    iterations = args.iterations if args.iterations is not None else (3 if http_profile else 2_000)
+    json_out = args.json_out or (
+        "./CONFORMANCE_HTTP_LATEST.json" if http_profile else "./CONFORMANCE_LATEST.json"
+    )
+
     try:
-        if args.target_base_url:
+        if http_profile:
             headers = {}
             for item in args.target_header:
                 if "=" not in item:
@@ -313,15 +379,15 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                 model=args.target_model,
                 implementation_name=args.target_name,
                 implementation_version=args.target_version,
-                iterations=args.iterations,
+                iterations=iterations,
                 timeout_seconds=args.timeout_seconds,
                 capture_host=args.capture_host,
                 capture_port=args.capture_port,
                 extra_headers=headers,
             )
         else:
-            report = run_conformance(args.iterations)
-        destination = write_conformance_report(report, args.json_out)
+            report = run_conformance(iterations)
+        destination = write_conformance_report(report, json_out)
     except (OSError, ValueError) as exc:
         print(f"Benchmark failed: {exc}", file=sys.stderr)
         return 2

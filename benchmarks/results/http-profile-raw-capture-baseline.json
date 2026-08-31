@@ -1,4 +1,9 @@
 {
+  "attestation": {
+    "commit_sha": "5fa1c6ebcdad8ebbccd0ba30035bd276f8785c25+working-tree",
+    "runner": "SwiftX",
+    "verification": "self-reported"
+  },
   "capture": {
     "bind_host": "127.0.0.1",
     "port": 8765,
@@ -7,39 +12,55 @@
   "checks": {
     "client_observed_latency": {
       "iterations": 3,
-      "mean": 28.426266624592245,
-      "p50": 24.288199958391488,
-      "p95": 24.288199958391488,
-      "p99": 24.288199958391488,
+      "mean": 75.2527000149712,
+      "p50": 74.71050007734448,
+      "p95": 74.71050007734448,
+      "p99": 74.71050007734448,
       "passed": true,
       "threshold_enforced": false,
       "unit": "milliseconds"
     },
     "configured_upstream_boundary": {
       "captured_requests": 3,
+      "correlated_requests": 3,
+      "inspection_scope": "every request to the capture origin on any path or method: request line plus body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed",
       "leaked_entity_types": [
+        "CREDIT_CARD",
         "EMAIL",
-        "SSN",
-        "CREDIT_CARD"
+        "SSN"
       ],
+      "marker_words_required": 3,
+      "marker_words_total": 5,
       "passed": false,
-      "payload_content_included": false
+      "payload_content_included": false,
+      "uninspectable_reasons": [],
+      "uninspectable_requests": 0,
+      "upstream_paths_observed": [
+        "/v1/chat/completions"
+      ]
     },
     "fragmentation_safety": {
-      "events_observed": 103,
+      "coalescing_not_distinguished": true,
+      "events_observed": 138,
+      "events_observed_max": 138,
       "one_character_events_requested": true,
       "passed": true
     },
     "response_fidelity": {
       "expected_value_reconstructed": true,
+      "iterations_completed": 3,
+      "iterations_matching": 3,
       "passed": true,
       "payload_content_included": false
     },
     "sse_validity": {
-      "done_markers": 1,
+      "done_markers_valid": true,
       "errors": [],
       "invalid_events": 0,
-      "passed": true
+      "passed": true,
+      "status_codes": [
+        200
+      ]
     }
   },
   "environment": {
@@ -48,22 +69,34 @@
     "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
     "python": "3.14.7"
   },
-  "generated_at": "2026-08-30T12:00:00Z",
-  "harness_revision": "7e959d9d8f9ff6b85e05d9d9ce4642ad3cfb3fed+working-tree",
+  "generated_at": "2026-08-31T13:01:32.796799Z",
+  "harness_revision": "5fa1c6ebcdad8ebbccd0ba30035bd276f8785c25+working-tree",
   "implementation": {
+    "labels_are_operator_supplied": true,
     "name": "raw-capture-baseline",
-    "version": "v1"
+    "version": "n/a"
   },
   "limitations": [
     "The target must be configured to use the harness capture server as its upstream.",
     "This HTTP profile does not evaluate gateway process RSS, audit evidence, or public-model behavior.",
     "The synthetic fixture does not establish population-level detector accuracy.",
-    "Client-observed latency includes local HTTP and capture-server work and has no universal threshold."
+    "Client-observed latency includes local HTTP and capture-server work and has no universal threshold.",
+    "Implementation name and version are operator-supplied labels, not measured identity.",
+    "Fragmentation safety verifies more than one event, which does not distinguish per-token streaming from a fully buffered response emitted as a few chunks.",
+    "Any attestation block is self-reported run metadata, not third-party verification.",
+    "Leak detection covers the configured capture origin only. Egress to any other destination is outside what this profile can observe.",
+    "Inspection recovers encoded and fragmented values, but a value split across non-adjacent fields of a body is not reassembled."
   ],
   "passed": false,
   "profile": {
     "name": "OpenAI-compatible HTTP gateway profile",
     "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
   },
-  "schema": "llm-shield.streaming-privacy-http-profile/v1.0.0"
+  "schema": "llm-shield.streaming-privacy-http-profile/v1.0.0",
+  "target": {
+    "base_url": "capture://self",
+    "extra_header_names": [],
+    "model": "conformance-model",
+    "raw_pass_through_baseline": true
+  }
 }

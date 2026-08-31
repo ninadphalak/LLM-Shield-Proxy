@@ -64,6 +64,26 @@ def _reconstruct_canonical_bytes(record: Dict[str, Any], exclude: tuple) -> byte
     return json.dumps(stripped).encode("utf-8")
 
 
+_GENESIS_HASH = "0" * 64
+
+
+def _is_chain_anchor(record: Dict[str, Any]) -> bool:
+    """True when this record legitimately begins a chain.
+
+    Matches AuditLogger: a recovered chain continues the prior hash, while a fresh
+    chain emits a startup record whose previous_hash equals its random initial_hash.
+
+    A declared initial_hash is NOT evidence of anything - a forger picks it freely.
+    It only makes the record structurally well-formed as a chain start; authenticity
+    comes from the signature, and multi-chain abuse is bounded separately.
+    """
+    previous_hash = record.get("previous_hash")
+    if previous_hash == _GENESIS_HASH:
+        return True
+    initial_hash = record.get("initial_hash")
+    return bool(initial_hash) and previous_hash == initial_hash
+
+
 def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = None) -> Dict[str, Any]:
     """Parse a hash-chained audit JSONL file, verifying SHA-256 continuity and,
     when a public key is supplied, Ed25519 receipt signatures."""
@@ -73,9 +93,11 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
         "chain_valid": True,
         "chain_breaks": [],
         "signature_checked": False,
+        "authenticity_verified": False,
         "signatures_valid": 0,
         "signatures_invalid": 0,
         "unsigned_events": 0,
+        "unanchored_chains": 0,
         "event_counts": {},
         "severity_counts": {},
         "first_timestamp": None,
@@ -106,9 +128,12 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
 
     fingerprints_seen: set = set()
     chain_ids_seen: set = set()
+    # Continuity is tracked per chain_id. A record must be continuous with the
+    # previous record of its OWN chain; a new chain_id is not an escape from
+    # previous-hash and sequence verification.
+    chain_prior_hash: Dict[str, str] = {}
+    chain_prior_sequence: Dict[str, int] = {}
     prior_hash: Optional[str] = None
-    prior_chain_id: Optional[str] = None
-    prior_sequence: Optional[int] = None
     expected_fingerprint: Optional[str] = None
     if verifier_key is not None:
         from cryptography.hazmat.primitives import serialization
@@ -129,6 +154,13 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
             except json.JSONDecodeError:
                 summary["chain_valid"] = False
                 summary["chain_breaks"].append({"line": line_no, "reason": "invalid_json"})
+                continue
+            if not isinstance(record, dict):
+                # A JSON scalar or array is well-formed JSON but not a record. It
+                # used to reach record.get() and raise AttributeError out of the
+                # verifier, so a corrupt log crashed instead of reading as invalid.
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append({"line": line_no, "reason": "non_object_record"})
                 continue
 
             summary["total_events"] += 1
@@ -158,12 +190,27 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
             chain_id = record.get("chain_id")
             if chain_id:
                 chain_ids_seen.add(str(chain_id))
-            same_chain = prior_chain_id is None or chain_id is None or chain_id == prior_chain_id
-            if same_chain and prior_hash is not None and record.get("previous_hash") != prior_hash:
+            chain_key = str(chain_id) if chain_id else ""
+            chain_hash = chain_prior_hash.get(chain_key)
+            prior_sequence = chain_prior_sequence.get(chain_key)
+            if chain_hash is not None and record.get("previous_hash") != chain_hash:
                 summary["chain_valid"] = False
                 summary["chain_breaks"].append(
                     {"line": line_no, "reason": "chain_discontinuity", "event": event_name}
                 )
+            elif chain_hash is None and not _is_chain_anchor(record):
+                # The first record of a chain must be a genuine anchor: the startup
+                # record declares initial_hash and points previous_hash at it (a fresh
+                # chain seeds a random initial_hash, not a zero genesis). Without this
+                # a forger bypasses continuity entirely by giving every record its own
+                # chain_id, so no record ever has a predecessor to be checked against.
+                # Verifying a rotated segment in isolation also reports unanchored,
+                # which is correct: a segment cannot be verified on its own.
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append(
+                    {"line": line_no, "reason": "unanchored_chain_start", "event": event_name}
+                )
+                summary["unanchored_chains"] += 1
             sequence = record.get("sequence")
             if sequence is not None:
                 try:
@@ -171,19 +218,25 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                     if summary["first_sequence"] is None:
                         summary["first_sequence"] = sequence_int
                     summary["last_sequence"] = sequence_int
-                    if same_chain and prior_sequence is not None and sequence_int != prior_sequence + 1:
+                    if prior_sequence is not None and sequence_int != prior_sequence + 1:
                         summary["chain_valid"] = False
                         summary["chain_breaks"].append(
                             {"line": line_no, "reason": "sequence_discontinuity", "event": event_name}
                         )
-                    prior_sequence = sequence_int
+                    elif prior_sequence is None and sequence_int != 1:
+                        summary["chain_valid"] = False
+                        summary["chain_breaks"].append(
+                            {"line": line_no, "reason": "non_initial_sequence_start", "event": event_name}
+                        )
+                    chain_prior_sequence[chain_key] = sequence_int
                 except (TypeError, ValueError):
                     summary["chain_valid"] = False
                     summary["chain_breaks"].append(
                         {"line": line_no, "reason": "invalid_sequence", "event": event_name}
                     )
+            if record_hash:
+                chain_prior_hash[chain_key] = record_hash
             prior_hash = record_hash or prior_hash
-            prior_chain_id = str(chain_id) if chain_id else prior_chain_id
 
             fingerprint = record.get("public_key_fingerprint")
             signature = record.get("signature")
@@ -211,10 +264,38 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                         )
             else:
                 summary["unsigned_events"] += 1
+                if verifier_key is not None:
+                    summary["chain_valid"] = False
+                    summary["chain_breaks"].append(
+                        {"line": line_no, "reason": "unsigned_record", "event": event_name}
+                    )
 
     summary["fingerprints_seen"] = sorted(fingerprints_seen)
     summary["chain_ids_seen"] = sorted(chain_ids_seen)
     summary["terminal_hash"] = prior_hash
+
+    if summary["total_events"] == 0:
+        # An emptied log is the cleanest tamper there is. Reporting it as valid
+        # handed an attacker who truncated the file to zero bytes a clean result.
+        summary["chain_valid"] = False
+        summary["chain_breaks"].append({"line": 0, "reason": "empty_log"})
+    if len(chain_ids_seen) > 1:
+        # One file is one worker's chain; audit-checkpoint takes a file per chain.
+        # Many chains in one file is how a forger avoids ever having a predecessor:
+        # every record anchors its own chain and nothing is checked against anything.
+        summary["chain_valid"] = False
+        summary["chain_breaks"].append(
+            {"line": 0, "reason": "multiple_chains_in_one_file", "chains": len(chain_ids_seen)}
+        )
+    # Authenticity is a separate claim from continuity. Anyone can recompute an
+    # unkeyed SHA-256 chain, so continuity alone never establishes who wrote it.
+    summary["authenticity_verified"] = bool(
+        summary["signature_checked"]
+        and summary["chain_valid"] is True
+        and summary["signatures_valid"] > 0
+        and summary["signatures_invalid"] == 0
+        and summary["unsigned_events"] == 0
+    )
     return summary
 
 

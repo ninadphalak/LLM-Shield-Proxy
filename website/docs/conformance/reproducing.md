@@ -62,6 +62,26 @@ request through the target, and stops the capture server afterward. If a contain
 host, bind deliberately with `--capture-host 0.0.0.0` and restrict access with the host firewall.
 The report never includes the API key, extra header values, or protected fixture values.
 
+### What the boundary check inspects
+
+Every request the target makes to the capture origin is recorded — any path, any method,
+request line as well as body — because a gateway that posts raw values to a sibling route
+has leaked them just as surely as one that puts them in the chat payload. Bodies are read
+under both `content-length` and chunked framing, decompressed when `content-encoding` says
+to, then walked over every JSON type: strings, numbers, dictionary keys, character-code
+arrays, and base64, hex or percent-encoded runs found inside strings. Values are matched
+literally, across adjacent fragments, and with separators stripped.
+
+A request the harness cannot fully inspect — unparseable, or too large or too deeply nested
+to walk within budget — is counted in `uninspectable_requests` and **fails** the boundary
+check. Not having looked is not the same as having found nothing.
+
+Each run embeds a random five-word marker in the prompt, and at least three of those words
+must come back in a captured request for the boundary check to count it. Without that,
+a target can exfiltrate to its real upstream and satisfy the check with one unrelated
+request to the capture server. The words are mundane nouns rather than a high-entropy
+token, because a conforming gateway's secret and person detectors redact the latter.
+
 Use `--target-base-url capture://self` to publish a raw OpenAI-compatible baseline. It is expected
 to fail the configured-upstream privacy check; that negative control proves the results format can
 represent a loss rather than only successful project runs.
