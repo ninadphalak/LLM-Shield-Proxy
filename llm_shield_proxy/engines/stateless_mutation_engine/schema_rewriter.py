@@ -4,9 +4,11 @@ from typing import Any, Dict
 
 class DynamicSchemaRewriter:
     """
-    Dynamically rewrites MCP tool schemas and OpenAI function definitions
-    to require cryptographic sibling hashes (_ctx_hash_<prop>) for string properties,
-    guaranteeing the LLM can echo back the cipher context statelessly.
+    Rewrites discovered JSON Schema objects to describe cryptographic sibling
+    context fields (``_ctx_hash_<prop>``) for string properties.
+
+    Marking a field as required does not compel a model or provider to echo it;
+    callers must test the selected structured-output integration.
     """
 
     @classmethod
@@ -14,7 +16,7 @@ class DynamicSchemaRewriter:
         if not isinstance(schema, dict):
             return schema
 
-        # Guarantee caller input immutability
+        # Preserve caller input immutability.
         schema_copy = copy.deepcopy(schema)
         return cls._rewrite_internal(schema_copy)
 
@@ -56,5 +58,18 @@ class DynamicSchemaRewriter:
 
         elif schema.get("type") == "array" and "items" in schema:
             schema["items"] = cls._rewrite_internal(schema["items"])
+
+        else:
+            # Tool definitions are commonly nested inside a larger request rather
+            # than passed as the root schema. Traverse containers until a JSON
+            # Schema-shaped object is found.
+            for key, value in list(schema.items()):
+                if isinstance(value, dict):
+                    schema[key] = cls._rewrite_internal(value)
+                elif isinstance(value, list):
+                    schema[key] = [
+                        cls._rewrite_internal(item) if isinstance(item, dict) else item
+                        for item in value
+                    ]
 
         return schema

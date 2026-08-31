@@ -1,13 +1,18 @@
 replicaCount: 1
 
 image:
-  repository: llm-shield-proxy
+  repository: ghcr.io/ninadphalak/llm-shield-proxy
   pullPolicy: IfNotPresent
   tag: "latest"
 
 webhook:
+  enabled: false
+  sidecarImage: ""
   certManager:
     enabled: false
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
 
 resources:
   limits:

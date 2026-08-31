@@ -25,7 +25,7 @@ _CACHE_TTL_SECONDS = 2.0
 @health_router.get("/health")
 @health_router.get("/healthz")
 async def liveness_probe() -> Dict[str, str]:
-    """Instant zero-await Liveness probe ensuring the event loop is responsive."""
+    """Return the application's lightweight liveness response."""
     return {"status": "ok"}
 
 

@@ -1,8 +1,8 @@
-"""Zero-Dependency Kubernetes Mutating Admission Webhook.
+"""Kubernetes Mutating Admission Webhook.
 
 Injects the LLM-Shield Proxy as a sidecar into Pods labeled with
 llm-shield.io/inject: "true" using standard JSON Patch (RFC 6902).
-Consumes 0MB of persistent memory by operating entirely within the FastAPI loop.
+The route runs inside the FastAPI process and adds normal request-processing overhead.
 """
 
 import base64
@@ -49,7 +49,7 @@ def _build_sidecar_patch() -> list[Dict[str, Any]]:
             "path": "/spec/containers/-",
             "value": {
                 "name": "llm-shield-proxy",
-                "image": "llm-shield/proxy:latest",
+                "image": settings.K8S_SIDECAR_IMAGE,
                 "ports": [{"containerPort": 8000}],
                 "env": [
                     {"name": "SHIELD_FAILURE_MODE", "value": "FAIL_CLOSED"},
@@ -73,8 +73,21 @@ async def mutate_webhook(request: Request) -> JSONResponse:
 
         metadata = obj.get("metadata", {})
         labels = metadata.get("labels", {})
+        containers = obj.get("spec", {}).get("containers", [])
 
         if labels.get("llm-shield.io/inject") == "true":
+            # Avoid returning an invalid duplicate-name patch. This does not
+            # validate that an existing same-name container has the desired image.
+            if any(container.get("name") == "llm-shield-proxy" for container in containers):
+                return JSONResponse({
+                    "apiVersion": "admission.k8s.io/v1",
+                    "kind": "AdmissionReview",
+                    "response": {
+                        "uid": uid,
+                        "allowed": True
+                    }
+                })
+
             patch = _build_sidecar_patch()
             patch_b64 = base64.b64encode(json.dumps(patch).encode("utf-8")).decode("utf-8")
 

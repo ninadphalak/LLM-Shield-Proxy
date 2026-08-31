@@ -1,7 +1,6 @@
 """Enterprise Configuration Module for LLM-Shield-Proxy.
 
-Centralizes, validates, and manages all environment variables, connection pools,
-security thresholds, and runtime settings using Pydantic Settings.
+Centralizes documented environment variables and runtime settings using Pydantic Settings.
 """
 
 from __future__ import annotations
@@ -96,6 +95,10 @@ class Settings(BaseSettings):
     EGRESS_GATEWAY_URL: Optional[str] = Field(default=None, description="Internal proxy/gateway URL for Air-Gapped mode")
     FORWARD_CLIENT_AUTH: bool = Field(default=False, description="Forward client auth headers in air-gapped mode")
     K8S_WEBHOOK_AUTH_TOKEN: Optional[str] = Field(default=None, description="Optional bearer token for K8s admission webhook")
+    K8S_SIDECAR_IMAGE: str = Field(
+        default="ghcr.io/ninadphalak/llm-shield-proxy:latest",
+        description="Container image appended by the Kubernetes admission webhook",
+    )
 
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
@@ -274,9 +277,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_canary_token(self) -> "Settings":
-        if self.ENABLE_CANARY_TRIPWIRE and not self.CANARY_TOKEN:
-            self.CANARY_TOKEN = f"[SHIELD_TRIPWIRE_{secrets.token_urlsafe(32)}]"
-            logger.info("Generated synthetic Canary Tripwire Token.")
+        if self.ENABLE_CANARY_TRIPWIRE:
+            if not self.SHIELD_WATERMARK_SECRET:
+                raise ValueError("SHIELD_WATERMARK_SECRET must be set if ENABLE_CANARY_TRIPWIRE is True.")
+            if not self.CANARY_TOKEN:
+                self.CANARY_TOKEN = f"[SHIELD_TRIPWIRE_{secrets.token_urlsafe(32)}]"
+                logger.info("Generated synthetic Canary Tripwire Token.")
         return self
 
     @model_validator(mode="after")
@@ -434,7 +440,7 @@ request_policy_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar("reque
 agent_identity_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("agent_identity_ctx", default=None)
 
 class DynamicSettingsProxy:
-    """Zero-latency ContextVar proxy for per-tenant dynamic configuration overrides."""
+    """ContextVar-backed proxy for supported per-tenant configuration overrides."""
     def __init__(self, base_settings: Settings):
         object.__setattr__(self, "_base", base_settings)
 

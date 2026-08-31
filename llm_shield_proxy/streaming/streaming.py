@@ -1,7 +1,7 @@
 """Enterprise Zero-Leakage Streaming & SSE Rehydration Engine.
 
 Implements prefix-free sliding-window buffering for Server-Sent Events (SSE) streams,
-guaranteeing zero partial-token leakage across chunk boundaries for both bracketed
+using bounded cross-chunk matching for supported bracketed
 and realistic synthetic unbracketed entities.
 """
 
@@ -167,10 +167,10 @@ async def rehydrate_sse_stream(
     Yields:
         Rehydrated, UTF-8 encoded Server-Sent Events bytes.
     """
-    from llm_shield_proxy.security.attestation import MerkleAttestationStream
+    from llm_shield_proxy.security.attestation import StreamDigestReceipt
 
     session_id = getattr(vault, "session_id", "stateless-session")
-    attestation = MerkleAttestationStream(session_id=session_id)
+    attestation = StreamDigestReceipt(session_id=session_id)
 
     async def _inner_stream() -> AsyncGenerator[bytes, None]:
         nonlocal watermark_text

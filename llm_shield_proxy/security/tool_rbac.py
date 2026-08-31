@@ -219,7 +219,7 @@ WHITESPACE_BYTES = (0x20, 0x09, 0x0A, 0x0D)  # ord(' '), ord('\t'), ord('\n'), o
 
 class StreamingToolParser:
     """
-    Zero-Allocation Streaming JSON Lexer that extracts tool names.
+    Incremental JSON lexer that extracts tool names with bounded retained state.
     Operates purely on byte-streams to prevent Slowloris and OOM attacks.
     """
 

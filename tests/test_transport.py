@@ -28,7 +28,7 @@ async def test_webhook_transport_fire_and_forget_failure(caplog, oscal_payload):
     with patch("httpx.AsyncClient.post", side_effect=httpx.TimeoutException("Mocked timeout")):
         with caplog.at_level(logging.WARNING):
             await transport.dispatch(oscal_payload)
-        assert "WORM warning: Webhook transport timed out" in caplog.text
+        assert "GRC webhook transport timed out" in caplog.text
 
     caplog.clear()
 
@@ -36,7 +36,7 @@ async def test_webhook_transport_fire_and_forget_failure(caplog, oscal_payload):
     with patch("httpx.AsyncClient.post", side_effect=httpx.RequestError("Mocked request error")):
         with caplog.at_level(logging.WARNING):
             await transport.dispatch(oscal_payload)
-        assert "WORM warning: Webhook transport failed" in caplog.text
+        assert "GRC webhook transport request failed" in caplog.text
 
     caplog.clear()
 
@@ -44,7 +44,19 @@ async def test_webhook_transport_fire_and_forget_failure(caplog, oscal_payload):
     with patch("httpx.AsyncClient.post", side_effect=Exception("Unexpected boom")):
         with caplog.at_level(logging.ERROR):
             await transport.dispatch(oscal_payload)
-        assert "Unexpected error in Webhook transport" in caplog.text
+        assert "Unexpected GRC webhook transport error" in caplog.text
+
+    caplog.clear()
+
+    # 4. Test an HTTP error response. A completed POST is not successful delivery.
+    error_response = httpx.Response(
+        500,
+        request=httpx.Request("POST", "https://example.invalid/grc"),
+    )
+    with patch("httpx.AsyncClient.post", return_value=error_response):
+        with caplog.at_level(logging.WARNING):
+            await transport.dispatch(oscal_payload)
+        assert "received HTTP 500" in caplog.text
 
 
 @pytest.mark.asyncio

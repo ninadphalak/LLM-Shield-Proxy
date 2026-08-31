@@ -21,6 +21,18 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.webhook.enabled }}
+          command: ["llm-shield-proxy"]
+          args:
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - {{ .Values.service.httpPort | quote }}
+            - "--tls-cert-file"
+            - "/var/run/llm-shield-webhook/tls.crt"
+            - "--tls-key-file"
+            - "/var/run/llm-shield-webhook/tls.key"
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.httpPort }}
@@ -45,6 +57,8 @@ spec:
               value: {{ .Values.mTLS.clientCertPath | quote }}
             - name: SSL_CLIENT_KEY_PATH
               value: {{ .Values.mTLS.clientKeyPath | quote }}
+            - name: K8S_SIDECAR_IMAGE
+              value: {{ default (printf "%s:%s" .Values.image.repository .Values.image.tag) .Values.webhook.sidecarImage | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           lifecycle:
@@ -55,11 +69,29 @@ spec:
             httpGet:
               path: /health/ready
               port: http
+              {{- if .Values.webhook.enabled }}
+              scheme: HTTPS
+              {{- end }}
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health/live
               port: http
+              {{- if .Values.webhook.enabled }}
+              scheme: HTTPS
+              {{- end }}
             initialDelaySeconds: 15
             periodSeconds: 20
+          {{- if .Values.webhook.enabled }}
+          volumeMounts:
+            - name: webhook-tls
+              mountPath: /var/run/llm-shield-webhook
+              readOnly: true
+          {{- end }}
+      {{- if .Values.webhook.enabled }}
+      volumes:
+        - name: webhook-tls
+          secret:
+            secretName: {{ include "llm-shield-proxy.fullname" . }}-webhook-cert
+      {{- end }}

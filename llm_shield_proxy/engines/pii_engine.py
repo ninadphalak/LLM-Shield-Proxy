@@ -244,7 +244,7 @@ class PIIEngine:
                     config = CustomRegexConfig(**yaml_data)
 
                     for custom_pattern in config.custom_patterns:
-                        # Compile using re2 to guarantee O(N) execution and ReDoS immunity
+                        # Compile with RE2 to avoid backtracking-based regular-expression behavior.
                         compiled = re2.compile(custom_pattern.pattern)
                         all_tier1.append((custom_pattern.name, compiled))
 
@@ -282,7 +282,7 @@ class PIIEngine:
     def detect_spans(
         self, text: str, active_profile: Optional[CompiledProfile] = None
     ) -> List[Tuple[int, int, str, str]]:
-        """Detects all PII and secret entity spans across the 3-Tier cascade.
+        """Returns entity spans detected by the enabled 3-tier cascade.
 
         Time Complexity: O(N * P) where N is text length and P is pattern count.
         Space Complexity: O(K) where K is number of matched spans.

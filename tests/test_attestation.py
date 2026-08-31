@@ -39,7 +39,7 @@ async def generate_mock_stream(num_chunks: int) -> AsyncGenerator[bytes, None]:
 
 
 @pytest.mark.asyncio
-async def test_attestation_log_and_signature(capture_audit_logs, monkeypatch):
+async def test_stream_digest_receipt_log_and_signature(capture_audit_logs, monkeypatch):
     monkeypatch.setattr(settings, "SHIELD_ENCRYPTION_KEY", "test-shield-key")
     vault = Vault(session_id="test_session_123")
     stream = generate_mock_stream(10)
@@ -50,34 +50,37 @@ async def test_attestation_log_and_signature(capture_audit_logs, monkeypatch):
         chunks.append(chunk)
 
     assert len(capture_audit_logs.records) > 0
-    # Find the attestation log
-    attestation_log = None
+    # Find the stream digest receipt.
+    receipt = None
     for record in capture_audit_logs.records:
         try:
             data = json.loads(record)
-            if data.get("event") == "proof_of_non_egress":
-                attestation_log = data
+            if data.get("event") == "stream_digest_receipt":
+                receipt = data
                 break
         except json.JSONDecodeError:
             pass
 
-    assert attestation_log is not None
-    assert attestation_log["session_id"] == "test_session_123"
-    assert attestation_log["total_chunks_processed"] > 0
+    assert receipt is not None
+    assert receipt["session_id"] == "test_session_123"
+    assert receipt["total_chunks_processed"] > 0
+    assert len(receipt["stream_digest_sha256"]) == 64
+    assert "proof_of_non_egress" not in receipt
+    assert "merkle_root" not in receipt
 
     # Signature Verification
-    signature = attestation_log.pop("signature")
+    signature = receipt.pop("signature")
     key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None)
     key = key_str.encode("utf-8")
 
-    payload_bytes = orjson.dumps(attestation_log, option=orjson.OPT_SORT_KEYS)
+    payload_bytes = orjson.dumps(receipt, option=orjson.OPT_SORT_KEYS)
     expected_sig = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
 
     assert hmac.compare_digest(signature, expected_sig)
 
 
 @pytest.mark.asyncio
-async def test_attestation_memory_footprint(monkeypatch):
+async def test_stream_digest_receipt_memory_footprint(monkeypatch):
     monkeypatch.setattr(settings, "SHIELD_ENCRYPTION_KEY", "test-shield-key")
     vault = Vault(session_id="test_session_mem")
     num_chunks = 100000

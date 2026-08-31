@@ -29,17 +29,17 @@ _FRAMEWORK_NARRATIVES: Dict[str, Dict[str, str]] = {
         ),
     },
     "soc2": {
-        "title": "SOC 2 Trust Services Criteria Compliance Pack",
+        "title": "SOC 2 Trust Services Criteria Evidence Support Pack",
         "reference": "AICPA Trust Services Criteria – Security & Confidentiality (CC6, CC7)",
         "narrative": (
             "This pack evidences logical access and system-monitoring controls under SOC 2 Trust "
-            "Services Criteria CC6 (Logical Access) and CC7 (System Operations): continuous "
-            "redaction enforcement plus a tamper-evident, cryptographically signed audit trail of "
-            "every proxy decision."
+            "Services Criteria CC6 (Logical Access) and CC7 (System Operations): configured "
+            "redaction observations plus signed, hash-linked records for instrumented proxy paths. "
+            "Completeness and control effectiveness require independent assessment."
         ),
     },
     "nist": {
-        "title": "NIST SP 800-53 Rev. 5 Compliance Pack",
+        "title": "NIST SP 800-53 Rev. 5 Evidence Support Pack",
         "reference": "NIST SP 800-53 Rev. 5 (AU-9, AU-10, PE-19)",
         "narrative": (
             "This pack bundles machine-readable NIST OSCAL assessment-results artifacts (control "

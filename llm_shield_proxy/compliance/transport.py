@@ -68,13 +68,19 @@ class AsyncWebhookTransport(BaseGRCTransport):
     async def dispatch(self, oscal_payload: dict):
         try:
             # We reuse the client to avoid exhausting memory with connection pools
-            await self.client.post(self.webhook_url, json=oscal_payload)
+            response = await self.client.post(self.webhook_url, json=oscal_payload)
+            response.raise_for_status()
         except httpx.TimeoutException:
-            logger.warning(f"WORM warning: Webhook transport timed out sending to {self.webhook_url}")
-        except httpx.RequestError as e:
-            logger.warning(f"WORM warning: Webhook transport failed sending to {self.webhook_url}: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in Webhook transport: {e}")
+            logger.warning("GRC webhook transport timed out; the event was not acknowledged")
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "GRC webhook transport received HTTP %s; the event was not acknowledged",
+                exc.response.status_code,
+            )
+        except httpx.RequestError:
+            logger.warning("GRC webhook transport request failed; the event was not acknowledged")
+        except Exception:
+            logger.exception("Unexpected GRC webhook transport error; the event was not acknowledged")
 
     async def aclose(self) -> None:
         """Gracefully close the underlying HTTP client connection pool."""

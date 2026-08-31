@@ -1,7 +1,7 @@
-"""Cryptographic Proof of Non-Egress Merkle Attestation Module.
+"""Application-level rolling digest receipts for emitted SSE chunks.
 
-Provides mathematical proof of continuous PII redaction without database overhead
-by computing an asynchronous rolling SHA-256 digest over the outgoing stream.
+The receipt is scoped to chunks observed by the response-stream pipeline. It is not a
+network-wide proof and does not establish detector recall.
 """
 
 import hashlib
@@ -14,11 +14,11 @@ from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.observability.audit import audit_logger
 
 
-class MerkleAttestationStream:
+class StreamDigestReceipt:
     """Asynchronous rolling SHA-256 digest accumulator.
 
-    Maintains O(1) memory overhead by dynamically updating the running hash
-    state instead of buffering stream chunks.
+    Retains a fixed-size digest state and chunk counter rather than buffering
+    stream chunks; logger/exporter memory is outside this class.
     """
 
     def __init__(self, session_id: str):
@@ -27,7 +27,7 @@ class MerkleAttestationStream:
         self.total_chunks_processed = 0
 
     def update(self, chunk_bytes: bytes) -> None:
-        """Dynamically ingests a text chunk into the rolling Merkle digest.
+        """Ingest a text chunk into the sequential rolling digest.
 
         Conceptually:
             h_i = SHA256(chunk_bytes)
@@ -40,30 +40,27 @@ class MerkleAttestationStream:
         self.total_chunks_processed += 1
 
     def emit_audit_receipt(self) -> None:
-        """Generates a cryptographically signed JSON attestation record.
-
-        Pushes directly to the local WORM-compliant JSON audit logger.
-        """
+        """Emit HMAC-signed digest metadata through the configured audit logger."""
         final_digest = self.hasher.hexdigest()
 
         payload = {
-            "event": "proof_of_non_egress",
+            "event": "stream_digest_receipt",
             "session_id": self.session_id,
-            "merkle_root": final_digest,
+            "stream_digest_sha256": final_digest,
             "total_chunks_processed": self.total_chunks_processed,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Sign the payload using SHIELD_ENCRYPTION_KEY or fallback
+        # Sign the payload using the explicitly configured SHIELD_ENCRYPTION_KEY.
         # Sort keys to ensure deterministic JSON structure for HMAC verification
         key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None)
         if not key_str:
-            raise ValueError("SHIELD_ENCRYPTION_KEY is required for cryptographic attestation")
+            raise ValueError("SHIELD_ENCRYPTION_KEY is required for the stream digest receipt")
         key = key_str.encode("utf-8")
         payload_bytes = json.dumps(payload, option=json.OPT_SORT_KEYS)
 
         signature = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
         payload["signature"] = signature
 
-        # Log the attestation event to the WORM logger
+        # Emit the narrowly named receipt through the configured audit logger.
         audit_logger.info(json.dumps(payload).decode("utf-8"))
