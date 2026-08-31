@@ -1,45 +1,65 @@
-import subprocess
-import time
+"""The published image starts and serves health with no configuration beyond secrets.
+
+Previously this rebuilt the image itself, bound a fixed host port, and ran
+nowhere: CI passed `--ignore=tests/ootb`. It now shares the session-scoped build
+with the other container tests, takes an ephemeral port so parallel runs cannot
+collide, and asserts the readiness contract rather than liveness alone.
+"""
+
+from __future__ import annotations
+
+import json
 import urllib.request
 
+from tests.ootb.docker_helpers import container_logs, free_port, wait_for_http
 
-def test_docker_standalone_happy_path():
-    image_name = "llm-shield:test"
-    container_name = "llm-shield-test-run"
+CONTAINER_NAME = "llm-shield-standalone-test"
 
-    # 1. Build the image
-    subprocess.run(["docker", "build", "-t", image_name, "."], check=True)
 
-    # Clean up any existing container with the same name
-    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+def test_docker_standalone_happy_path(shield_image, run_container):
+    host_port = free_port()
+    run_container(
+        CONTAINER_NAME,
+        [
+            "-p",
+            f"127.0.0.1:{host_port}:8000",
+            "-e",
+            "SHIELD_ENCRYPTION_KEY=" + "00" * 32,
+            "-e",
+            "SHIELD_WATERMARK_SECRET=test-watermark",
+            shield_image,
+        ],
+    )
 
-    # 2. Run the container
-    subprocess.run(["docker", "run", "-d", "--name", container_name, "-p", "8001:8000", "-e", "SHIELD_ENCRYPTION_KEY=" + "00" * 32, "-e", "SHIELD_WATERMARK_SECRET=test-watermark", image_name], check=True)
-
+    base_url = f"http://127.0.0.1:{host_port}"
     try:
-        # 3. Ping healthz
-        max_retries = 15
-        success = False
-        last_error = None
-        for _ in range(max_retries):
-            try:
-                response = urllib.request.urlopen("http://127.0.0.1:8001/healthz", timeout=2)
-                if response.getcode() == 200:
-                    success = True
-                    break
-            except Exception as e:
-                last_error = e
-                time.sleep(1)
+        wait_for_http(f"{base_url}/healthz")
+    except AssertionError as exc:
+        raise AssertionError(f"{exc}\n--- container logs ---\n{container_logs(CONTAINER_NAME)}") from exc
 
-        if not success:
-            print("--- DOCKER LOGS ---")
-            subprocess.run(["docker", "logs", container_name])
-            print("-------------------")
-        assert success, f"Failed to get 200 OK from /healthz. Last error: {last_error}"
-    finally:
-        # 4. Tear down
-        subprocess.run(["docker", "rm", "-f", container_name], check=True)
+    with urllib.request.urlopen(f"{base_url}/healthz", timeout=5) as response:
+        assert response.getcode() == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+
+    # Readiness is the probe Kubernetes gates traffic on, and it runs the real
+    # component checks (PII engine, vault, redis) rather than returning a
+    # constant -- so a container that starts but cannot serve is caught here.
+    with urllib.request.urlopen(f"{base_url}/readyz", timeout=10) as response:
+        assert response.getcode() == 200, container_logs(CONTAINER_NAME)
+        readiness = json.loads(response.read())
+
+    assert readiness["status"] == "ready", readiness
+    assert readiness["components"]["pii_engine"] == "ok"
 
 
-if __name__ == "__main__":
-    test_docker_standalone_happy_path()
+def test_container_runs_as_a_non_root_user(shield_image):
+    """The Dockerfile's `USER 10001` is a security control worth asserting."""
+    import subprocess
+
+    result = subprocess.run(
+        ["docker", "run", "--rm", "--entrypoint", "python", shield_image, "-c", "import os; print(os.getuid())"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "10001", f"container is running as uid {result.stdout.strip()}"

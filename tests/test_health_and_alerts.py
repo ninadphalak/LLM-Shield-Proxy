@@ -69,7 +69,16 @@ async def test_readyz_endpoint(monkeypatch):
 
 
 def test_prometheus_rule_yaml():
-    """Validate Kubernetes PrometheusRule CRD YAML rendering."""
+    """Fast source-file smoke check on the PrometheusRule template.
+
+    This does **not** render the chart: it strips every `{{ ... }}` with a regex
+    and parses what is left, so it cannot detect a chart that fails to render, a
+    PromQL expression Prometheus rejects, or a metric the app never exports. It
+    is kept only because it needs no toolchain. The real verification --
+    `helm template` plus `promtool check rules` against the rendered output --
+    lives in `tests/test_helm_render_and_alerts.py`, and it found this file's
+    template does not in fact render as shipped.
+    """
     helm_path = (
         Path(__file__).parent.parent / "deploy" / "helm" / "llm-shield-proxy" / "templates" / "prometheus-rule.yaml"
     )
