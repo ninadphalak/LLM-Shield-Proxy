@@ -3,14 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Centralized Enterprise Secrets & mTLS** feature ensures that the proxy integrates seamlessly into high-security enterprise environments (like DoD or Financial Services) without relying on insecure `.env` files. It natively fetches configuration data, API keys, and cryptographic certs directly from HashiCorp Vault.
+The **Centralized Enterprise Secrets & mTLS** feature supports retrieving configured secrets from HashiCorp Vault and applying selected TLS credentials. Suitability for a regulated environment depends on the full deployment, trust, identity, rotation, logging, and operational controls.
 
 ## How It Works
 Storing the `UPSTREAM_API_KEY` or `REDIS_PASSWORD` in a Kubernetes ConfigMap or local disk is a critical security vulnerability.
 
 1. **Vault Authentication:** On startup, the proxy authenticates to HashiCorp Vault using Kubernetes Service Account Tokens or Vault AppRole credentials.
-2. **In-Memory Hydration:** It fetches all required API keys, HMAC salts, and Redis credentials directly into ephemeral RAM. These secrets are never written to disk.
-3. **mTLS Transport:** For backend connections (like connecting to the Redis cluster), the proxy pulls X.509 client certificates from Vault and enforces Mutual TLS (mTLS) to guarantee the connection cannot be intercepted or spoofed on the internal network.
+2. **In-Memory Hydration:** The runtime can fetch configured secrets into process memory without intentionally writing them to an application file. Secret-manager agents, swap, crash dumps, logs, and platform snapshots require separate controls.
+3. **mTLS Transport:** Configured backend connections can require client certificates and server verification. Assurance depends on trust roots, hostname validation, key custody, protocol configuration, and the complete connection path.
 
 
 ```mermaid
@@ -38,7 +38,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **Dynamic Lease Renewal:** If Vault issues a dynamic secret (like a short-lived PostgreSQL password for audit logs), the proxy spins up a background `asyncio` task to automatically renew the lease before it expires, ensuring zero downtime.
-* **Fail-Closed on Auth Error:** If the proxy cannot authenticate to Vault on startup, it will refuse to start and crash the pod, ensuring it never operates in an unconfigured, insecure state.
+* **Startup failure on configured auth error:** When Vault-backed secrets are required, authentication failure prevents that startup path from becoming ready. Test optional-secret and cached-secret behavior separately.
 
 ## FAQ
 
@@ -47,9 +47,9 @@ A: Currently, HashiCorp Vault is the natively supported provider for advanced dy
 
 
 ## Plainspeak
-This feature guarantees that the proxy never keeps passwords lying around where a hacker could find them.
+This feature centralizes secret retrieval; it does not remove secrets from process memory or every platform persistence and observability path.
 
-Normally, apps read their passwords from a simple file saved on the hard drive. If a hacker breaches the drive, they get the passwords. This feature forces the proxy to fetch passwords directly from an ultra-secure central vault (like HashiCorp Vault) directly into its active memory. The passwords are never saved to the hard drive, meaning there's nothing for a hacker to steal if they break in.
+Vault-backed retrieval can avoid application-managed plaintext credential files. Operators still need controls for Vault, workload identity, memory, swap, dumps, logs, backups, and administrator access.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_vault_mtls.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_vault_mtls.py).

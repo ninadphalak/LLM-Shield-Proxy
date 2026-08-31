@@ -3,14 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Provider Failover Routing** ensures zero-downtime availability for critical AI pipelines. When the primary LLM provider (e.g., OpenAI) experiences an outage, network partition, or severe rate-limiting (HTTP 429), the proxy automatically and transparently re-routes the traffic to a pre-authorized secondary mirror (e.g., Azure OpenAI or Anthropic).
+**Provider Failover Routing** can attempt a pre-authorized secondary endpoint for selected primary-provider failures. It adds a recovery option but does not establish zero downtime, successful replay, or equivalent model behavior.
 
 ## How It Works
 High Availability (HA) requires resilience against massive centralized outages.
 
 1. **Error Interception:** The proxy's `httpx` client wraps outbound connections in an exception handler. If it detects a `502 Bad Gateway`, `503 Service Unavailable`, `504 Gateway Timeout`, or a severe `ConnectTimeout`, it intercepts the failure.
-2. **Key-Swapping & Rerouting:** The proxy instantly swaps the primary `UPSTREAM_API_KEY` with the `FALLBACK_API_KEY`, updates the base URL, and re-issues the identical JSON payload to the fallback provider.
-3. **Seamless Client UX:** The downstream client application receives the final successful stream without ever realizing the primary provider was offline.
+2. **Key-Swapping & Rerouting:** For an eligible failure, the proxy selects the configured fallback key and base URL and attempts the payload through the fallback path.
+3. **Client-visible result:** A successful fallback can return through the same downstream API shape. It adds latency and may differ semantically; surface the failover in telemetry.
 
 
 ```mermaid
@@ -38,22 +38,22 @@ View diagram on GitHub mobile 📱 -->
 | `FALLBACK_API_KEY` | The API key for the secondary provider. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **No Unapproved Model Downgrades:** The proxy will NEVER silently downgrade a model (e.g., from `gpt-4` to `gpt-3.5-turbo`) to achieve a successful response. It simply reroutes to the identical model name on the fallback URL. It is the operator's responsibility to ensure the fallback URL supports the requested model.
+* **Model name preservation:** The routing path preserves the requested model name rather than intentionally substituting a lower-tier name. Operators must verify what that name resolves to at each provider and whether semantics match.
 * **4xx Errors are Ignored:** The proxy only fails over on network timeouts and 50x server errors. If OpenAI returns a `400 Bad Request` (e.g., context window exceeded), the proxy passes the error directly to the client, as failing over would simply result in the exact same 400 error on the secondary provider.
 
 ## FAQ
 
 **Q: Can I use this to failover between completely different providers, like OpenAI to Anthropic?**
-A: Yes. Because the proxy integrates the [Multi-Provider Translators](/docs/features/ultra-low-latency-streaming-traffic-engineering/multi-provider-translators), if you configure an Anthropic fallback URL, the proxy will automatically translate the OpenAI schema into Claude's schema during the failover event.
+A: The repository includes an Anthropic adapter for supported OpenAI-style fields. Validate the exact request features, tool schemas, error mapping, streaming events, and model-name resolution before using it as a cross-provider fallback.
 
 **Q: How do I test that this works in production?**
-A: You can force a failover by intentionally setting `UPSTREAM_BASE_URL` to a blackholed or invalid IP address (like `https://192.0.2.1`). The proxy will timeout on the primary and successfully route to the fallback.
+A: In a non-production environment, direct the primary path to a controlled failing endpoint and verify whether the configured failure class triggers the fallback. Assert the audit signal, latency, response shape, and behavior when the fallback also fails.
 
 
 ## Plainspeak
 This feature acts as an intelligent traffic cop for your AI requests.
 
-When an AI provider like OpenAI goes down, normally your users just get an error screen. With this feature, the system instantly notices the outage and automatically detours the traffic to a working backup provider (like Anthropic) in the blink of an eye. The user never even notices there was a problem.
+For selected failure modes, the proxy can attempt a configured secondary endpoint. The retry adds latency and may still fail or produce different behavior; surface failover in telemetry and test it with production-shaped requests.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

@@ -8,21 +8,25 @@ export default function FinalCTA(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <Heading as="h2" className={styles.title}>
-          Make your LLM privacy boundary reproducible.
+          Evaluate your LLM privacy boundary with us.
         </Heading>
         <p className={styles.subtitle}>
-          Point your <code>base_url</code> at the proxy and run the conformance checks.
+          Apply for a confidential 30-day design-partner pilot or run the same assessment locally.
         </p>
         <div className={styles.buttons}>
-          <Link className="button button--secondary button--lg" to="/docs/deployment">
-            Install
+          <Link className="button button--secondary button--lg" to="/docs/design-partner-pilot">
+            Apply for a private pilot
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            href="https://github.com/ninadphalak/LLM-Shield-Proxy">
-            ⭐ Star on GitHub
+            to="/docs/guides/pilot-assessment">
+            Run the local assessment
           </Link>
         </div>
+        <p className={styles.subtitle}>
+          Prefer to inspect the code first?{' '}
+          <Link href="https://github.com/ninadphalak/LLM-Shield-Proxy">View the repository</Link>.
+        </p>
       </div>
     </section>
   );

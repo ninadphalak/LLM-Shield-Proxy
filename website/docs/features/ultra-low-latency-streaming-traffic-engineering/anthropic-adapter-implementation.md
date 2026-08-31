@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Anthropic Adapter Implementation** is a highly specialized protocol translator built natively into the proxy. It allows any OpenAI-compatible client to seamlessly interface with Anthropic's Claude API. It fundamentally bridges the gap between OpenAI's monolithic `messages` schema and Anthropic's distinct prompt engineering requirements.
+The **Anthropic Adapter Implementation** translates a documented subset of OpenAI-style chat fields and Anthropic response events. It can support selected clients without an Anthropic SDK, but it does not cover every OpenAI or Anthropic feature and does not remove semantic differences between models.
 
 ## How It Works
 Anthropic's Messages API enforces several strict contracts that the OpenAI API does not. The adapter normalizes these differences at the network edge:
@@ -35,10 +35,10 @@ The adapter engages automatically when the proxy detects an Anthropic target URL
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ANTHROPIC_VERSION` | Sets the `anthropic-version` API header. Default: `2023-06-01`. | [View in deployment.md](/docs/deployment) |
+| `ANTHROPIC_API_VERSION` | Sets the `anthropic-version` API header. Default: `2023-06-01`. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Tool Calling (Function Calling) Compatibility:** The adapter is fully aware of Anthropic's tool-use XML and JSON specifications, successfully mapping OpenAI's `tools` array into Anthropic's format, and parsing Claude's tool execution requests back into standard OpenAI JSON-RPC payloads.
+* **Tool calling:** The adapter maps documented tool-definition and tool-use fields between selected OpenAI-style and Anthropic envelopes. Test parallel calls, IDs, content blocks, streaming deltas, validation errors, and unsupported fields for the pinned provider version.
 
 ## FAQ
 
@@ -46,7 +46,7 @@ The adapter engages automatically when the proxy detects an Anthropic target URL
 A: Yes! Set the model string in your SDK to `claude-3-5-sonnet-20240620`, point your base URL to the proxy, and the proxy will automatically route and translate the request to Anthropic.
 
 **Q: Does Anthropic's SSE stream break the sliding-window buffer?**
-A: No. The adapter normalizes Anthropic's stream into standard chunks *before* it passes them into the SSE Rehydration Buffer, ensuring that PII de-masking works flawlessly across providers.
+A: The adapter normalizes supported Anthropic events before the rehydration buffer. Rehydration still depends on token preservation, event coverage, buffer behavior, and the selected masking mode; exercise provider-specific fragmentation fixtures.
 
 
 ## Plainspeak
@@ -55,4 +55,4 @@ This feature specifically handles the unique, strict conversational rules requir
 Anthropic is extremely picky about how a conversation is formatted (for example, it requires exactly alternating "User" and "Assistant" messages). If your application sends messages out of order, Anthropic will reject them. This adapter acts as a smart editor, automatically reformatting and fixing your message history in real-time so that Anthropic accepts it without complaints.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).

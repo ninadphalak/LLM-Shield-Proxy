@@ -11,8 +11,8 @@ LLM-Shield-Proxy is engineered as **Critical Compliance Infrastructure**. By des
 ### Common Fail Closed Configurations
 
 #### 1. `TELEMETRY_ENDPOINT_URL`
-If you have configured a telemetry endpoint for shipping Merkle logs and the endpoint becomes unreachable, the proxy will halt traffic.
-*   **Production:** This ensures that no traffic is processed without an immutable audit trail.
+An unreachable telemetry or audit destination does not have one universal traffic outcome. OpenTelemetry export is asynchronous, while audit behavior depends on `AUDIT_DURABILITY` and its configured sink. Test queue saturation, destination outages, and restart behavior for the selected mode; use `durable` or `required` with a durable path when request acknowledgement must depend on local evidence persistence.
+*   **Production:** Use `required` durability when the request must fail if the local append cannot be acknowledged. Add independently administered immutable retention if the control requires WORM storage.
 *   **Local/POC Testing:** If you are just testing the proxy locally, you can disable this by unsetting `TELEMETRY_ENDPOINT_URL` or setting `FAIL_OPEN_ON_TELEMETRY_ERROR=True` (NOT RECOMMENDED for production).
 
 #### 2. Redis Connection Drops

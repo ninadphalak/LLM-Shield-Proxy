@@ -84,6 +84,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/docs/design-partner-pilot',
+          label: 'Pilot Program',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/ninadphalak/LLM-Shield-Proxy',
           label: 'GitHub',
           position: 'right',
@@ -148,6 +153,10 @@ const config: Config = {
             {
               label: 'Contributing Guide',
               href: 'https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/CONTRIBUTING.md',
+            },
+            {
+              label: '30-Day Design Partner Pilot',
+              to: '/docs/design-partner-pilot',
             },
           ],
         },

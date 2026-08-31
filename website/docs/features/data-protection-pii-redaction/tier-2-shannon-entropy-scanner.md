@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Tier 2 Shannon Entropy Scanner** is the second defensive layer in the LLM-Shield-Proxy. While regex (Tier 1) excels at structured data like SSNs, it completely fails to detect unstructured, proprietary cryptographic secrets (e.g., custom JWTs, internal API tokens, Database connection passwords). The Tier 2 engine automatically flags and redacts these unstructured secrets by evaluating the mathematical information density (entropy) of incoming token streams.
+The **Tier 2 Shannon Entropy Scanner** complements configured patterns by scoring selected token candidates with Shannon entropy. It can identify some high-entropy secret shapes that have no known prefix, but it can also miss low-entropy secrets and flag benign identifiers.
 
 ## How It Works
 Instead of relying on massive, slow dictionaries of potential secret formats, the proxy applies Information Theory.
@@ -37,7 +37,7 @@ View diagram on GitHub mobile 📱 -->
 | `ENABLE_TIER2_ENTROPY` | Toggles the Shannon Entropy scanner on or off. Defaults to `true`. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **False Positive Prevention:** Standard English text inherently has lower entropy than cryptographic secrets. The thresholds (4.5 and 3.4) are mathematically tuned to prevent standard conversational text from being flagged as a secret.
+* **False-positive trade-off:** The configured thresholds are heuristics. Evaluate them on representative secrets, identifiers, natural language, encoded content, and hard negatives before deployment.
 * **Base64 Candidate Inspection:** The engine extracts candidates of at least 20 characters and decodes text-sized values up to 8,192 characters. Larger encoded interiors are skipped to bound detector work; a 256-character guard on each boundary keeps adjacent plaintext in scope.
 
 ## FAQ
@@ -52,7 +52,7 @@ A: False positives are possible with any heuristic. The default threshold reduce
 ## Plainspeak
 This feature acts like a randomness detector. While some sensitive information (like phone numbers) has a predictable format, things like passwords or secret API keys just look like random gibberish.
 
-Because we can't search for a specific password pattern, this scanner mathematically measures how "random" a piece of text is (known as Shannon entropy). If it spots a string of text that is completely unpredictable and random, it flags it as a likely secret key and hides it to prevent accidental leaks.
+The scanner computes Shannon entropy for selected candidates and flags values above configured thresholds. High entropy is neither necessary nor sufficient for a secret, so the tier can miss secrets and flag benign data.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Provider Failover with Per-Request Override** guarantees zero-downtime service continuity for mission-critical AI applications. It allows the proxy to dynamically reroute requests to secondary LLM mirrors (like Azure OpenAI) if the primary provider experiences an outage, or empowers clients to explicitly declare a fallback URL on a per-request basis.
+**Provider Failover with Per-Request Override** can route eligible requests to a configured secondary endpoint after selected failures. It does not establish zero downtime, provider equivalence, or successful replay.
 
 ## How It Works
 Relying on a single AI provider introduces significant availability risks. This feature operates natively in the routing plane:
@@ -39,21 +39,21 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **No Unapproved Downgrades:** The proxy will *only* failover to explicitly approved URLs. It protects enterprises from situations where an application silently downgrades to a weaker, cheaper model (e.g., GPT-4 to GPT-3.5) without security authorization.
-* **Idempotency:** Failover is safe because LLM text generation requests are generally idempotent. The proxy only fails over on network errors (502, 503, 504) or timeout exceptions, never on 4xx client errors.
+* **Replay risk:** LLM requests are not inherently idempotent; a failed attempt may have reached the first provider or consumed quota. The configured predicate excludes handled 4xx client errors, but operators must assess duplication, billing, and side effects.
 
 ## FAQ
 
 **Q: Can I use this to failover from OpenAI to Anthropic?**
-A: Yes! Because the proxy features Multi-Provider Translators, you can set the primary to OpenAI and the fallback to Anthropic. The proxy will dynamically translate the schema during the failover event, completely abstracting the outage from the client.
+A: Cross-provider fallback requires a configured adapter and can change supported parameters, model behavior, streaming envelopes, latency, and output. Test it as a distinct execution path and expose the failover to operators.
 
 **Q: Does the client have to wait a long time during a failover?**
-A: The delay is equal to the configured timeout for the primary request. You can aggressively tune `HTTP_TIMEOUT_SECONDS` (e.g., to 3 seconds) to ensure failovers happen almost instantaneously if a provider hangs.
+A: Failover begins after the configured failure predicate or timeout. A shorter timeout can increase false failovers and duplicate work; tune it from observed latency distributions.
 
 
 ## Plainspeak
-This feature is an automatic backup plan that ensures your app never goes down when an AI provider crashes.
+This feature provides an operator-configured secondary route for selected failures. Availability still depends on both providers, the network, credentials, models, quotas, and replay behavior.
 
-If OpenAI's servers suddenly go offline, this feature detects the crash and instantly reroutes the question to a backup provider (like Anthropic or a different server) before the user even realizes there was a problem. It also allows developers to easily specify exactly which backup server they prefer to use for any given request.
+For configured eligible failures, the proxy can attempt a pre-authorized fallback endpoint. The attempt adds latency, can fail, and may produce different model behavior. Per-request routing inputs must be authenticated and constrained by the SSRF and policy controls.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

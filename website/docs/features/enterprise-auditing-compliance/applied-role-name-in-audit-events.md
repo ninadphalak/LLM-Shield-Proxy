@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Applied Role Name in Audit Events** feature provides exact attribution for every security decision made by the proxy. It ensures that compliance officers and security analysts know exactly *which* YAML policy role governed a specific request, vastly simplifying access control audits.
+The **Applied Role Name in Audit Events** feature records the role name returned by the supported policy-resolution path for an event. It is useful correlation metadata; its accuracy depends on identity mapping, resolver behavior, event delivery, and audit integrity.
 
 ## How It Works
 When a user authenticates, their `virtual_key_id` maps to a specific role (e.g., `role_data_scientist`).
@@ -28,25 +28,25 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Extremely low memory overhead.
+- **Overhead:** Adds a role-name field to supported events. Measure serialization, queue, signing, and retention cost in the chosen audit mode.
 
 ## Configuration Flags
 This feature is natively embedded in the logging and policy engines.
 
 ## Critical Logic & Edge Cases
-* **Fallback Role:** If a client authenticates successfully but their specific role is missing from `policies.yaml`, the proxy defaults to the strict `role_default` (Fail-Closed). In this scenario, the audit log will accurately reflect `"applied_role_name": "role_default (fallback)"`.
-* **Impersonation Auditing:** If an admin utilizes a feature to assume a different role temporarily, the audit log retains both the primary identity and the `applied_role_name`, preventing privilege escalation without a forensic trace.
+* **Fallback role:** Main-route behavior depends on whether a `default_role` exists and on `SHIELD_FAILURE_MODE`; the MCP resolver has separate defaults. Test the actual event field for mapped, fallback, and denied callers.
+* **Identity evidence:** Where both authenticated identity and applied role are emitted, retain and verify both fields. Their presence does not prevent impersonation or privilege escalation.
 
 ## FAQ
 
 **Q: Why is this important for SOC 2?**
-A: SOC 2 requires proof of Logical Access Controls (who has access to what). If you just log "SSN Redacted", an auditor will ask *why* it was redacted. By logging the `applied_role_name`, you instantly prove that the redaction occurred because the user was assigned a specific, governed policy.
+A: Recording `applied_role_name` can help connect an observed decision to the policy name selected at that boundary. Auditors still need evidence for identity mapping, policy contents and approvals, configuration history, completeness, and control operation.
 
 
 ## Plainspeak
 This feature acts as a strict "who authorized this?" tracker on the audit logs.
 
-If a file is redacted, the logs normally just say "file redacted". But an auditor will ask, "Wait, why was it redacted, and whose rules were we following?" This feature automatically tags every log with the exact name of the security policy (the "role") that caused the action, providing absolute clarity on why a decision was made.
+The supported audit events can include the role name resolved at the decision boundary. This helps an auditor join an event to policy evidence, but does not by itself prove identity mapping, policy contents, approval history, completeness, or control effectiveness.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

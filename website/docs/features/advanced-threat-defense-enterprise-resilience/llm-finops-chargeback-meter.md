@@ -10,7 +10,7 @@ Without the proxy, an enterprise using a single corporate OpenAI key has no idea
 
 1. **Usage Interception:** The proxy monitors the final chunk of Server-Sent Events (SSE) or the JSON root of non-streaming responses for the `usage` object (e.g., `prompt_tokens`, `completion_tokens`).
 2. **Metadata Tagging:** It enriches this raw usage data with critical metadata: the `virtual_key_id`, the `applied_role_name`, the selected `model`, and the target `upstream_provider`.
-3. **Asynchronous Emission:** To guarantee zero latency impact on the user's stream, the enriched metric is placed onto a bounded background queue. A dedicated worker thread dequeues these events and publishes them to the `/metrics` endpoint for Prometheus scraping.
+3. **Asynchronous Emission:** Enriched metrics use a bounded background path to reduce request-path work. Queueing, serialization, synchronization, CPU use, and drops still require measurement.
 
 
 ```mermaid
@@ -28,16 +28,16 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Completely offloaded to a background thread using a `queue.Queue(maxsize=5000)`. If Prometheus is down or the queue backs up, it safely drops metrics rather than blocking live traffic.
+- **Overhead:** Uses a bounded background queue to reduce request-path work. Queue operations and metric creation still consume resources, and pressure can cause metric drops.
 
 ## Configuration Flags
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_PROMETHEUS_METRICS` | Toggles the exposure of the `/metrics` endpoint on port 9090. | [View in deployment.md](/docs/deployment) |
+| `ENABLE_FINOPS_METERING` | Enables supported token-usage extraction and metric recording. The FastAPI `/metrics` route remains part of the application and can be protected with `METRICS_BEARER_TOKEN`. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **FinOps Stream Options:** OpenAI does not emit usage data on SSE streams by default. The proxy integrates with the [Automatic FinOps `stream_options` Injection](/docs/features/ultra-low-latency-streaming-traffic-engineering/automatic-finops-stream-options-injection) feature to force OpenAI to return this data, guaranteeing accurate metering.
+* **FinOps stream options:** On supported OpenAI-style requests, the proxy can request usage in the stream. Providers may omit or define usage differently; reconcile retries, cached/reasoning tokens, missing chunks, prices, and invoices before chargeback.
 * **Anthropic Normalization:** Anthropic Claude uses different terminology (`input_tokens`, `output_tokens`) in its streaming events. The proxy automatically normalizes these into the standard `prompt_tokens` and `completion_tokens` metric labels.
 
 ## FAQ
@@ -52,7 +52,7 @@ A: Yes! The proxy exposes a specific metric `shield_proxy_tokens_saved_total` wh
 ## Plainspeak
 This feature is a highly detailed billing meter that helps companies figure out exactly which team is spending money on AI.
 
-Instead of just getting one massive bill from OpenAI at the end of the month, this feature tracks every single chat message and tags it with the specific user or department who sent it. It then sends this usage data to a dashboard, so the finance team can accurately charge each department for the exact amount of AI computing power they used.
+This feature associates observed provider usage events with configured tenant metadata. Use it for allocation estimates only after reconciling retries, cached or reasoning tokens, missing usage chunks, pricing changes, and the provider invoice.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).

@@ -3,19 +3,19 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Deep Component Health Probes** provide Kubernetes with absolute clarity regarding the proxy's operational status. Rather than simply returning a "200 OK" if the HTTP server is running, the proxy performs deep, asynchronous diagnostic checks against its critical dependencies (Redis, Vault, Upstream APIs) to ensure it is truly ready to handle traffic.
+**Deep Component Health Probes** expose selected dependency and process signals to Kubernetes. A successful probe is a point-in-time readiness signal, not proof of security, correctness, future availability, or every upstream path.
 
 ## How It Works
 If a proxy pod loses connection to the Redis Vault but continues accepting traffic, it could result in catastrophic tokenization failures or data leaks.
 
-1. **Liveness Probe (`/health/live`):** Checks if the Python event loop is functioning and the core FastAPI process is responsive.
-2. **Readiness Probe (`/health/ready`):** Executes an active PING against the Redis cluster, validates that the HashiCorp Vault token is unexpired, and optionally performs a lightweight socket connection to the upstream LLM provider.
-3. **Prometheus Alerting:** The results of these deep probes are exposed as metrics. If a specific dependency (like Redis) experiences high latency, Prometheus fires pre-packaged alert rules to notify the on-call engineer via PagerDuty.
+1. **Liveness (`/livez`, with `/health` and `/healthz` aliases):** Returns a lightweight application response; it does not exercise dependencies.
+2. **Readiness (`/readyz`):** Checks that Tier 1 patterns are present, an enabled ONNX session is loaded, an enabled Vault integration has cached secrets, and a configured Redis store answers a PING within the implementation's fixed timeout.
+3. **Prometheus rules:** The Helm chart includes alert expressions. Delivery to an on-call system depends on separately configured Prometheus and Alertmanager infrastructure.
 
 
 ```mermaid
 flowchart TD
-    A[K8s Kubelet] --> B(/health/ready)
+    A[K8s Kubelet] --> B(/readyz)
     B --> C(Check Redis)
     B --> D(Check Vault TTL)
     C -->|Timeout| E[HTTP 503 Unhealthy]
@@ -29,31 +29,31 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Extremely low. Probes are cached for 2-3 seconds to prevent Kubernetes from accidentally initiating a Denial of Service attack against Redis by probing too aggressively.
+- **Caching:** Readiness results are cached for two seconds. Measure probe load and choose Kubernetes periods and timeouts for the deployment.
 
 ## Configuration Flags
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `PROBE_REDIS_TIMEOUT` | Maximum time to wait for a Redis PING before failing the readiness check. | [View in deployment.md](/docs/deployment) |
+The current Redis PING timeout is fixed at 0.5 seconds in `api/health.py`; there is no `PROBE_REDIS_TIMEOUT` setting.
 
 ## Critical Logic & Edge Cases
-* **Graceful Degradation Tolerances:** Depending on your enterprise configuration, losing Redis might *not* be fatal if you are primarily relying on Stateless Synthetic. The health probe logic dynamically adjusts its strictness based on the active `SHIELD_DEFAULT_MASKING_MODE`.
-* **Pod Draining Synchronization:** When a `SIGTERM` is received, the readiness probe is instantly forced to return `503`. This signals Kubernetes to stop sending new traffic while the proxy finishes draining its active streams.
+* **Redis boundary:** If the active vault store is a `RedisVaultStore`, a failed PING makes readiness return 503. The readiness code does not vary that result by masking mode.
+* **Pod draining synchronization:** After `SIGTERM`, the application changes readiness to `503`. Kubernetes and ingress convergence take time, and active streams remain bounded by the drain and platform termination deadlines.
 
 ## FAQ
 
 **Q: Where can I find the Prometheus Alert Rules?**
 A: The repository includes a `prometheus-rules.yaml` file in the `/deploy/` directory, containing best-practice thresholds for latency, error rates, and probe failures.
 
-**Q: Will the probe timeout if the upstream LLM (OpenAI) is down?**
-A: The readiness probe does not execute a full LLM completion. It only tests the TCP/TLS socket connection to the API gateway. If OpenAI is returning 503s but the network is reachable, the pod remains "Ready" to handle failover routing correctly.
+**Q: Will the probe fail if the upstream LLM is down?**
+A: No upstream request or socket check is part of the current readiness implementation. An upstream outage can therefore coexist with a 200 readiness response.
 
 
 ## Plainspeak
 This feature acts like a highly sensitive heart monitor for the proxy.
 
-Normally, a cloud server just checks if an app is "turned on." This feature goes much deeper. It actively tests all of the proxy's internal organs (like testing its connection to the password vault and the database). If it detects that a critical organ is failing, it immediately alerts the cloud to stop sending it traffic and pages an engineer before a major crash happens.
+The liveness route is shallow, while readiness checks a documented subset of local and configured dependency state. Kubernetes may remove an unready Pod from service; paging depends on the operator's monitoring stack.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_health_and_alerts.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_health_and_alerts.py).

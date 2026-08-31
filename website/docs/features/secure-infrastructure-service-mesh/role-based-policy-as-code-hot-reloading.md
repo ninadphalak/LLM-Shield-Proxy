@@ -3,15 +3,15 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Role-Based Policy-as-Code & Hot-Reloading** allows security teams to manage Data Loss Prevention (DLP) rules declaratively via GitOps. Furthermore, it allows the proxy to dynamically ingest policy updates on-the-fly without requiring a pod restart or dropping active user connections.
+**Role-Based Policy-as-Code & Hot-Reloading** lets security teams manage supported proxy settings in a YAML file. The local resolver polls for changes and can replace its in-memory mapping without a process restart; propagation time and in-flight behavior must be tested.
 
 ## How It Works
 Security policies in large organizations change rapidly. Waiting 10 minutes for a Kubernetes deployment to roll out a new regex rule is unacceptable during an active incident.
 
 1. **GitOps Integration:** Policies are defined in a `policies.yaml` file (mounted via Kubernetes ConfigMap or pulled from an external Git repository).
 2. **Asynchronous Polling:** A background `asyncio` task polls the file or network endpoint for a new SHA-256 hash.
-3. **Atomic Hot-Reload:** When a change is detected, the proxy parses the new YAML into Pydantic models. It then performs an atomic, thread-safe memory pointer swap (`O(1)` complexity).
-4. **Seamless Transition:** Request #100 uses the old policy. Request #101 instantly uses the new policy. No connections are dropped, and the event loop is never blocked.
+3. **Validated replacement:** When a change is detected, the proxy parses and validates the new YAML before replacing the in-memory mapping.
+4. **Request-scoped transition:** Requests resolve policy at documented boundaries. In-flight and subsequent requests can observe different versions; measure reload latency and test malformed or partially written policy files.
 
 
 ```mermaid
@@ -34,11 +34,11 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `POLICY_HOT_RELOAD_INTERVAL` | The frequency in seconds to check for policy updates (default 10s). | [View in deployment.md](/docs/deployment) |
+| `POLICIES_RELOAD_INTERVAL_SECONDS` | The polling interval for policy-file changes (default 5s). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Validation Safety:** If a security engineer pushes a malformed YAML file (e.g., missing a required field or containing a syntax error), the Pydantic validator will reject it. The proxy will log a high-priority error and *continue using the last known good policy*, preventing an accidental DoS.
-* **In-Flight Streams:** If a policy is swapped while a user is in the middle of a 2-minute long streaming response, the specific request is bound to the policy state that existed when the request started, preventing mid-stream logic corruption.
+* **In-flight streams:** Policy is resolved at documented request boundaries. Add a concurrency test for the selected resolver and version if in-flight consistency is a deployment requirement.
 
 ## FAQ
 
@@ -47,9 +47,7 @@ A: No. TLS certificates and core `google-re2` compilations (BYOR) operate at a l
 
 
 ## Plainspeak
-This feature allows security teams to change the rules of the proxy instantly, without rebooting the system.
-
-Normally, if you update the security rules, you have to restart the server, which kicks everyone off their active chats. This feature constantly watches the rulebook file. The absolute second the file is updated, it smoothly slides the new rules into the system's memory. The next question asked uses the new rules, and no one's connection drops.
+The local resolver periodically checks the policy file and replaces the active validated mapping when it detects a change. Reload time includes the polling interval and file propagation; a process crash, invalid file, or dependency failure can still interrupt service.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

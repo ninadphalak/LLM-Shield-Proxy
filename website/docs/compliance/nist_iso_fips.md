@@ -11,7 +11,7 @@ The LLM-Shield-Proxy acts as the central governance dispatcher and cryptographic
 Both ISO 42001 and NIST SP 800-53 Rev. 5 emphasize continuous risk management, systemic oversight, and the automated generation of compliance artifacts.
 
 ### Universal Decision Trace Exporter & OSCAL
-Manually mapping LLM events to compliance controls is impossible at scale. The proxy bridges the gap between low-level system events and high-level GRC standards.
+Manual control mapping becomes costly and inconsistent as event volume grows. The proxy can export low-level events in formats that support a broader GRC workflow.
 - **Automated Mapping:** The proxy's **GRC Dispatcher** captures low-level interception and redaction events and maps these AI system decisions to automated **NIST OSCAL (Open Security Controls Assessment Language)** compliance artifacts.
 - **GRC Integration:** These OSCAL artifacts, alongside OpenTelemetry `gen_ai.*` spans, are continuously dispatched to external GRC and observability tools (e.g., Vanta, Drata, Datadog). This provides auditors with a real-time, provable dashboard of the system's risk posture.
 
@@ -25,9 +25,9 @@ As required by NIST Audit and Accountability (AU) controls:
 For deployments within the US Department of Defense, federal agencies, or highly regulated financial sectors, cryptographic modules must adhere to FIPS 140-3 standards.
 
 ### Cryptographic Known Answer Tests (KAT)
-To guarantee that the proxy's internal cryptographic algorithms are functioning correctly and have not been degraded or altered:
+To detect specific cryptographic implementation or configuration failures at startup:
 - **Algorithm Self-Tests:** The system enforces rigorous cryptographic **Known Answer Tests (KAT)** at boot time for both the **SHA-256** hashing engine and the **AES-256-GCM** envelope encryption engine.
-- **Execution:** During initialization, the proxy feeds predetermined inputs into the cryptographic modules and verifies that the outputs mathematically match the strict expected ciphertexts and digests.
+- **Execution:** During initialization, the proxy feeds predetermined inputs into selected cryptographic operations and compares the outputs with expected test vectors. A passing KAT is not a FIPS 140-3 validation of the application or deployment.
 - **Failure Halting:** If a KAT fails (indicating hardware degradation, memory corruption, or binary tampering), the proxy will aggressively halt initialization and refuse to route traffic, preventing any unencrypted or improperly hashed data from traversing the network.
 
 *(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details).*

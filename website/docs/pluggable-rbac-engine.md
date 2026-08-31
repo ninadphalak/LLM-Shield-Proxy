@@ -22,10 +22,10 @@ class BasePolicyResolver(ABC):
 
 ## 2. High-Speed Cache: RedisPolicyResolver
 
-The default out-of-the-box implementation uses a stateless Redis TTL vault. This ensures the proxy can evaluate tool executions mid-stream without incurring external HTTP latency.
+The Redis-backed implementation can resolve cached policy without an external HTTP call on that cache hit. Redis access, serialization, cache misses, and resolver behavior still have measurable cost.
 
 * **Implementation Detail:** Uses asyncio Redis clients (`redis.asyncio`) and `orjson`; measure process RSS and resolver latency under the intended concurrency.
-* **Fail-Closed Logic:** If the `shield:rbac:{virtual_key}` is missing or expired, the resolver defaults to empty allowance arrays, instantly severing the upstream agent socket.
+* **Fail-closed logic:** If `shield:rbac:{virtual_key}` is missing or expired, the Redis resolver returns no allowed tools and the supported tool-call path rejects the request before its configured upstream action.
 
 ## 3. Enterprise Infrastructure Adapters (Stubs)
 
@@ -38,11 +38,11 @@ To integrate with global Zero-Trust architectures, the engine includes standard 
 
 The `RBACValidator` accepts the policy resolver via constructor injection. This prevents tight coupling and allows the execution plane to dynamically adapt to the deployment environment.
 
-Crucially, policy resolution occurs **per-stream**, not just on instantiation. When `validate_stream(stream, virtual_key)` is invoked, it dynamically fetches the latest policy using `await self.resolver.resolve_policy(virtual_key)`. This guarantees real-time enforcement even if policies change mid-session.
+Policy resolution occurs at the documented per-stream boundary. A policy change affects requests according to resolver caching and when each stream resolves policy; it does not retroactively change an already resolved decision.
 
 ## 5. Security & Validation (Test Strategy)
 
 The pluggable architecture is validated using `unittest.mock.AsyncMock` (or `fakeredis`).
 * **Vector:** A mock Redis client is seeded with a blocked tool (`exec_sql`).
 * **Execution:** A fragmented byte-stream representing the JSON tool call is fed into the `StreamingToolParser`.
-* **Assertion:** The parser successfully yields the key, the `RBACValidator` triggers the `RedisPolicyResolver`, and a `ToolAccessForbiddenException` is raised before the JSON body is fully transmitted, proving OOM and Slowloris resilience.
+* **Assertion:** The parser yields the key, the `RBACValidator` invokes the `RedisPolicyResolver`, and a `ToolAccessForbiddenException` is raised at the tested boundary. Separate payload-size, line-size, timeout, and load tests cover resource-exhaustion risks.

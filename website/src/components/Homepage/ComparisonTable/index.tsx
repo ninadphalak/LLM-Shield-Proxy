@@ -21,12 +21,12 @@ const ROWS: {dimension: string; legacy: string; shield: string}[] = [
   {
     dimension: 'Agent / tool-call traffic',
     legacy: "Text-oriented tools don't reason about JSON structure - naive regex over raw JSON can corrupt syntax and crash agents.",
-    shield: 'Parses JSON-RPC / MCP payloads into an AST and masks only sensitive leaf values, guaranteeing valid output.',
+    shield: 'Parses supported JSON-RPC payloads into an AST and masks selected leaf values; schema compatibility is tested separately.',
   },
   {
     dimension: 'Data retention',
     legacy: 'Many gateways log or cache prompts for debugging, creating a new data liability.',
-    shield: 'Zero long-term storage by default - self-destructing TTL vaults or fully stateless in-band encryption.',
+    shield: 'Stateless encryption or configured TTL-backed mappings, with persistence and memory boundaries documented for operators.',
   },
 ];
 

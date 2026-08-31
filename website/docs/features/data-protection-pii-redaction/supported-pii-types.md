@@ -32,14 +32,14 @@ Because developers often leak proprietary API keys or database passwords that do
 **What gets detected:**
 - **Cryptographic Keys & Salts**: High-entropy strings exceeding `\tau_H \ge 4.5` bits/symbol.
 - **Obfuscated / Smuggled Data**: Text-sized Base64 candidates and Hex-encoded secrets. Base64 decoding is bounded to 8,192 characters; images and larger encoded interiors are outside this detector's scope.
-- **Proprietary Tokens**: Any alphanumeric string of sufficient length (16+ characters) that is mathematically random enough to be classified as a secret.
+- **Secret candidates**: Configured high-entropy token shapes above the selected length and entropy thresholds. Entropy is a heuristic and can produce false positives and false negatives.
 
 ---
 
 ## 🤖 Tier 3: NLP NER Models (Semantic & Contextual Data)
 Tier 3 utilizes Named Entity Recognition (NER) models (like Presidio or local ONNX runtimes) to understand the semantic meaning of low-entropy text.
 
-While Tiers 1 and 2 detect *structured* data perfectly, Tier 3 is required for *contextual* data (where the words look like normal English but hold sensitive meaning).
+Tiers 1 and 2 target configured structured formats and high-entropy candidates; both can produce false positives and false negatives. Tier 3 can add contextual entity detection, with quality depending on the selected model, thresholds, language, and evaluation corpus.
 
 ### Standard PII (General NER)
 - **`PERSON`**: Full names, patient names, employee names.

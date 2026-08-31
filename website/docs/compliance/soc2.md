@@ -8,7 +8,7 @@ For AI gateways, standard Trust Services Criteria (TSC) such as Logical Access (
 
 ## Logical Access & Role-Based Access Control (CC6.1)
 
-To ensure that only authorized entities (both human and autonomous agents) can execute sensitive operations, the proxy implements rigid access frameworks.
+To support authorization controls for selected human and agent operations, the proxy provides configurable identity and policy checkpoints. Effectiveness depends on resolver configuration, routing coverage, credential trust, and failure behavior.
 
 ### Pluggable Streaming Tool-Call RBAC
 As LLM agents utilize protocols like MCP (Model Context Protocol) to execute downstream functions, standard API keys are insufficient.
@@ -26,7 +26,7 @@ To maintain confidentiality while logging:
 - The proxy utilizes **RFC 6902 JSON patch differential audit logging**. Instead of logging the raw request (which could contain sensitive enterprise IP), the system logs the structural *delta*-recording exactly what rules were triggered and what entity categories were redacted.
 
 ### Insider Leak Forensics & Anomaly Detection
-To satisfy anomaly detection and prevent data exfiltration (CC7.2):
+To support anomaly-detection and data-loss risk controls associated with CC7.2:
 - **Steganographic Canary Watermarking:** The proxy utilizes dynamic zero-width Unicode steganographic canary watermarking. This allows enterprise forensics teams to trace leaked model outputs back to specific users, agents, or sessions without altering the visible text of the LLM response.
 - **Composite Agent Loop Circuit Breakers:** To protect system availability against runaway autonomous AI loops, circuit breakers monitor execution patterns and halt execution if threshold limits (e.g., rapidly repeating unauthorized SQL queries) are breached.
 

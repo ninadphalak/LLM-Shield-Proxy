@@ -10,7 +10,7 @@ Traditional HTTP proxies load entire JSON bodies into memory, converting them in
 
 1. **Native JSON implementation:** The lexer uses `orjson` on supported parsing paths.
 2. **Bounded state:** Incremental parsing avoids retaining the full response history; allocations still occur and are measured by the conformance benchmark.
-3. **SSE Chunk Parsing:** When processing streaming Server-Sent Events, the lexer instantly isolates the `data:` block and parses the delta fragments without accumulating the entire response history in memory.
+3. **SSE chunk parsing:** On supported paths, the lexer identifies `data:` content and processes fragments while retaining a bounded trailing window rather than the complete response history.
 
 
 ```mermaid
@@ -34,8 +34,8 @@ View diagram on GitHub mobile 📱 -->
 The lexer is deeply embedded into the proxy's core and operates automatically without specific configuration flags.
 
 ## Critical Logic & Edge Cases
-* **Invalid Payload Rejection:** If an attacker sends malformed JSON, the Rust lexer throws an instantaneous exception, allowing the proxy to return a `400 Bad Request` before the Python engine even attempts to allocate memory for the payload.
-* **Float / Int Overflow Safety:** `orjson` natively handles massive numerical values (e.g., in `tool_calls`) securely without overflowing Python's standard integer types.
+* **Invalid payload handling:** Malformed JSON can be rejected on paths that parse a complete JSON value. Confirm status codes and buffering behavior for request bodies, SSE fragments, and truncated streams separately.
+* **Numeric limits:** Exercise unusually large integers, floats, nesting, and payload sizes against both the parser and the surrounding application limits; native parsing does not remove resource-exhaustion risk.
 
 ## FAQ
 
@@ -43,7 +43,7 @@ The lexer is deeply embedded into the proxy's core and operates automatically wi
 A: In asynchronous Python (`asyncio`), CPU-heavy parsing can block other work on the same event loop. Native parsing can reduce that cost, but concurrency capacity must be measured for the complete service and workload.
 
 **Q: Are there any compatibility issues with `orjson`?**
-A: Very few. `orjson` is strictly compliant with the JSON specification. The only edge case is that it requires dictionary keys to be strings (which the HTTP protocol guarantees anyway).
+A: JSON objects require string keys, but integration limits also include supported SSE framing, maximum line size, Unicode handling, nesting, provider-specific envelopes, and incomplete streams. Exercise the conformance fixtures and provider-specific tests.
 
 **Q: Does this help protect against Denial of Service?**
 A: Bounded parser state reduces one memory-growth risk, but it does not guarantee that a pod cannot run out of memory. Enforce payload and concurrency limits and validate peak RSS under load.
@@ -55,4 +55,4 @@ This feature is an incremental data reader designed to limit retained state.
 Instead of retaining the complete response, it keeps only the state needed for the current parsing decision. It still allocates memory, so the conformance and service benchmarks report that behavior rather than calling it allocation-free.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_streaming_json_lexer.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_streaming_json_lexer.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_streaming_json_lexer.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_streaming_json_lexer.py).

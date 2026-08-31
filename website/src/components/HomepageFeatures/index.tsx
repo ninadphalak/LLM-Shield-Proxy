@@ -14,7 +14,7 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Zero-Egress Data Protection',
+    title: 'Configured-Boundary Data Protection',
     icon: '🔒',
     description: (
       <>
@@ -24,7 +24,7 @@ const FeatureList: FeatureItem[] = [
     link: '/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy'
   },
   {
-    title: 'Ultra-Low Latency Streaming',
+    title: 'Bounded Streaming Rehydration',
     icon: '⚡',
     description: (
       <>
@@ -38,7 +38,7 @@ const FeatureList: FeatureItem[] = [
     icon: '📜',
     description: (
       <>
-        Dynamic role-based access control (RBAC) and zero-downtime hot-reloading for granular tenant-scoped PII profiles and Agent Identity Enforcement.
+        Request-scoped policy mappings and file polling for supported tenant PII profiles. Validate reload, resolver, concurrency, and unknown-identity behavior.
       </>
     ),
     link: '/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading'
@@ -68,7 +68,7 @@ const FeatureList: FeatureItem[] = [
     icon: '🤖',
     description: (
       <>
-        Tie GenAI API requests directly back to individual agents and users for granular rate-limiting and quota chargebacks.
+        Validate configured JWT and DPoP conditions on supported governed paths. Attribution depends on issuer, key, audience, proxy placement, and replay controls.
       </>
     ),
     link: '/docs/features/agent_identity_enforcer'
@@ -78,7 +78,7 @@ const FeatureList: FeatureItem[] = [
     icon: '🌐',
     description: (
       <>
-        Zero-dependency mutating webhooks, mTLS sidecar integrations, and deep component health probes integrated via Prometheus.
+        Envoy ext_proc, a Kubernetes sidecar-injection webhook, mTLS options, scoped readiness checks, and Helm alert rules with deployment-specific boundaries.
       </>
     ),
     link: '/docs/features/secure-infrastructure-service-mesh'

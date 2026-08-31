@@ -29,33 +29,33 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Completely in-memory, requiring no database lookups during the critical request path.
+- **Overhead:** Registry lookup is in-process for loaded keys. Authentication, copying, header construction, rotation, and any Vault refresh still have measurable cost.
 
 ## Configuration Flags
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `OPENAI_API_KEY` | Real key injected for OpenAI/Azure destinations. | [View in deployment.md](/docs/deployment) |
+| `OPENAI_API_KEY` | Key selected for the exact `api.openai.com` hostname. Azure endpoints currently fall back to `UPSTREAM_API_KEY`. | [View in deployment.md](/docs/deployment) |
 | `ANTHROPIC_API_KEY` | Real key injected for Anthropic destinations. | [View in deployment.md](/docs/deployment) |
 | `GEMINI_API_KEY` | Real key injected for Google Gemini destinations. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Key Stripping:** If a developer accidentally hardcodes a real OpenAI key into their client application and sends it to the proxy, the proxy's middleware strips the rogue key completely, replacing it with the central registry key. This prevents developers from intentionally bypassing corporate billing accounts.
-* **HashiCorp Vault Integration:** While keys can be loaded via `.env`, the proxy natively supports pulling these keys directly from HashiCorp Vault at startup, ensuring the real API keys never touch a developer's hard drive or a Kubernetes `ConfigMap`.
+* **Key replacement:** On supported proxy paths, configured client credential headers are removed or replaced before the upstream request is built. Network bypass routes and unrecognized headers require separate controls and tests.
+* **HashiCorp Vault Integration:** Keys can be loaded from Vault rather than a local `.env` or `ConfigMap`. Whether they appear in files, process memory, logs, snapshots, or deployment tooling depends on the complete secret-delivery path.
 
 ## FAQ
 
 **Q: Can I use different OpenAI keys for different departments?**
 A: Yes. While the global registry sets a baseline, you can define `upstream_api_key` overrides directly inside specific roles in `policies.yaml`. When the HR department authenticates, the proxy will resolve and inject the HR-specific OpenAI key instead of the global one.
 
-**Q: How does this work with Azure OpenAI's unique authentication?**
-A: The registry is schema-aware. If the target is an Azure OpenAI endpoint, it intelligently injects the key into the `api-key` HTTP header rather than formatting it as an `Authorization: Bearer` token.
+**Q: How does this work with Azure OpenAI's authentication?**
+A: The current hostname registry does not contain an Azure endpoint matcher or automatically select Azure's `api-key` header. Treat Azure as a documented integration gap: configure and verify the required upstream header outside this registry before relying on it.
 
 
 ## Plainspeak
-This feature works like a smart keychain that automatically grabs the right key for the right door.
+Think of this as an exact-hostname key lookup for the providers listed in the implementation, with a configured `UPSTREAM_API_KEY` fallback. It is not a schema-aware credential broker.
 
-If you use multiple AI providers (OpenAI, Anthropic, DeepSeek), developers usually have to write messy code to juggle all the different API passwords. With this feature, developers just send their request to the proxy, and the proxy automatically looks at the destination, pulls the correct password out of its secure keychain, and unlocks the door. Developers never have to worry about managing the keys.
+The proxy can centralize provider credential selection so application developers do not embed each provider key. Operators still own key provisioning, access control, rotation, revocation, observability, and incident response.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_multi_tenant.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_multi_tenant.py).

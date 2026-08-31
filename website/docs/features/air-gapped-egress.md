@@ -2,11 +2,11 @@
 
 LLM-Shield-Proxy provides an **Air-Gapped Egress Gateway Mode** for environments with strict Zero-Internet corporate subnet architectures. When operating in high-security, highly-regulated enclaves, servers are often denied direct access to the public internet to prevent data exfiltration.
 
-In this mode, LLM-Shield-Proxy never connects directly to public LLM APIs (like OpenAI, Anthropic). Instead, all upstream traffic is securely routed through an internal, trusted egress proxy (e.g., Envoy, Squid, LiteLLM) configured on the private network.
+In this mode, the supported upstream path targets the configured internal egress gateway rather than a public provider URL. Enforce and verify the boundary with network policy, DNS, firewall telemetry, and tests for telemetry, updates, model downloads, and error paths.
 
 ## Inner Workings & Topology
 
-The topology in Air-Gapped Mode ensures that the proxy is completely isolated from the internet:
+The intended topology isolates the proxy from direct internet routes; deployment controls must enforce and test that property:
 
 ```mermaid
 sequenceDiagram
@@ -32,18 +32,18 @@ The behavior is controlled by several key flags (see [Deployment Configuration](
 
 - `AIR_GAPPED_MODE` (bool): Master toggle to enable strict Zero-Internet routing.
 - `EGRESS_GATEWAY_URL` (string): The internal proxy URL. Required if `AIR_GAPPED_MODE` is `true`. (e.g., `http://egress-proxy.internal:8080`).
-- `FORWARD_CLIENT_AUTH` (bool): Defaults to `false`. If disabled, `authorization` and `x-api-key` headers are completely stripped before leaving the LLM-Shield.
+- `FORWARD_CLIENT_AUTH` (bool): Defaults to `false`. On supported forwarding paths, configured client-auth headers are removed before the gateway request is built.
 
 ## Critical Logic & Conditional Behaviors
 
 ### 1. SSRF Protection Bypass for Internal Gateways
 Normally, the LLM-Shield Proxy strictly blocks requests targeting internal or private RFC 1918 IP addresses to prevent Server-Side Request Forgery (SSRF). However, when `AIR_GAPPED_MODE` is active, the `EGRESS_GATEWAY_URL` is parsed by a dedicated, non-blocking async DNS resolver (`_resolve_internal_hostname`) that explicitly *allows* private IPs. The resolved internal IP is substituted into the connection URL so the socket connects to that pinned address rather than re-resolving the hostname at connect time (closing the DNS-rebinding TOCTOU window between the check and the actual connection).
 
-Pinning the socket to a resolved IP would normally break TLS: `httpx`/`httpcore` validate the server certificate against whatever hostname is in the connection URL, and a real certificate almost never carries a bare IP in its SAN. To avoid that, the proxy separately carries the original `EGRESS_GATEWAY_URL` hostname through as an `extensions={"sni_hostname": ...}` override on the outbound `httpx` request -- so the socket connects to the pinned IP, but TLS SNI negotiation and certificate hostname verification happen against the real gateway hostname. The `Host` HTTP header is set the same way, independently of the SNI override.
+Connecting by resolved IP can fail hostname verification when the certificate contains the DNS name rather than that IP. The proxy separately carries the original `EGRESS_GATEWAY_URL` hostname as an `extensions={"sni_hostname": ...}` override, so the socket uses the validated IP while TLS verifies the configured hostname. The `Host` header is set separately. Exercise this behavior through the selected `httpx`/`httpcore` versions and gateway certificate chain.
 
 ### 2. Authorization Header Stripping
 For internal mTLS deployments, you might configure your egress gateway to inject the public API keys, effectively treating LLM-Shield as an untrusted internal node that does not have access to the actual LLM API keys.
-By setting `FORWARD_CLIENT_AUTH=False`, LLM-Shield guarantees that no client-provided `Authorization`, `x-api-key`, `x-goog-api-key`, or `api-key` headers are leaked to the egress gateway.
+With `FORWARD_CLIENT_AUTH=False`, the supported forwarding path removes the listed client-provided credential headers. Test aliases, mixed case, duplicate headers, adapters, and alternate routes in the selected deployment.
 
 ### 3. Transparent Streaming
 Because LLM-Shield manipulates the upstream route via `httpx.AsyncClient`, the core streaming engine remains agnostic to the gateway hop. Standard SSE processing, including the sliding-window de-redaction buffer, functions identically to a direct internet connection.
@@ -61,4 +61,4 @@ Yes. You can configure `EGRESS_GATEWAY_URL` with `https://` and supply the `SSL_
 
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_air_gapped_egress.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_air_gapped_egress.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_air_gapped_egress.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_air_gapped_egress.py).

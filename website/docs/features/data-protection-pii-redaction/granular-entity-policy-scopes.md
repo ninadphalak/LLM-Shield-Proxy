@@ -41,16 +41,16 @@ View diagram on GitHub mobile 📱 -->
 A: Currently, policy resolution is strictly tied to the `virtual_key_id` (via the `Authorization` header) as this maps cleanly to identity providers and service accounts in Zero Trust architectures.
 
 **Q: How fast is the policy lookup? Will it slow down my requests if I have 10,000 users?**
-A: The lookup takes microseconds. The `policies.yaml` file is flattened into an O(1) hash map in memory upon startup. Evaluating 10,000 rules takes exactly the same time as evaluating 1 rule.
+A: The active mapping uses dictionary lookup after policy flattening, but total request cost includes identity resolution, reloads, detector work, and policy processing. Measure the actual policy sizes and concurrency profile rather than asserting identical timing.
 
 **Q: If a user sends a custom regex pattern in their prompt, does it bypass the scope?**
-A: No. The proxy's redaction scopes apply to the data *exiting* your VPC. The user's prompt is completely subjugated to the policy assigned to their virtual key, regardless of what instructions they pass to the LLM.
+A: The resolved policy controls the supported transformation path. Identity mapping, resolver defaults, bypass routes, unsupported payloads, and failure behavior must be tested separately.
 
 
 ## Plainspeak
-This feature ensures that different departments have exactly the right level of data security tailored to their needs, rather than using a one-size-fits-all approach.
+This feature lets operators assign different configured entity scopes to different identities. The policy design and validation remain the operator's responsibility.
 
-For example, the HR department's AI might be allowed to see employee names, but the Marketing department's AI should definitely not. This feature creates specific "ID badges" (profiles) for different teams. When a team uses the system, it instantly checks their badge and strictly applies their custom rules, defaulting to blocking everything if it's ever unsure.
+For example, HR and Marketing can be assigned different entity rules. The proxy resolves the supplied tenant/key through the configured policy source and applies the resulting profile on supported paths. Unknown-key and resolver-failure behavior must be tested for each resolver; not every path shares the same default.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_policy_scopes.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_scopes.py).

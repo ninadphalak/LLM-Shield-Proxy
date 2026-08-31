@@ -5,7 +5,7 @@
 
 ## 🛡️ OWASP Top 10 for LLMs (v1.1) Mapping
 
-LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** critical vulnerabilities identified by OWASP for Large Language Model applications. (Training Data Poisoning and Supply Chain Vulnerabilities are handled at the model deployment layer).
+The following table maps implemented controls to selected OWASP risks. It is a design aid, not a claim that the proxy fully mitigates an OWASP category or secures the surrounding application, model, supply chain, and deployment.
 
 | OWASP Threat | LLM-Shield-Proxy Mitigation |
 | :--- | :--- |
@@ -19,7 +19,7 @@ LLM-Shield-Proxy provides comprehensive mitigation for **8 out of the 10** criti
 | **LLM10: Model Theft** | Mitigated by Dynamic Canary Watermarking & Steganography to track stolen outputs back to the source. |
 
 ## 22-Vector Threat Matrix
-LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhaustive suite of **78 automated unit, integration, and adversarial fuzzing tests** to ensure continuous **LLM Security Posture Management (LLM SPM)**.
+The repository includes automated unit, integration, conformance, and adversarial tests for the mechanisms listed below. A passing repository test demonstrates the named fixture at the tested revision; it is not a deployment-wide security validation.
 
 | Threat Vector / Attack Category | Adversarial Payload / Vector | Proxy Defense Mechanism | Verification Status |
 | :--- | :--- | :--- | :--- |
@@ -39,7 +39,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 | **Agent-Driven Infinite Loops** | Autonomous agents getting stuck in costly self-reflective loops. | Composite Agent Loop Circuit Breaker (`AGENT_BREAKER_THRESHOLD`). | ✅ **PASSED** (`test_composite_agent_loop_breaker`) |
 | **Audit Log Tampering** | Malicious actor modifies supplied evidence. | SHA-256 chaining, Ed25519 signatures, sequence checks, and optional durable delivery. | ✅ **PASSED** (`test_worm_compliant_merkle_chaining`); immutable retention is external |
 | **Insider Model Leaks** | Employees copying redacted/synthetic data to train local shadow IT models. | Dynamic Canary Watermarking & Steganography. | ✅ **PASSED** (`test_dynamic_canary_watermark_injection`) |
-| **Egress Spoofing** | Attacker claims proxy sent PII to upstream provider. | Cryptographic Proof of Non-Egress Cryptographic Attestation. | ✅ **PASSED** (`test_proof_of_non_egress_attestation`) |
+| **Receipt Tampering** | An application-generated stream receipt is edited after emission. | HMAC-signed rolling SSE digest metadata; this does not observe every network packet. | ✅ **PASSED** (`test_stream_digest_receipt_log_and_signature`) |
 | **Vault Memory Dump** | Attacker gains memory dump of TTL session vault to steal mapped PII. | In-Band Stateless Syntheticgraphic Masking (AES-256-GCM). | ✅ **PASSED** (`test_stateless_synthetic_masking_vault_bypass`) |
 | **DPoP Proof Replay** | Eavesdropper captures a valid `(JWT, DPoP)` pair and replays it inside its freshness window. | RFC 9449 `(jkt, jti)` replay cache (`TTLCache`, 300s TTL); a reused pair is rejected with `401 "DPoP proof replayed"` even though the proof is otherwise cryptographically valid. | ✅ **PASSED** (`test_dpop_replay_rejected_on_reuse`) |
 | **Unauthenticated BYOK Passthrough** | Caller presents a provider-shaped key (`sk-proj-*`) that matches no configured virtual key, hoping prefix-matching alone grants passthrough. | `ENABLE_OPEN_BYOK_PASSTHROUGH` (default `False`) gates the bypass; without it the request is rejected `401` before ever reaching the DLP pipeline. | ✅ **PASSED** (`test_byok_prefix_alone_rejected_by_default`) |
@@ -55,7 +55,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Flags**: [`ENABLE_TIER2_ENTROPY`](deployment.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](deployment.md#core-configuration-flags)
 
 #### In-Band Stateless Syntheticgraphic Masking
-* **Implementation Details**: Eliminates the need for external session vaults by encrypting sensitive entities directly in the LLM context using **AES-256-GCM** with a 256-bit Data Encryption Key (DEK). The encrypted payload remains mathematically unbreakable upstream and is decrypted seamlessly during the SSE stream return, guaranteeing zero state-leakage.
+* **Implementation Details**: Avoids an external mapping vault for supported flows by encrypting detected values into in-band tokens with **AES-256-GCM**. Security depends on key generation, custody, rotation, nonce handling, implementation correctness, and the selected threat model. Ciphertext still crosses the configured upstream boundary, and provider echo must be tested.
 * **Flags**: [`SHIELD_DEFAULT_MASKING_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_ENCRYPTION_KEY`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Stateless Redis TTL Vault & Deterministic HMAC Masking
@@ -63,13 +63,13 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Flags**: [`REDIS_URL`](deployment.md#core-configuration-flags), [`SESSION_TTL_SECONDS`](deployment.md#core-configuration-flags)
 
 #### Dynamic Canary Watermarking & Steganography (Leak Forensics)
-* **Implementation Details**: Injects cryptographically verifiable, invisible canary tokens (via zero-width characters or deterministic synthetic swapping) into the outbound stream. If an employee leaks a response or uses it to train a shadow-IT model, the watermark can be extracted to mathematically prove provenance and identify the exact session/tenant that leaked the data.
+* **Implementation Details**: Can insert a keyed zero-width correlation marker into configured output. If enough of the marker survives copying and normalization, the decoder can associate it with recorded metadata. The signal is removable, can collide with text-processing behavior, and does not by itself prove who disclosed content.
 * **Flags**: [`ENABLE_WATERMARKING`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_WATERMARK_SECRET`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ### 🛑 Threat Prevention & Isolation
 
 #### Edge-Level Agent Identity Enforcer
-* **Implementation Details**: Requires agents to present a signed Workload Identity (JWT) and Demonstrating Proof-of-Possession (DPoP) proof before executing tool calls. Validated identity metadata is recorded in the signed, tamper-evident audit chain. See the [detailed documentation](docs/features/agent_identity_enforcer.md) for more info.
+* **Implementation Details**: Requires agents to present a signed Workload Identity (JWT) and Demonstrating Proof-of-Possession (DPoP) proof before executing tool calls. Validated identity metadata is recorded in the signed, tamper-evident audit chain. See the [detailed documentation](/docs/features/agent_identity_enforcer.md) for more info.
 * **Flags**: [`AGENT_IDENTITY_ENFORCER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Autonomous Agent Security (Composite Agent Loop Circuit Breaker)
@@ -77,7 +77,7 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Flags**: [`ENABLE_AGENT_BREAKER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Granular Entity Policy Scopes & Zero Trust AI Defaults
-* **Implementation Details**: Ensures strict **AI Governance** by binding incoming requests instantly to department-level security profiles via Virtual Keys. Utilizes O(1) in-memory tenant profile mapping. The system operates on a strict `FAIL_CLOSED` **Zero Trust AI** default-if a policy resolution fails or the engine faults, the **LLM Firewall** drops the connection rather than failing open and leaking data.
+* **Implementation Details**: Binds supported requests to configured profiles through Virtual Keys. The redaction failure mode defaults to `FAIL_CLOSED`; each policy resolver and dependency still requires explicit failure-path testing. The MCP router's documented in-memory resolver is permissive unless an external or YAML-backed policy resolver is wired in.
 * **Flags**: [`VALID_VIRTUAL_KEYS`](deployment.md#core-configuration-flags), [`SHIELD_FAILURE_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Bounded Streaming JSON Lexer
@@ -94,8 +94,8 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 * **Implementation Details**: Every emitted audit entry can be signed and linked to the predecessor hash. Verification detects edits, gaps, insertion, or reordering inside evidence received. An unanchored deleted suffix is not detectable from the shortened file, and these mechanics only support-not satisfy by themselves-SOC 2, ISO/IEC 42001, and HIPAA controls.
 * **Flags**: [`AUDIT_LOG_FORMAT`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
-#### Cryptographic Proof of Non-Egress Cryptographic Attestation
-* **Implementation Details**: Constructs a Merkle Tree of all redacted tokens per session. The proxy provides a cryptographic root hash confirming exactly what was stripped, allowing third-party auditors to verify non-egress without ever seeing the raw sensitive data.
+#### Signed Egress Transformation Receipt
+* **Implementation Details**: Signs application-generated transformation metadata so a verifier can detect later modification of the supplied receipt. It supports review of what the application recorded at the configured boundary; it does not independently observe the network, prove universal detector recall, or rule out another egress path.
 
 #### FIPS 140-3 KAT & RFC 6902 Differential Audit Logging
 * **Implementation Details**: Executes Known Answer Tests (KAT) at startup to verify cryptographic module integrity (FIPS 140-3). Emits logs strictly utilizing RFC 6902 JSON Patch formats to precisely record mutations made to the outbound LLM payload.
@@ -104,33 +104,33 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 ### 🏗️ Secure Infrastructure & Service Mesh
 
 #### Centralized Enterprise Secrets & Comprehensive mTLS
-* **Implementation Details**: Features native HashiCorp Vault integration supporting AppRole, Kubernetes Service Accounts, and Token authentication with a non-blocking TTL cache. Enforces strict X.509 mutual TLS (mTLS) for backend secret retrieval. Additionally, the proxy natively terminates inbound TLS (HTTPS), mandates inbound mTLS at the TCP/socket layer (`ssl.CERT_REQUIRED`), and can present outbound mTLS client certificates when routing to internal enterprise API gateways. See the [Deep Dive Feature Document](docs/features/secure-infrastructure-service-mesh/tls-mtls-support.md) for full configuration details.
+* **Implementation Details**: Features native HashiCorp Vault integration supporting AppRole, Kubernetes Service Accounts, and Token authentication with a non-blocking TTL cache. Enforces strict X.509 mutual TLS (mTLS) for backend secret retrieval. Additionally, the proxy natively terminates inbound TLS (HTTPS), mandates inbound mTLS at the TCP/socket layer (`ssl.CERT_REQUIRED`), and can present outbound mTLS client certificates when routing to internal enterprise API gateways. See the [Deep Dive Feature Document](/docs/features/secure-infrastructure-service-mesh/tls-mtls-support.md) for full configuration details.
 * **Flags**: [`ENABLE_VAULT_SECRETS`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`ENABLE_MTLS`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), `TLS_CERT_FILE`, `CLIENT_CA_FILE`, `OUTBOUND_CLIENT_CERT`.
 
 #### Service Mesh Native gRPC ext_proc Integration
-* **Implementation Details**: Integrates gracefully into Kubernetes Service Meshes (like Istio/Linkerd) natively without secondary sidecar bottlenecks. By implementing Envoy's External Processing filter (`envoy.service.ext_proc.v3.ExternalProcessor`), it achieves Zero HTTP network hops, streaming buffers directly over highly secure UDS (Unix Domain Sockets).
+* **Implementation Details**: Implements Envoy's External Processing interface (`envoy.service.ext_proc.v3.ExternalProcessor`) and supports a Unix Domain Socket between sidecars. This removes a TCP hop between Envoy and the processor but still incurs serialization, IPC, parsing, and transformation work that must be measured.
 * **Flags**: [`ENABLE_EXT_PROC`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`EXT_PROC_SOCK_PATH`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
-#### Zero-Dependency Kubernetes Mutating Webhook
-* **Implementation Details**: Intercepts Pod deployment manifests directly via a standalone Mutating Webhook to seamlessly inject the LLM-Shield sidecar container and mTLS certificates, requiring zero external dependencies or elevated cluster privileges.
+#### Kubernetes Mutating Webhook
+* **Implementation details:** A standalone Kubernetes mutating webhook can add configured sidecar and certificate references to matching Pod admissions. It requires admission registration, TLS, service/RBAC configuration, and cluster privileges appropriate to those resources.
 
 #### Traffic Engineering & Resiliency
 * **Implementation Details**:
   * **Redis Token-Bucket**: Pre-loaded Lua scripts (`evalsha`) handle high-throughput rate limiting to prevent noisy-neighbor DoS.
-  * **SIGTERM Draining**: Kubernetes 25s SIGTERM connection draining ensures active SSE streams finish transmission securely during pod termination.
+  * **SIGTERM Draining**: Gives active SSE streams up to the configured timeout to finish before process termination; streams can still be interrupted when the timeout expires.
   * **Upstream Key Overriding**: Strips vulnerable client keys and injects internal load-balanced provider API keys dynamically.
 * **Flags**: [`ENABLE_RATE_LIMITING`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`DRAIN_TIMEOUT_SECONDS`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`OVERRIDE_CLIENT_AUTH`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Deep Component Health Probes and Prometheus Alerts
-* **Implementation Details**: Provides granular `/healthz`, `/livez`, and `/readyz` probes covering Redis connectivity and Vault mTLS states to ensure traffic is never routed to a compromised or disconnected node. Integrates directly with Prometheus Alertmanager.
+* **Implementation Details**: Provides `/healthz`, `/livez`, and `/readyz` signals for configured dependencies. Orchestrators must use the correct probe and thresholds; a healthy probe does not establish that a node is uncompromised.
 * **Flags**: [`METRICS_BEARER_TOKEN`](deployment.md#core-configuration-flags)
 
-#### Zero-Overhead OpenTelemetry (OTel) Tracing
+#### Bounded Asynchronous OpenTelemetry (OTel) Tracing
 * **Implementation Details**: Handles W3C `traceparent` propagation through a bounded asynchronous background path. Export configuration can still add CPU work, queue pressure, or drops and should be included in service-level tests.
 * **Flags**: [`TELEMETRY_ENABLED`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Multi-Provider Translators & Anthropic Adapter
-* **Implementation Details**: Acts as an un-bypassable security layer by universally intercepting requests and employing a Zero-SDK OpenAI-to-Anthropic request transformation. It normalizes distinct SSE stream formats at the network edge, ensuring security policies are uniformly applied regardless of the backend LLM provider.
+* **Implementation details:** The proxy transforms supported OpenAI-style requests and selected Anthropic SSE events on traffic explicitly routed through it. Network controls must prevent bypass, and provider-specific fields require integration tests.
 * **Flags**: [`DEFAULT_UPSTREAM_PROVIDER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`ANTHROPIC_API_VERSION`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 ---
@@ -143,9 +143,9 @@ LLM-Shield-Proxy is an enterprise **LLM Firewall** validated against an exhausti
 LLM-Shield-Proxy is engineered to support in-VPC privacy controls and SOC 2/HIPAA evidence collection. Security and confidentiality are core to the architecture; deployment and operation determine compliance.
 
 ## Supported Versions
-As an open-source project, **only the absolute latest release version** is actively supported with security updates.
+The project currently publishes security fixes for the latest release line only.
 
-We do not backport security patches to older versions. If a vulnerability is found and patched (e.g., in `1.x.y`), users on older versions are expected to upgrade to the latest release to secure their environment. The onus is entirely on the user to ensure they are pulling the latest Docker image or PyPI package.
+Backports to older versions are not part of the current maintenance policy. Operators should monitor release and advisory channels, pin and verify artifacts, and plan upgrades when a relevant fix is published.
 
 | Version | Supported          |
 | ------- | ------------------ |

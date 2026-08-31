@@ -1,15 +1,15 @@
-# Security Response Headers on All Responses
+# Security Response Headers
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Security Response Headers** feature ensures that every single HTTP response emitted by the proxy-whether it is a successful LLM stream, a 400 error, or a 503 load-shedding rejection-is automatically armored with industry-standard HTTP security headers. This protects client applications and browsers interacting with the proxy from common web vulnerabilities.
+The **Security Response Headers** middleware adds configured headers to responses that traverse the middleware stack. Some server, framework, proxy, and early-failure responses can follow different paths, so verify success, streaming, error, and infrastructure-generated responses.
 
 ## How It Works
 Modern web security requires strict directives to prevent browsers from executing malicious behaviors (like MIME-sniffing or clickjacking).
 
-1. **Middleware Injection:** The proxy utilizes a FastAPI middleware layer that intercepts every outbound `Response` object immediately before it is flushed to the network socket.
-2. **Deterministic Appends:** It forcefully injects specific headers, regardless of what the upstream LLM provided.
+1. **Middleware Injection:** A FastAPI middleware layer adds headers to responses that traverse that application path.
+2. **Configured values:** The middleware sets the documented header values; infrastructure-generated or bypass responses require separate verification.
 3. **The Headers:**
    - `X-Content-Type-Options: nosniff` (Prevents MIME-sniffing vulnerabilities).
    - `X-Frame-Options: DENY` (Prevents Clickjacking by disallowing iframe embedding).
@@ -30,25 +30,23 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Zero measurable overhead.
+- **Overhead:** Header construction and middleware dispatch perform work; measure the complete request path under the published protocol.
 
 ## Configuration Flags
-These headers are hardcoded into the security middleware to ensure baseline OWASP compliance and cannot be disabled without modifying the source code.
+These headers provide browser hardening defaults; they do not establish OWASP compliance or replace application-specific CSP, CORS, TLS, cookie, and content-handling review.
 
 ## Critical Logic & Edge Cases
 * **HSTS Preloading:** The `Strict-Transport-Security` header includes a 1-year `max-age`. If the proxy is accidentally exposed over plain HTTP (port 80) without a TLS terminator in front of it, browsers will forcefully upgrade subsequent requests to HTTPS.
-* **CORS Compatibility:** These security headers operate completely independently of Cross-Origin Resource Sharing (CORS) headers, meaning they will not interfere with `Access-Control-Allow-Origin` configurations required by your frontend applications.
+* **CORS interaction:** Security and CORS headers are configured separately, but browser behavior depends on their combined values. Test the intended origins, methods, credentials, and error responses.
 
 ## FAQ
 
 **Q: Do these headers affect Server-Sent Events (SSE)?**
-A: Yes. The headers are applied to the initial HTTP 200 OK response that establishes the SSE connection, securing the stream at the transport layer before the delta chunks begin arriving.
+A: The application middleware is intended to add them to the initial SSE response. Verify this through the selected ASGI server, ingress, error path, and TLS terminator; the headers do not encrypt transport by themselves.
 
 
 ## Plainspeak
-This feature adds an invisible armor plating to the web browser when communicating with the proxy.
-
-When an app connects to the internet, hackers often try tricky browser attacks (like secretly embedding your chat window inside a malicious website to steal clicks). This feature forcefully attaches strict security instructions to every single response, ordering the user's web browser to instantly block those types of attacks.
+These response headers ask compatible browsers to disable MIME sniffing, framing, and future plaintext HTTP access for the configured host. Their effect depends on HTTPS, browser support, intermediaries, and the rest of the application's security policy.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

@@ -3,13 +3,12 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Pluggable Tool-Call RBAC (MCP Governance)** is a critical component of the LLM-Shield-Proxy.
-Intercepts autonomous JSON-RPC tool executions and enforces strict logical access controls against your existing Redis infrastructure. *(OPA and HashiCorp Vault resolvers planned for v1.2)*
+The **Pluggable Tool-Call RBAC (MCP Governance)** evaluates the method subset supported by `/v1/mcp` against a configured policy resolver. In-memory, Redis, OPA, and Vault resolver classes exist, but resolver defaults, wiring, and failure behavior determine the effective policy.
 
 ## How It Works
-This feature integrates directly into the zero-egress VPC architecture to ensure secure and ultra-low latency processing.
+This feature evaluates supported tool calls against the configured resolver before forwarding. Security and latency depend on resolver defaults, cache state, network deadlines, and failure behavior.
 1. **Initialization:** Configured during startup via `policies.yaml` or `.env`.
-2. **Execution:** Operates asynchronously within the data plane, guaranteeing high throughput.
+2. **Execution:** Uses asynchronous interfaces on documented paths. Throughput depends on parsing, resolver/cache state, external services, audit settings, concurrency, and payloads.
 3. **Completion:** Mutates or validates the payload safely before egress to the upstream LLM provider.
 
 
@@ -25,31 +24,33 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Highly concurrent execution without saturating the Python GIL.
+- **Overhead:** Depends on JSON parsing, resolver/cache state, backend latency, audit work, and concurrency. Measure the configured path.
 
 ## Configuration Flags
-The engine operates automatically but can be tuned via deployment flags.
+The `/v1/mcp` route is registered by the application. Policy resolver selection and upstream routing are configured separately.
 
 | Environment Variable / Config | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_PLUGGABLE_TOOL_CALL_RBAC_MCP_GOVERNANCE` | Toggles this functionality. | [View in deployment.md](/docs/deployment) |
+| `OPA_URL` | Selects the OPA resolver in the default dependency factory when configured. | [View in deployment.md](/docs/deployment) |
+| `REDIS_URL` | Enables the Redis-backed resolver/store paths where the application selects them. | [View in deployment.md](/docs/deployment) |
+| `X-Shield-Upstream-URL` / `UPSTREAM_MCP_BASE_URL` | Selects the upstream for the scoped MCP gateway; the environment fallback is read directly by the router. | [View in the governance guide](/docs/guides/mcp-tool-governance) |
 
 ## Critical Logic & Edge Cases
-* **Streaming Integrity:** Seamlessly handles split token chunks in real-time.
-* **Security Stance:** Enforces a Zero-Trust, fail-closed default architecture.
+* **Streaming boundary tests:** Exercises supported split-token fixtures with the configured lookahead; other encodings, envelopes, and tokens require additional cases.
+* **Default-policy warning:** Without OPA, Vault, Redis policy data, or an application override, the current in-memory resolver is permissive except for explicit blocks. Do not describe the route as fail-closed until the deployed resolver and outage behavior demonstrate it.
 
 ## FAQ
-**Q: Does this break real-time streaming?**
-A: No, the proxy is engineered to reconstruct and redact payloads on the fly without breaking SSE connections.
+**Q: Is `/v1/mcp` a complete MCP Streamable HTTP implementation?**
+A: No. It supports a documented JSON-RPC subset and does not implement initialization, capability negotiation, sessions, GET/SSE, or every MCP method.
 
 **Q: Where can I see the audit logs for this feature?**
-A: All decisions are exported via the Universal Decision Trace Exporter (OTel / OSCAL) for SOC 2 compliance.
+A: Instrumented decisions can emit configured audit, OTel, or OSCAL metadata. Delivery and completeness depend on settings and downstream systems, and the artifacts do not establish SOC 2 compliance.
 
 
 ## Plainspeak
-This feature acts as a bouncer that strictly controls what an AI agent is allowed to do.
+This feature is a policy checkpoint for supported tool calls on one scoped gateway route.
 
-When an AI decides it wants to use a tool (like "delete a file" or "send an email"), it shouldn't be blindly trusted. This feature intercepts the AI's request before it happens, checks the AI's "ID badge" against a strict list of permissions, and blocks the action immediately if the AI isn't authorized to use that specific tool.
+For supported calls, the route resolves caller policy before forwarding. Its effectiveness depends on routing all relevant calls through the route and configuring a resolver that denies the intended operations and fails as required.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_proxy.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_proxy.py).

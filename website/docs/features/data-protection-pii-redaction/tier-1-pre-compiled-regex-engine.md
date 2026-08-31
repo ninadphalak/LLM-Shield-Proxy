@@ -9,8 +9,8 @@ The **Tier 1 Pre-Compiled Regex Engine** is the foundational layer of the LLM-Sh
 Unlike traditional proxies that evaluate regular expressions dynamically at runtime using standard backtracking engines (like Python's `re` module), LLM-Shield-Proxy utilizes the **`google-re2` C++ engine**.
 
 1. **Startup Compilation:** During the FastAPI `lifespan` startup event, all predefined PII patterns and user-supplied custom regexes are compiled down into Deterministic Finite Automatons (DFAs).
-2. **Linear Execution O(N):** Because the regexes are DFAs, they guarantee linear execution time (O(N)) relative to the size of the payload.
-3. **ReDoS Immunity:** By eliminating backtracking, the engine is mathematically immune to Regular Expression Denial of Service (ReDoS) attacks, meaning adversarial prompts (like `(a+)+$`) cannot spike CPU usage or stall the event loop.
+2. **Non-backtracking engine:** Supported patterns use RE2, avoiding catastrophic backtracking behavior.
+3. **Bounded pattern language:** Unsupported constructs are rejected by RE2. Pattern count, input size, fallback behavior, and surrounding processing remain part of the resource model.
 
 
 ```mermaid
@@ -27,7 +27,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Adds virtually zero latency to the streaming data plane.
+- **Overhead:** Depends on input size, configured patterns, runtime, and concurrency. Measure it with the selected service-level workload.
 
 ## Configuration Flags
 The engine operates automatically, but can be extended via the Bring-Your-Own-Regex (BYOR) feature.
@@ -51,7 +51,7 @@ custom_patterns:
 ## FAQ
 
 **Q: Can I use lookaheads or lookbehinds in my custom regex?**
-A: No. Because `google-re2` guarantees O(N) performance by strictly using DFAs, it does not support unbounded lookaheads/lookbehinds or backreferences. If your pattern requires contextual NLP, rely on the **Tier 3 ONNX NER** engine instead.
+A: RE2 does not support lookbehind or backreferences. If a rule needs unsupported context, redesign the rule or evaluate the optional NER tier; do not silently change engines.
 
 **Q: Does injecting thousands of custom regexes slow down the proxy?**
 A: No. The `re2` engine compiles them into a highly optimized state machine. While startup time might marginally increase, runtime matching remains practically constant-time and ultra-low latency.
@@ -59,7 +59,7 @@ A: No. The `re2` engine compiles them into a highly optimized state machine. Whi
 ## Plainspeak
 This feature quickly scans text for sensitive information like Social Security Numbers and email addresses using pre-defined search patterns (like a highly advanced "CTRL+F").
 
-Unlike standard search engines that can get stuck or crash if a hacker sends a tricky "bomb" of confusing text (known as backtracking), this engine uses a specialized, math-based search method. This guarantees the search moves straight through the text at a fast, predictable speed and can never be tricked into freezing the system.
+RE2 avoids the catastrophic-backtracking failure mode found in some regex engines. It does not remove other CPU, memory, input-size, concurrency, or integration risks.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/YOUR_ORG/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
