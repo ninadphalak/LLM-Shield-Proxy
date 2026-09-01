@@ -67,6 +67,19 @@ def _reconstruct_canonical_bytes(record: Dict[str, Any], exclude: tuple) -> byte
 _GENESIS_HASH = "0" * 64
 
 
+class _DuplicateJSONKey(ValueError):
+    pass
+
+
+def _object_without_duplicates(pairs: List[tuple[str, Any]]) -> Dict[str, Any]:
+    record: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in record:
+            raise _DuplicateJSONKey(key)
+        record[key] = value
+    return record
+
+
 def _is_chain_anchor(record: Dict[str, Any]) -> bool:
     """True when this record legitimately begins a chain.
 
@@ -153,7 +166,11 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
             if not line:
                 continue
             try:
-                record = json.loads(line)
+                record = json.loads(line, object_pairs_hook=_object_without_duplicates)
+            except _DuplicateJSONKey:
+                summary["chain_valid"] = False
+                summary["chain_breaks"].append({"line": line_no, "reason": "duplicate_json_key"})
+                continue
             except json.JSONDecodeError:
                 summary["chain_valid"] = False
                 summary["chain_breaks"].append({"line": line_no, "reason": "invalid_json"})
@@ -297,6 +314,8 @@ def verify_worm_log(audit_log_path: Optional[str], pubkey_pem: Optional[str] = N
                     decoded_signature = base64.b64decode(signature, validate=True)
                     if len(decoded_signature) != 64:
                         raise ValueError("Ed25519 signatures are 64 bytes")
+                    if base64.b64encode(decoded_signature).decode("ascii") != signature:
+                        raise ValueError("signature Base64 is not canonical")
                 except (ValueError, TypeError, binascii.Error):
                     decoded_signature = None
                     summary["signatures_invalid"] += 1

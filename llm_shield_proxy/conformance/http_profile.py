@@ -156,6 +156,22 @@ class _Inspection:
         return True
 
 
+class _JSONObject:
+    """JSON object representation that preserves duplicate member occurrences."""
+
+    def __init__(self, pairs: list[tuple[str, Any]]) -> None:
+        self.pairs = pairs
+
+
+def _materialize_json(value: Any) -> Any:
+    """Apply normal last-member-wins semantics after inspection is preserved."""
+    if isinstance(value, _JSONObject):
+        return {key: _materialize_json(item) for key, item in value.pairs}
+    if isinstance(value, list):
+        return [_materialize_json(item) for item in value]
+    return value
+
+
 def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is_key: bool = False) -> None:
     """Walk a parsed body exhaustively, decoding encoded runs as it goes.
 
@@ -187,6 +203,14 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
         if not is_key:
             found.values.append(text)
         return
+    if isinstance(value, _JSONObject):
+        # json.loads normally collapses duplicate members before the object walk.
+        # Preserve and inspect every occurrence: earlier values reached the capture
+        # origin and first-wins JSON parsers can expose them to a real upstream.
+        for key, item in value.pairs:
+            _collect(str(key), found, depth + 1, rounds, is_key=True)
+            _collect(item, found, depth + 1, rounds)
+        return
     if isinstance(value, dict):
         for key, item in value.items():
             _collect(str(key), found, depth + 1, rounds, is_key=True)
@@ -202,6 +226,58 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
             _collect(item, found, depth + 1, rounds)
         return
     found.truncated = True
+
+
+def _collect_framing_metadata(kind: str, text: str, found: _Inspection) -> None:
+    """Collect framing syntax while separating structural names from data values."""
+    # Keep the complete syntax in strings so a value carried in an unusual but
+    # parseable shape is still visible within one request. Structural names do not
+    # belong in the values-only cross-request join.
+    _collect(text, found, is_key=True)
+    if kind == "trailer":
+        name, separator, value = text.partition(":")
+        if separator:
+            _collect(name.strip(), found, is_key=True)
+            _collect(value.strip(), found)
+        return
+
+    # Chunk extensions are `;`-separated name[=value] parameters. This bounded
+    # lexer respects quoted semicolons and escapes sufficiently to recover each
+    # parameter value without discarding the raw extension above.
+    position = 0
+    length = len(text)
+    while position < length:
+        while position < length and (text[position].isspace() or text[position] == ";"):
+            position += 1
+        name_start = position
+        while position < length and text[position] not in "=;":
+            position += 1
+        name = text[name_start:position].strip()
+        if name:
+            _collect(name, found, is_key=True)
+        if position >= length or text[position] != "=":
+            continue
+        position += 1
+        while position < length and text[position].isspace():
+            position += 1
+        if position < length and text[position] == '"':
+            position += 1
+            characters: list[str] = []
+            while position < length:
+                character = text[position]
+                position += 1
+                if character == '"':
+                    break
+                if character == "\\" and position < length:
+                    character = text[position]
+                    position += 1
+                characters.append(character)
+            _collect("".join(characters), found)
+        else:
+            value_start = position
+            while position < length and text[position] != ";":
+                position += 1
+            _collect(text[value_start:position].strip(), found)
 
 
 def _leaked_entities(records: list[dict[str, Any]]) -> list[str]:
@@ -374,7 +450,7 @@ def _handler_for(state: _CaptureState):
                 return
             self.send_error(404)
 
-        def _read_body(self) -> tuple[bytes, Optional[str], list[str]]:
+        def _read_body(self) -> tuple[bytes, Optional[str], list[tuple[str, str]]]:
             """Read the body under either framing.
 
             BaseHTTPRequestHandler does not decode Transfer-Encoding: chunked, and
@@ -383,7 +459,7 @@ def _handler_for(state: _CaptureState):
             otherwise be indistinguishable from a clean one.
             """
             transfer_encoding = (self.headers.get("transfer-encoding") or "").lower()
-            framing_metadata: list[str] = []
+            framing_metadata: list[tuple[str, str]] = []
             if "chunked" in transfer_encoding:
                 chunks: list[bytes] = []
                 total = 0
@@ -400,7 +476,9 @@ def _handler_for(state: _CaptureState):
                     size_line = raw_size_line.strip()
                     size_token, separator, extension = size_line.partition(b";")
                     if separator:
-                        framing_metadata.append(unquote_plus(extension.decode("latin-1")))
+                        framing_metadata.append(
+                            ("chunk_extension", unquote_plus(extension.decode("latin-1")))
+                        )
                     try:
                         size = int(size_token, 16)
                     except ValueError:
@@ -416,7 +494,7 @@ def _handler_for(state: _CaptureState):
                             if metadata_bytes > _MAX_CAPTURE_BYTES:
                                 return b"".join(chunks), "trailer_too_large", framing_metadata
                             framing_metadata.append(
-                                unquote_plus(trailer.decode("latin-1").strip())
+                                ("trailer", unquote_plus(trailer.decode("latin-1").strip()))
                             )
                         return b"".join(chunks), None, framing_metadata
                     total += size
@@ -430,7 +508,9 @@ def _handler_for(state: _CaptureState):
                         return b"".join(chunks), "malformed_chunk_terminator", framing_metadata
             raw_length = self.headers.get("content-length")
             if raw_length is None:
-                return b"", "missing_framing", framing_metadata
+                # An HTTP request with neither Transfer-Encoding nor Content-Length
+                # has a zero-length body; it is not close-delimited like a response.
+                return b"", None, framing_metadata
             try:
                 length = int(raw_length)
             except ValueError:
@@ -472,38 +552,52 @@ def _handler_for(state: _CaptureState):
             # receives them either way, so an unwalked header is an unwatched channel.
             header_string_start, header_value_start = len(found.strings), len(found.values)
             for header_name, header_value in self.headers.items():
-                _collect(str(header_name), found)
+                _collect(str(header_name), found, is_key=True)
                 _collect(unquote_plus(str(header_value)), found)
             record["headers_strings"] = found.strings[header_string_start:]
             record["headers_values"] = found.values[header_value_start:]
+            header_defects = getattr(self.headers, "defects", ())
+            if header_defects:
+                # email.message intentionally recovers from malformed header lines
+                # and can discard them. Recovery is useful for a server, but a
+                # measurement oracle cannot certify bytes its parser did not expose.
+                defect_names = sorted({type(defect).__name__ for defect in header_defects})
+                record["error"] = record["error"] or (
+                    "malformed_headers:" + ",".join(defect_names)
+                )
             framing_string_start, framing_value_start = len(found.strings), len(found.values)
-            for item in framing_metadata:
-                _collect(item, found)
+            for kind, item in framing_metadata:
+                _collect_framing_metadata(kind, item, found)
             record["framing_strings"] = found.strings[framing_string_start:]
             record["framing_values"] = found.values[framing_value_start:]
             record["body_strings"] = []
             record["body_values"] = []
             try:
-                payload = json.loads(body)
+                inspection_payload = json.loads(body, object_pairs_hook=_JSONObject)
                 body_string_start, body_value_start = len(found.strings), len(found.values)
-                _collect(payload, found)
+                _collect(inspection_payload, found)
                 record["body_strings"] = found.strings[body_string_start:]
                 record["body_values"] = found.values[body_value_start:]
                 if found.truncated:
                     # Fail closed. A body too deep or too large to walk has NOT been
                     # shown to be clean, and a target can choose how deep to nest.
                     record["error"] = record["error"] or "inspection_truncated"
+                else:
+                    # The echo endpoint needs normal last-member-wins semantics.
+                    # Materialize only after the bounded walk, so over-deep input
+                    # cannot recurse here before its fail-closed record is appended.
+                    payload = _materialize_json(inspection_payload)
                 # A declared content-encoding the capture could not apply means the
                 # bytes walked are not the bytes a real upstream would decode, even
                 # when they happen to parse as JSON on their own.
                 record["parsed"] = not record["error"]
-            except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError) as exc:
                 if body.strip():
                     record["error"] = record["error"] or f"unparsable_body:{type(exc).__name__}"
                 else:
                     # A bodyless request (a GET, say) is fully inspected via its
                     # request line; absence of JSON is not an inspection failure.
-                    record["parsed"] = not found.truncated
+                    record["parsed"] = not record["error"] and not found.truncated
             record["strings"] = found.strings
             record["values"] = found.values
             # Always recorded, parsed or not: an inspection failure must be able to

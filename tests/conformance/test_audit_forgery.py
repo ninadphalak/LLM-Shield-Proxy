@@ -243,6 +243,50 @@ def test_signature_base64_is_not_permissively_rewritten(tmp_path):
     assert result["signatures_invalid"] == 1
 
 
+def test_signature_base64_requires_canonical_pad_bits(tmp_path):
+    """Different textual Base64 must not be accepted as the intact log bytes.
+
+    ``validate=True`` checks the alphabet but does not require unused pad bits to
+    be zero. Changing those bits leaves the decoded Ed25519 signature unchanged.
+    """
+    import base64
+
+    private, pem, fingerprint = _signing_pair()
+    record, _ = _signed(private, fingerprint, 1, GENESIS)
+    canonical = record["signature"]
+    assert canonical.endswith("==")
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    index = alphabet.index(canonical[-3])
+    replacement = alphabet[(index // 16) * 16 + ((index + 1) % 16)]
+    record["signature"] = canonical[:-3] + replacement + "=="
+    assert record["signature"] != canonical
+    assert base64.b64decode(record["signature"], validate=True) == base64.b64decode(canonical)
+
+    result = verify_worm_log(_write(tmp_path, [record]), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert any(b["reason"] == "invalid_signature_encoding" for b in result["chain_breaks"])
+
+
+def test_duplicate_json_member_is_not_accepted_as_an_intact_signed_record(tmp_path):
+    """Injecting a shadow member changes the file but survived dict reconstruction."""
+    private, pem, fingerprint = _signing_pair()
+    record, _ = _signed(private, fingerprint, 1, GENESIS)
+    line = json.dumps(record)
+    line = line.replace(
+        '"chain_id": "prod"',
+        '"chain_id": "attacker-shadow", "chain_id": "prod"',
+        1,
+    )
+    path = tmp_path / "duplicate-key.jsonl"
+    path.write_text(line + "\n", encoding="utf-8")
+
+    result = verify_worm_log(str(path), pem)
+    assert result["chain_valid"] is False
+    assert result["authenticity_verified"] is False
+    assert any(b["reason"] == "duplicate_json_key" for b in result["chain_breaks"])
+
+
 def test_signature_and_fingerprint_must_remain_paired(tmp_path):
     """The fingerprint is part of AuditLogger's signed-record envelope."""
     private, pem, fingerprint = _signing_pair()

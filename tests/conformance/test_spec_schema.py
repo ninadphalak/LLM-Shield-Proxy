@@ -9,9 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-jsonschema = pytest.importorskip("jsonschema")
-from jsonschema import Draft202012Validator  # noqa: E402
+from jsonschema import Draft202012Validator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC_DIR = REPO_ROOT / "spec" / "v1.0.0"
@@ -62,6 +60,15 @@ def test_egress_pass_is_rejected_when_entities_leaked(local_report):
     forged = copy.deepcopy(local_report)
     forged["checks"]["raw_pii_egress"] = {"passed": True, "leaked_entity_types": ["EMAIL"]}
     assert _errors(REPORT_SCHEMA, forged)
+
+
+def test_local_report_cannot_relabel_the_measured_egress_fixture(local_report):
+    """A valid envelope must not claim a different boundary or entity fixture."""
+    forged = copy.deepcopy(local_report)
+    egress = forged["checks"]["raw_pii_egress"]
+    egress["boundary"] = "post-model response and browser storage"
+    egress["protected_entity_types"] = ["PHONE"]
+    assert _errors(REPORT_SCHEMA, forged), "schema accepted a different measured boundary"
 
 
 def test_evidence_free_envelope_is_rejected(local_report):
@@ -185,6 +192,26 @@ def test_boundary_pass_requires_no_leak_and_no_blind_spot():
         boundary[field] = value
         forged["passed"] = True
         assert _errors(HTTP_SCHEMA, forged), f"boundary passed with {field}={value}"
+
+
+def test_http_report_cannot_expand_the_profile_scope_beyond_capture_origin():
+    source = REPO_ROOT / "benchmarks" / "results" / "http-profile-llm-shield-proxy-working-tree.json"
+    forged = json.loads(source.read_text(encoding="utf-8"))
+    assert forged["passed"] is True
+    forged["profile"]["scope"] = "HTTP/2, DNS, TLS, and egress to every destination"
+    forged["checks"]["configured_upstream_boundary"]["inspection_scope"] = (
+        "all protocols and all destinations"
+    )
+    assert _errors(HTTP_SCHEMA, forged), "schema accepted an observation-scope overclaim"
+
+
+def test_passing_sse_check_requires_success_status():
+    source = REPO_ROOT / "benchmarks" / "results" / "http-profile-llm-shield-proxy-working-tree.json"
+    forged = json.loads(source.read_text(encoding="utf-8"))
+    assert forged["passed"] is True
+    sse = forged["checks"]["sse_validity"]
+    sse["status_codes"] = [500]
+    assert _errors(HTTP_SCHEMA, forged), "schema accepted a passing HTTP 500"
 
 
 def test_emitted_http_report_validates():
