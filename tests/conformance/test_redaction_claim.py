@@ -26,7 +26,8 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from llm_shield_proxy.conformance.http_profile import (
-    PROTECTED_VALUES,
+    REFERENCE_FIXTURE,
+    extract_fixture,
     run_http_conformance,
 )
 from llm_shield_proxy.conformance.redaction_claim import (
@@ -55,7 +56,7 @@ def capture_port():
     return _free_port()
 
 
-MASK = {v: f"[TOK_{i}]" for i, v in enumerate(PROTECTED_VALUES.values())}
+# Per-request now; see extract_fixture.
 
 
 def _gateway(port, redact=True):
@@ -70,6 +71,9 @@ def _gateway(port, redact=True):
 
             payload = json.loads(self.rfile.read(int(self.headers.get("content-length", "0"))))
             prompt = payload["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             forwarded = prompt
             if redact:
                 for raw, token in MASK.items():
@@ -325,8 +329,11 @@ def _one_way_anonymizer(port):
 
             payload = json.loads(self.rfile.read(int(self.headers.get("content-length", "0"))))
             prompt = payload["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             anonymized = prompt
-            for index, raw in enumerate(PROTECTED_VALUES.values()):
+            for index, raw in enumerate(RAW):
                 anonymized = anonymized.replace(raw, "{{ENTITY_%d}}" % index)
             payload["messages"][-1]["content"] = anonymized
             try:

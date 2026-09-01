@@ -30,17 +30,224 @@ from llm_shield_proxy.conformance.redaction_claim import (
     rationale_for,
 )
 
-PROTECTED_VALUES = {
-    "EMAIL": "person@example.invalid",
-    "SSN": "123-45-6789",
-    "CREDIT_CARD": "4532-1234-5678-9012",
-}
-_PROMPT_TEMPLATE = (
-    "Synthetic conformance record {nonce}: contact person@example.invalid, "
-    "SSN 123-45-6789, card 4532-1234-5678-9012"
+# ---------------------------------------------------------------------------
+# The protected fixture. Every value must satisfy BOTH properties at once.
+#
+# VALID -- a detector that validates its input recognises it. The fixture this
+# replaced did not: `123-45-6789` is on Presidio's own invalidation list, the card
+# `4532-1234-5678-9012` has Luhn checksum 68, and `.invalid` has no public suffix so
+# `tldextract` rejects it. Measured against `mcr.microsoft.com/presidio-analyzer`,
+# stock registry, `score_threshold: 0.0`, that fixture produced NO `US_SSN`, NO
+# `CREDIT_CARD` and NO `EMAIL_ADDRESS`. So the profile scored a careful detector
+# worse than a careless one, and this project's own engine is careless by
+# construction (`engines/pii_engine.py` is bare regex with no Luhn and no SSN range
+# check). That is a bias in the reference implementation's favour and it is the
+# thing this block exists to remove. Never reintroduce an invalid specimen.
+#
+# NON-REAL -- the value can never identify a person or route anywhere. Reserved
+# space only. This is why the card is DRAWN FROM A PUBLISHED LIST rather than
+# generated: a randomly generated Luhn-valid PAN in an issued BIN may be a live
+# card, and the harness must never emit one.
+# ---------------------------------------------------------------------------
+
+PROTECTED_ENTITY_TYPES = ("EMAIL", "SSN", "CREDIT_CARD")
+
+# RFC 2606 s3 reserves example.com for documentation. It resolves to IANA-operated
+# hosts that accept no mail, so the address cannot reach a person -- and `.com` is a
+# real public suffix, so `tldextract`-style validation accepts it.
+_FIXTURE_EMAIL_DOMAIN = "example.com"
+# Letters only and a CONSTANT length. A digit in the local part would join the
+# cross-request digit haystacks the SSN and card needles are matched against, which
+# is the same reason the capture probe path carries no digits.
+_FIXTURE_EMAIL_LOCAL_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+_FIXTURE_EMAIL_LOCAL_LENGTH = 8
+
+# The SSA has never issued a Social Security Number with an area of 900-999, so a
+# number from this space cannot belong to anyone. Presidio's `UsSsnRecognizer` does
+# not range-check the area, so it still scores these 0.85 -- verified by measurement,
+# not assumed.
+#
+# The group is held to 01-49, which is outside EVERY group range in Presidio's ITIN
+# recognizer (50-65, 70-88, 90-92, 94-99). Without that the value is also a
+# syntactically valid ITIN and a validating detector may label it `US_ITIN` instead
+# of `US_SSN` -- measured: `987-65-4320`, the range the SSA publishes for use in
+# ADVERTISING, comes back US_ITIN 0.5 and no US_SSN at all, because Presidio's SSN
+# recognizer additionally blacklists the prefix `98765432` outright. The officially
+# "safe" SSN is precisely the one a careful detector ignores, which is the whole
+# problem in miniature.
+_FIXTURE_SSN_AREA = (900, 999)
+_FIXTURE_SSN_GROUP = (1, 49)
+_FIXTURE_SSN_SERIAL = (1, 9999)
+# Presidio's UsSsnRecognizer.invalidate_result rejects a value starting with any of
+# these. The generated space cannot produce one, and the generator checks anyway.
+_SSN_INVALIDATING_PREFIXES = ("000", "666", "123456789", "98765432", "078051120")
+
+# Published test PANs. Every one is Luhn-valid, 16 digits, and identically grouped as
+# dddd-dddd-dddd-dddd, so drawing between them varies the VALUE without varying the
+# FORMAT. None is issued to a cardholder. They are enumerated rather than generated
+# on purpose: see the NON-REAL note above.
+_FIXTURE_TEST_CARDS = (
+    "4111111111111111",
+    "4012888888881881",
+    "4242424242424242",
+    "5555555555554444",
+    "5105105105105100",
+    "6011111111111117",
 )
-# Retained for callers and tests that need a stable example of the fixture shape.
-PROMPT = _PROMPT_TEMPLATE.format(nonce="bracket-gravel-kettle-pantry-socket")
+
+# The shape of each value, published in the report and used by callers that must
+# recover the fixture from the prompt they received. A gateway that wants to pass
+# now needs a format-based detector rather than three string replacements.
+PROTECTED_VALUE_FORMATS = {
+    "EMAIL": "[a-z]{8}@example.com",
+    "SSN": "ddd-dd-dddd",
+    "CREDIT_CARD": "dddd-dddd-dddd-dddd",
+}
+PROTECTED_VALUE_PATTERNS = {
+    "EMAIL": re.compile(r"\b[a-z]{8}@example\.com\b"),
+    "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    "CREDIT_CARD": re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{4}\b"),
+}
+
+_PROMPT_TEMPLATE = (
+    "Synthetic conformance record {nonce}: contact {email}, SSN {ssn}, card {card}"
+)
+
+
+def _ipv4_can_produce(digits: str) -> bool:
+    """Could some dotted-quad IPv4 address normalize to exactly these digits?
+
+    `_normalize` strips separators, so an injected client IP is matched against the
+    needle with its dots removed. Round 7 measured exactly this: the single address
+    123.45.67.89 normalizes to the old SSN fixture's digits, so a tunnel that adds an
+    `x-forwarded-for` header produced an SSN finding against a gateway that had
+    redacted correctly. A generated SSN is rejected if any valid IPv4 can collide
+    with it, which removes that class of false accusation by construction rather
+    than by disclosure.
+    """
+
+    def walk(rest: str, parts: int) -> bool:
+        if parts == 4:
+            return not rest
+        if not rest:
+            return False
+        for size in (1, 2, 3):
+            if len(rest) < size:
+                break
+            octet = rest[:size]
+            if size > 1 and octet[0] == "0":
+                continue  # 010 and 01 are not how an address is written
+            if int(octet) > 255:
+                continue
+            if walk(rest[size:], parts + 1):
+                return True
+        return False
+
+    return walk(digits, 0)
+
+
+def _make_ssn() -> str:
+    while True:
+        area = _FIXTURE_SSN_AREA[0] + secrets.randbelow(
+            _FIXTURE_SSN_AREA[1] - _FIXTURE_SSN_AREA[0] + 1
+        )
+        group = _FIXTURE_SSN_GROUP[0] + secrets.randbelow(
+            _FIXTURE_SSN_GROUP[1] - _FIXTURE_SSN_GROUP[0] + 1
+        )
+        serial = _FIXTURE_SSN_SERIAL[0] + secrets.randbelow(
+            _FIXTURE_SSN_SERIAL[1] - _FIXTURE_SSN_SERIAL[0] + 1
+        )
+        value = f"{area:03d}-{group:02d}-{serial:04d}"
+        digits = value.replace("-", "")
+        if any(digits.startswith(prefix) for prefix in _SSN_INVALIDATING_PREFIXES):
+            continue  # unreachable from this space, but the invariant is checked
+        if all(digit == digits[0] for digit in digits):
+            continue
+        if _ipv4_can_produce(digits):
+            continue
+        return value
+
+
+def make_fixture() -> dict[str, str]:
+    """One run's protected values. Same format every run, different values.
+
+    Variation is not a fraud control on its own -- a target that redacts by FORMAT
+    passes either way, which is the point. It raises the cheapest way to pass without
+    building anything from three string replacements to a working format detector,
+    which is approximately the thing being measured.
+
+    The card is drawn from a fixed published list rather than generated. Generating a
+    Luhn-valid PAN would satisfy VALID and break NON-REAL.
+    """
+    local = "".join(
+        _FIXTURE_EMAIL_LOCAL_ALPHABET[
+            secrets.randbelow(len(_FIXTURE_EMAIL_LOCAL_ALPHABET))
+        ]
+        for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH)
+    )
+    card = _FIXTURE_TEST_CARDS[secrets.randbelow(len(_FIXTURE_TEST_CARDS))]
+    return {
+        "EMAIL": f"{local}@{_FIXTURE_EMAIL_DOMAIN}",
+        "SSN": _make_ssn(),
+        "CREDIT_CARD": "-".join(card[index : index + 4] for index in range(0, 16, 4)),
+    }
+
+
+def fixture_value_space() -> dict[str, int]:
+    """How many distinct values each entity can draw from, before rejection.
+
+    Published so a reader can see what value variation is actually worth per entity
+    rather than taking "varies per run" on trust. NOMINAL: `_make_ssn` resamples away
+    the IPv4-collidable values on top of this, which is not a rounding error -- a
+    measured 37.3% of the 9-digit space is some dotted quad with its dots removed, so
+    the effective SSN space is about 3.1e7 rather than 4.9e7. It is reported nominal
+    because counting the exact residue is a 49-million-iteration walk and does not
+    belong on the report path.
+
+    The card number is deliberately the smallest by four orders of magnitude. That is
+    not an oversight: it is drawn from a published list because a generated
+    Luhn-valid PAN in an issued BIN could be a live card.
+    """
+    return {
+        "EMAIL": len(_FIXTURE_EMAIL_LOCAL_ALPHABET) ** _FIXTURE_EMAIL_LOCAL_LENGTH,
+        "SSN": (
+            (_FIXTURE_SSN_AREA[1] - _FIXTURE_SSN_AREA[0] + 1)
+            * (_FIXTURE_SSN_GROUP[1] - _FIXTURE_SSN_GROUP[0] + 1)
+            * (_FIXTURE_SSN_SERIAL[1] - _FIXTURE_SSN_SERIAL[0] + 1)
+        ),
+        "CREDIT_CARD": len(_FIXTURE_TEST_CARDS),
+    }
+
+
+def extract_fixture(prompt: str) -> dict[str, str]:
+    """Recover the fixture from a prompt, by FORMAT.
+
+    Exported because the values now vary per run: anything that needs to act on them
+    -- a mock gateway in the test suite, a reference redactor -- must detect them
+    rather than compare against a constant.
+    """
+    found: dict[str, str] = {}
+    for entity, pattern in PROTECTED_VALUE_PATTERNS.items():
+        match = pattern.search(prompt)
+        if match:
+            found[entity] = match.group(0)
+    return found
+
+
+# A stable, valid, non-real example of the fixture SHAPE, for documentation and for
+# callers that need one value set without running the harness. It is NOT what a run
+# uses -- `make_fixture()` is -- so never match a captured request against it.
+REFERENCE_FIXTURE = {
+    "EMAIL": "jrmccalx@example.com",
+    "SSN": "914-27-6083",
+    "CREDIT_CARD": "4111-1111-1111-1111",
+}
+PROMPT = _PROMPT_TEMPLATE.format(
+    nonce="bracket-gravel-kettle-pantry-socket",
+    email=REFERENCE_FIXTURE["EMAIL"],
+    ssn=REFERENCE_FIXTURE["SSN"],
+    card=REFERENCE_FIXTURE["CREDIT_CARD"],
+)
 
 # Bounds on what the capture server will buffer and inspect from one request.
 # Exceeding any of them marks the capture uninspectable, which FAILS the boundary
@@ -128,8 +335,13 @@ def _make_nonce() -> str:
     return "-".join(chosen)
 
 
-def _build_prompt(nonce: str) -> str:
-    return _PROMPT_TEMPLATE.format(nonce=nonce)
+def _build_prompt(nonce: str, fixture: dict[str, str]) -> str:
+    return _PROMPT_TEMPLATE.format(
+        nonce=nonce,
+        email=fixture["EMAIL"],
+        ssn=fixture["SSN"],
+        card=fixture["CREDIT_CARD"],
+    )
 
 
 def _normalize(text: str) -> str:
@@ -156,7 +368,15 @@ def _decode_candidates(value: str) -> list[str]:
         # which is all it took to hide an encoded value from an anchored match.
         for offset in range(4):
             aligned = run[offset:]
-            if len(aligned) < 16:
+            # Floor of one decodable group, NOT the 16 characters _BASE64ISH needs to
+            # spot a run in the first place. Reusing 16 here meant a 16-character run
+            # -- exactly what one prefix character plus an 11-byte value produces --
+            # was only ever tried at offset 0, which decodes to noise, so the value
+            # was never recovered. The suite did not catch it because the previous
+            # fixture's SSN digits (123456789) were a SUBSTRING of its card digits
+            # (4532123456789012): every "SSN recovered" assertion was satisfied by
+            # decoding the card. Found when the fixture stopped being invalid.
+            if len(aligned) < 4:
                 break
             # Both truncating to a 4-character boundary and padding up to one:
             # truncating alone drops the final group, which cost the tail of a value
@@ -353,7 +573,7 @@ def _needle_proximity(needle: str, haystacks: tuple[str, ...]) -> int:
 
 
 def _leaked_entities(
-    records: list[dict[str, Any]]
+    records: list[dict[str, Any]], fixture: dict[str, str]
 ) -> tuple[list[str], list[dict[str, Any]], int]:
     """Entity types whose fixture value reached the upstream in any recoverable form.
 
@@ -362,7 +582,7 @@ def _leaked_entities(
     """
     leaked: set[str] = set()
     evidence: list[dict[str, Any]] = []
-    proximity: dict[str, int] = {entity: 0 for entity in PROTECTED_VALUES}
+    proximity: dict[str, int] = {entity: 0 for entity in fixture}
 
     def inspect(strings: list[str], values: list[str], channel: str, scope: str) -> None:
         haystacks = (
@@ -371,11 +591,11 @@ def _leaked_entities(
             _normalize("".join(strings)),
             _normalize("".join(values)),
         )
-        for entity, value in PROTECTED_VALUES.items():
+        for entity, value in fixture.items():
             proximity[entity] = max(
                 proximity[entity], _needle_proximity(_normalize(value), haystacks)
             )
-        for entity, value in PROTECTED_VALUES.items():
+        for entity, value in fixture.items():
             if entity in leaked:
                 continue
             if any(value in text for text in strings):
@@ -1097,7 +1317,11 @@ def run_http_conformance(
     # target can exfiltrate raw PII to its real upstream and satisfy the boundary
     # check with one unrelated request to the capture server.
     nonce = _make_nonce()
-    prompt = _build_prompt(nonce)
+    # Values vary per run; the FORMAT does not. A target that redacts by shape is
+    # unaffected. See make_fixture() for why the card is drawn from a published list
+    # instead of generated, and why an SSN an IPv4 could collide with is rejected.
+    fixture = make_fixture()
+    prompt = _build_prompt(nonce, fixture)
 
     probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
     state = _CaptureState(probe_path, capture_token)
@@ -1168,7 +1392,7 @@ def run_http_conformance(
     unattributed = [record for record in target_records if not record.get("authenticated", True)]
 
     marker_words = nonce.split("-")
-    leaked_types, leak_evidence, needle_proximity = _leaked_entities(captured)
+    leaked_types, leak_evidence, needle_proximity = _leaked_entities(captured, fixture)
     # Inspected SEPARATELY, not joined into the target's channels. Concatenating
     # anonymous internet traffic into the cross-request haystacks would let a third
     # party who knows the fixture and the capture URL manufacture a leak finding
@@ -1179,7 +1403,7 @@ def run_http_conformance(
         unattributed_leaked_types,
         unattributed_leak_evidence,
         unattributed_needle_proximity,
-    ) = _leaked_entities(unattributed)
+    ) = _leaked_entities(unattributed, fixture)
     unattributed_uninspectable = [
         record for record in unattributed if not record["parsed"]
     ]
@@ -1240,8 +1464,7 @@ def run_http_conformance(
             # request from 20 digits to 93.
             "needle_proximity": needle_proximity,
             "needle_lengths": {
-                entity: len(_normalize(value))
-                for entity, value in PROTECTED_VALUES.items()
+                entity: len(_normalize(value)) for entity, value in fixture.items()
             },
             "upstream_paths_observed": paths,
             "upstream_methods_observed": methods,
@@ -1340,6 +1563,31 @@ def run_http_conformance(
             "extra_header_names": sorted(extra_headers or {}),
             "raw_pass_through_baseline": target_base_url == "capture://self",
         },
+        # Dimensions only. Publishing the values would hand a shim the answer, and
+        # publishing nothing left a reader unable to tell a varied-valid fixture from
+        # the fixed-invalid one this replaced.
+        "fixture": {
+            "varies_per_run": True,
+            "values_published": False,
+            "formats": dict(PROTECTED_VALUE_FORMATS),
+            "value_space_nominal": fixture_value_space(),
+            "specimens_are_valid": (
+                "Every value is a valid specimen a validating detector recognises: "
+                "Luhn-valid 16-digit PAN, SSN with non-zero group and serial outside "
+                "every ITIN group range, address on a real public suffix."
+            ),
+            "specimens_are_non_real": (
+                "Reserved space only: example.com (RFC 2606 s3), the SSA "
+                "never-issued 900-999 SSN area, and published test card numbers."
+            ),
+            "ssn_ipv4_collision_rejection": (
+                "Generated SSNs whose digits any valid dotted-quad IPv4 address "
+                "could produce are resampled, because header inspection puts client "
+                "IPs into the same normalized haystack. A measured 37.3% of the "
+                "nominal space is rejected on this rule, so the effective SSN space "
+                "is roughly 3.1e7."
+            ),
+        },
         "harness_revision": os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown",
         "environment": {
             "python": platform.python_version(),
@@ -1419,22 +1667,23 @@ def run_http_conformance(
                 "was recovered only after joining channels and stripping separators, "
                 "which is what catches deliberate obfuscation but can in principle "
                 "collide. needle_proximity reports how close anything came to each "
-                "protected value, against needle_lengths -- equal means present. On an "
-                "honest run the SSN margin measures 2 of 9.",
+                "protected value, against needle_lengths -- equal means present. The "
+                "margin is published per run because the values vary per run.",
                 "In public mode the path between the target and the capture injects "
                 "headers of its own, and they are inspected as an egress channel "
                 "because a gateway could hide values there. A measured Cloudflare quick "
                 "tunnel adds ten (cf-connecting-ip, x-forwarded-for, cf-ray and seven "
                 "more) and takes a request from 20 digits to 93 without changing needle "
                 "proximity. Any injected identifier whose digits happen to contain a "
-                "protected value collides: of valid IPv4 addresses exactly one, "
-                "123.45.67.89, normalizes to the SSN fixture's digits, and a random "
-                "hex request id reaches them at roughly 1e-10 per request. Such a run "
-                "reports a normalized-match SSN finding against a gateway that "
-                "redacted correctly. Suppressing header inspection would open a real "
-                "evasion channel to remove a rare event, so leak_evidence records the "
-                "matcher instead: check whether the match was literal before treating "
-                "it as egress. The 16-digit card needle is unreachable by any IPv4.",
+                "protected value collides. The IPv4 case is now excluded by "
+                "construction rather than disclosed: the generator rejects any SSN "
+                "whose digits some valid dotted-quad address could produce, which is "
+                "what made 123.45.67.89 normalize onto the previous fixed SSN and "
+                "report a leak against a gateway that had redacted correctly. A random "
+                "hex request id still reaches the needle at roughly 1e-10 per request, "
+                "so leak_evidence records which matcher fired: check whether the match "
+                "was literal before treating it as egress. The 16-digit card needle is "
+                "unreachable by any IPv4.",
                 "correlated_requests counts captured requests carrying at least the "
                 "required number of marker words; marker_words_observed_max reports how "
                 "much of the marker survived. A gateway that reversibly masks the marker "
@@ -1446,14 +1695,25 @@ def run_http_conformance(
                 "or public-model behavior.",
                 "The synthetic fixture does not establish population-level detector "
                 "accuracy.",
-                "The fixture is three fixed, publicly known values, so a target that "
-                "hard-codes them passes every check without operating a detector at "
-                "all -- reproduced with a ~35-line string-replacement shim. This "
-                "profile measures the behaviour of the endpoint it was pointed at "
-                "during the run; it does not establish that the endpoint is the "
-                "product it is labelled as. Varying the fixture was measured and "
-                "rejected: a third of plausible format variants made this project's "
-                "own correctly-redacting gateway report a leak.",
+                "The fixture VALUES vary per run but the FORMATS are fixed and "
+                "published, so a target that matches the three shapes and substitutes "
+                "them passes every check without operating a detector on anything "
+                "else. Value variation raised the cheapest such shim from three string "
+                "replacements to a working format matcher; it does not make one "
+                "impossible. This profile measures the behaviour of the endpoint it "
+                "was pointed at during the run; it does not establish that the "
+                "endpoint is the product it is labelled as.",
+                "The card value is drawn from a fixed list of published test PANs "
+                "rather than generated. A generated Luhn-valid number in an issued BIN "
+                "could be a live card, so the harness will not emit one -- which means "
+                "the card carries less value entropy than the SSN and the email.",
+                "Every fixture value is a VALID specimen: Luhn-valid card, an SSN in "
+                "the never-issued 900-999 area with a non-ITIN group, and an address "
+                "on the reserved example.com domain. A detector that validates its "
+                "input therefore recognises all three. This replaced a fixture whose "
+                "three values were all invalid specimens, which stock Presidio "
+                "correctly ignored -- that fixture measured carefulness as a fault and "
+                "favoured this project's own non-validating regex engine.",
                 "Client-observed latency includes local HTTP and capture-server work and "
                 "has no universal threshold.",
                 "Implementation name and version are operator-supplied labels, not "

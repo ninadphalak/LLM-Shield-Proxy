@@ -31,13 +31,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from llm_shield_proxy.conformance.http_profile import (
-    PROTECTED_VALUES,
+    PROTECTED_ENTITY_TYPES,
+    REFERENCE_FIXTURE,
+    _ipv4_can_produce,
+    make_fixture,
+    extract_fixture,
     _needle_proximity,
     _normalize,
     run_http_conformance,
 )
 
-MASK = {v: f"[TOK_{i}]" for i, v in enumerate(PROTECTED_VALUES.values())}
+# Per-request now; see extract_fixture.
 # What cloudflared actually adds, measured against a live quick tunnel.
 TUNNEL_HEADERS = {
     "cf-ray": "9a2b3c4d5e6f7890-LHR",
@@ -72,6 +76,9 @@ def _gateway(port, *, redact=True, extra_headers=None):
         def do_POST(self):  # noqa: N802
             payload = json.loads(self.rfile.read(int(self.headers.get("content-length", "0"))))
             prompt = payload["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             forwarded = prompt
             if redact:
                 for raw, token in MASK.items():
@@ -130,7 +137,7 @@ def test_needle_proximity_is_the_needle_run_not_a_digit_count():
     like the fixture, so a digit-run count is dominated by them and says nothing about
     headroom. This metric measures the needle instead.
     """
-    needle = _normalize(PROTECTED_VALUES["CREDIT_CARD"])  # 16 digits
+    needle = _normalize(REFERENCE_FIXTURE["CREDIT_CARD"])  # 16 digits
     # A different 16-digit card: plenty of digits, but almost none of THIS needle.
     substitute = _normalize("4187-4907-6848-0972")
     assert len(substitute) == 16
@@ -151,7 +158,7 @@ def test_honest_run_keeps_a_margin(capture_port):
     report = _run(capture_port)
     boundary = report["checks"]["configured_upstream_boundary"]
     assert boundary["leaked_entity_types"] == []
-    for entity in PROTECTED_VALUES:
+    for entity in PROTECTED_ENTITY_TYPES:
         assert boundary["needle_proximity"][entity] < boundary["needle_lengths"][entity]
 
 
@@ -183,59 +190,82 @@ def test_tunnel_injected_headers_do_not_fail_an_honest_gateway(capture_port):
     assert report["passed"] is True, report["checks"]
 
 
-def test_the_client_ip_collision_is_distinguishable_from_a_real_leak(capture_port):
-    """The enumerated false positive, and the field that lets a reader catch it.
+def test_no_client_ip_can_collide_with_a_generated_ssn(capture_port):
+    """The round-7 false positive is now excluded by construction, not disclosed.
 
-    123.45.67.89 is the ONLY valid IPv4 that normalizes to the SSN fixture's digits.
-    A client connecting from it makes a perfectly-redacting gateway report an SSN
-    finding. That is not suppressed -- dropping header inspection would open a real
-    evasion channel -- so what must hold is that the artifact says the match was
-    NORMALIZED, not literal, and a reader can tell it from a value sent verbatim.
+    123.45.67.89 normalizes to 123456789, which WAS the SSN fixture's digits: a client
+    connecting from that address made a perfectly-redacting gateway report an SSN
+    finding. The generator now resamples any SSN some valid dotted quad could produce,
+    so no address can reproduce that class of finding. Header inspection is unchanged --
+    suppressing it would have opened a real evasion channel.
     """
-    collision = _run(
+    hostile = _run(
         capture_port,
         extra_headers={**TUNNEL_HEADERS, "x-forwarded-for": "123.45.67.89"},
     )
-    boundary = collision["checks"]["configured_upstream_boundary"]
-    assert boundary["leaked_entity_types"] == ["SSN"], "the enumerated collision changed"
-    evidence = {item["entity_type"]: item for item in boundary["leak_evidence"]}
-    assert evidence["SSN"]["match"] == "normalized"
+    boundary = hostile["checks"]["configured_upstream_boundary"]
+    assert boundary["leaked_entity_types"] == [], boundary["leak_evidence"]
+    assert hostile["passed"] is True, hostile["checks"]
 
-    # A genuine verbatim leak is reported differently, which is the whole point.
+    # A genuine verbatim leak is still reported, and as a literal match.
     real = _run(capture_port, redact=False)
     real_evidence = {
         item["entity_type"]: item
         for item in real["checks"]["configured_upstream_boundary"]["leak_evidence"]
     }
     assert real_evidence["SSN"]["match"] == "literal"
-    assert evidence["SSN"]["match"] != real_evidence["SSN"]["match"]
+
+
+def test_generated_ssns_are_never_ipv4_representable():
+    """The invariant behind the test above, checked over many draws rather than one."""
+    for _ in range(500):
+        digits = _normalize(make_fixture()["SSN"])
+        assert len(digits) == 9
+        assert not _ipv4_can_produce(digits), digits
 
 
 def test_the_card_needle_cannot_collide_with_any_ipv4():
     """16 normalized digits; the longest possible IPv4 digit string is 12."""
-    assert len(_normalize(PROTECTED_VALUES["CREDIT_CARD"])) == 16
+    assert len(_normalize(REFERENCE_FIXTURE["CREDIT_CARD"])) == 16
     longest_possible_ipv4_digits = len("255255255255")
-    assert longest_possible_ipv4_digits < len(_normalize(PROTECTED_VALUES["CREDIT_CARD"]))
+    assert longest_possible_ipv4_digits < len(
+        _normalize(REFERENCE_FIXTURE["CREDIT_CARD"])
+    )
 
 
-def test_exactly_one_ipv4_collides_with_the_ssn_needle():
-    """Pins the enumeration the limitation text states. If the fixture changes, this
-    fails and the documented claim must be re-derived rather than silently going stale.
+def test_the_ipv4_enumeration_agrees_with_the_generator_guard():
+    """An independent enumeration, so `_ipv4_can_produce` cannot silently weaken.
+
+    The guard is what removes the round-7 false positive, so it gets a second
+    implementation rather than a self-consistent one. 123456789 -- the SSN the profile
+    used to ship -- must still enumerate as reachable; a generated SSN must not.
     """
-    needle = _normalize(PROTECTED_VALUES["SSN"])
-    found = []
-    for a in range(1, 4):
-        for b in range(1, 4):
-            for c in range(1, 4):
-                d = len(needle) - a - b - c
-                if not 1 <= d <= 3:
-                    continue
-                parts = [needle[:a], needle[a:a + b], needle[a + b:a + b + c], needle[a + b + c:]]
-                if any(len(part) > 1 and part[0] == "0" for part in parts):
-                    continue
-                if all(int(part) <= 255 for part in parts):
-                    found.append(".".join(parts))
-    assert found == ["123.45.67.89"], found
+
+    def enumerate_ipv4(needle):
+        found = []
+        for a in range(1, 4):
+            for b in range(1, 4):
+                for c in range(1, 4):
+                    d = len(needle) - a - b - c
+                    if not 1 <= d <= 3:
+                        continue
+                    parts = [
+                        needle[:a],
+                        needle[a : a + b],
+                        needle[a + b : a + b + c],
+                        needle[a + b + c :],
+                    ]
+                    if any(len(part) > 1 and part[0] == "0" for part in parts):
+                        continue
+                    if all(int(part) <= 255 for part in parts):
+                        found.append(".".join(parts))
+        return found
+
+    assert enumerate_ipv4("123456789") == ["123.45.67.89"]
+    assert _ipv4_can_produce("123456789") is True
+    for _ in range(200):
+        digits = _normalize(make_fixture()["SSN"])
+        assert enumerate_ipv4(digits) == [], digits
 
 
 def test_limitations_disclose_the_matcher_and_the_collision(capture_port):

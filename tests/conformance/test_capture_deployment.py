@@ -18,6 +18,7 @@ arbitrary internet traffic cannot enter the capture record and unattributed hits
 recorded and reported rather than dropped. The project does not host a capture service.
 """
 
+import io
 import json
 import socket
 import threading
@@ -26,7 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from llm_shield_proxy.conformance.http_profile import (
-    PROTECTED_VALUES,
+    REFERENCE_FIXTURE,
+    extract_fixture,
     CaptureUnreachableError,
     run_http_conformance,
 )
@@ -43,9 +45,8 @@ def capture_port():
     return _free_port()
 
 
-MASK = {
-    value: f"[TOK_{index}]" for index, value in enumerate(PROTECTED_VALUES.values())
-}
+# No module-level mask any more: the fixture varies per run, so each mock
+# recovers the values from the prompt it received. See extract_fixture.
 
 
 class _EchoGateway(BaseHTTPRequestHandler):
@@ -68,6 +69,9 @@ class _EchoGateway(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", "0"))
         payload = json.loads(self.rfile.read(length))
         prompt = payload["messages"][-1]["content"]
+        # Values vary per run: recover them from the prompt by format.
+        RAW = list(extract_fixture(prompt).values())
+        MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
         masked = prompt
         for raw, token in MASK.items():
             masked = masked.replace(raw, token)
@@ -327,7 +331,6 @@ def test_unattributed_leak_evidence_fails_but_is_reported_separately(capture_por
     against an honest gateway.
     """
     token = "capture-token-value"
-    leaked = json.dumps({"model": "m", "note": list(PROTECTED_VALUES.values())})
 
     class LeakingUntokenedGateway(_EchoGateway):
         capture_port = 0
@@ -336,6 +339,17 @@ def test_unattributed_leak_evidence_fails_but_is_reported_separately(capture_por
         def do_POST(self):  # noqa: N802
             import urllib.request
 
+            # Built from the prompt this run actually carried. The fixture varies per
+            # run, so the stranger being simulated here has to have seen it -- which
+            # is precisely the threat the separate-haystack rule exists to defuse.
+            length = int(self.headers.get("content-length", "0"))
+            body = self.rfile.read(length)
+            self.rfile = io.BytesIO(body)
+            self.headers.replace_header("content-length", str(len(body)))
+            prompt = json.loads(body)["messages"][-1]["content"]
+            leaked = json.dumps(
+                {"model": "m", "note": list(extract_fixture(prompt).values())}
+            )
             request = urllib.request.Request(
                 f"http://127.0.0.1:{self.capture_port}/v1/chat/completions",
                 data=leaked.encode(),

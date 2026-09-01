@@ -7,6 +7,7 @@
     "capture",
     "checks",
     "environment",
+    "fixture",
     "generated_at",
     "harness_revision",
     "implementation",
@@ -273,6 +274,58 @@
     "outcome_rationale": {
       "type": "string",
       "minLength": 1
+    },
+    "fixture": {
+      "type": "object",
+      "description": "Dimensions of the protected fixture used by this run. Values are never published -- printing them would hand a shape-matching shim the answer -- but a reader must be able to tell a varied, VALID fixture from the fixed one this replaced, whose three values were all invalid specimens (a blacklisted SSN, a Luhn-invalid card, an address with no public suffix) that a validating detector correctly ignored.",
+      "required": [
+        "varies_per_run",
+        "values_published",
+        "formats",
+        "value_space_nominal",
+        "specimens_are_valid",
+        "specimens_are_non_real"
+      ],
+      "properties": {
+        "varies_per_run": {
+          "type": "boolean"
+        },
+        "values_published": {
+          "const": false,
+          "description": "The harness never writes fixture values into a report."
+        },
+        "formats": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The shape of each protected value. Fixed across runs, so a format-matching target is unaffected by value variation."
+        },
+        "value_space_nominal": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Distinct values each entity draws from, before rejection sampling. A value of 1 means that entity does not vary."
+        },
+        "specimens_are_valid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "specimens_are_non_real": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ssn_ipv4_collision_rejection": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     }
   },
   "allOf": [
@@ -881,7 +934,7 @@
                   "literal",
                   "normalized"
                 ],
-                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide -- an injected client IP of 123.45.67.89 normalizes to the SSN fixture's digits. Check this before describing a finding as egress."
+                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide with an injected identifier's digits. The IPv4 case that produced a false SSN finding in round 7 is now excluded by construction: the generator resamples any SSN some valid dotted quad could produce. Check this field before describing a finding as egress."
               }
             },
             "additionalProperties": false
@@ -922,7 +975,7 @@
                   "literal",
                   "normalized"
                 ],
-                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide -- an injected client IP of 123.45.67.89 normalizes to the SSN fixture's digits. Check this before describing a finding as egress."
+                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide with an injected identifier's digits. The IPv4 case that produced a false SSN finding in round 7 is now excluded by construction: the generator resamples any SSN some valid dotted quad could produce. Check this field before describing a finding as egress."
               }
             },
             "additionalProperties": false
@@ -930,7 +983,7 @@
         },
         "needle_proximity": {
           "type": "object",
-          "description": "Longest contiguous run OF EACH NEEDLE found in any haystack, against needle_lengths. Equal means the value is present; less is the margin. An honest run measures 2 of 9 for the SSN. Deliberately not a digit count: a correctly redacting gateway emits substitute values shaped like the fixture, so a raw digit-run count is dominated by them and says nothing about headroom.",
+          "description": "Longest contiguous run OF EACH NEEDLE found in any haystack, against needle_lengths. Equal means the value is present; less is the margin. Published per run because the fixture values vary per run. Deliberately not a digit count: a correctly redacting gateway emits substitute values shaped like the fixture, so a raw digit-run count is dominated by them and says nothing about headroom.",
           "additionalProperties": {
             "type": "integer",
             "minimum": 0

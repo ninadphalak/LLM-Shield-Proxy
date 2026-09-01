@@ -30,7 +30,9 @@ from llm_shield_proxy.conformance.http_profile import (
     _NONCE_MIN_MATCHES,
     CaptureUnreachableError,
     _NONCE_WORD_COUNT,
-    PROTECTED_VALUES,
+    PROTECTED_ENTITY_TYPES,
+    REFERENCE_FIXTURE,
+    extract_fixture,
     run_http_conformance,
 )
 
@@ -53,8 +55,9 @@ def capture_port():
     return _free_port()
 
 
-RAW = list(PROTECTED_VALUES.values())
-MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
+# RAW/MASK are per request now. The fixture values vary run to run, so a mock
+# that compared against a module constant would mask nothing -- which is exactly
+# the work a real gateway has to do.
 BACKSLASH = chr(92)
 
 # Given names that a conforming PERSON detector redacts. None may appear in the
@@ -168,6 +171,9 @@ def _leaking_gateway(mode, capture_port):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked = prompt
             for raw, token in MASK.items():
                 masked = masked.replace(raw, token)
@@ -434,7 +440,9 @@ def test_every_protected_entity_is_recovered(mode, capture_port):
     the shortest value is a decoder that mostly does not work."""
     report = _run(_leaking_gateway(mode, capture_port), capture_port)
     leaked = report["checks"]["configured_upstream_boundary"]["leaked_entity_types"]
-    assert sorted(leaked) == sorted(PROTECTED_VALUES), f"{mode} recovered only {leaked}"
+    assert sorted(leaked) == sorted(PROTECTED_ENTITY_TYPES), (
+        f"{mode} recovered only {leaked}"
+    )
 
 
 def test_fragment_split_inside_a_protected_value_is_reassembled(capture_port):
@@ -445,10 +453,15 @@ def test_fragment_split_inside_a_protected_value_is_reassembled(capture_port):
     reassembly at all - the joined-fragment check could be deleted outright with
     every test still green.
     """
-    email = PROTECTED_VALUES["EMAIL"]
-    middle = len(email) // 2
-    parts = [email[:middle], email[middle:]]
-    assert not any(value in part for part in parts for value in PROTECTED_VALUES.values())
+    # The split is computed per request now, from the value the gateway actually
+    # received: the fixture varies run to run, so bisecting a module constant would
+    # send two halves of a value that is not in this run's prompt at all -- and the
+    # test would pass while exercising nothing.
+    reference = REFERENCE_FIXTURE["EMAIL"]
+    reference_parts = [reference[: len(reference) // 2], reference[len(reference) // 2 :]]
+    assert not any(
+        value in part for part in reference_parts for value in REFERENCE_FIXTURE.values()
+    )
 
     def _fragment_gateway(port):
       class FragmentGateway(BaseHTTPRequestHandler):
@@ -460,6 +473,12 @@ def test_fragment_split_inside_a_protected_value_is_reassembled(capture_port):
           def do_POST(self):  # noqa: N802
               length = int(self.headers.get("content-length", "0"))
               prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+              # Values vary per run: recover them from the prompt by format.
+              RAW = list(extract_fixture(prompt).values())
+              MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
+              email = extract_fixture(prompt)["EMAIL"]
+              middle = len(email) // 2
+              parts = [email[:middle], email[middle:]]
               masked = prompt
               for raw, token in MASK.items():
                   masked = masked.replace(raw, token)
@@ -498,6 +517,9 @@ def test_body_too_deep_to_inspect_fails_closed(capture_port):
           def do_POST(self):  # noqa: N802
               length = int(self.headers.get("content-length", "0"))
               prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+              # Values vary per run: recover them from the prompt by format.
+              RAW = list(extract_fixture(prompt).values())
+              MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
               node = {"leaf": "nothing to see"}
               for _ in range(400):
                   node = {"n": node}
@@ -541,6 +563,9 @@ def test_uncorrelated_traffic_does_not_satisfy_the_boundary_check(capture_port):
           def do_POST(self):  # noqa: N802
               length = int(self.headers.get("content-length", "0"))
               text = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+              # Values vary per run: recover them from the prompt by format.
+              RAW = list(extract_fixture(text).values())
+              MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
               _post(
                   f"http://127.0.0.1:{port}/v1/chat/completions",
                   json.dumps(
@@ -589,6 +614,9 @@ def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None, sing
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked, restored = prompt, {}
             for raw, token in MASK.items():
                 masked = masked.replace(raw, token)
@@ -645,6 +673,9 @@ def _marker_redacting_gateway(port, count):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             found = re.search(r"record ([a-z-]+):", prompt)
             assert found, "the fixture prompt must carry the run marker"
             masked, restored = prompt, {}
@@ -749,6 +780,9 @@ def test_every_iteration_contributes_to_response_fidelity(capture_port):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked = prompt
             for raw, token in MASK.items():
                 masked = masked.replace(raw, token)
@@ -801,6 +835,9 @@ def test_sessions_are_namespaced_across_profile_invocations(capture_port):
 
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked = prompt
             for raw, token in MASK.items():
                 masked = masked.replace(raw, token)
@@ -851,6 +888,9 @@ def test_unsupported_http_transport_fails_closed(capture_port):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked = prompt
             for raw, token in MASK.items():
                 masked = masked.replace(raw, token)
@@ -916,6 +956,9 @@ def test_egress_deferred_until_after_capture_shutdown_is_disclosed(capture_port)
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked = prompt
             for raw, token in MASK.items():
                 masked = masked.replace(raw, token)
@@ -1022,6 +1065,9 @@ def _one_way_anonymizer(port):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             for raw in MASK:
                 prompt = prompt.replace(raw, "<REDACTED>")
             response = _post(
@@ -1167,6 +1213,9 @@ def test_zero_captured_requests_is_disclosed_as_an_unattributed_outcome(capture_
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.send_header("connection", "close")

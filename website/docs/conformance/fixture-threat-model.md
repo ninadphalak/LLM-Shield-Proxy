@@ -9,6 +9,13 @@ nothing. This page states that weakness in the current HTTP profile plainly, mea
 sides of the obvious fix, and records the decision. Nothing here is hypothetical: every
 number below was produced by running the harness.
 
+Two defects of the fixture are recorded here, and they point in opposite directions. The
+first is that the fixture is **gameable**, which lets a target pass without doing the work;
+that one is measured, decided, and deliberately left unfixed. The second, found later by
+the first runs against real third-party gateways, is that the fixture is **undetectable by
+a detector that validates its input**, which fails a target that is behaving correctly.
+That one is open.
+
 ## The weakness
 
 The HTTP profile's prompt contains three hard-coded constants:
@@ -133,6 +140,40 @@ Three changes, in priority order, each of which does more than a varying fixture
    plus a target identity — a passing JSON file alone was never sufficient.
 
 None of that is a code change to the fixture, which is why the fixture stays as it is.
+
+## A second, separate defect: the fixture is undetectable by a validating detector
+
+Found on 2026-09-01 by the first runs against real third-party gateways, and **not yet
+fixed**. This is not the gameability problem above; it points the other way. Gameability lets
+a bad target pass. This makes a *good* target fail.
+
+Each of the three constants is a value chosen to be safe to publish, and each is therefore
+exactly what a detector that validates its input is built to reject. Measured against the
+pinned `mcr.microsoft.com/presidio-analyzer` image, `score_threshold: 0.0`, English:
+
+| Fixture value | Presidio verdict | Control | Presidio verdict |
+| :--- | :--- | :--- | :--- |
+| `123-45-6789` | nothing — `US_SSN` invalidates the sequential digits | `456-78-9012` | `US_SSN` 0.85 |
+| `4532-1234-5678-9012` | no `CREDIT_CARD` — Luhn sum is 68 | `4111-1111-1111-1111` | `CREDIT_CARD` 1.0 |
+| `person@example.invalid` | `URL` 0.5, never `EMAIL_ADDRESS` | `bob@example.com` | `EMAIL_ADDRESS` 1.0 |
+
+Analysed as the whole prompt, stock Presidio returns two findings — `DATE_TIME` over the card
+and `URL` over part of the email — and nothing for the SSN.
+
+The consequence was reproduced end to end. LiteLLM 1.99.0 with its documented Presidio PII
+masking guardrail enabled reports `leaked_entity_types: ["SSN"]` against the shipped fixture,
+and `leaked_entity_types: []` against the same run with only the three constants substituted
+for detectable equivalents. LLM-Shield-Proxy passes both, because its Tier 1 patterns are pure
+regex with no Luhn check and no SSN range check. **The fixture systematically favours
+non-validating detectors, and this project's own implementation is one.**
+
+That is a bias in the referee's favour, so it is stated here rather than left in the artifacts.
+Until it is fixed, a `fail` produced against a detector that validates its input is not
+publishable as a verdict; the row is held back and the reason is published instead. Any fix has
+to keep the values publishable and non-real while remaining detectable — for example values
+that are format-valid and checksum-valid but reserved, chosen per entity type — and it changes
+the constants the cross-request margin below is measured against, so it must be re-measured in
+the same change.
 
 ## What this does not claim
 

@@ -24,12 +24,13 @@ import pytest
 
 from llm_shield_proxy.cli import build_benchmark_parser
 from llm_shield_proxy.conformance.http_profile import (
-    PROTECTED_VALUES,
+    REFERENCE_FIXTURE,
+    extract_fixture,
     run_http_conformance,
 )
 
 TOKEN = "s3cret-capture-token-do-not-publish"
-MASK = {v: f"[TOK_{i}]" for i, v in enumerate(PROTECTED_VALUES.values())}
+# Per-request now; see extract_fixture.
 
 
 def _free_port():
@@ -55,6 +56,9 @@ def _gateway(port, token=None):
 
             payload = json.loads(self.rfile.read(int(self.headers.get("content-length", "0"))))
             prompt = payload["messages"][-1]["content"]
+            # Values vary per run: recover them from the prompt by format.
+            RAW = list(extract_fixture(prompt).values())
+            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             masked = prompt
             for raw, tok in MASK.items():
                 masked = masked.replace(raw, tok)

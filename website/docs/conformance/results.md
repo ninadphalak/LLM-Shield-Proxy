@@ -76,14 +76,46 @@ See the [hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor pr
 | :--- | :--- | :--- | :--- | :--- |
 | Raw capture endpoint | Synthetic control, not a product | Harness negative control | `fail` — raw fixtures reach the capture, three `literal` matches | [`http-profile-raw-capture-baseline.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-raw-capture-baseline.json) |
 | LLM-Shield-Proxy | Claimed, enabled | `1.3.4+working-tree`; maintainer self-test | `pass` — 5/5 checks | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) |
-| LiteLLM | Not yet recorded | Pending maintainer-neutral configuration | Not run | — |
-| Portkey | Claims redaction; [does not document rehydration](https://docs.portkey.ai/docs/product/guardrails/pii-redaction) | Pending run with guardrails enabled | Not run — expected `no-leak-profile-not-met` | — |
+| LiteLLM (self-hosted) | Claims PII masking; [Presidio guardrail](https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2) | `litellm[proxy]==1.99.0` on CPython 3.12.3; **default configuration, no guardrail attached** | `redaction-not-enabled` — a configuration statement, not a verdict. The other four checks pass | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0-default.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0.md) |
+| LiteLLM + Presidio PII masking | as above | `litellm[proxy]==1.99.0`, `guardrail: presidio`, `output_parse_pii: true`, stock Presidio images pinned by digest | **Held back — not a row.** The shipped fixture is undetectable by Presidio, so the measured `fail` would score the fixture, not the product. [Raw artifact](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0-presidio-NOT-A-VERDICT.json) · [evidence and controlled experiment](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0.md) |
+| Portkey Gateway (OSS, self-hosted) | Claims redaction; [does not document rehydration](https://portkey.ai/docs/product/guardrails/pii-redaction) | `portkeyai/gateway@sha256:97f094d9…5200d` (1.15.2); **default configuration, no guardrails** | `redaction-not-enabled` — a configuration statement, not a verdict. The other four checks pass | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2-default.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2.md) |
+| Portkey Gateway (OSS, self-hosted) + redaction | as above | same image; one `default.regexReplace` before-request hook. **Tester-authored patterns** — this measures Portkey's guardrail transform engine, not Portkey's detector | `no-leak-profile-not-met` — **no leak** (`leaked_entity_types: []`); one-way replacement does not meet the reversible-masking requirement | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2-regexreplace.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2.md) |
+| Portkey (hosted platform) | as above | Pending run with `Portkey Pro PII` or `Regex Match` guardrails enabled | Not run — expected `no-leak-profile-not-met` | — |
 | Presidio in front of an OpenAI-compatible mock | Claims anonymization; `replace`/`hash`/`mask` do not rehydrate | Pending adapter/configuration | Not run — expected `no-leak-profile-not-met` | — |
 | Cloudflare AI Gateway | **Does not claim PII redaction.** [DLP flags or blocks; neither redacts](https://developers.cloudflare.com/ai-gateway/features/dlp/) | Pending run | Not run — expected `not-applicable` | — |
 
 The "expected" outcomes above are predictions from vendor documentation, not results. They
 are recorded so that a run which contradicts them is treated as a finding about the run
 rather than quietly published.
+
+Every measured row above was produced by this project's maintainer against a target they
+installed themselves. That is a conflict of interest. It is disclosed, the pinned
+configuration and the raw artifact are published for each one, and none of them has been
+independently reproduced. See [governance](./governance).
+
+### The first third-party runs found a defect in the fixture, not in the gateways
+
+The three protected values in the shipped fixture — `person@example.invalid`, `123-45-6789`
+and `4532-1234-5678-9012` — were chosen to be safe to publish. Every one of them is a value a
+*validating* detector is built to reject:
+
+| Fixture value | Why a validating detector rejects it |
+| :--- | :--- |
+| `123-45-6789` | Presidio's `US_SSN` recognizer invalidates the sequential digit run. `456-78-9012` scores 0.85 in the same sentence |
+| `4532-1234-5678-9012` | Luhn checksum is 68. Presidio's `CREDIT_CARD` recognizer validates the checksum; `4111-1111-1111-1111` scores 1.0 |
+| `person@example.invalid` | `.invalid` is not a real TLD; Presidio reports `URL` at 0.5, never `EMAIL_ADDRESS`. `bob@example.com` scores 1.0 |
+
+Run against the whole fixture prompt, stock Presidio returns exactly two findings —
+`DATE_TIME` over the card number and `URL` over part of the email — and nothing at all for the
+SSN. So a gateway whose detector validates its inputs leaks the SSN here while behaving
+correctly on real data, and a gateway whose detector is pure pattern-matching (this project's
+included) passes.
+
+That asymmetry is measured, it is in this profile's favour, and it is the reason the
+LiteLLM + Presidio row above is held back rather than published as a `fail`. It is a
+separate problem from the fixture being *gameable*
+([threat model](./fixture-threat-model)) and it is not yet fixed. Until it is, a `fail`
+against a validating detector is not publishable as a verdict.
 
 Raw OpenAI should not receive synthetic protected fixtures merely to populate a table. The local
 capture endpoint supplies the correct pass-through negative control without transmitting those
