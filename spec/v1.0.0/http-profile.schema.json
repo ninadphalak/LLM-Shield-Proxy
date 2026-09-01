@@ -32,12 +32,10 @@
       ],
       "properties": {
         "name": {
-          "type": "string",
-          "minLength": 1
+          "const": "OpenAI-compatible HTTP gateway profile"
         },
         "scope": {
-          "type": "string",
-          "minLength": 1
+          "const": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
         }
       },
       "additionalProperties": false
@@ -390,6 +388,10 @@
           "invalid_events": {"const": 0},
           "done_markers_valid": {"const": true},
           "content_type_valid": {"const": true},
+          "status_codes": {
+            "minItems": 1,
+            "items": {"type": "integer", "minimum": 200, "maximum": 299}
+          },
           "errors": {"maxItems": 0}
         }
       },
@@ -488,14 +490,17 @@
           "items": {"type": "string"}
         },
         "marker_words_required": {
-          "type": "integer",
-          "minimum": 1
+          "const": 3
         },
         "marker_words_total": {
-          "type": "integer",
-          "minimum": 1
+          "const": 5
         },
-        "inspection_scope": {"type": "string", "minLength": 1},
+        "inspection_scope": {
+          "enum": [
+            "every request to the capture origin on any path or method: request line plus body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed",
+            "every HTTP/1.x request to the capture origin on any path or method: request line, headers, chunk extensions, trailers, and body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, including ordered per-channel joins across captured requests"
+          ]
+        },
         "payload_content_included": {"const": false}
       },
       "allOf": [

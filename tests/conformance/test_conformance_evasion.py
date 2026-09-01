@@ -1,10 +1,11 @@
 """A gateway that leaks raw PII must never report passed: true.
 
 Each gateway here redacts the VISIBLE request field - so the echo round-trips and
-response fidelity passes - while exfiltrating the raw protected values to the same
-configured upstream, disguised only by an encoding that preserves meaning. That is
-the shape of a real leak: the audited field looks clean and a side channel carries
-the payload. Every mode below passed the harness at some point.
+response fidelity passes - while exfiltrating protected values to the same configured
+upstream through a representation or channel that preserves meaning. That is the
+shape of a real leak: the audited field looks clean and a side channel carries the
+payload. Some modes reproduce prior false negatives; the rest pin adjacent routes
+and controlled mutations so the same blind spots cannot move channels.
 
 The second half asserts the inverse: a conforming gateway must not be failed. The
 correlation marker has already produced one false positive (a high-entropy nonce was
@@ -18,6 +19,7 @@ import json
 import socket
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -130,6 +132,10 @@ def _hide(mode, values):
         return [value.encode().hex() for value in values]
     if mode == "percent_encoded":
         return ["%" + "%".join(f"{byte:02x}" for byte in value.encode()) for value in values]
+    if mode == "case_variant_email":
+        # Email local/domain matching is case-insensitive for this conformance
+        # target. The normalized oracle must not depend on source casing.
+        return [values[0].upper()]
     if mode == "key_interleaved_fragments":
         # Fragments separated by dict KEYS: a check that joins every collected string
         # in document order splices the keys in between and misses the value.
@@ -213,7 +219,80 @@ def _leaking_gateway(mode, capture_port):
                             ).encode("ascii")
                             + fragment,
                         )
-            elif mode not in ("trailer_channel", "chunk_extension_channel"):
+            elif mode == "parser_recursion":
+                # Parser/materialization recursion must not run before the bounded
+                # object walk leaves a fail-closed capture record. A later clean
+                # request is only a decoy and cannot erase the deep request.
+                deep = b'{"nested":' * 2_000 + json.dumps(RAW).encode() + b"}" * 2_000
+                _raw_request(
+                    capture_port,
+                    (
+                        "POST /v1/deep HTTP/1.0\r\n"
+                        f"Content-Length: {len(deep)}\r\n"
+                        "Content-Type: application/json\r\n\r\n"
+                    ).encode("ascii")
+                    + deep,
+                )
+            elif mode == "cross_request_header_fragments":
+                for value in RAW:
+                    middle = len(value) // 2
+                    first, second = value[:middle], value[middle:]
+                    for fragment, first_header in ((first, False), (second, True)):
+                        ordered_headers = (
+                            f"X-Piece: {fragment}\r\nHost: 127.0.0.1:{capture_port}\r\n"
+                            "Content-Length: 2\r\nConnection: close\r\n"
+                            if first_header
+                            else f"Host: 127.0.0.1:{capture_port}\r\n"
+                            "Content-Length: 2\r\nConnection: close\r\n"
+                            f"X-Piece: {fragment}\r\n"
+                        )
+                        _raw_request(
+                            capture_port,
+                            (
+                                "POST /v1/fragments HTTP/1.0\r\n"
+                                + ordered_headers
+                                + "\r\n{}"
+                            ).encode("ascii"),
+                        )
+            elif mode == "cross_request_framing_fragments":
+                for value in RAW:
+                    middle = len(value) // 2
+                    for fragment in (value[:middle], value[middle:]):
+                        _chunked_post(
+                            capture_port,
+                            b"{}",
+                            extension=";piece=" + urllib.parse.quote(fragment, safe=""),
+                        )
+            elif mode == "cross_request_request_line_fragments":
+                for value in RAW:
+                    middle = len(value) // 2
+                    first, second = value[:middle], value[middle:]
+                    _raw_request(
+                        capture_port,
+                        (
+                            "POST /v1/fragments?piece="
+                            + urllib.parse.quote(first, safe="")
+                            + " HTTP/1.0\r\nConnection: close\r\n\r\n"
+                        ).encode("ascii"),
+                    )
+                    _raw_request(
+                        capture_port,
+                        (
+                            f"{second} /v1/fragments HTTP/1.0\r\n"
+                            "Connection: close\r\n\r\n"
+                        ).encode("ascii"),
+                    )
+            elif mode not in (
+                "trailer_channel",
+                "chunk_extension_channel",
+                "duplicate_json_members",
+                "malformed_header_line",
+                "malformed_bodyless_header_line",
+                "parser_recursion",
+                "cross_request_header_fragments",
+                "cross_request_framing_fragments",
+                "cross_request_request_line_fragments",
+            ):
                 body["telemetry"] = _hide(mode, RAW)
             payload = json.dumps(body).encode()
             if mode == "trailer_channel":
@@ -227,6 +306,46 @@ def _leaking_gateway(mode, capture_port):
                     f';x-orig-{index}="{value}"' for index, value in enumerate(RAW)
                 )
                 response = _chunked_post(capture_port, payload, extension=extension)
+            elif mode == "duplicate_json_members":
+                # A normal JSON object walk sees only the last value for a duplicate
+                # member. The upstream still received the earlier member bytes, and
+                # first-wins parsers can expose the protected values directly.
+                payload = (
+                    '{"telemetry":'
+                    + json.dumps(RAW)
+                    + ',"telemetry":"[REDACTED]","model":"m","messages":'
+                    + json.dumps(body["messages"])
+                    + "}"
+                ).encode()
+                response = _post(upstream, payload, headers)
+            elif mode == "malformed_header_line":
+                # Python's header parser can retain the valid framing fields while
+                # discarding a malformed later line. Those bytes nevertheless reached
+                # the capture origin and must make the request uninspectable or leaked.
+                malformed = "X Orig: " + " | ".join(RAW)
+                response = _raw_request(
+                    capture_port,
+                    (
+                        "POST /v1/chat/completions HTTP/1.1\r\n"
+                        f"Host: 127.0.0.1:{capture_port}\r\n"
+                        "Content-Type: application/json\r\n"
+                        f"Content-Length: {len(payload)}\r\n"
+                        "Connection: close\r\n"
+                        f"{malformed}\r\n\r\n"
+                    ).encode("ascii")
+                    + payload,
+                )
+            elif mode == "malformed_bodyless_header_line":
+                malformed = "X Orig: " + " | ".join(RAW)
+                _raw_request(
+                    capture_port,
+                    (
+                        "POST /v1/fragments HTTP/1.0\r\n"
+                        "Connection: close\r\n"
+                        f"{malformed}\r\n\r\n"
+                    ).encode("ascii"),
+                )
+                response = _post(upstream, payload, headers)
             else:
                 if mode == "gzip":
                     payload, headers["content-encoding"] = gzip.compress(payload), "gzip"
@@ -277,6 +396,7 @@ LEAK_MODES = [
     "double_base64",
     "hex",
     "percent_encoded",
+    "case_variant_email",
     "key_interleaved_fragments",
     "sibling_endpoint",
     "query_string",
@@ -285,6 +405,13 @@ LEAK_MODES = [
     "chunk_extension_channel",
     "unsupported_method_channel",
     "cross_request_fragments",
+    "duplicate_json_members",
+    "malformed_header_line",
+    "malformed_bodyless_header_line",
+    "parser_recursion",
+    "cross_request_header_fragments",
+    "cross_request_framing_fragments",
+    "cross_request_request_line_fragments",
 ]
 
 
@@ -294,7 +421,9 @@ def test_leaking_gateway_never_passes(mode, capture_port):
     boundary = report["checks"]["configured_upstream_boundary"]
     assert report["passed"] is False, f"{mode} evaded the harness"
     assert boundary["passed"] is False
-    assert boundary["leaked_entity_types"], f"{mode} leaked without detection"
+    assert boundary["leaked_entity_types"] or boundary["uninspectable_requests"], (
+        f"{mode} leaked without detection or a fail-closed record"
+    )
 
 
 @pytest.mark.parametrize("mode", ["plain", "char_codes", "hex", "prefixed_base64"])
@@ -446,7 +575,7 @@ def test_raw_pass_through_baseline_is_recorded_as_failing(capture_port):
 # --- the inverse: conforming gateways the harness must not fail ---------------------
 
 
-def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None):
+def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None, single_event=False):
     """Redacts every protected value, forwards nothing raw, rehydrates the response."""
 
     class ConformingGateway(BaseHTTPRequestHandler):
@@ -486,8 +615,9 @@ def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None):
             self.send_header("content-type", "text/event-stream")
             self.send_header("connection", "close")
             self.end_headers()
-            for character in text:
-                event = {"choices": [{"delta": {"content": character}}]}
+            response_fragments = [text] if single_event else text
+            for fragment in response_fragments:
+                event = {"choices": [{"delta": {"content": fragment}}]}
                 self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
@@ -498,6 +628,33 @@ def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None):
 def test_conforming_gateway_passes(capture_port):
     report = _run(_conforming_gateway(capture_port), capture_port, iterations=2)
     assert report["passed"] is True, report["checks"]
+
+
+def test_conforming_gateway_may_make_a_bodyless_auxiliary_request(capture_port):
+    """No Content-Length means a zero-length request body under HTTP/1.1."""
+
+    class BodylessAuxiliaryGateway(_conforming_gateway(capture_port)):
+        def do_POST(self):  # noqa: N802
+            _raw_request(
+                capture_port,
+                (
+                    "GET /v1/models HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{capture_port}\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("ascii"),
+            )
+            super().do_POST()
+
+    report = _run(BodylessAuxiliaryGateway, capture_port)
+    assert report["passed"] is True, report["checks"]
+
+
+def test_single_event_response_does_not_satisfy_fragmentation(capture_port):
+    report = _run(_conforming_gateway(capture_port, single_event=True), capture_port)
+    fragmentation = report["checks"]["fragmentation_safety"]
+    assert fragmentation["events_observed"] == 1
+    assert fragmentation["passed"] is False
+    assert report["passed"] is False
 
 
 def test_generated_marker_words_are_distinct(monkeypatch):

@@ -282,10 +282,17 @@
       ],
       "properties": {
         "passed": {"type": "boolean"},
-        "boundary": {"type": "string", "minLength": 1},
+        "boundary": {"const": "serialized payload presented to the configured upstream"},
         "protected_entity_types": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"const": "CREDIT_CARD"},
+            {"const": "EMAIL"},
+            {"const": "SSN"}
+          ],
+          "items": false
         },
         "detected_entity_counts": {
           "type": "object",
