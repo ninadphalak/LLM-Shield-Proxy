@@ -5,8 +5,6 @@ and cryptographic isolation guarantees identified during the codebase audit.
 """
 
 import asyncio
-import hashlib
-import hmac
 import time
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,7 +20,7 @@ from llm_shield_proxy.api.main import (
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.security.rate_limit import DistributedBlastRadiusLimiter, DistributedRateLimiter
-from llm_shield_proxy.security.watermark import _IDENTITY_HMAC_KEY, generate_watermark_text, get_identity
+from llm_shield_proxy.security.watermark import generate_watermark_text, get_identity
 
 
 def test_ssrf_ipv6_and_special_ip_rejection():
@@ -104,12 +102,10 @@ def test_watermark_uses_fingerprint_not_raw_secret():
     assert len(wm_vk) > 0
 
     # With raw auth header fallback
-    identity_from_auth = get_identity(authorization_header=raw_api_key)
+    identity_from_auth = get_identity(secret=secret, authorization_header=raw_api_key)
     # Identity must NOT be the raw secret string
     assert "sk-proj" not in identity_from_auth
-    assert identity_from_auth == hmac.new(
-        _IDENTITY_HMAC_KEY, b"sk-proj-1234567890abcdef", hashlib.sha256
-    ).hexdigest()[:12]
+    assert identity_from_auth != get_identity(secret="different-deployment", authorization_header=raw_api_key)
 
 
 def test_request_id_crlf_sanitization():

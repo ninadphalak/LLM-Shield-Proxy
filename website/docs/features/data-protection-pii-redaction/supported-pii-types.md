@@ -6,20 +6,22 @@ The LLM-Shield-Proxy employs a **3-Tier Cascade Engine** to detect and redact se
 
 ---
 
-## 🛡️ Tier 1: Microsecond Regex (High-Fidelity Structured Data)
+## 🛡️ Tier 1: Pre-Compiled Structured Patterns
 Tier 1 uses pre-compiled `google-re2` regular expressions to detect structured formats with RE2's bounded-time matching model.
 
-**Exhaustive List of Tier 1 Native Detectors:**
-1. **`CREDIT_CARD`**: Major credit card formats (Visa, MasterCard, Amex, Discover) validated via length and spacing.
+All ten native pattern names below have focused redaction, non-disclosure, and rehydration tests. That is pattern-path coverage, not a population-level precision or recall claim. The expressions match the documented shapes; they do not validate whether an identifier was actually issued.
+
+**Native Tier 1 pattern catalog:**
+1. **`CREDIT_CARD`**: 13-16 digits with optional spaces or hyphens. It does not run a Luhn check or identify an issuer.
 2. **`SSN`**: US Social Security Numbers (e.g., `XXX-XX-XXXX`).
 3. **`EMAIL`**: Standard email addresses.
-4. **`PHONE`**: International and domestic phone numbers, including extensions.
+4. **`PHONE`**: Selected 7- or 10-digit domestic shapes with optional country prefix and common separators. Extensions are not part of the native expression.
 5. **`IP_ADDRESS`**: IPv4 network addresses.
-6. **`AWS_API_KEY`**: Amazon Web Services Access Keys (e.g., `AKIA...`, `ASIA...`, `sk-...`).
+6. **`AWS_API_KEY`**: AWS `AKIA`/`ASIA` access-key shapes and the existing `sk-` API-key shape.
 7. **`GITHUB_PAT`**: GitHub Personal Access Tokens (e.g., `ghp_...`).
-8. **`SSH_PRIVATE_KEY`**: RSA/DSA/ECDSA/Ed25519 private keys (detects PEM headers).
-9. **`JWT_TOKEN`**: JSON Web Tokens.
-10. **`MRN`**: Medical Record Numbers (Standardized formats).
+8. **`SSH_PRIVATE_KEY`**: Private-key PEM/OpenSSH header text; the native expression does not parse or validate the key body.
+9. **`JWT_TOKEN`**: Three-segment JWT-shaped strings; signatures and claims are not validated.
+10. **`MRN`**: The project-specific `NNN-NN-NNX` medical-record-number shape.
 
 > [!TIP]
 > You can easily add your own Tier 1 detectors using the [Bring Your Own Regex (BYOR)](bring-your-own-regex-byor-custom-rules.md) feature via `policies.yaml`.

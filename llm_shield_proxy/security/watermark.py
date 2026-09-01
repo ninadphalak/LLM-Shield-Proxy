@@ -9,21 +9,15 @@ import hmac
 import time
 from typing import Optional
 
-# Fixed application-level key for deriving a non-reversible identity fingerprint
-# from an Authorization header. This is not a secret store of confidentiality -
-# the header value is a high-entropy API key, not a low-entropy password, so a
-# keyed HMAC (fast, non-blocking under asyncio) is sufficient; a slow KDF like
-# PBKDF2/bcrypt buys no brute-force resistance here but would block the event loop.
-_IDENTITY_HMAC_KEY = b"llm-shield-identity-fingerprint-v1"
-
 
 def get_identity(
+    secret: str,
     virtual_key_id: Optional[str] = None,
     client_ip: Optional[str] = None,
     authorization_header: Optional[str] = None,
     x_virtual_key_header: Optional[str] = None,
 ) -> str:
-    """Resolves identity safely without leaking raw secret credentials into HMAC oracles."""
+    """Resolve identity without making credential fingerprints linkable across deployments."""
     if virtual_key_id and virtual_key_id not in ("BYOK", "anonymous"):
         return virtual_key_id
 
@@ -35,7 +29,7 @@ def get_identity(
     if authorization_header:
         auth = authorization_header.replace("Bearer ", "").strip()
         if auth:
-            return hmac.new(_IDENTITY_HMAC_KEY, auth.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
+            return hmac.new(secret.encode("utf-8"), auth.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
 
     if client_ip:
         ip = client_ip.strip()
@@ -80,6 +74,7 @@ def generate_watermark_text(
 ) -> str:
     """End-to-end generation of the invisible watermark string."""
     identity = get_identity(
+        secret=secret,
         virtual_key_id=virtual_key_id,
         client_ip=client_ip,
         authorization_header=authorization_header,

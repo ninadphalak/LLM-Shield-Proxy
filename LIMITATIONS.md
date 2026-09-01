@@ -57,8 +57,10 @@ reports may add narrower constraints; none should imply a broader assurance than
 - `POST /v1/mcp` is a JSON-RPC gateway for selected methods. It is not currently a complete MCP
   Streamable HTTP implementation: initialization, capabilities, sessions, GET/SSE, and other
   methods are outside the route.
-- The MCP in-memory resolver can be permissive unless a policy-backed resolver is wired. Verify
-  allowlist and egress policy behavior at startup.
+- Empty MCP allowlists deny every tool by default. `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY`
+  explicitly changes that contract to permit every tool not named in `blocked_tools`; startup
+  emits a critical warning for that permissive state. Verify the effective resolver, allowlist,
+  blocklist, and egress policy before routing tool calls.
 - Envoy `ext_proc` behavior depends on Envoy version, body modes, buffer limits, timeout/failure
   policy, UDS permissions, and the processor's supported protobuf contract.
 
@@ -79,7 +81,9 @@ reports may add narrower constraints; none should imply a broader assurance than
   accidentally. Earlier bytes cannot be recalled after a later match.
 - Zero-width watermarks can be stripped or changed by normalization, copying, editors, messaging
   systems, accessibility tools, and document conversion. A surviving marker is a correlation
-  signal, not proof of who disclosed content or why.
+  signal, not proof of who disclosed content or why. Watermark identity fingerprints are scoped
+  by the operator-supplied `SHIELD_WATERMARK_SECRET`; enabling watermarking without it fails
+  startup.
 
 ## Performance and availability are environment-specific
 

@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from llm_shield_proxy.core.config import Settings
 from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
-from llm_shield_proxy.security.watermark import encode_steganography
+from llm_shield_proxy.security.watermark import encode_steganography, get_identity
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -55,6 +55,16 @@ def test_canary_config_requires_secret():
         VALID_VIRTUAL_KEYS="test",
     )
     assert s.CANARY_TOKEN is not None
+
+
+def test_identity_fingerprint_is_deployment_secret_scoped():
+    """The same credential must not produce a globally linkable identity fingerprint."""
+    credential = "Bearer sk-same-credential-in-two-deployments"
+
+    first = get_identity(secret="deployment-one-secret", authorization_header=credential)
+    second = get_identity(secret="deployment-two-secret", authorization_header=credential)
+
+    assert first != second
 
 
 @pytest.mark.asyncio

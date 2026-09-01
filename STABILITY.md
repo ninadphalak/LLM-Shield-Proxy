@@ -32,7 +32,7 @@ Features are not removed when they land in Experimental. They are labeled so tha
 the difference between "this is proven" and "this is implemented." Research is the one tier
 that carries no such promise: entries there may be removed in any release.
 
-Current inventory: **21 Supported, 20 Beta, 12 Experimental, 4 Research (57 total).**
+Current inventory: **22 Supported, 20 Beta, 11 Experimental, 4 Research (57 total).**
 
 ## What CI actually runs
 
@@ -57,6 +57,7 @@ prevent.
 Exercised end-to-end in CI. Each entry names the boundary of what was verified.
 
 **Detection and masking**
+- Supported PII and sensitive data types â€” *all ten native Tier 1 detector patterns are exercised with redaction, non-disclosure, and rehydration assertions. Tier 2 entropy candidates and the Tier 3 `PERSON` fallback have separate tests. Model-defined semantic types remain dependent on the operator-supplied model, labels, thresholds, language, and corpus.*
 - Tier 1 pre-compiled built-in regex engine
 - Tier 2 Shannon entropy scanner
 - Format-preserving synthetic masking
@@ -123,7 +124,6 @@ Not exercised end-to-end against the infrastructure it targets, or a deliberate 
 
 | Feature | Why it is Experimental |
 |---|---|
-| Supported PII and sensitive data types | The native engine implements ten Tier 1 patterns, entropy candidates, and a `PERSON` fallback, while the linked catalog page also describes model-defined semantic types. Tests cover six Tier 1 types and the `PERSON` fallback, not the advertised exhaustive set. |
 | Multi-provider request/event translators | Provider selection and the Anthropic transformer are unit-tested, but the implementation is a documented subset and is not exercised against provider protocols. |
 | Anthropic adapter | The adapter deliberately handles a text-focused subset, coerces unsupported roles, and is not validated against the Anthropic API. |
 | Envoy `ext_proc` integration | Not validated against a pinned real Envoy container. Buffer modes, timeout policy, and long-TTFT behavior are unverified. |
@@ -144,9 +144,8 @@ and the notes may be useful, not because they are on a path to support.
 
 | Exploration | What it is, and what limits it |
 |---|---|
-| Dynamic canary watermarking and steganography | Injects zero-width Unicode characters keyed to a per-session HMAC fingerprint, for internal leak forensics. Zero-width marks do not survive most normalization, copy-paste, JSON re-encoding, or markdown rendering, and must not be injected into code or structured output. Treat it as a tracing aid against a careless path, not as a control against an adversary who can strip characters. |
-| Scoped MCP JSON-RPC gateway | An exploration of brokering MCP traffic inside a controlled network boundary. It implements only `tools/list`, `tools/call`, and `resources/read`, with no initialization, capability negotiation, sessions, or GET/SSE channel, so it is not drop-in for any MCP SDK. MCP is still moving and this project has not committed to tracking it. |
-| Pluggable tool-call RBAC (MCP governance) | Applies only to `tools/list`, `tools/call`, and `resources/read`; the gateway has no initialization, capability negotiation, sessions, or GET/SSE channel. The default in-memory resolver is permissive unless policy is supplied. |
+| Dynamic canary watermarking and steganography | Injects zero-width Unicode characters keyed with the operator-supplied `SHIELD_WATERMARK_SECRET`, for internal leak forensics. Enabling watermarking without the secret fails startup, and different secrets produce different identity fingerprints for the same credential. Zero-width marks do not survive most normalization, copy-paste, JSON re-encoding, or markdown rendering, and must not be injected into code or structured output. Treat it as a tracing aid against a careless path, not as a control against an adversary who can strip characters. |
+| Scoped MCP JSON-RPC gateway and pluggable tool-call RBAC | An exploration of brokering `tools/list`, `tools/call`, and `resources/read` inside a controlled network boundary, with no initialization, capability negotiation, sessions, or GET/SSE channel. It is not drop-in for any MCP SDK. Empty allowlists deny every tool by default; intentional blocklist-only deployments must set `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY`, which emits a critical startup warning that every unblocked tool is permitted. MCP is still moving and this project has not committed to tracking it. |
 | Context-aware tool catalog pruner | Its Redis path **is** now verified against Redis 7 in CI (cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation, including a tenant's first invalidation). It sits here as a scope statement rather than an evidence one: it serves the `tools/list` method of a protocol subset this project has not committed to tracking. |
 | Dynamic MCP tool schema rewriting | Schema rewriting cannot compel a model or parser to echo the added fields. |
 

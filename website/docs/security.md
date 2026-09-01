@@ -77,7 +77,7 @@ The repository includes automated unit, integration, conformance, and adversaria
 * **Flags**: [`ENABLE_AGENT_BREAKER`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`AGENT_BREAKER_THRESHOLD`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Granular Entity Policy Scopes & Zero Trust AI Defaults
-* **Implementation Details**: Binds supported requests to configured profiles through Virtual Keys. The redaction failure mode defaults to `FAIL_CLOSED`; each policy resolver and dependency still requires explicit failure-path testing. The MCP router's documented in-memory resolver is permissive unless an external or YAML-backed policy resolver is wired in.
+* **Implementation Details**: Binds supported requests to configured profiles through Virtual Keys. The redaction failure mode defaults to `FAIL_CLOSED`; each policy resolver and dependency still requires explicit failure-path testing. The MCP router denies every tool when its resolver returns an empty allowlist unless the operator explicitly selects `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY`, which emits a critical startup warning.
 * **Flags**: [`VALID_VIRTUAL_KEYS`](deployment.md#core-configuration-flags), [`SHIELD_FAILURE_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Bounded Streaming JSON Lexer

@@ -260,6 +260,13 @@ class Settings(BaseSettings):
     POLICIES_RELOAD_INTERVAL_SECONDS: int = Field(default=5, description="Interval to check policies file")
     OPA_URL: Optional[str] = Field(default=None, description="Enterprise OPA server URL for RBAC")
     RBAC_CACHE_TTL_SECONDS: int = Field(default=300, description="TTL for stale-while-revalidate RBAC cache")
+    MCP_EMPTY_ALLOWLIST_MODE: Literal["DENY_ALL", "BLOCKLIST_ONLY"] = Field(
+        default="DENY_ALL",
+        description=(
+            "MCP tool policy when allowed_tools is empty. DENY_ALL fails closed; "
+            "BLOCKLIST_ONLY explicitly permits tools not named in blocked_tools."
+        ),
+    )
 
     # Internal dynamic cache
     _valid_virtual_keys_set: frozenset[str] = frozenset()

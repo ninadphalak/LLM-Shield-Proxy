@@ -2,7 +2,7 @@
 
 # 🚀 Deployment: Infrastructure & Resiliency
 
-For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Topologies](/docs/features/deployment-topologies.md)** guide.
+For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Topologies](/docs/features/deployment-topologies.md)** guide. The **[Air-Gapped Egress Gateway Mode](/docs/features/air-gapped-egress)** guide documents the internal-gateway routing, DNS pinning, TLS, and credential-forwarding boundary in detail.
 
 
 ## 1. Service Mesh Native Interface
@@ -98,7 +98,8 @@ Policies can supply request-scoped overrides for settings that the implementatio
 | **Agent Circuit Breaker** | `AGENT_BREAKER_THRESHOLD` | `3` | Consecutive duplicate turns before tripping the circuit breaker. |
 | **Agent Identity Enforcer** | `AGENT_IDENTITY_ENFORCER` | `"off"` | Agent Identity Enforcer mode (`"off"`, `"lenient"`, `"strict"`). |
 | **Leak Forensics** | `ENABLE_WATERMARKING` | `False` | Enable Dynamic Canary Watermarking & Steganography. |
-| **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Secret for HMAC-SHA256 watermarking. |
+| **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Operator secret for HMAC-SHA256 watermark and identity fingerprints; required when watermarking or canary tripwires are enabled. |
+| **MCP RBAC** | `MCP_EMPTY_ALLOWLIST_MODE` | `DENY_ALL` | `DENY_ALL` rejects every tool when `allowed_tools` is empty. `BLOCKLIST_ONLY` explicitly permits tools not named in `blocked_tools` and emits a critical startup warning. |
 | **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry export. |
 | **OTel & Tracing** | `TELEMETRY_ENDPOINT_URL` | `None` | Target webhook endpoint URL for audit telemetry. |
 | **OTel & Tracing** | `ANONYMOUS_USAGE_TRACKING` | `True` | Enable anonymous, opt-out volumetric telemetry. |

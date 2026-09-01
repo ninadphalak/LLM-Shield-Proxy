@@ -88,6 +88,58 @@ def test_pii_tier1_structured_redaction():
     assert rehydrated == sample_text
 
 
+def test_pii_tier1_github_pat_redaction():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
+    sample_text = f"GitHub token: {secret}"
+
+    redacted = engine.redact_text(sample_text, vault)
+
+    assert "[GITHUB_PAT_1]" in redacted
+    assert secret not in redacted
+    assert vault.rehydrate(redacted) == sample_text
+
+
+def test_pii_tier1_ssh_private_key_redaction():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    secret = "-----BEGIN OPENSSH PRIVATE KEY-----"
+    sample_text = f"Leaked key header: {secret}"
+
+    redacted = engine.redact_text(sample_text, vault)
+
+    assert "[SSH_PRIVATE_KEY_1]" in redacted
+    assert secret not in redacted
+    assert vault.rehydrate(redacted) == sample_text
+
+
+def test_pii_tier1_jwt_token_redaction():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    secret = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123"
+    sample_text = f"JWT: {secret}"
+
+    redacted = engine.redact_text(sample_text, vault)
+
+    assert "[JWT_TOKEN_1]" in redacted
+    assert secret not in redacted
+    assert vault.rehydrate(redacted) == sample_text
+
+
+def test_pii_tier1_mrn_redaction():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    secret = "123-45-67A"
+    sample_text = f"Medical record number: {secret}"
+
+    redacted = engine.redact_text(sample_text, vault)
+
+    assert "[MRN_1]" in redacted
+    assert secret not in redacted
+    assert vault.rehydrate(redacted) == sample_text
+
+
 def test_pii_tier2_shannon_entropy_redaction():
     """Tests Tier 2 Shannon entropy detection for raw unformatted high-entropy secrets."""
     engine = PIIEngine(enable_tier2=True, enable_tier3=False, entropy_threshold=4.5)

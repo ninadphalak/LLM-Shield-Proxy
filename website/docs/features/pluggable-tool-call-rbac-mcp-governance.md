@@ -37,7 +37,7 @@ View diagram on GitHub mobile 📱 -->
 | `ENABLE_AGENT_BREAKER` | Toggles autonomous loop protection and tool interception. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Allowlist behavior:** With a non-empty `allowed_tools` policy on the documented resolver/path, an unlisted tool is denied. The built-in MCP in-memory resolver can be permissive when no allowlist is wired; verify resolver configuration at startup.
+* **Allowlist behavior:** With a non-empty `allowed_tools` policy on the documented resolver/path, an unlisted tool is denied. An empty allowlist denies every tool by default. `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY` is the explicit allow-all-except-blocked mode and emits a critical startup warning; verify resolver configuration at startup.
 * **Graceful Degradation:** When rejecting a tool call, the proxy does not simply return an HTTP 500. It injects a synthetic JSON-RPC error back into the stream, telling the LLM "You do not have permission to use this tool," allowing the agent to dynamically recover and choose a different action.
 
 ## FAQ

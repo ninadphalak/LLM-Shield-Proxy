@@ -41,7 +41,7 @@ from watchdog.observers import Observer
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
 from llm_shield_proxy.adapters.provider_factory import resolve_provider
 from llm_shield_proxy.api.health import health_router
-from llm_shield_proxy.api.mcp_router import mcp_router
+from llm_shield_proxy.api.mcp_router import mcp_router, warn_if_mcp_policy_is_empty_at_startup
 from llm_shield_proxy.api.webhook import webhook_router
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
@@ -298,6 +298,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
     app.state.http_client = build_upstream_client()
+    await warn_if_mcp_policy_is_empty_at_startup(app)
 
     observer = Observer()
     observer.schedule(ConfigHandler(), path=".", recursive=False)
