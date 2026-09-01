@@ -43,23 +43,25 @@ jobs:
 
       - name: Import GPG Key (Ninad Phalak)
         id: gpg_import
-        if: ${{ env.GPG_PRIVATE_KEY != '' }}
-        continue-on-error: true
         uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Sign Checksums with GPG
-        if: ${{ steps.gpg_import.outcome == 'success' }}
         run: |
           gpg --batch --yes --detach-sign --armor checksums.txt
 
-      - name: Create Placeholder ASC if not signed
+      - name: Verify the signature before publishing it
         run: |
-          if [ ! -f checksums.txt.asc ]; then
-            echo "# GPG signature pending key verification" > checksums.txt.asc
+          # Fail closed. A release asset named checksums.txt.asc will be read as
+          # a detached signature, so publishing anything else in its place is
+          # worse than publishing nothing: it looks verifiable and is not.
+          if ! head -1 checksums.txt.asc | grep -q "BEGIN PGP SIGNATURE"; then
+            echo "::error::checksums.txt.asc is not a PGP signature. Refusing to publish it."
+            exit 1
           fi
+          gpg --verify checksums.txt.asc checksums.txt
 
       - name: Upload Release Assets & GPG Signature
         uses: softprops/action-gh-release@v3
