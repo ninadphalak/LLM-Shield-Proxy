@@ -29,9 +29,10 @@ from a young repository is a reason for suspicion, not confidence. Publishing wh
 carry independent evidence — and which do not — is more useful than publishing a longer list.
 
 Features are not removed when they land in Experimental. They are labeled so that you can tell
-the difference between "this is proven" and "this is implemented."
+the difference between "this is proven" and "this is implemented." Research is the one tier
+that carries no such promise: entries there may be removed in any release.
 
-Current inventory: **21 Supported, 21 Beta, 15 Experimental (57 total).**
+Current inventory: **21 Supported, 20 Beta, 12 Experimental, 4 Research (57 total).**
 
 ## What CI actually runs
 
@@ -146,7 +147,7 @@ and the notes may be useful, not because they are on a path to support.
 | Dynamic canary watermarking and steganography | Injects zero-width Unicode characters keyed to a per-session HMAC fingerprint, for internal leak forensics. Zero-width marks do not survive most normalization, copy-paste, JSON re-encoding, or markdown rendering, and must not be injected into code or structured output. Treat it as a tracing aid against a careless path, not as a control against an adversary who can strip characters. |
 | Scoped MCP JSON-RPC gateway | An exploration of brokering MCP traffic inside a controlled network boundary. It implements only `tools/list`, `tools/call`, and `resources/read`, with no initialization, capability negotiation, sessions, or GET/SSE channel, so it is not drop-in for any MCP SDK. MCP is still moving and this project has not committed to tracking it. |
 | Pluggable tool-call RBAC (MCP governance) | Applies only to `tools/list`, `tools/call`, and `resources/read`; the gateway has no initialization, capability negotiation, sessions, or GET/SSE channel. The default in-memory resolver is permissive unless policy is supplied. |
-| Context-aware tool catalog pruner | Its Redis path **is** now verified against Redis 7 in CI (cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation, including a tenant's first invalidation). It stays Experimental purely as a scope statement: it serves the `tools/list` subset of MCP. |
+| Context-aware tool catalog pruner | Its Redis path **is** now verified against Redis 7 in CI (cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation, including a tenant's first invalidation). It sits here as a scope statement rather than an evidence one: it serves the `tools/list` method of a protocol subset this project has not committed to tracking. |
 | Dynamic MCP tool schema rewriting | Schema rewriting cannot compel a model or parser to echo the added fields. |
 
 ## Defects found by building the CI

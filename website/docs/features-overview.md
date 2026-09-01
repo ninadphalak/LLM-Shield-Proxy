@@ -13,6 +13,10 @@ works outside the maintainer's machine:
   implements a deliberate protocol subset. A protocol subset stays `Experimental` however well
   covered it is, because that label is a scope statement. Not for a production traffic path
   without your own validation.
+* `Research` - an exploration that is not on a path to being supported, resting on an approach
+  with known limits or on a protocol this project has not committed to tracking. **Do not build
+  on these. They may be removed in any release, without a deprecation period or a migration
+  note.** Read them as published notes on an idea, not as a feature.
 
 Tiers describe verification status, not code quality. See
 [Stability Tiers](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/STABILITY.md) for the
@@ -33,7 +37,7 @@ full definitions and the deprecation policy.
 * `Supported` **[JSON Bomb / Payload Nesting Depth Protection](/docs/features/data-protection-pii-redaction/json-bomb-payload-nesting-depth-protection.md)**: Rejects supported JSON payloads that exceed configured depth/bracket bounds. This reduces specific resource-exhaustion risks but is not a complete parser or denial-of-service defense.
 ## Section B: Ultra-Low Latency Streaming & Traffic Engineering
 * `Supported` **[SSE Sliding-Window Buffer](/docs/features/ultra-low-latency-streaming-traffic-engineering/sub-millisecond-sse-sliding-window-buffer.md)**: Reconstructs tested placeholders split across SSE chunks with bounded trailing overlap. Published timings are component measurements, not end-to-end latency guarantees.
-* `Research` **[Context-Aware Tool Catalog Pruner](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner.md)**: Filters supported `tools/list` result shapes through the resolved policy and offers bounded caching. *(Its Redis path is verified against Redis 7 in CI — cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation. It stays Experimental as a scope statement: it serves the deliberate MCP `tools/list` method subset.)*
+* `Research` **[Context-Aware Tool Catalog Pruner](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner.md)**: Filters supported `tools/list` result shapes through the resolved policy and offers bounded caching. *(Its Redis path is verified against Redis 7 in CI — cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation. It sits in Research as a scope statement rather than an evidence one: it serves the `tools/list` method of a protocol subset this project has not committed to tracking.)*
 * `Supported` **[Bounded Streaming JSON Lexer](/docs/features/ultra-low-latency-streaming-traffic-engineering/zero-allocation-streaming-json-lexer.md)**: Parses incremental JSON/SSE data without retaining the complete response history; allocations and RSS are benchmarked explicitly.
 * `Experimental` **[Multi-Provider Translators](/docs/features/ultra-low-latency-streaming-traffic-engineering/multi-provider-translators.md)**: Translates a documented subset of OpenAI-style requests and Anthropic events. Unsupported fields and provider semantics require integration tests.
 * `Experimental` **[Anthropic Adapter Implementation](/docs/features/ultra-low-latency-streaming-traffic-engineering/anthropic-adapter-implementation.md)**: Translates a text-focused subset of OpenAI-style requests and Anthropic events. It is unit-tested but not validated against the provider protocol.
