@@ -2,7 +2,7 @@
 
 ## Maintainer self-test
 
-The repository includes a machine-readable v1.0.0 pre-release report at `benchmarks/results/conformance-v1.0.0-pre-release-windows.json`. It covers all seven required domains. Timing and allocation values are environment-scoped and are intentionally not promoted as total proxy latency or a universal memory ceiling.
+The repository includes a machine-readable v1.0.0 pre-release report at `benchmarks/results/conformance-v1.0.0-pre-release-windows.json`. It covers all six scored domains and publishes the required timing distributions. Timing and allocation values are environment-scoped and are intentionally not promoted as total proxy latency or a universal memory ceiling.
 
 **Run:** 2026-08-30 on Windows 11, CPython 3.14.7, AMD64; 10,000 timing samples per operation.
 
@@ -19,8 +19,9 @@ Because the implementation changes are not yet committed, this is a transparent 
 | SSE validity | Pass - valid JSON events, one `[DONE]`, valid termination, split UTF-8 preserved |
 | Rehydration fidelity | Pass - exact equality; no placeholder in client-visible output |
 | Audit integrity | Pass - two signatures verified; tamper negative control detected |
-| Latency measurement completeness | Pass - distributions recorded; no threshold enforced |
 | Memory bound/measurement completeness | Pass - retained state within bound; allocation recorded; no RSS threshold |
+
+Latency is published rather than scored: the former `latency_measurement` check could not fail, so it was removed. The distributions below are the evidence it claimed to be.
 
 ### In-process timing observations
 
@@ -43,14 +44,46 @@ The table is intentionally public before it is full. “Not run” is not a pass
 an explicit work item. Results will link the raw report, pinned target revision/image, and
 redacted configuration.
 
-| Target | Version/configuration | HTTP profile | Artifact |
-| :--- | :--- | :--- | :--- |
-| Raw capture endpoint | Harness negative control | Fail as expected: raw protected fixtures reach capture | [`http-profile-raw-capture-baseline.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-raw-capture-baseline.json) |
-| LLM-Shield-Proxy | `1.3.4+working-tree`; maintainer self-test | Pass: 5/5 HTTP-profile checks | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) |
-| LiteLLM | Pending maintainer-neutral configuration | Not run | — |
-| Portkey | Pending maintainer-neutral configuration | Not run | — |
-| Presidio in front of an OpenAI-compatible mock | Pending adapter/configuration | Not run | — |
-| Cloudflare AI Gateway | Pending testable configuration and account boundary | Not run | — |
+### What a row is allowed to say
+
+A measurement is not a verdict. Every report carries an `outcome` derived from what the
+product **claims** about PII redaction (with a citation), what was **configured** for the
+run, and only then what was measured. The submitter supplies the claim and cannot type the
+outcome; the [published schema](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json)
+re-derives it, so a hand-edited report fails validation.
+
+| `outcome` | Row reads | Is it a leak finding? |
+| :--- | :--- | :--- |
+| `pass` | Pass | — |
+| `fail` | Fail | **Yes.** Protected data reached the capture origin |
+| `no-leak-profile-not-met` | No leak; does not meet the reversible-masking requirement | No |
+| `not-applicable` | Not applicable — no redaction feature offered | No |
+| `redaction-not-enabled` | Redaction available, not enabled for this run | No |
+| `inconclusive` | Not a row — nothing correlated | No |
+| `claim-unstated` | Not a row — no claim recorded | No |
+
+This exists because the harness can measure products it has no business judging. A gateway
+that offers caching, routing and observability and never claimed to redact PII is not a
+privacy failure; neither is a one-way anonymizer that leaks nothing and simply does not
+restore values. Both would otherwise be printed as "Fail" next to this project's own "Pass",
+which is an accusation a neutral referee cannot retract. `leaked_entity_types` remains the
+only field that reports protected data reaching the capture, and `leak_evidence` now records
+whether each finding was a `literal` match or one recovered only after normalization.
+
+See the [hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor procedure.
+
+| Target | Redaction claim | Version/configuration | `outcome` | Artifact |
+| :--- | :--- | :--- | :--- | :--- |
+| Raw capture endpoint | Synthetic control, not a product | Harness negative control | `fail` — raw fixtures reach the capture, three `literal` matches | [`http-profile-raw-capture-baseline.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-raw-capture-baseline.json) |
+| LLM-Shield-Proxy | Claimed, enabled | `1.3.4+working-tree`; maintainer self-test | `pass` — 5/5 checks | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) |
+| LiteLLM | Not yet recorded | Pending maintainer-neutral configuration | Not run | — |
+| Portkey | Claims redaction; [does not document rehydration](https://docs.portkey.ai/docs/product/guardrails/pii-redaction) | Pending run with guardrails enabled | Not run — expected `no-leak-profile-not-met` | — |
+| Presidio in front of an OpenAI-compatible mock | Claims anonymization; `replace`/`hash`/`mask` do not rehydrate | Pending adapter/configuration | Not run — expected `no-leak-profile-not-met` | — |
+| Cloudflare AI Gateway | **Does not claim PII redaction.** [DLP flags or blocks; neither redacts](https://developers.cloudflare.com/ai-gateway/features/dlp/) | Pending run | Not run — expected `not-applicable` | — |
+
+The "expected" outcomes above are predictions from vendor documentation, not results. They
+are recorded so that a run which contradicts them is treated as a finding about the run
+rather than quietly published.
 
 Raw OpenAI should not receive synthetic protected fixtures merely to populate a table. The local
 capture endpoint supplies the correct pass-through negative control without transmitting those

@@ -22,7 +22,6 @@ CHECK_NAMES = [
     "sse_validity",
     "rehydration_fidelity",
     "audit_integrity",
-    "latency_measurement",
     "memory_bounded",
 ]
 

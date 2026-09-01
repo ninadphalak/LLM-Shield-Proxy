@@ -7,7 +7,7 @@ The Open Conformance Lab is the vendor-neutral evidence surface for streaming pr
 
 The lab is Apache-2.0 licensed. The specification, vectors, runner, report schema, and implementation are inspectable and reusable without a license fee, account, hosted service, or paid edition.
 
-## Seven conformance domains
+## Six scored domains, plus published timings
 
 | Domain | Question answered |
 | :--- | :--- |
@@ -16,8 +16,9 @@ The lab is Apache-2.0 licensed. The specification, vectors, runner, report schem
 | SSE validity | Does output remain parseable OpenAI-style SSE, preserve one `[DONE]`, and survive a UTF-8 mid-codepoint split? |
 | Rehydration fidelity | Does the client receive the exact expected reconstructed value, without placeholder residue? |
 | Audit integrity | Do chain, sequence, fingerprint, and Ed25519 checks pass-and does a tampered negative control fail? |
-| Latency | Are warmup, scope, iterations, unit, and distribution statistics published without presenting an isolated operation as end-to-end latency? |
 | Memory | Is retained streaming state bounded and is the measurement labeled correctly as allocation data or process RSS? |
+
+Latency remains a **publication** requirement (SPG-LATENCY-1), not a scored check. The former `latency_measurement` check gated on percentiles of monotonic-clock deltas being non-negative, which cannot fail under any implementation or any input; a check that cannot fail is not evidence. The distributions are still published under `microbenchmarks`.
 
 Read the normative [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), review the [published results table](./results), or [reproduce the local and HTTP profiles](./reproducing).
 
@@ -29,7 +30,7 @@ observed content as one-character SSE events, and lets the harness verify downst
 reconstruction. This design can evaluate different gateways without importing their detector or
 streaming classes.
 
-The HTTP profile is narrower than the seven-domain local profile: it does not remotely infer
+The HTTP profile is narrower than the local profile: it does not remotely infer
 process RSS or audit integrity. Those properties require separate artifacts rather than a
 fabricated pass.
 

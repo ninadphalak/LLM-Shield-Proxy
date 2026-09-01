@@ -22,7 +22,6 @@ def test_conformance_checks_fragmentation_sse_and_upstream_boundary(monkeypatch)
         "sse_validity",
         "rehydration_fidelity",
         "audit_integrity",
-        "latency_measurement",
         "memory_bounded",
     }
     assert report["checks"]["fragmentation_safety"]["passed"] is True
@@ -33,8 +32,12 @@ def test_conformance_checks_fragmentation_sse_and_upstream_boundary(monkeypatch)
     assert report["checks"]["raw_pii_egress"]["leaked_entity_types"] == []
     assert report["checks"]["raw_pii_egress"]["payload_content_included"] is False
     assert report["checks"]["audit_integrity"]["tamper_negative_control_detected"] is True
-    assert report["checks"]["latency_measurement"]["threshold_enforced"] is False
     assert report["checks"]["memory_bounded"]["rss_threshold_enforced"] is False
+    # Deleted on purpose: it gated on percentiles of monotonic-clock deltas being
+    # non-negative, so it could not fail. Timings are still published, as
+    # measurements rather than as a passed gate.
+    assert "latency_measurement" not in report["checks"]
+    assert report["microbenchmarks"]["no_op"]
     assert "excludes ASGI" in report["microbenchmarks"]["scope"]
 
 

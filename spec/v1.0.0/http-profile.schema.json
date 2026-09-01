@@ -4,17 +4,20 @@
   "title": "Streaming Privacy Gateway HTTP Profile Report v1.0.0",
   "type": "object",
   "required": [
-    "schema",
-    "generated_at",
-    "profile",
-    "implementation",
-    "target",
-    "harness_revision",
-    "environment",
     "capture",
     "checks",
+    "environment",
+    "generated_at",
+    "harness_revision",
+    "implementation",
+    "limitations",
+    "outcome",
+    "outcome_rationale",
     "passed",
-    "limitations"
+    "profile",
+    "redaction_claim",
+    "schema",
+    "target"
   ],
   "properties": {
     "schema": {
@@ -125,8 +128,12 @@
     "capture": {
       "type": "object",
       "required": [
+        "mode",
         "bind_host",
-        "port"
+        "port",
+        "authentication_required",
+        "target_must_be_preconfigured_for",
+        "self_probe"
       ],
       "properties": {
         "bind_host": {
@@ -137,9 +144,58 @@
           "type": "integer"
         },
         "target_must_be_preconfigured_for": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "loopback",
+            "public"
+          ]
+        },
+        "authentication_required": {
+          "type": "boolean"
+        },
+        "self_probe": {
+          "type": "object",
+          "description": "The harness's own request to the advertised capture URL, sent before any target traffic. It is the fail-closed check that the capture was reachable and recording at the address the target was configured with; a run that could not confirm it aborts and produces no report, so both fields are const true here.",
+          "required": [
+            "performed",
+            "url",
+            "recorded",
+            "round_trip_ms"
+          ],
+          "properties": {
+            "performed": {
+              "const": true
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "recorded": {
+              "const": true
+            },
+            "round_trip_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "advertised_url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "advertised_url_reachable": {
+              "type": "boolean",
+              "description": "Whether the URL the target is configured with also answered the probe from the harness. False is not on its own a defect: a legitimate address can be reachable from the target and not from the harness (host.docker.internal resolves inside a container, often not on the host). It is recorded so that a run which then captures nothing can be read as a reachability problem rather than as leak evidence. An advertised URL answered by a DIFFERENT server aborts the run instead."
+            },
+            "advertised_url_detail": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "checks": {
       "type": "object",
@@ -173,12 +229,50 @@
       "type": "boolean"
     },
     "limitations": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
+      "type": "object",
+      "description": "Split deliberately. run_validity is what a reader must check before treating this artifact as a result; method_limits is what the method can never see in any run. One mixed list made a reader wade through the permanent statements to reach the ones that decide whether this particular run means anything.",
+      "required": [
+        "run_validity",
+        "method_limits"
+      ],
+      "properties": {
+        "run_validity": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "method_limits": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "redaction_claim": {
+      "$ref": "#/$defs/redaction_claim"
+    },
+    "outcome": {
+      "enum": [
+        "pass",
+        "fail",
+        "no-leak-profile-not-met",
+        "not-applicable",
+        "redaction-not-enabled",
+        "inconclusive",
+        "claim-unstated"
+      ],
+      "description": "What a published table cell is allowed to say. DERIVED from redaction_claim plus the measurement -- never typed by the submitter, and re-derived by the rules below so a hand-edited report fails validation. `passed` remains the raw measurement and is not overwritten. 'fail' means one thing only: protected data reached the capture origin. 'no-leak-profile-not-met' is a non-pass with NO leak -- typically a one-way anonymizer that never restores the value, so response_fidelity fails while nothing egressed; publish it as such and never as a privacy failure. The rest are not verdicts at all: 'not-applicable' means the product offers no redaction feature and this profile measured it against something it never offered; 'redaction-not-enabled' is a statement about configuration; 'inconclusive' means the run could not be attributed; 'claim-unstated' means no claim was recorded and the artifact is not publishable as a row."
+    },
+    "outcome_rationale": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "allOf": [
@@ -346,6 +440,42 @@
           }
         }
       }
+    },
+    {
+      "$ref": "#/$defs/outcome_unknown_claim_is_unstated"
+    },
+    {
+      "$ref": "#/$defs/outcome_no_claim_is_not_applicable"
+    },
+    {
+      "$ref": "#/$defs/outcome_unconfigured_is_not_a_verdict"
+    },
+    {
+      "$ref": "#/$defs/outcome_pass_requires_verdict_conditions"
+    },
+    {
+      "$ref": "#/$defs/outcome_fail_requires_verdict_conditions"
+    },
+    {
+      "$ref": "#/$defs/outcome_inconclusive_requires_no_correlation"
+    },
+    {
+      "$ref": "#/$defs/not_applicable_requires_no_claim"
+    },
+    {
+      "$ref": "#/$defs/not_enabled_requires_claim_and_off"
+    },
+    {
+      "$ref": "#/$defs/claim_unstated_requires_unknown"
+    },
+    {
+      "$ref": "#/$defs/inconclusive_requires_claim_and_on"
+    },
+    {
+      "$ref": "#/$defs/fail_requires_leak_evidence"
+    },
+    {
+      "$ref": "#/$defs/no_leak_outcome_requires_no_leak"
     }
   ],
   "$defs": {
@@ -356,43 +486,121 @@
         "one_character_events_requested",
         "events_observed",
         "events_observed_max",
-        "coalescing_not_distinguished"
+        "coalescing_not_distinguished",
+        "response_reconstructed"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "one_character_events_requested": {"const": true},
-        "events_observed": {"type": "integer", "minimum": 0},
-        "events_observed_max": {"type": "integer", "minimum": 0},
-        "coalescing_not_distinguished": {"const": true}
+        "passed": {
+          "type": "boolean"
+        },
+        "one_character_events_requested": {
+          "const": true
+        },
+        "events_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events_observed_max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "response_reconstructed": {
+          "type": "boolean"
+        },
+        "coalescing_not_distinguished": {
+          "const": true
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
-      "then": {"properties": {"events_observed": {"minimum": 2}}},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "events_observed": {
+            "minimum": 2
+          },
+          "response_reconstructed": {
+            "const": true
+          }
+        }
+      },
       "additionalProperties": false
     },
     "sse_check": {
       "type": "object",
       "required": [
-        "passed", "invalid_events", "done_markers_valid", "status_codes", "errors"
+        "passed",
+        "invalid_events",
+        "done_markers_valid",
+        "status_codes",
+        "errors"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "invalid_events": {"type": "integer", "minimum": 0},
-        "done_markers_valid": {"type": "boolean"},
-        "content_type_valid": {"type": "boolean"},
-        "status_codes": {"type": "array", "items": {"type": "integer"}},
-        "errors": {"type": "array", "items": {"type": "string"}}
+        "passed": {
+          "type": "boolean"
+        },
+        "invalid_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_markers_valid": {
+          "type": "boolean"
+        },
+        "content_type_valid": {
+          "type": "boolean"
+        },
+        "status_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
       "then": {
         "properties": {
-          "invalid_events": {"const": 0},
-          "done_markers_valid": {"const": true},
-          "content_type_valid": {"const": true},
+          "invalid_events": {
+            "const": 0
+          },
+          "done_markers_valid": {
+            "const": true
+          },
+          "content_type_valid": {
+            "const": true
+          },
           "status_codes": {
             "minItems": 1,
-            "items": {"type": "integer", "minimum": 200, "maximum": 299}
+            "items": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 299
+            }
           },
-          "errors": {"maxItems": 0}
+          "errors": {
+            "maxItems": 0
+          }
         }
       },
       "additionalProperties": false
@@ -400,23 +608,56 @@
     "response_check": {
       "type": "object",
       "required": [
-        "passed", "expected_value_reconstructed", "iterations_matching",
-        "iterations_completed", "payload_content_included"
+        "passed",
+        "expected_value_reconstructed",
+        "iterations_matching",
+        "iterations_completed",
+        "payload_content_included"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "expected_value_reconstructed": {"type": "boolean"},
-        "iterations_matching": {"type": "integer", "minimum": 0},
-        "iterations_completed": {"type": "integer", "minimum": 0},
-        "iterations_requested": {"type": "integer", "minimum": 1},
-        "payload_content_included": {"const": false}
+        "passed": {
+          "type": "boolean"
+        },
+        "expected_value_reconstructed": {
+          "type": "boolean"
+        },
+        "iterations_matching": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "iterations_completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "iterations_requested": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload_content_included": {
+          "const": false
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
       "then": {
         "properties": {
-          "expected_value_reconstructed": {"const": true},
-          "iterations_matching": {"minimum": 1},
-          "iterations_completed": {"minimum": 1}
+          "expected_value_reconstructed": {
+            "const": true
+          },
+          "iterations_matching": {
+            "minimum": 1
+          },
+          "iterations_completed": {
+            "minimum": 1
+          }
         }
       },
       "additionalProperties": false
@@ -424,34 +665,96 @@
     "latency_check": {
       "type": "object",
       "required": [
-        "passed", "threshold_enforced", "unit", "iterations", "mean", "p50", "p95", "p99"
+        "passed",
+        "threshold_enforced",
+        "unit",
+        "iterations",
+        "mean",
+        "p50",
+        "p95",
+        "p99",
+        "iterations_measured"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "threshold_enforced": {"const": false},
-        "unit": {"const": "milliseconds"},
-        "iterations": {"type": "integer", "minimum": 1},
-        "mean": {"type": "number", "minimum": 0},
-        "p50": {"type": "number", "minimum": 0},
-        "p95": {"type": "number", "minimum": 0},
-        "p99": {"type": "number", "minimum": 0}
+        "passed": {
+          "type": "boolean"
+        },
+        "threshold_enforced": {
+          "const": false
+        },
+        "unit": {
+          "const": "milliseconds"
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "iterations_measured": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0
+        }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "passed": {
+                "const": true
+              }
+            },
+            "required": [
+              "passed"
+            ]
+          },
+          "then": {
+            "properties": {
+              "iterations_measured": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "boundary_check": {
       "type": "object",
       "required": [
-        "passed",
+        "capture_mode",
         "captured_requests",
         "correlated_requests",
-        "uninspectable_requests",
-        "uninspectable_reasons",
+        "inspection_scope",
+        "leak_evidence",
         "leaked_entity_types",
-        "upstream_paths_observed",
+        "marker_words_observed_max",
         "marker_words_required",
         "marker_words_total",
-        "inspection_scope",
-        "payload_content_included"
+        "needle_lengths",
+        "needle_proximity",
+        "passed",
+        "payload_content_included",
+        "unattributed_leaked_entity_types",
+        "unattributed_requests",
+        "unattributed_uninspectable_requests",
+        "uninspectable_reasons",
+        "uninspectable_requests",
+        "upstream_paths_observed"
       ],
       "properties": {
         "passed": {
@@ -471,7 +774,9 @@
         },
         "uninspectable_reasons": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "leaked_entity_types": {
           "type": "array",
@@ -487,7 +792,9 @@
         },
         "upstream_methods_observed": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "marker_words_required": {
           "const": 3
@@ -495,13 +802,154 @@
         "marker_words_total": {
           "const": 5
         },
+        "marker_words_observed_max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
         "inspection_scope": {
           "enum": [
             "every request to the capture origin on any path or method: request line plus body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed",
             "every HTTP/1.x request to the capture origin on any path or method: request line, headers, chunk extensions, trailers, and body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, including ordered per-channel joins across captured requests"
           ]
         },
-        "payload_content_included": {"const": false}
+        "payload_content_included": {
+          "const": false
+        },
+        "capture_mode": {
+          "enum": [
+            "loopback",
+            "public"
+          ],
+          "description": "loopback: only a target on the tester's own machine or network could reach the capture, so every request that arrived is the target's. public: the capture was reachable beyond loopback and attribution rests on the capture token instead. A public run is a weaker observation and must not be compared as equivalent to a loopback run."
+        },
+        "unattributed_requests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requests recorded by the capture that did not present the capture token. Reported, never dropped. Expected to be non-zero on a public capture (background internet scan traffic) and not on its own a failure."
+        },
+        "unattributed_uninspectable_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unattributed_leaked_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Protected fixture values found in unattributed traffic. Fails the check, because the fixture is synthetic and no honest third party sends it, but is reported separately so the artifact does not assert the target sent them."
+        },
+        "unattributed_paths_observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "leak_evidence": {
+          "type": "array",
+          "description": "Provenance for every entry in leaked_entity_types. A bare entity name is an accusation with no way for the accused to check it.",
+          "items": {
+            "type": "object",
+            "required": [
+              "entity_type",
+              "channel",
+              "scope",
+              "match"
+            ],
+            "properties": {
+              "entity_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "channel": {
+                "enum": [
+                  "all",
+                  "request",
+                  "headers",
+                  "framing",
+                  "body"
+                ]
+              },
+              "scope": {
+                "enum": [
+                  "per-request",
+                  "cross-request"
+                ]
+              },
+              "match": {
+                "enum": [
+                  "literal",
+                  "normalized"
+                ],
+                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide -- an injected client IP of 123.45.67.89 normalizes to the SSN fixture's digits. Check this before describing a finding as egress."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "unattributed_leak_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "entity_type",
+              "channel",
+              "scope",
+              "match"
+            ],
+            "properties": {
+              "entity_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "channel": {
+                "enum": [
+                  "all",
+                  "request",
+                  "headers",
+                  "framing",
+                  "body"
+                ]
+              },
+              "scope": {
+                "enum": [
+                  "per-request",
+                  "cross-request"
+                ]
+              },
+              "match": {
+                "enum": [
+                  "literal",
+                  "normalized"
+                ],
+                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide -- an injected client IP of 123.45.67.89 normalizes to the SSN fixture's digits. Check this before describing a finding as egress."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "needle_proximity": {
+          "type": "object",
+          "description": "Longest contiguous run OF EACH NEEDLE found in any haystack, against needle_lengths. Equal means the value is present; less is the margin. An honest run measures 2 of 9 for the SSN. Deliberately not a digit count: a correctly redacting gateway emits substitute values shaped like the fixture, so a raw digit-run count is dominated by them and says nothing about headroom.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "unattributed_needle_proximity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "needle_lengths": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
       },
       "allOf": [
         {
@@ -520,6 +968,9 @@
               "leaked_entity_types": {
                 "maxItems": 0
               },
+              "marker_words_observed_max": {
+                "minimum": 3
+              },
               "uninspectable_requests": {
                 "const": 0
               },
@@ -528,6 +979,9 @@
               },
               "captured_requests": {
                 "minimum": 1
+              },
+              "unattributed_leaked_entity_types": {
+                "maxItems": 0
               }
             }
           }
@@ -574,6 +1028,534 @@
         }
       },
       "additionalProperties": false
+    },
+    "redaction_claim": {
+      "type": "object",
+      "description": "What the product CLAIMS about PII redaction, with a citation, and what was configured for this run. Operator-supplied, like implementation.name -- the harness cannot measure a vendor's marketing. It exists because a product that never offered PII redaction must never be published as a privacy 'Fail': that is a smear and it is not retractable. It governs the derived `outcome`.",
+      "required": [
+        "vendor_claims_pii_redaction",
+        "configured_for_this_run",
+        "recorded_by"
+      ],
+      "properties": {
+        "vendor_claims_pii_redaction": {
+          "enum": [
+            "claimed",
+            "not-offered",
+            "unknown"
+          ],
+          "description": "claimed: the vendor documents a PII redaction/anonymization feature. not-offered: the product does not claim one (e.g. a gateway that is caching, routing, rate limiting and observability). unknown: not recorded - the run is then not publishable in either direction."
+        },
+        "claim_citation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the vendor states it. Required unless the claim is 'unknown', so a reader can check the claim instead of trusting the submitter."
+        },
+        "claim_quote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configured_for_this_run": {
+          "type": "boolean",
+          "description": "Whether that redaction feature was actually enabled for this run. A run with it off is a configuration statement, not a verdict."
+        },
+        "configuration_reference": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The exact setting, guardrail or config file that enabled redaction. Required when configured_for_this_run is true, so the row reproduces."
+        },
+        "recorded_by": {
+          "const": "operator"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "enum": [
+                  "claimed",
+                  "not-offered"
+                ]
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          },
+          "then": {
+            "required": [
+              "claim_citation"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "configured_for_this_run"
+            ]
+          },
+          "then": {
+            "required": [
+              "configuration_reference"
+            ],
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "outcome_unknown_claim_is_unstated": {
+      "if": {
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        },
+        "required": [
+          "redaction_claim"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "claim-unstated"
+          }
+        }
+      }
+    },
+    "outcome_no_claim_is_not_applicable": {
+      "if": {
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "not-offered"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        },
+        "required": [
+          "redaction_claim"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "not-applicable"
+          }
+        }
+      }
+    },
+    "outcome_unconfigured_is_not_a_verdict": {
+      "if": {
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": false
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          }
+        },
+        "required": [
+          "redaction_claim"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "redaction-not-enabled"
+          }
+        }
+      }
+    },
+    "outcome_pass_requires_verdict_conditions": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "pass"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": true
+          },
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          },
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "correlated_requests": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "outcome_fail_requires_verdict_conditions": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "fail"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          },
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          },
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "correlated_requests": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "outcome_inconclusive_requires_no_correlation": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "correlated_requests": {
+                    "const": 0
+                  }
+                },
+                "required": [
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "not_applicable_requires_no_claim": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "not-applicable"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "not-offered"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        }
+      }
+    },
+    "not_enabled_requires_claim_and_off": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "redaction-not-enabled"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": false
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          }
+        }
+      }
+    },
+    "claim_unstated_requires_unknown": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "claim-unstated"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        }
+      }
+    },
+    "inconclusive_requires_claim_and_on": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          }
+        }
+      }
+    },
+    "fail_requires_leak_evidence": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "fail"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "leaked_entity_types": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "leaked_entity_types"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "unattributed_leaked_entity_types": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "unattributed_leaked_entity_types"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "no_leak_outcome_requires_no_leak": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "no-leak-profile-not-met"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "passed": {
+            "const": false
+          },
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          },
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "leaked_entity_types": {
+                    "maxItems": 0
+                  },
+                  "unattributed_leaked_entity_types": {
+                    "maxItems": 0
+                  },
+                  "correlated_requests": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "leaked_entity_types",
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
     }
   },
   "additionalProperties": false

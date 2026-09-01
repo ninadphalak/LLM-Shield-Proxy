@@ -1,55 +1,93 @@
 {
   "attestation": {
-    "commit_sha": "5fa1c6ebcdad8ebbccd0ba30035bd276f8785c25+working-tree",
+    "commit_sha": "fe99dca410930f01aa1addc05354cff9be9bd35e+working-tree",
     "runner": "SwiftX",
     "verification": "self-reported"
   },
   "capture": {
+    "authentication_required": false,
     "bind_host": "127.0.0.1",
+    "mode": "loopback",
     "port": 8765,
+    "self_probe": {
+      "performed": true,
+      "recorded": true,
+      "round_trip_ms": 42.357999831438065,
+      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/vckrprkzgouoiwmdkmomjzhl"
+    },
     "target_must_be_preconfigured_for": "http://127.0.0.1:8765/v1"
   },
   "checks": {
     "client_observed_latency": {
       "iterations": 3,
-      "mean": 352.1439666704585,
-      "p50": 385.013599996455,
-      "p95": 385.013599996455,
-      "p99": 385.013599996455,
+      "iterations_measured": 3,
+      "mean": 122.89690009007852,
+      "p50": 116.86539999209344,
+      "p95": 116.86539999209344,
+      "p99": 116.86539999209344,
       "passed": true,
       "threshold_enforced": false,
       "unit": "milliseconds"
     },
     "configured_upstream_boundary": {
+      "capture_mode": "loopback",
       "captured_requests": 3,
       "correlated_requests": 3,
-      "inspection_scope": "every request to the capture origin on any path or method: request line plus body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed",
+      "inspection_scope": "every HTTP/1.x request to the capture origin on any path or method: request line, headers, chunk extensions, trailers, and body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, including ordered per-channel joins across captured requests",
+      "leak_evidence": [],
       "leaked_entity_types": [],
+      "marker_words_observed_max": 5,
       "marker_words_required": 3,
       "marker_words_total": 5,
+      "needle_lengths": {
+        "CREDIT_CARD": 16,
+        "EMAIL": 20,
+        "SSN": 9
+      },
+      "needle_proximity": {
+        "CREDIT_CARD": 2,
+        "EMAIL": 7,
+        "SSN": 2
+      },
       "passed": true,
       "payload_content_included": false,
+      "unattributed_leak_evidence": [],
+      "unattributed_leaked_entity_types": [],
+      "unattributed_needle_proximity": {
+        "CREDIT_CARD": 0,
+        "EMAIL": 0,
+        "SSN": 0
+      },
+      "unattributed_paths_observed": [],
+      "unattributed_requests": 0,
+      "unattributed_uninspectable_requests": 0,
       "uninspectable_reasons": [],
       "uninspectable_requests": 0,
+      "upstream_methods_observed": [
+        "POST"
+      ],
       "upstream_paths_observed": [
         "/v1/chat/completions"
       ]
     },
     "fragmentation_safety": {
       "coalescing_not_distinguished": true,
-      "events_observed": 131,
-      "events_observed_max": 131,
+      "events_observed": 133,
+      "events_observed_max": 133,
       "one_character_events_requested": true,
-      "passed": true
+      "passed": true,
+      "response_reconstructed": true
     },
     "response_fidelity": {
       "expected_value_reconstructed": true,
       "iterations_completed": 3,
       "iterations_matching": 3,
+      "iterations_requested": 3,
       "passed": true,
       "payload_content_included": false
     },
     "sse_validity": {
+      "content_type_valid": true,
       "done_markers_valid": true,
       "errors": [],
       "invalid_events": 0,
@@ -65,28 +103,54 @@
     "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
     "python": "3.14.7"
   },
-  "generated_at": "2026-08-31T13:01:32.064843Z",
-  "harness_revision": "5fa1c6ebcdad8ebbccd0ba30035bd276f8785c25+working-tree",
+  "generated_at": "2026-09-01T12:14:30.024026Z",
+  "harness_revision": "fe99dca410930f01aa1addc05354cff9be9bd35e+working-tree",
   "implementation": {
     "labels_are_operator_supplied": true,
     "name": "llm-shield-proxy",
     "version": "1.3.4+working-tree"
   },
-  "limitations": [
-    "The target must be configured to use the harness capture server as its upstream.",
-    "This HTTP profile does not evaluate gateway process RSS, audit evidence, or public-model behavior.",
-    "The synthetic fixture does not establish population-level detector accuracy.",
-    "Client-observed latency includes local HTTP and capture-server work and has no universal threshold.",
-    "Implementation name and version are operator-supplied labels, not measured identity.",
-    "Fragmentation safety verifies more than one event, which does not distinguish per-token streaming from a fully buffered response emitted as a few chunks.",
-    "Any attestation block is self-reported run metadata, not third-party verification.",
-    "Leak detection covers the configured capture origin only. Egress to any other destination is outside what this profile can observe.",
-    "Inspection recovers encoded and fragmented values, but a value split across non-adjacent fields of a body is not reassembled."
-  ],
+  "limitations": {
+    "method_limits": [
+      "This HTTP profile does not evaluate gateway process RSS, audit evidence, or public-model behavior.",
+      "The synthetic fixture does not establish population-level detector accuracy.",
+      "The fixture is three fixed, publicly known values, so a target that hard-codes them passes every check without operating a detector at all -- reproduced with a ~35-line string-replacement shim. This profile measures the behaviour of the endpoint it was pointed at during the run; it does not establish that the endpoint is the product it is labelled as. Varying the fixture was measured and rejected: a third of plausible format variants made this project's own correctly-redacting gateway report a leak.",
+      "Client-observed latency includes local HTTP and capture-server work and has no universal threshold.",
+      "Implementation name and version are operator-supplied labels, not measured identity.",
+      "Fragmentation safety verifies more than one event, which does not distinguish per-token streaming from a fully buffered response emitted as a few chunks.",
+      "Any attestation block is self-reported run metadata, not third-party verification.",
+      "Leak detection covers the configured capture origin only. Egress to any other destination is outside what this profile can observe.",
+      "The observation window ends after the client iterations finish; egress deliberately deferred until after capture shutdown is outside this finite run.",
+      "The profile inspects HTTP application data, not covert encodings in request counts, ordering, timing, connection metadata, packetization, or DNS/TLS metadata.",
+      "Inspection recovers encoded and fragmented values within a request and ordered fragments in the same channel across requests, but does not reassemble arbitrary fragments separated by unrelated values or moved between channel types."
+    ],
+    "run_validity": [
+      "The target must be configured to use the harness capture server as its upstream. This profile does not install or configure the target, and it cannot confirm the configuration took effect.",
+      "Zero captured requests fails the boundary check but does not identify a cause. A target that was never configured to use the capture origin, or that cannot reach it, is indistinguishable here from one that sent the traffic somewhere else. Confirm the target's configured upstream before reading this as leak evidence.",
+      "The capture server speaks plaintext HTTP/1.x, so the target must be able to open a plaintext HTTP connection to the advertised capture address. In loopback mode that address is on the tester's own machine; in public mode the tester supplies a reachable address and is assumed to terminate TLS at their own tunnel. A gateway that only egresses to an operator-fixed upstream it will not let the tester change cannot be measured by this check at all.",
+      "capture.mode records which observation this was. In public mode the capture address is reachable by anyone, so it is a WEAKER observation than a loopback run: attribution rests on the capture token the target was configured with rather than on the address being unreachable from outside. Do not compare a public run and a loopback run as equivalent evidence.",
+      "Requests that do not present the capture token are recorded and reported as unattributed, never dropped. A non-zero unattributed_requests on a public capture is expected background internet traffic and is not evidence about the target; unattributed_uninspectable_requests counts traffic the harness could not parse, which on a public address is ordinary noise. Protected fixture values appearing in unattributed traffic do fail the check and are reported separately, because a public capture address can be reached by a third party who knows the fixture.",
+      "Authentication, rate-limit, blast-radius, and other gateway policy controls must permit the requested evaluation traffic; a policy rejection is a profile non-pass, not evidence that protected data leaked.",
+      "Capture requests exceeding the byte, nesting, node, or decode budgets are failed closed as uninspectable; a non-pass from that condition is not evidence of a leak.",
+      "The capture server observes HTTP/1.x. Unsupported or malformed protocol attempts are failed closed as uninspectable rather than decoded as HTTP/2 or HTTP/3, so a target that speaks only HTTP/2 upstream produces a non-pass that is about the harness, not about the target.",
+      "leaked_entity_types names the entity but not the evidence. Read leak_evidence: a 'literal' match means the fixture value appeared verbatim in something the target sent; a 'normalized' match means it was recovered only after joining channels and stripping separators, which is what catches deliberate obfuscation but can in principle collide. needle_proximity reports how close anything came to each protected value, against needle_lengths -- equal means present. On an honest run the SSN margin measures 2 of 9.",
+      "In public mode the path between the target and the capture injects headers of its own, and they are inspected as an egress channel because a gateway could hide values there. A measured Cloudflare quick tunnel adds ten (cf-connecting-ip, x-forwarded-for, cf-ray and seven more) and takes a request from 20 digits to 93 without changing needle proximity. Any injected identifier whose digits happen to contain a protected value collides: of valid IPv4 addresses exactly one, 123.45.67.89, normalizes to the SSN fixture's digits, and a random hex request id reaches them at roughly 1e-10 per request. Such a run reports a normalized-match SSN finding against a gateway that redacted correctly. Suppressing header inspection would open a real evasion channel to remove a rare event, so leak_evidence records the matcher instead: check whether the match was literal before treating it as egress. The 16-digit card needle is unreachable by any IPv4.",
+      "correlated_requests counts captured requests carrying at least the required number of marker words; marker_words_observed_max reports how much of the marker survived. A gateway that reversibly masks the marker can correlate zero requests while behaving correctly."
+    ]
+  },
+  "outcome": "pass",
+  "outcome_rationale": "The product claims PII redaction, redaction was configured for this run, and every check passed. This is a verdict.",
   "passed": true,
   "profile": {
     "name": "OpenAI-compatible HTTP gateway profile",
     "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+  },
+  "redaction_claim": {
+    "claim_citation": "https://github.com/ninadphalak/LLM-Shield-Proxy#readme",
+    "configuration_reference": "default Tier 1/2 detector cascade, default SYNTHETIC masking mode",
+    "configured_for_this_run": true,
+    "recorded_by": "operator",
+    "vendor_claims_pii_redaction": "claimed"
   },
   "schema": "llm-shield.streaming-privacy-http-profile/v1.0.0",
   "target": {

@@ -63,6 +63,8 @@ The runner MUST publish warmup behavior, iteration count, operation scope, clock
 
 Version 1.0.0 sets no universal pass threshold. A deployment MAY publish a preregistered threshold in a separate profile.
 
+This domain is scored by publication, not by a `checks` entry. It contributes no pass/fail result object; a runner that omits the required distributions produces an invalid report rather than a failed check.
+
 ### SPG-MEMORY-1: Memory reporting and bounded state
 
 The runner MUST demonstrate that retained placeholder-prefix state does not exceed the declared token-derived bound. Allocation observations MUST be labeled as allocations, not RSS. A process-memory claim MUST use a separate production profile specifying sampling tool, lifecycle phase, workload, duration, concurrency, installation extras, and peak-versus-steady-state semantics.
@@ -71,7 +73,7 @@ Version 1.0.0 sets no universal RSS threshold.
 
 ## 4. Pass calculation
 
-The top-level result is `passed: true` only when all seven domain result objects report `passed: true`. Latency and memory pass means that required measurements and bounds were produced; it does not mean an undeclared performance threshold was met.
+The top-level result is `passed: true` only when all six SCORED domain result objects report `passed: true`. SPG-LATENCY-1 is a publication requirement, not a scored domain: its former check gated on percentiles of monotonic-clock deltas being non-negative, which cannot fail, so it produced no evidence and was removed from `checks`. The measurements it required are still mandatory and still published. A memory pass means that the required measurement and bound were produced; it does not mean an undeclared performance threshold was met.
 
 ## 5. Reproducibility and publication
 

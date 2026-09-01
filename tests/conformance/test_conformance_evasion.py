@@ -16,6 +16,7 @@ of 54 marker words were given names, which a conforming PERSON detector redacts)
 import base64
 import gzip
 import json
+import re
 import socket
 import threading
 import urllib.error
@@ -27,6 +28,7 @@ import pytest
 
 from llm_shield_proxy.conformance.http_profile import (
     _NONCE_MIN_MATCHES,
+    CaptureUnreachableError,
     _NONCE_WORD_COUNT,
     PROTECTED_VALUES,
     run_http_conformance,
@@ -625,6 +627,61 @@ def _conforming_gateway(port, redact_words=frozenset(), extra_payload=None, sing
     return ConformingGateway
 
 
+def _marker_redacting_gateway(port, count):
+    """Conforming gateway whose detector also masks the first ``count`` marker words.
+
+    The words are parsed out of the prompt this run actually sent. Learning them from
+    a separate probe run does not work: every run draws a fresh marker, so redacting
+    the probe's words leaves the run under test almost always untouched, and the test
+    passes without exercising anything.
+    """
+
+    class MarkerRedactingGateway(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            found = re.search(r"record ([a-z-]+):", prompt)
+            assert found, "the fixture prompt must carry the run marker"
+            masked, restored = prompt, {}
+            for raw, token in MASK.items():
+                masked = masked.replace(raw, token)
+            # Reversible masking: a conforming detector may tag a marker word, and a
+            # gateway that masks it still returns the original to the client.
+            for index, word in enumerate(found.group(1).split("-")[:count]):
+                token = f"[PERSON_{index}]"
+                restored[token] = word
+                masked = masked.replace(word, token)
+            response = _post(
+                f"http://127.0.0.1:{port}/v1/chat/completions",
+                json.dumps({"model": "m", "messages": [{"role": "user", "content": masked}]}).encode(),
+            )
+            text = "".join(
+                json.loads(line[5:])["choices"][0]["delta"]["content"]
+                for line in response.decode().splitlines()
+                if line.startswith("data:") and line[5:].strip() != "[DONE]"
+            )
+            for token, word in restored.items():
+                text = text.replace(token, word)
+            for raw, token in MASK.items():
+                text = text.replace(token, raw)
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in text:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    return MarkerRedactingGateway
+
+
 def test_conforming_gateway_passes(capture_port):
     report = _run(_conforming_gateway(capture_port), capture_port, iterations=2)
     assert report["passed"] is True, report["checks"]
@@ -839,7 +896,10 @@ def test_clean_request_over_inspection_budget_is_an_explicit_non_pass(capture_po
     assert report["passed"] is False
     assert boundary["leaked_entity_types"] == []
     assert boundary["uninspectable_requests"] >= 1
-    assert any("failed closed as uninspectable" in item for item in report["limitations"])
+    assert any(
+        "failed closed as uninspectable" in item
+        for item in report["limitations"]["run_validity"]
+    )
 
 
 def test_egress_deferred_until_after_capture_shutdown_is_disclosed(capture_port):
@@ -902,8 +962,13 @@ def test_egress_deferred_until_after_capture_shutdown_is_disclosed(capture_port)
         timer.join(timeout=3)
     assert attempted.is_set()
     assert report["passed"] is True
-    assert any("observation window ends" in item for item in report["limitations"])
-    assert any("request counts" in item for item in report["limitations"])
+    assert any(
+        "observation window ends" in item
+        for item in report["limitations"]["method_limits"]
+    )
+    assert any(
+        "request counts" in item for item in report["limitations"]["method_limits"]
+    )
 
 
 def test_marker_words_are_not_given_names():
@@ -919,25 +984,238 @@ def test_correlation_survives_partial_marker_redaction(capture_port):
     redactable = _NONCE_WORD_COUNT - _NONCE_MIN_MATCHES
     assert redactable >= 1, "the marker must tolerate at least one redacted word"
 
-    from llm_shield_proxy.conformance import http_profile as conformance_http
+    report = _run(_marker_redacting_gateway(capture_port, redactable), capture_port)
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert boundary["marker_words_observed_max"] == _NONCE_WORD_COUNT - redactable
+    assert boundary["correlated_requests"] >= 1, "redacting the tolerated count broke correlation"
+    assert report["passed"] is True, report["checks"]
 
-    seen = {}
-    original = conformance_http._build_prompt
 
-    def capture_prompt(nonce):
-        seen["words"] = nonce.split("-")
-        return original(nonce)
+# --- every failed check must explain itself from its own published fields -----------
+#
+# A published report is read by people who did not run it. A check that reports
+# passed: false while every measurement it emits reads exactly as it does on a
+# passing run is an accusation with no evidence attached, and the harness names the
+# gateway it accuses. Round 6 reproduced two of these against honest gateways: a
+# one-way anonymizer (no rehydration) and a gateway applying its own rate limit.
 
-    conformance_http._build_prompt = capture_prompt
-    try:
-        # Probe once to learn this run's marker, then redact the tolerated number.
-        probe = _run(_conforming_gateway(capture_port), capture_port, iterations=1)
-        assert probe["passed"] is True
-        words = frozenset(seen["words"][:redactable])
-        report = _run(_conforming_gateway(capture_port, redact_words=words), capture_port, iterations=1)
-    finally:
-        conformance_http._build_prompt = original
+
+def _explanatory_fields(check, reference):
+    """Fields of a failed check that differ from the same check on a passing run."""
+    volatile = {"mean", "p50", "p95", "p99", "captured_requests", "correlated_requests"}
+    return {
+        name: value
+        for name, value in check.items()
+        if name != "passed" and name not in volatile and reference.get(name) != value
+    }
+
+
+def _one_way_anonymizer(port):
+    """Redacts every protected value correctly, and never rehydrates the response."""
+
+    class OneWayAnonymizer(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            for raw in MASK:
+                prompt = prompt.replace(raw, "<REDACTED>")
+            response = _post(
+                f"http://127.0.0.1:{port}/v1/chat/completions",
+                json.dumps({"model": "m", "messages": [{"role": "user", "content": prompt}]}).encode(),
+            )
+            text = "".join(
+                json.loads(line[5:])["choices"][0]["delta"]["content"]
+                for line in response.decode().splitlines()
+                if line.startswith("data:") and line[5:].strip() != "[DONE]"
+            )
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in text:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    return OneWayAnonymizer
+
+
+def test_no_rehydration_failure_is_explained_by_fragmentation_safety(capture_port):
+    """A one-way anonymizer trips fragmentation_safety; the check must say why.
+
+    ``fragmentation_safety`` also gates on response reconstruction, so it fails
+    alongside ``response_fidelity`` while ``events_observed`` still satisfies its
+    own stated ``> 1`` criterion.
+    """
+    passing = _run(_conforming_gateway(capture_port), capture_port)
+    assert passing["passed"] is True, passing["checks"]
+    report = _run(_one_way_anonymizer(capture_port), capture_port)
 
     boundary = report["checks"]["configured_upstream_boundary"]
-    assert boundary["correlated_requests"] >= 1, f"redacting {sorted(words)} broke correlation"
-    assert report["passed"] is True, report["checks"]
+    assert boundary["passed"] is True, "the anonymizer leaked nothing; the boundary must pass"
+    fragmentation = report["checks"]["fragmentation_safety"]
+    assert fragmentation["passed"] is False
+    assert fragmentation["events_observed"] > 1, "the > 1 criterion is met, so it is not the cause"
+    assert fragmentation["response_reconstructed"] is False
+    assert _explanatory_fields(fragmentation, passing["checks"]["fragmentation_safety"])
+
+
+def _rate_limiting_gateway(port, allowed):
+    """Honest gateway that applies its own rate limit after ``allowed`` requests."""
+
+    class RateLimitingGateway(_conforming_gateway(port)):
+        served = 0
+
+        def do_POST(self):  # noqa: N802
+            type(self).served += 1
+            if type(self).served > allowed:
+                self.send_error(429)
+                return
+            super().do_POST()
+
+    return RateLimitingGateway
+
+
+def test_policy_rejection_is_explained_by_client_observed_latency(capture_port):
+    """An honest gateway's own 429 must not fail a check that publishes no reason."""
+    passing = _run(_conforming_gateway(capture_port), capture_port, iterations=2)
+    assert passing["passed"] is True, passing["checks"]
+    report = _run(_rate_limiting_gateway(capture_port, 1), capture_port, iterations=2)
+
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert boundary["leaked_entity_types"] == [], "a rate limit is not leak evidence"
+    latency = report["checks"]["client_observed_latency"]
+    assert latency["passed"] is False
+    assert latency["iterations_measured"] < latency["iterations"]
+    assert _explanatory_fields(latency, passing["checks"]["client_observed_latency"])
+    assert any(
+        "policy rejection is a profile non-pass" in item
+        for item in report["limitations"]["run_validity"]
+    )
+
+
+def test_every_failed_check_publishes_a_reason(capture_port):
+    """Blanket invariant: no check may fail with all of its own fields reading clean."""
+
+    class BufferedRateLimitedGateway(_conforming_gateway(capture_port, single_event=True)):
+        served = 0
+
+        def do_POST(self):  # noqa: N802
+            type(self).served += 1
+            if type(self).served > 1:
+                self.send_error(429)
+                return
+            super().do_POST()
+
+    passing = _run(_conforming_gateway(capture_port), capture_port, iterations=2)
+    report = _run(BufferedRateLimitedGateway, capture_port, iterations=2)
+    unexplained = [
+        name
+        for name, check in report["checks"].items()
+        if not check["passed"] and not _explanatory_fields(check, passing["checks"][name])
+    ]
+    assert not unexplained, f"failed with no published reason: {unexplained}"
+
+
+# --- an over-redacting gateway must be distinguishable from a decoy -----------------
+
+
+def test_marker_word_survival_is_reported(capture_port):
+    """correlated_requests: 0 alone cannot separate over-redaction from no capture.
+
+    A gateway whose detector tags the marker words and masks them REVERSIBLY behaves
+    correctly end to end, yet correlates nothing. Without the observed-word count its
+    report is byte-identical to a target that exfiltrated elsewhere and sent decoys,
+    which reaches the capture carrying none of the marker.
+    """
+    clean = _run(_conforming_gateway(capture_port), capture_port)
+    assert clean["passed"] is True
+    assert clean["checks"]["configured_upstream_boundary"]["marker_words_observed_max"] == (
+        _NONCE_WORD_COUNT
+    )
+
+    # One more than the profile tolerates: correct behaviour, no correlation.
+    over = _NONCE_WORD_COUNT - _NONCE_MIN_MATCHES + 1
+    report = _run(_marker_redacting_gateway(capture_port, over), capture_port)
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert boundary["correlated_requests"] == 0
+    assert boundary["passed"] is False
+    survivors = boundary["marker_words_observed_max"]
+    assert survivors == _NONCE_WORD_COUNT - over
+    assert 0 < survivors < _NONCE_MIN_MATCHES, (
+        "an over-redacting honest gateway must be distinguishable from a decoy"
+    )
+
+
+def test_zero_captured_requests_is_disclosed_as_an_unattributed_outcome(capture_port):
+    """A target that never reaches the capture is not evidence that it leaked."""
+
+    class UnreachableCaptureGateway(BaseHTTPRequestHandler):
+        """Honest, but egressing to its own upstream: a hosted gateway's behaviour."""
+
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("connection", "close")
+            self.end_headers()
+            for character in prompt:
+                event = {"choices": [{"delta": {"content": character}}]}
+                self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    report = _run(UnreachableCaptureGateway, capture_port)
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert boundary["captured_requests"] == 0
+    assert boundary["passed"] is False
+    assert boundary["marker_words_observed_max"] == 0
+    assert any(
+        "Zero captured requests" in item
+        for item in report["limitations"]["run_validity"]
+    )
+    assert any(
+        "plaintext HTTP/1.x" in item for item in report["limitations"]["run_validity"]
+    )
+
+
+def test_capture_server_fails_closed_when_another_process_holds_the_port():
+    """A stolen capture port must fail the RUN, not report a gateway failure.
+
+    Round 6 tried to prevent this by clearing ``allow_reuse_address`` on Windows.
+    Measured on Windows 11, that does not work: the hijack happens only when the two
+    sockets bind DIFFERENT addresses, and there it happens with or without the flag,
+    while the matching-address case was already refused before the change. Confirmed
+    end to end -- with the fix applied, a pre-existing loopback listener took every
+    request and the capture recorded zero.
+
+    The flag is gone. A post-bind self-probe replaces it: the harness sends one request
+    to its own capture URL and aborts unless the capture recorded it. That fails closed
+    on every hijack shape on every platform, and also catches a firewall, a stray proxy
+    environment variable and a dead server. Detailed coverage lives in
+    ``test_capture_deployment.py``; this pins the specific shape round 6 got wrong.
+    """
+    with socket.socket() as held:
+        held.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        # Either outcome is fail-closed: the bind may still be refused (POSIX), or it
+        # succeeds and the probe catches the steal (Windows). What must never happen
+        # is a report blaming the gateway.
+        with pytest.raises((OSError, CaptureUnreachableError)):
+            run_http_conformance(
+                "http://127.0.0.1:1/v1", iterations=1, capture_port=port, timeout_seconds=1.0
+            )

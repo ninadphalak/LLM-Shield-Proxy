@@ -23,6 +23,13 @@ from urllib.parse import unquote_plus, urljoin
 
 import httpx
 
+from llm_shield_proxy.conformance.provenance import build_attestation
+from llm_shield_proxy.conformance.redaction_claim import (
+    derive_outcome,
+    normalize_claim,
+    rationale_for,
+)
+
 PROTECTED_VALUES = {
     "EMAIL": "person@example.invalid",
     "SSN": "123-45-6789",
@@ -69,6 +76,45 @@ _NONCE_WORDS = (
 _NONCE_WORD_COUNT = 5
 # A conforming gateway may legitimately redact a minority of the marker words.
 _NONCE_MIN_MATCHES = 3
+
+
+class CaptureUnreachableError(OSError):
+    """The capture server did not observe the harness's own probe request.
+
+    Raised BEFORE any target traffic, so no report is produced. Every condition it
+    detects -- a hijacked port, a firewall, a broken tunnel, a stray proxy
+    environment variable, a dead server -- otherwise produces a schema-valid report
+    that fails checks against a gateway which did nothing wrong.
+
+    Deliberately an OSError. It replaces the EADDRINUSE that POSIX used to raise for
+    the one hijack shape a bind could refuse, and the CLI already turns an OSError
+    from the harness into "Benchmark failed: ..." and exit 2. The replacement must
+    fail the same way the thing it replaces did, and it genuinely is a connectivity
+    condition.
+    """
+
+
+# The probe path carries a per-run secret so a target cannot address it, and is drawn
+# from LETTERS ONLY: a digit in the path would join the cross-request digit haystacks
+# that the SSN and card needles are matched against, and the whole point of the probe
+# is that it cannot influence a verdict.
+#
+# It is appended to the capture BASE url rather than to the origin, and matched as a
+# SUFFIX rather than by equality. A tester's reverse proxy may forward only `/v1/*`,
+# and one that rewrites the prefix would change the path the capture sees -- either
+# would 404 or mismatch an origin-rooted probe and abort an honest run. The 24-letter
+# secret is what makes the path unguessable; the prefix carries no security.
+_PROBE_PATH_TEMPLATE = "/__conformance_capture_probe__/{token}"
+_PROBE_TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+_PROBE_TOKEN_LENGTH = 24
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})
+
+
+def _make_probe_token() -> str:
+    return "".join(
+        _PROBE_TOKEN_ALPHABET[secrets.randbelow(len(_PROBE_TOKEN_ALPHABET))]
+        for _ in range(_PROBE_TOKEN_LENGTH)
+    )
 
 
 def _make_nonce() -> str:
@@ -280,11 +326,45 @@ def _collect_framing_metadata(kind: str, text: str, found: _Inspection) -> None:
             _collect(text[value_start:position].strip(), found)
 
 
-def _leaked_entities(records: list[dict[str, Any]]) -> list[str]:
-    """Entity types whose fixture value reached the upstream in any recoverable form."""
-    leaked: set[str] = set()
+def _needle_proximity(needle: str, haystacks: tuple[str, ...]) -> int:
+    """Longest contiguous run OF THE NEEDLE found anywhere in these haystacks.
 
-    def inspect(strings: list[str], values: list[str]) -> None:
+    This is the collision margin. Equal to len(needle) means the value is present --
+    a leak. Anything less is how close the run came: round 6 measured 2 of 9 for the
+    SSN on an honest loopback run, a 7-character margin, and concluded no benign
+    reassembly was constructible.
+
+    Deliberately NOT "longest digit run in the haystack": measured against the live
+    proxy that number is 16, and it is the gateway's own synthetic REPLACEMENT card
+    standing in for the fixture. A correctly-redacting gateway emits substitutes shaped
+    like the fixture, so a raw digit-run count is dominated by them and tells a reader
+    nothing about headroom.
+    """
+    longest = 0
+    length = len(needle)
+    for start in range(length):
+        # Only runs longer than the best so far can improve it.
+        for end in range(length, start + longest, -1):
+            fragment = needle[start:end]
+            if any(fragment in hay for hay in haystacks):
+                longest = max(longest, end - start)
+                break
+    return longest
+
+
+def _leaked_entities(
+    records: list[dict[str, Any]]
+) -> tuple[list[str], list[dict[str, Any]], int]:
+    """Entity types whose fixture value reached the upstream in any recoverable form.
+
+    Returns the sorted entity list (unchanged in meaning), the evidence behind each
+    finding, and the longest contiguous digit run seen in any normalized haystack.
+    """
+    leaked: set[str] = set()
+    evidence: list[dict[str, Any]] = []
+    proximity: dict[str, int] = {entity: 0 for entity in PROTECTED_VALUES}
+
+    def inspect(strings: list[str], values: list[str], channel: str, scope: str) -> None:
         haystacks = (
             "".join(strings),
             "".join(values),
@@ -292,19 +372,43 @@ def _leaked_entities(records: list[dict[str, Any]]) -> list[str]:
             _normalize("".join(values)),
         )
         for entity, value in PROTECTED_VALUES.items():
+            proximity[entity] = max(
+                proximity[entity], _needle_proximity(_normalize(value), haystacks)
+            )
+        for entity, value in PROTECTED_VALUES.items():
             if entity in leaked:
                 continue
             if any(value in text for text in strings):
+                # The fixture value appears verbatim in something the target sent.
+                # This is the strong form and needs no interpretation.
                 leaked.add(entity)
+                evidence.append(
+                    {
+                        "entity_type": entity,
+                        "channel": channel,
+                        "scope": scope,
+                        "match": "literal",
+                    }
+                )
                 continue
             normalized = _normalize(value)
             if any(value in hay or normalized in hay for hay in haystacks):
+                # Recovered only after joining and stripping separators. Still a
+                # finding -- this is what catches deliberate obfuscation -- but a
+                # purely numeric needle can in principle collide with unrelated
+                # digits, so the artifact says which matcher fired.
                 leaked.add(entity)
+                evidence.append(
+                    {
+                        "entity_type": entity,
+                        "channel": channel,
+                        "scope": scope,
+                        "match": "normalized",
+                    }
+                )
 
     for record in records:
-        strings: list[str] = record["strings"]
-        values: list[str] = record["values"]
-        inspect(strings, values)
+        inspect(record["strings"], record["values"], "all", "per-request")
 
     # A stateful upstream can reassemble one logical value from ordered requests.
     # Join each data channel independently across records so ordinary method/header
@@ -316,8 +420,8 @@ def _leaked_entities(records: list[dict[str, Any]]) -> list[str]:
         values = [
             item for record in records for item in record.get(f"{channel}_values", [])
         ]
-        inspect(strings, values)
-    return sorted(leaked)
+        inspect(strings, values, channel, "cross-request")
+    return sorted(leaked), evidence, proximity
 
 
 def _marker_matches(record: dict[str, Any], words: list[str]) -> int:
@@ -369,9 +473,36 @@ def _percentiles(values: list[float]) -> dict[str, float]:
 class _CaptureState:
     """Records what the upstream actually received, decoded, not as raw wire bytes."""
 
-    def __init__(self) -> None:
+    def __init__(self, probe_path: str, capture_token: Optional[str] = None) -> None:
         self.lock = threading.Lock()
         self.records: list[dict[str, Any]] = []
+        self.probe_path = probe_path.rstrip("/")
+        self.capture_token = capture_token
+
+    def classify(self, path: Any, headers: Any) -> tuple[bool, bool]:
+        """Is this the harness's own probe, and did it present the capture token?
+
+        Neither answer may ever cause a request to go unrecorded. A capture bound to
+        a public interface WILL receive traffic that belongs to nobody -- scanners,
+        someone else's misconfiguration -- and dropping it would hide exactly the
+        condition a reader needs to weigh the run. Both flags only decide which
+        bucket a record is reported in.
+        """
+        probe = str(path or "").split("?")[0].rstrip("/").endswith(self.probe_path)
+        if self.capture_token is None:
+            return probe, True
+        presented: list[str] = []
+        if headers is not None:
+            for value in headers.get_all("authorization") or ():
+                text = str(value).strip()
+                if text.lower().startswith("bearer "):
+                    presented.append(text[7:].strip())
+            for value in headers.get_all("x-conformance-capture-token") or ():
+                presented.append(str(value).strip())
+        authenticated = any(
+            secrets.compare_digest(item, self.capture_token) for item in presented
+        )
+        return probe, authenticated
 
     def append(self, record: dict[str, Any]) -> None:
         with self.lock:
@@ -414,10 +545,15 @@ def _handler_for(state: _CaptureState):
                     for header_name, header_value in headers.items():
                         _collect(str(header_name), found)
                         _collect(unquote_plus(str(header_value)), found)
+                probe, authenticated = state.classify(
+                    getattr(self, "path", ""), getattr(self, "headers", None)
+                )
                 state.append(
                     {
                         "path": getattr(self, "path", ""),
                         "method": getattr(self, "command", ""),
+                        "probe": probe,
+                        "authenticated": authenticated,
                         "parsed": False,
                         "strings": found.strings,
                         "values": found.values,
@@ -437,7 +573,20 @@ def _handler_for(state: _CaptureState):
             super().send_error(code, message, explain)
 
         def do_GET(self) -> None:  # noqa: N802
-            self._capture()
+            record, _ = self._capture()
+            if record["probe"]:
+                # Echo the secret back. The probe must prove that the socket the
+                # harness reached is THIS server, not another process that bound the
+                # same address -- a 404 or any other body from a squatter fails it.
+                body = json.dumps(
+                    {"conformance_capture_probe": state.probe_path}
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.rstrip("/") == "/v1/models":
                 body = json.dumps(
                     {"object": "list", "data": [{"id": "conformance-model", "object": "model"}]}
@@ -529,9 +678,12 @@ def _handler_for(state: _CaptureState):
             body, encoding_error = _decode_content_encoding(
                 body, self.headers.get("content-encoding", "")
             )
+            probe, authenticated = state.classify(self.path, self.headers)
             record: dict[str, Any] = {
                 "path": self.path,
                 "method": self.command,
+                "probe": probe,
+                "authenticated": authenticated,
                 "parsed": False,
                 "strings": [],
                 "values": [],
@@ -660,6 +812,116 @@ def _handler_for(state: _CaptureState):
     return CaptureHandler
 
 
+def _probe_once(
+    url: str,
+    probe_path: str,
+    capture_token: Optional[str],
+    timeout_seconds: float,
+) -> tuple[bool, str, float]:
+    """One probe request. Returns (answered_by_our_capture, detail, elapsed_ms)."""
+    headers = {"user-agent": "llm-shield-conformance-probe"}
+    if capture_token:
+        headers["authorization"] = f"Bearer {capture_token}"
+    started = time.perf_counter()
+    try:
+        # trust_env=False on purpose: an HTTP_PROXY/ALL_PROXY variable in the tester's
+        # environment would route the probe away from the capture and report a
+        # reachability the target does not have.
+        with httpx.Client(timeout=timeout_seconds, trust_env=False) as client:
+            response = client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        return False, f"unreachable:{type(exc).__name__}", (time.perf_counter() - started) * 1_000
+    elapsed_ms = (time.perf_counter() - started) * 1_000
+    if response.status_code != 200:
+        return False, f"wrong_responder:http_{response.status_code}", elapsed_ms
+    try:
+        echoed = response.json().get("conformance_capture_probe")
+    except (json.JSONDecodeError, AttributeError, ValueError):
+        echoed = None
+    if echoed != probe_path:
+        return False, "wrong_responder:echo_mismatch", elapsed_ms
+    return True, "ok", elapsed_ms
+
+
+def _self_probe(
+    local_url: str,
+    advertised_url: Optional[str],
+    probe_path: str,
+    state: _CaptureState,
+    capture_token: Optional[str],
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """Send the harness's own request to the capture and confirm it was recorded.
+
+    This replaces trying to make the bind refuse a stolen port. Measured on Windows
+    11, clearing allow_reuse_address did not prevent the hijack: the steal happens
+    when the two sockets bind DIFFERENT addresses, and there it happens with or
+    without the flag, while the matching-address case was already refused before the
+    change. Confirmed end to end -- with that fix applied, a pre-existing loopback
+    listener took every request and the capture recorded zero.
+
+    Probing the channel instead of tuning the flag fails closed on every hijack shape
+    on every platform, and also catches a firewall, a stray proxy environment
+    variable, and a dead server.
+
+    Two probes, deliberately asymmetric:
+
+    local_url is the bind address, always reachable from the harness itself. Any
+    failure here aborts: the capture is hijacked, dead, or firewalled, and a run would
+    measure nothing while emitting a schema-valid report that blames the target.
+
+    advertised_url is what the TARGET is configured with. When it answers with
+    something other than this capture, that is positive evidence of a hijacked public
+    address and also aborts. When it is merely unreachable, the result is RECORDED and
+    the run continues: a legitimate configuration can be reachable from the target and
+    not from the harness -- host.docker.internal resolves inside a container and often
+    not on the host. Aborting there would fire on an honest setup, so the limit is
+    published instead. A broken tunnel still fails the boundary check on zero
+    captures, and advertised_url_reachable false is what tells the reader why.
+    """
+    answered, detail, elapsed_ms = _probe_once(
+        local_url, probe_path, capture_token, timeout_seconds
+    )
+    if not answered:
+        raise CaptureUnreachableError(
+            f"capture self-probe to {local_url} failed ({detail}). The capture server "
+            "is not reachable and recording at its own bind address, so this run would "
+            "measure nothing. Another process may hold the port."
+        )
+    recorded = [record for record in state.snapshot() if record.get("probe")]
+    if not recorded:
+        raise CaptureUnreachableError(
+            f"capture self-probe to {local_url} was answered but not recorded. The "
+            "capture server is not recording the traffic it serves."
+        )
+    if capture_token and not any(record.get("authenticated") for record in recorded):
+        raise CaptureUnreachableError(
+            f"capture self-probe to {local_url} was recorded but its capture token was "
+            "not seen, so traffic the target sends with that token could not be "
+            "attributed to it."
+        )
+    probe: dict[str, Any] = {
+        "performed": True,
+        "url": local_url,
+        "recorded": True,
+        "round_trip_ms": elapsed_ms,
+    }
+    if advertised_url and advertised_url != local_url:
+        reachable, advertised_detail, _ = _probe_once(
+            advertised_url, probe_path, capture_token, timeout_seconds
+        )
+        if not reachable and advertised_detail.startswith("wrong_responder"):
+            raise CaptureUnreachableError(
+                f"capture self-probe to the advertised URL {advertised_url} was "
+                f"answered by something other than this capture ({advertised_detail}). "
+                "The address the target will be configured with does not reach this run."
+            )
+        probe["advertised_url"] = advertised_url
+        probe["advertised_url_reachable"] = reachable
+        probe["advertised_url_detail"] = advertised_detail
+    return probe
+
+
 async def _exercise_target(
     target_base_url: str,
     api_key: str,
@@ -763,17 +1025,73 @@ def run_http_conformance(
     timeout_seconds: float = 30.0,
     capture_host: str = "127.0.0.1",
     capture_port: int = 8765,
+    capture_token: Optional[str] = None,
+    capture_public_url: Optional[str] = None,
     extra_headers: Optional[dict[str, str]] = None,
+    redaction_claim: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Evaluate an OpenAI-compatible endpoint against a controlled capture upstream.
 
     Configure the target gateway's upstream base URL to the capture server before running.
     Use ``capture://self`` as the target to record an explicit raw-pass-through baseline.
+
+    Two capture modes:
+
+    ``loopback`` (default) -- the capture binds ``127.0.0.1`` and only a target on the
+    tester's own machine or network can reach it. This is the stronger observation:
+    every request that arrives is the target's.
+
+    ``public`` -- the tester binds a reachable interface (``capture_host="0.0.0.0"``)
+    and/or fronts the capture with their own tunnel or VPS, then passes the
+    externally reachable base URL as ``capture_public_url`` so the harness advertises,
+    probes and correlates against the address the target will actually use. This is
+    what makes a hosted gateway measurable at all, and it is a WEAKER observation: the
+    address is reachable by anyone. ``capture_token`` is therefore REQUIRED in this
+    mode; the target is configured with it as its upstream API key, and requests that
+    do not present it are recorded and reported as unattributed rather than counted
+    as the target's. The project does not operate a capture service -- a neutral
+    referee cannot also host the traffic it measures -- so the tester deploys it.
+
+    TLS is assumed to be terminated by the tester's tunnel; the capture itself speaks
+    plaintext HTTP/1.x behind it.
+
+    ``redaction_claim`` records what the product CLAIMS about PII redaction, with a
+    citation, and what was configured for this run. It governs the derived ``outcome``,
+    which is what a published table cell is allowed to say. Omitting it yields
+    ``outcome: claim-unstated`` -- honest measurements, not publishable as a row. See
+    ``conformance/redaction_claim.py``: a product that never offered redaction must
+    never be printed as "Fail".
     """
     if iterations < 1:
         raise ValueError("iterations must be at least 1")
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
+    # Validated before the capture server binds: a malformed claim should cost nothing
+    # and must never be silently defaulted into a verdict.
+    claim_block = normalize_claim(redaction_claim)
+
+    bind_is_loopback = capture_host in _LOOPBACK_HOSTS
+    capture_mode = "loopback" if bind_is_loopback and not capture_public_url else "public"
+    if not bind_is_loopback and not capture_public_url:
+        raise ValueError(
+            f"capture_host={capture_host!r} is not loopback, so capture_public_url is "
+            "required (CLI: --capture-public-url URL, env: "
+            "CONFORMANCE_CAPTURE_PUBLIC_URL). A wildcard bind has no address anything "
+            "can connect to, so publishing it as the URL the target must be configured "
+            "for is simply wrong. Pass the externally reachable /v1 base URL the target "
+            "will use -- your tunnel, your VPS, or http://host.docker.internal:PORT/v1 "
+            "for a container. A public bind also requires capture_token (CLI: "
+            "--capture-token, env: CONFORMANCE_CAPTURE_TOKEN)."
+        )
+    if capture_mode == "public" and not capture_token:
+        raise ValueError(
+            "capture_token is required when the capture is reachable beyond loopback "
+            "(CLI: --capture-token TOKEN, env: CONFORMANCE_CAPTURE_TOKEN -- prefer the "
+            f"env var, process listings show argv). bind_host={capture_host!r}, "
+            f"public_url={capture_public_url!r}. Without a token any internet traffic "
+            "could enter the capture record. Configure the target's upstream API key to "
+            "the same value so its requests are attributable."
+        )
 
     # Per-run nonce. Without it nothing ties a captured request to THIS run, so a
     # target can exfiltrate raw PII to its real upstream and satisfy the boundary
@@ -781,14 +1099,44 @@ def run_http_conformance(
     nonce = _make_nonce()
     prompt = _build_prompt(nonce)
 
-    state = _CaptureState()
+    probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
+    state = _CaptureState(probe_path, capture_token)
+
+    # SO_REUSEADDR is left at HTTPServer's default on every platform. Clearing it on
+    # Windows was tried and measured not to prevent a hijack -- the steal happens
+    # when the two sockets bind DIFFERENT addresses, where the flag is irrelevant,
+    # and the matching-address case was already refused without it. Keeping the flag
+    # is also what lets a repeat run rebind over the previous run's TIME_WAIT
+    # entries. The post-bind self-probe below is what actually fails closed here.
     server = ThreadingHTTPServer((capture_host, capture_port), _handler_for(state))
     actual_host, actual_port = server.server_address[:2]
-    capture_base_url = f"http://{actual_host}:{actual_port}/v1"
-    effective_target = capture_base_url if target_base_url == "capture://self" else target_base_url
+    local_base_url = f"http://{actual_host}:{actual_port}/v1"
+    # What the TARGET must be pointed at. In public mode that is the tester's own
+    # externally reachable address, not the bind address -- a capture bound to
+    # 0.0.0.0 has no usable URL of its own.
+    advertised_base_url = (capture_public_url or local_base_url).rstrip("/")
+    # The local probe must use an address the harness can actually connect to. A
+    # wildcard bind is not one, so normalize it to loopback for the probe only.
+    probe_host = "127.0.0.1" if actual_host in ("0.0.0.0", "::", "") else actual_host
+    local_probe_url = f"http://{probe_host}:{actual_port}/v1{probe_path}"
+    advertised_probe_url = advertised_base_url + probe_path
+    effective_target = (
+        advertised_base_url if target_base_url == "capture://self" else target_base_url
+    )
     thread = threading.Thread(target=server.serve_forever, name="conformance-capture", daemon=True)
     thread.start()
     try:
+        # Before any target traffic. A run whose capture cannot be reached measures
+        # nothing, and the report it would otherwise emit is schema-valid and blames
+        # the target.
+        self_probe = _self_probe(
+            local_probe_url,
+            advertised_probe_url,
+            probe_path,
+            state,
+            capture_token,
+            min(timeout_seconds, 30.0),
+        )
         exercise = asyncio.run(
             _exercise_target(
                 effective_target,
@@ -806,13 +1154,42 @@ def run_http_conformance(
         server.server_close()
         thread.join(timeout=5)
 
-    captured = state.snapshot()
+    all_records = state.snapshot()
+    # The probe is the harness's own traffic. It is bucketed out of everything a
+    # verdict is computed from -- captured_requests, correlation, and the leak
+    # haystacks -- so it can neither pollute the record nor move a result. Its path
+    # carries a per-run secret and contains no digits, so a target cannot address it
+    # and it cannot contribute to a cross-request digit reassembly.
+    probe_records = [record for record in all_records if record.get("probe")]
+    target_records = [record for record in all_records if not record.get("probe")]
+    # A public capture WILL receive traffic that is not the target's. It is recorded
+    # and reported, never dropped, but it is not attributed to the target.
+    captured = [record for record in target_records if record.get("authenticated", True)]
+    unattributed = [record for record in target_records if not record.get("authenticated", True)]
+
     marker_words = nonce.split("-")
-    leaked_types = _leaked_entities(captured)
+    leaked_types, leak_evidence, needle_proximity = _leaked_entities(captured)
+    # Inspected SEPARATELY, not joined into the target's channels. Concatenating
+    # anonymous internet traffic into the cross-request haystacks would let a third
+    # party who knows the fixture and the capture URL manufacture a leak finding
+    # against an honest gateway. Fixture values arriving at all still fail the check
+    # -- no honest third party sends this synthetic fixture -- but the cause is
+    # published in its own field so a reader is not told the target sent them.
+    (
+        unattributed_leaked_types,
+        unattributed_leak_evidence,
+        unattributed_needle_proximity,
+    ) = _leaked_entities(unattributed)
+    unattributed_uninspectable = [
+        record for record in unattributed if not record["parsed"]
+    ]
     # A conforming gateway may redact part of the marker, so a majority ties the
     # capture to this run. Requiring the literal nonce failed honest implementations.
+    marker_hits = [_marker_matches(record, marker_words) for record in captured]
     correlated = [
-        record for record in captured if _marker_matches(record, marker_words) >= _NONCE_MIN_MATCHES
+        record
+        for record, hits in zip(captured, marker_hits)
+        if hits >= _NONCE_MIN_MATCHES
     ]
     uninspectable = [record for record in captured if not record["parsed"]]
     paths = sorted({str(record["path"]).split("?")[0] for record in captured})
@@ -820,18 +1197,62 @@ def run_http_conformance(
     latency = _percentiles(exercise["durations_ms"])
     checks = {
         "configured_upstream_boundary": {
-            "passed": bool(correlated) and not leaked_types and not uninspectable,
+            "passed": (
+                bool(correlated)
+                and not leaked_types
+                and not unattributed_leaked_types
+                and not uninspectable
+            ),
+            # A public capture is a weaker observation than a loopback one and a
+            # reader must be able to tell which they are looking at without leaving
+            # the check that made the claim.
+            "capture_mode": capture_mode,
             "captured_requests": len(captured),
             "correlated_requests": len(correlated),
             "uninspectable_requests": len(uninspectable),
+            # Recorded and published, never silently dropped. On a public capture a
+            # non-zero count is expected background scan traffic and does NOT fail
+            # the check: gating on it would fail an honest run for something a
+            # stranger did. Fixture values inside it do fail, above.
+            "unattributed_requests": len(unattributed),
+            "unattributed_uninspectable_requests": len(unattributed_uninspectable),
+            "unattributed_leaked_entity_types": unattributed_leaked_types,
+            "unattributed_leak_evidence": unattributed_leak_evidence,
+            "unattributed_needle_proximity": unattributed_needle_proximity,
+            "unattributed_paths_observed": sorted(
+                {str(record["path"]).split("?")[0] for record in unattributed}
+            ),
             "uninspectable_reasons": sorted(
                 {str(record["error"]) for record in uninspectable if record["error"]}
             ),
             "leaked_entity_types": leaked_types,
+            # Where each finding came from and which matcher produced it. A bare
+            # leaked_entity_types is an unretractable accusation with no provenance;
+            # "literal" means the fixture value appeared verbatim, "normalized" means
+            # it was recovered only after joining and stripping separators.
+            "leak_evidence": leak_evidence,
+            # How close anything in the capture came to each protected value: the
+            # longest contiguous run OF THE NEEDLE found in any haystack. Equal to the
+            # needle length means it is present. Anything less is the margin -- round 6
+            # measured 2 of 9 for the SSN on an honest loopback run. Published per run
+            # because public capture mode lets tunnel-injected headers into the same
+            # haystacks: a Cloudflare quick tunnel adds ten headers and took a measured
+            # request from 20 digits to 93.
+            "needle_proximity": needle_proximity,
+            "needle_lengths": {
+                entity: len(_normalize(value))
+                for entity, value in PROTECTED_VALUES.items()
+            },
             "upstream_paths_observed": paths,
             "upstream_methods_observed": methods,
             "marker_words_required": _NONCE_MIN_MATCHES,
             "marker_words_total": len(marker_words),
+            # How much of the marker actually survived into the best capture. Without
+            # it, an honest gateway that reversibly masked the marker words (a
+            # conforming detector may tag them) reports correlated_requests: 0 --
+            # byte-identical to a target that exfiltrated elsewhere and sent decoy
+            # traffic. The count separates "partly redacted" from "never arrived".
+            "marker_words_observed_max": max(marker_hits) if marker_hits else 0,
             "inspection_scope": (
                 "every HTTP/1.x request to the capture origin on any path or method: request "
                 "line, headers, chunk extensions, trailers, and body, after transfer-encoding "
@@ -847,6 +1268,11 @@ def run_http_conformance(
             "one_character_events_requested": True,
             "events_observed": exercise["events"],
             "events_observed_max": exercise["events_max"],
+            # This check also gates on reconstruction, so it must publish that term.
+            # Without it the check can report passed: false while events_observed
+            # satisfies its own stated criterion and no field it emits is false --
+            # an unattributable failed check in a third party's published report.
+            "response_reconstructed": exercise["text_matches"],
             "coalescing_not_distinguished": True,
         },
         "sse_validity": {
@@ -875,12 +1301,27 @@ def run_http_conformance(
             "threshold_enforced": False,
             "unit": "milliseconds",
             "iterations": iterations,
+            # The gate is sample completeness, not latency. Publishing only the
+            # requested count left every field of this check reading clean while it
+            # reported passed: false -- reproduced against a gateway that returned
+            # HTTP 429 on its own rate limit.
+            "iterations_measured": len(exercise["durations_ms"]),
             **latency,
         },
     }
-    from llm_shield_proxy.conformance.local import build_attestation
-
     attestation = build_attestation()
+    measured_pass = all(check["passed"] for check in checks.values())
+    # "Attributable" means at least one captured request carried this run's marker. A
+    # run with none cannot tell "never configured" from "sent it elsewhere", which
+    # round 6 established is not evidence of a leak -- so it is not a Fail either.
+    outcome = derive_outcome(
+        claim_block,
+        passed=measured_pass,
+        attributable=bool(correlated),
+        # Only actual leak evidence makes a non-pass a leak finding. A one-way
+        # anonymizer fails response_fidelity while leaking nothing.
+        leaked=bool(leaked_types or unattributed_leaked_types),
+    )
     report: dict[str, Any] = {
         "schema": "llm-shield.streaming-privacy-http-profile/v1.0.0",
         "generated_at": _timestamp(),
@@ -907,38 +1348,135 @@ def run_http_conformance(
             "processor": platform.processor(),
         },
         "capture": {
+            "mode": capture_mode,
             "bind_host": capture_host,
             "port": actual_port,
-            "target_must_be_preconfigured_for": capture_base_url,
+            "authentication_required": capture_token is not None,
+            "target_must_be_preconfigured_for": advertised_base_url,
+            # Proof the capture was reachable and recording at the address the target
+            # was configured with, taken before any target traffic.
+            "self_probe": self_probe,
         },
         "checks": checks,
-        "passed": all(check["passed"] for check in checks.values()),
-        "limitations": [
-            "The target must be configured to use the harness capture server as its upstream.",
-            "This HTTP profile does not evaluate gateway process RSS, audit evidence, or public-model behavior.",
-            "The synthetic fixture does not establish population-level detector accuracy.",
-            "Client-observed latency includes local HTTP and capture-server work and has no universal threshold.",
-            "Implementation name and version are operator-supplied labels, not measured identity.",
-            "Authentication, rate-limit, blast-radius, and other gateway policy controls must "
-            "permit the requested evaluation traffic; a policy rejection is a profile non-pass, "
-            "not evidence that protected data leaked.",
-            "Fragmentation safety verifies more than one event, which does not distinguish "
-            "per-token streaming from a fully buffered response emitted as a few chunks.",
-            "Any attestation block is self-reported run metadata, not third-party verification.",
-            "Leak detection covers the configured capture origin only. Egress to any other "
-            "destination is outside what this profile can observe.",
-            "The capture server observes HTTP/1.x. Unsupported or malformed protocol attempts "
-            "are failed closed as uninspectable rather than decoded as HTTP/2 or HTTP/3.",
-            "Capture requests exceeding the byte, nesting, node, or decode budgets are failed "
-            "closed as uninspectable; a non-pass from that condition is not evidence of a leak.",
-            "The observation window ends after the client iterations finish; egress deliberately "
-            "deferred until after capture shutdown is outside this finite run.",
-            "The profile inspects HTTP application data, not covert encodings in request counts, "
-            "ordering, timing, connection metadata, packetization, or DNS/TLS metadata.",
-            "Inspection recovers encoded and fragmented values within a request and ordered "
-            "fragments in the same channel across requests, but does not reassemble arbitrary "
-            "fragments separated by unrelated values or moved between channel types.",
-        ],
+        # The raw measurement: did all five checks pass. Never overwritten by the
+        # claim logic, so a negative finding is preserved even when the outcome says
+        # the run is not a verdict about the product.
+        "passed": measured_pass,
+        # What a published row is ALLOWED to say. Derived here, never operator-typed.
+        "redaction_claim": claim_block,
+        "outcome": outcome,
+        "outcome_rationale": rationale_for(outcome),
+        # Split deliberately. The old single list mixed two kinds of statement and a
+        # reader had to wade through the permanent ones to reach the ones that decide
+        # whether this particular artifact means anything. Only run_validity needs
+        # reading before publishing a row.
+        "limitations": {
+            # B -- conditions that would make THIS run meaningless. Check every one
+            # against the fields the report publishes before treating it as a result.
+            "run_validity": [
+                "The target must be configured to use the harness capture server as its "
+                "upstream. This profile does not install or configure the target, and it "
+                "cannot confirm the configuration took effect.",
+                "Zero captured requests fails the boundary check but does not identify a "
+                "cause. A target that was never configured to use the capture origin, or "
+                "that cannot reach it, is indistinguishable here from one that sent the "
+                "traffic somewhere else. Confirm the target's configured upstream before "
+                "reading this as leak evidence.",
+                "The capture server speaks plaintext HTTP/1.x, so the target must be able "
+                "to open a plaintext HTTP connection to the advertised capture address. In "
+                "loopback mode that address is on the tester's own machine; in public mode "
+                "the tester supplies a reachable address and is assumed to terminate TLS at "
+                "their own tunnel. A gateway that only egresses to an operator-fixed "
+                "upstream it will not let the tester change cannot be measured by this "
+                "check at all.",
+                "capture.mode records which observation this was. In public mode the "
+                "capture address is reachable by anyone, so it is a WEAKER observation "
+                "than a loopback run: attribution rests on the capture token the target "
+                "was configured with rather than on the address being unreachable from "
+                "outside. Do not compare a public run and a loopback run as equivalent "
+                "evidence.",
+                "Requests that do not present the capture token are recorded and reported "
+                "as unattributed, never dropped. A non-zero unattributed_requests on a "
+                "public capture is expected background internet traffic and is not "
+                "evidence about the target; unattributed_uninspectable_requests counts "
+                "traffic the harness could not parse, which on a public address is "
+                "ordinary noise. Protected fixture values appearing in unattributed "
+                "traffic do fail the check and are reported separately, because a public "
+                "capture address can be reached by a third party who knows the fixture.",
+                "Authentication, rate-limit, blast-radius, and other gateway policy "
+                "controls must permit the requested evaluation traffic; a policy "
+                "rejection is a profile non-pass, not evidence that protected data leaked.",
+                "Capture requests exceeding the byte, nesting, node, or decode budgets are "
+                "failed closed as uninspectable; a non-pass from that condition is not "
+                "evidence of a leak.",
+                "The capture server observes HTTP/1.x. Unsupported or malformed protocol "
+                "attempts are failed closed as uninspectable rather than decoded as HTTP/2 "
+                "or HTTP/3, so a target that speaks only HTTP/2 upstream produces a "
+                "non-pass that is about the harness, not about the target.",
+                "leaked_entity_types names the entity but not the evidence. Read "
+                "leak_evidence: a 'literal' match means the fixture value appeared "
+                "verbatim in something the target sent; a 'normalized' match means it "
+                "was recovered only after joining channels and stripping separators, "
+                "which is what catches deliberate obfuscation but can in principle "
+                "collide. needle_proximity reports how close anything came to each "
+                "protected value, against needle_lengths -- equal means present. On an "
+                "honest run the SSN margin measures 2 of 9.",
+                "In public mode the path between the target and the capture injects "
+                "headers of its own, and they are inspected as an egress channel "
+                "because a gateway could hide values there. A measured Cloudflare quick "
+                "tunnel adds ten (cf-connecting-ip, x-forwarded-for, cf-ray and seven "
+                "more) and takes a request from 20 digits to 93 without changing needle "
+                "proximity. Any injected identifier whose digits happen to contain a "
+                "protected value collides: of valid IPv4 addresses exactly one, "
+                "123.45.67.89, normalizes to the SSN fixture's digits, and a random "
+                "hex request id reaches them at roughly 1e-10 per request. Such a run "
+                "reports a normalized-match SSN finding against a gateway that "
+                "redacted correctly. Suppressing header inspection would open a real "
+                "evasion channel to remove a rare event, so leak_evidence records the "
+                "matcher instead: check whether the match was literal before treating "
+                "it as egress. The 16-digit card needle is unreachable by any IPv4.",
+                "correlated_requests counts captured requests carrying at least the "
+                "required number of marker words; marker_words_observed_max reports how "
+                "much of the marker survived. A gateway that reversibly masks the marker "
+                "can correlate zero requests while behaving correctly.",
+            ],
+            # A -- what this method can never see, in any run. Permanent.
+            "method_limits": [
+                "This HTTP profile does not evaluate gateway process RSS, audit evidence, "
+                "or public-model behavior.",
+                "The synthetic fixture does not establish population-level detector "
+                "accuracy.",
+                "The fixture is three fixed, publicly known values, so a target that "
+                "hard-codes them passes every check without operating a detector at "
+                "all -- reproduced with a ~35-line string-replacement shim. This "
+                "profile measures the behaviour of the endpoint it was pointed at "
+                "during the run; it does not establish that the endpoint is the "
+                "product it is labelled as. Varying the fixture was measured and "
+                "rejected: a third of plausible format variants made this project's "
+                "own correctly-redacting gateway report a leak.",
+                "Client-observed latency includes local HTTP and capture-server work and "
+                "has no universal threshold.",
+                "Implementation name and version are operator-supplied labels, not "
+                "measured identity.",
+                "Fragmentation safety verifies more than one event, which does not "
+                "distinguish per-token streaming from a fully buffered response emitted "
+                "as a few chunks.",
+                "Any attestation block is self-reported run metadata, not third-party "
+                "verification.",
+                "Leak detection covers the configured capture origin only. Egress to any "
+                "other destination is outside what this profile can observe.",
+                "The observation window ends after the client iterations finish; egress "
+                "deliberately deferred until after capture shutdown is outside this "
+                "finite run.",
+                "The profile inspects HTTP application data, not covert encodings in "
+                "request counts, ordering, timing, connection metadata, packetization, or "
+                "DNS/TLS metadata.",
+                "Inspection recovers encoded and fragmented values within a request and "
+                "ordered fragments in the same channel across requests, but does not "
+                "reassemble arbitrary fragments separated by unrelated values or moved "
+                "between channel types.",
+            ],
+        },
     }
     if attestation is not None:
         report["attestation"] = attestation

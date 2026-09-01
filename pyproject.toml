@@ -37,7 +37,26 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+# The BASE install is the conformance harness, not the proxy.
+#
+# The harness is the neutral measurer; the proxy is one of the things it measures.
+# Asking an engineer at another gateway to install a competing gateway's full stack --
+# OpenTelemetry, redis, faker, google-re2, the ASGI server -- in order to run a neutral
+# benchmark against their own product is the concrete blocker on getting outside runs,
+# and outside runs are the entire point of publishing the harness.
+#
+# So: `pip install llm-shield-proxy` gives stdlib + httpx and the `llm-shield-conformance`
+# command. `pip install llm-shield-proxy[proxy]` gives the gateway and the
+# `llm-shield-proxy` server command. A regression test installs the base into a clean
+# virtualenv and runs the HTTP profile from it, because this file has been wrong before
+# while the import graph was right.
 dependencies = [
+    "httpx>=0.24.0"
+]
+
+[project.optional-dependencies]
+# Everything the reference proxy needs. This was the old unconditional dependency list.
+proxy = [
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
     "jsonschema>=4.0.0",
@@ -59,8 +78,11 @@ dependencies = [
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp>=1.20.0"
 ]
-
-[project.optional-dependencies]
+# Validating an emitted report against spec/v1.0.0/ before publishing a row. Optional
+# because the harness does not need it to produce the report, only to check it.
+harness-validate = [
+    "jsonschema>=4.0.0"
+]
 redis = [
     "redis>=5.0.0"
 ]
@@ -73,6 +95,9 @@ onnx = [
     "onnxruntime>=1.17.0"
 ]
 dev = [
+    # Self-referential: the test suite exercises the proxy as well as the harness, so
+    # `pip install -e .[dev]` must still produce a complete environment.
+    "llm-shield-proxy[proxy]",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-httpx>=0.24.0",
@@ -94,7 +119,11 @@ Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 "Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
 
 [project.scripts]
-llm-shield-proxy = "llm_shield_proxy.api.cli:main"
+# Dispatches operator subcommands (and --help) without importing the ASGI server, then
+# delegates to api/cli.py for serving, which needs the [proxy] extra.
+llm-shield-proxy = "llm_shield_proxy.cli:main"
+# The harness command. Runs on the base install: stdlib + httpx, no proxy.
+llm-shield-conformance = "llm_shield_proxy.cli:conformance_main"
 
 [tool.setuptools.packages.find]
 include = ["llm_shield_proxy*"]

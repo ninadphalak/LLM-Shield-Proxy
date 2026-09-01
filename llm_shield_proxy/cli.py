@@ -13,10 +13,13 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from llm_shield_proxy.compliance.report import SUPPORTED_FRAMEWORKS
 
 
 def build_compliance_report_parser() -> argparse.ArgumentParser:
+    # Deferred: compliance.report pulls the proxy's crypto stack, and the HTTP
+    # conformance profile in this same module must stay installable without it.
+    from llm_shield_proxy.compliance.report import SUPPORTED_FRAMEWORKS
+
     parser = argparse.ArgumentParser(
         prog="llm-shield-proxy compliance-report",
         description="Generate a compliance evidence pack (OSCAL + audit verification + checksums).",
@@ -335,8 +338,66 @@ def build_benchmark_parser() -> argparse.ArgumentParser:
         metavar="NAME=VALUE",
         help="Additional target request header; repeat as needed. Values are not written to the report.",
     )
-    parser.add_argument("--capture-host", default="127.0.0.1", help="Controlled upstream bind host.")
+    parser.add_argument(
+        "--capture-host",
+        default="127.0.0.1",
+        help="Controlled upstream bind host. Anything other than loopback also requires "
+        "--capture-public-url and --capture-token.",
+    )
     parser.add_argument("--capture-port", type=int, default=8765, help="Controlled upstream bind port.")
+    parser.add_argument(
+        "--capture-public-url",
+        default=os.getenv("CONFORMANCE_CAPTURE_PUBLIC_URL") or None,
+        metavar="URL",
+        help="Externally reachable /v1 base URL the target will be configured with -- your "
+        "tunnel or VPS. Required whenever --capture-host is not loopback, because a "
+        "wildcard bind has no address a target can connect to. Env: "
+        "CONFORMANCE_CAPTURE_PUBLIC_URL.",
+    )
+    parser.add_argument(
+        "--capture-token",
+        default=None,
+        metavar="TOKEN",
+        help="Bearer token the capture requires, so arbitrary internet traffic cannot enter "
+        "the capture record. Required in public mode. PREFER the CONFORMANCE_CAPTURE_TOKEN "
+        "environment variable: process listings show argv, so a token passed as a flag is "
+        "visible to every other user on the host. The token is never written to the report.",
+    )
+    parser.add_argument(
+        "--redaction-claimed",
+        choices=["claimed", "not-offered", "unknown"],
+        default="unknown",
+        help="What the target's vendor CLAIMS about PII redaction. 'not-offered' marks a "
+        "product that does not advertise redaction at all (caching/routing/observability "
+        "gateways); its run is reported as not-applicable and MUST NOT be published as a "
+        "failure. Default 'unknown' yields outcome=claim-unstated, which is not publishable.",
+    )
+    parser.add_argument(
+        "--redaction-claim-citation",
+        default=None,
+        metavar="URL",
+        help="Where the vendor states it. Required unless --redaction-claimed is unknown.",
+    )
+    parser.add_argument(
+        "--redaction-claim-quote",
+        default=None,
+        metavar="TEXT",
+        help="Optional short quote from the cited source.",
+    )
+    parser.add_argument(
+        "--redaction-enabled",
+        action="store_true",
+        help="The target's redaction feature was enabled for this run. Without it a run "
+        "against a redacting product is reported as redaction-not-enabled: a configuration "
+        "statement, not a verdict.",
+    )
+    parser.add_argument(
+        "--redaction-config-reference",
+        default=None,
+        metavar="TEXT",
+        help="The exact setting/guardrail/config that enabled redaction. Required with "
+        "--redaction-enabled so the row reproduces.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     return parser
 
@@ -344,17 +405,22 @@ def build_benchmark_parser() -> argparse.ArgumentParser:
 def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_benchmark_parser().parse_args(argv)
 
-    # The conformance harness is an offline test tool. Disable only configured
-    # OpenTelemetry export before importing PIIEngine/tracing; do not alter the
-    # product's anonymous usage tracking setting.
-    from llm_shield_proxy.core.config import settings
-
-    settings.TELEMETRY_ENABLED = False
-    settings.TELEMETRY_ENDPOINT_URL = None
-
-    from llm_shield_proxy.conformance import run_conformance, write_conformance_report
+    from llm_shield_proxy.conformance import write_conformance_report
 
     http_profile = bool(args.target_base_url)
+    if not http_profile:
+        # The conformance harness is an offline test tool. Disable only configured
+        # OpenTelemetry export before importing PIIEngine/tracing; do not alter the
+        # product's anonymous usage tracking setting.
+        #
+        # Both of these imports pull the whole reference proxy, so they are scoped to
+        # the LOCAL profile. The HTTP profile measures somebody else's gateway and must
+        # not require this one to be installed at all -- and it imports no OTel
+        # provider, so there is no exporter here to disable.
+        from llm_shield_proxy.core.config import settings
+
+        settings.TELEMETRY_ENABLED = False
+        settings.TELEMETRY_ENDPOINT_URL = None
     iterations = args.iterations if args.iterations is not None else (3 if http_profile else 2_000)
     json_out = args.json_out or (
         "./CONFORMANCE_HTTP_LATEST.json" if http_profile else "./CONFORMANCE_LATEST.json"
@@ -371,6 +437,22 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                     raise ValueError("--target-header name must not be empty")
                 headers[name.strip()] = value
 
+            # Environment first. A token in argv is readable from any process listing
+            # on the host; the flag stays for scripted use but the env var wins.
+            capture_token = os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token
+
+            # The harness derives `outcome` from this; it is never a free string.
+            redaction_claim = {
+                "vendor_claims_pii_redaction": args.redaction_claimed,
+                "configured_for_this_run": bool(args.redaction_enabled),
+            }
+            if args.redaction_claim_citation:
+                redaction_claim["claim_citation"] = args.redaction_claim_citation
+            if args.redaction_claim_quote:
+                redaction_claim["claim_quote"] = args.redaction_claim_quote
+            if args.redaction_config_reference:
+                redaction_claim["configuration_reference"] = args.redaction_config_reference
+
             from llm_shield_proxy.conformance.http_profile import run_http_conformance
 
             report = run_http_conformance(
@@ -383,9 +465,14 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                 timeout_seconds=args.timeout_seconds,
                 capture_host=args.capture_host,
                 capture_port=args.capture_port,
+                capture_token=capture_token,
+                capture_public_url=args.capture_public_url,
                 extra_headers=headers,
+                redaction_claim=redaction_claim,
             )
         else:
+            from llm_shield_proxy.conformance import run_conformance
+
             report = run_conformance(iterations)
         destination = write_conformance_report(report, json_out)
     except (OSError, ValueError) as exc:
@@ -394,6 +481,12 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"Conformance report written to {destination}")
     print(f"  Passed:       {report['passed']}")
+    if "outcome" in report:
+        print(f"  Outcome:      {report['outcome']}")
+        if report["outcome"] not in ("pass", "fail"):
+            # Say it here too. A reader who only sees stdout must not write a
+            # "Fail" row from a run that was never a verdict.
+            print(f"                {report['outcome_rationale']}")
     print(f"  Checks:       {len(report['checks'])}")
     if args.target_base_url:
         print(f"  Iterations:   {report['checks']['client_observed_latency']['iterations']}")
@@ -402,6 +495,77 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  Iterations:   {report['microbenchmarks']['iterations']}")
         print("  Timing scope: local in-process operations only")
     return 0 if report["passed"] else 1
+
+
+OPERATOR_COMMANDS = (
+    "assess",
+    "audit-verify",
+    "audit-checkpoint",
+    "audit-checkpoint-verify",
+    "compliance-report",
+    "benchmark",
+)
+
+_BASE_INSTALL_HELP = """llm-shield-proxy: streaming privacy gateway and conformance harness
+
+Subcommands (available on the base install):
+  benchmark                 run the local or HTTP conformance profile
+  assess                    offline aggregate-only pilot assessment
+  audit-verify              verify a WORM audit log
+  audit-checkpoint          checkpoint and sign closed audit chains
+  audit-checkpoint-verify   verify a signed checkpoint
+  compliance-report         build a compliance evidence pack
+
+Run `llm-shield-proxy <subcommand> --help` for a subcommand's options.
+`llm-shield-conformance` is the same conformance runner with no other subcommands.
+
+Serving the proxy needs the optional gateway stack, which is NOT part of the base
+install -- the harness must stay installable without it, so that measuring somebody
+else's gateway does not require installing this one:
+
+    pip install 'llm-shield-proxy[proxy]'
+    llm-shield-proxy --host 0.0.0.0 --port 8000
+"""
+
+
+def main() -> int:
+    """Console entry for `llm-shield-proxy`.
+
+    Dispatches operator subcommands BEFORE importing the ASGI entry point, because
+    `api/cli.py` imports uvicorn and the settings model at module scope and neither is
+    in the base install. With the [proxy] extra present this delegates exactly as it
+    always did, help text included.
+    """
+    argv = sys.argv[1:]
+    if argv and argv[0] in OPERATOR_COMMANDS:
+        return operator_main(argv)
+    try:
+        from llm_shield_proxy.api.cli import main as serve_main
+    except ImportError:
+        # No gateway stack. Explain rather than emit a traceback; `--help` still
+        # answers, which is what a fresh install is most likely to be asked.
+        if not argv or argv[0] in ("-h", "--help"):
+            print(_BASE_INSTALL_HELP)
+            return 0
+        print(
+            "This command needs the gateway stack, which the base install omits.\n"
+            "Install it with:  pip install 'llm-shield-proxy[proxy]'",
+            file=sys.stderr,
+        )
+        return 2
+    serve_main()
+    return 0
+
+
+def conformance_main(argv: Optional[Sequence[str]] = None) -> int:
+    """Console entry point for the conformance harness alone.
+
+    Deliberately does NOT route through ``api/cli.py``, which imports uvicorn and the
+    settings model at module scope before it dispatches a subcommand. This one runs on
+    the base install -- stdlib plus httpx -- so a third party can measure their own
+    gateway without installing this one.
+    """
+    return benchmark_main(argv)
 
 
 def operator_main(argv: Optional[Sequence[str]] = None) -> int:
@@ -430,9 +594,7 @@ def operator_main(argv: Optional[Sequence[str]] = None) -> int:
     return 2
 
 
-def main() -> None:
-    sys.exit(operator_main())
-
-
 if __name__ == "__main__":
-    main()
+    # `python -m llm_shield_proxy.cli <subcommand>` goes through the same dispatcher as
+    # the console script, so the two cannot drift.
+    sys.exit(main())
