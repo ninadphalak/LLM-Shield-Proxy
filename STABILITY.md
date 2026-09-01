@@ -12,6 +12,7 @@ correct; it simply has not been exercised end-to-end against the infrastructure 
 | **Supported** | Exercised end-to-end in CI against the infrastructure it targets — either because it needs none beyond `pip install llm-shield-proxy`, or because CI provisions the real thing (a Redis server, a Docker container, an HTTP/2 server). Every Supported entry carries a **scoped disclaimer naming exactly what was verified**. | Behavior is reproducible by a third party in minutes, on the versions and topology named in the disclaimer. Breaking changes follow the deprecation policy below. |
 | **Beta** | Covered by tests, but the external system it integrates with is substituted in those tests (an in-memory exporter, a mocked backend), or behavior depends heavily on operator configuration. | The code path is exercised. The integration, your topology, and your failure modes are not. Integration-test before production. |
 | **Experimental** | Targets infrastructure that has not been exercised end-to-end in this repository, or implements a deliberate subset of a larger protocol. | Treat as a reference implementation and a starting point. Do not place on a production traffic path without your own validation. |
+| **Research** | An exploration that is not on a path to being supported. It may rest on an approach with known limits, or on a protocol the project has not committed to tracking. | **Do not build on these. They may be removed in any release, without a deprecation period or a migration note.** Read them as published notes on an idea, not as a feature. |
 
 A note on the **Supported** definition. It used to read "runs with no external infrastructure",
 which made the tier a statement about dependencies rather than about evidence. That produced the
@@ -112,7 +113,6 @@ operator configuration.
 - Request rate limiting and traffic-engineering controls
 - Role-based policy-as-code with hot reload
 - Request-scoped dynamic overrides
-- Dynamic canary watermarking
 - Stream digest receipt
 - Applied role name in audit events
 
@@ -123,7 +123,6 @@ Not exercised end-to-end against the infrastructure it targets, or a deliberate 
 | Feature | Why it is Experimental |
 |---|---|
 | Supported PII and sensitive data types | The native engine implements ten Tier 1 patterns, entropy candidates, and a `PERSON` fallback, while the linked catalog page also describes model-defined semantic types. Tests cover six Tier 1 types and the `PERSON` fallback, not the advertised exhaustive set. |
-| Context-aware tool catalog pruner | Its Redis path **is** now verified against Redis 7 in CI (cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation, including a tenant's first invalidation). It stays Experimental purely as a scope statement: it serves the `tools/list` subset of MCP. |
 | Multi-provider request/event translators | Provider selection and the Anthropic transformer are unit-tested, but the implementation is a documented subset and is not exercised against provider protocols. |
 | Anthropic adapter | The adapter deliberately handles a text-focused subset, coerces unsupported roles, and is not validated against the Anthropic API. |
 | Envoy `ext_proc` integration | Not validated against a pinned real Envoy container. Buffer modes, timeout policy, and long-TTFT behavior are unverified. |
@@ -131,12 +130,24 @@ Not exercised end-to-end against the infrastructure it targets, or a deliberate 
 | Kubernetes mutating webhook | `helm template --set webhook.enabled=true` now renders in CI, and the render is checked for one shared CA across the serving certificate and the admission `caBundle` and for the `/v1/k8s/mutate` path matching the app route. No cluster admission install has been performed. |
 | HashiCorp Vault secrets and mTLS | No live Vault backend has been exercised. |
 | OPA and Vault RBAC resolvers | Failure, staleness, refresh, and concurrency behavior are untested against live backends. |
-| Pluggable tool-call RBAC (MCP governance) | Applies only to `tools/list`, `tools/call`, and `resources/read`; the gateway has no initialization, capability negotiation, sessions, or GET/SSE channel. The default in-memory resolver is permissive unless policy is supplied. |
-| Dynamic MCP tool schema rewriting | Schema rewriting cannot compel a model or parser to echo the added fields. |
 | Decision trace exporter | A library primitive. Runtime proxy routes do not invoke it. |
 | GRC webhook and file transport | Caller-wired primitives with no environment-based wiring or vendor connector. |
 | Multi-provider upstream key registry | Matches four exact hostnames. Azure hostname/header handling is not implemented. |
 | Reproducible benchmarks and signed supply chain | The local benchmark is covered separately by the supported conformance harness. Cosign/OIDC signing and SBOM attestation live in CI workflows and have no implementing package module or covering test under `tests/`. |
+
+## Research
+
+Explorations, not features. **Anything here may be removed in any release, without a
+deprecation period and without a migration note.** They are published because the work is real
+and the notes may be useful, not because they are on a path to support.
+
+| Exploration | What it is, and what limits it |
+|---|---|
+| Dynamic canary watermarking and steganography | Injects zero-width Unicode characters keyed to a per-session HMAC fingerprint, for internal leak forensics. Zero-width marks do not survive most normalization, copy-paste, JSON re-encoding, or markdown rendering, and must not be injected into code or structured output. Treat it as a tracing aid against a careless path, not as a control against an adversary who can strip characters. |
+| Scoped MCP JSON-RPC gateway | An exploration of brokering MCP traffic inside a controlled network boundary. It implements only `tools/list`, `tools/call`, and `resources/read`, with no initialization, capability negotiation, sessions, or GET/SSE channel, so it is not drop-in for any MCP SDK. MCP is still moving and this project has not committed to tracking it. |
+| Pluggable tool-call RBAC (MCP governance) | Applies only to `tools/list`, `tools/call`, and `resources/read`; the gateway has no initialization, capability negotiation, sessions, or GET/SSE channel. The default in-memory resolver is permissive unless policy is supplied. |
+| Context-aware tool catalog pruner | Its Redis path **is** now verified against Redis 7 in CI (cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation, including a tenant's first invalidation). It stays Experimental purely as a scope statement: it serves the `tools/list` subset of MCP. |
+| Dynamic MCP tool schema rewriting | Schema rewriting cannot compel a model or parser to echo the added fields. |
 
 ## Defects found by building the CI
 
@@ -164,6 +175,8 @@ pins what a draining pod actually sends.
   note, and never in a patch release.
 - **Beta** features may change behavior in a minor release with a changelog entry.
 - **Experimental** features may change or be removed in any release.
+- **Research** entries carry no stability commitment of any kind and may be removed
+  without notice. They are not part of the supported surface.
 
 The conformance specification in `spec/` has its own versioning and governance process and is
 not covered by this policy. See `website/docs/conformance/governance.md`.
