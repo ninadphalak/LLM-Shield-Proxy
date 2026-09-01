@@ -27,8 +27,8 @@ coverage.xml
 .env
 .env.*
 !.env.example
-config.yaml
-!config.example.yaml
+/config.yaml
+!/config.example.yaml
 
 # Local Redis / Data stores
 dump.rdb
