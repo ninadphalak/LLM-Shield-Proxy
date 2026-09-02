@@ -349,6 +349,28 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     settings.TELEMETRY_ENABLED = False
     settings.TELEMETRY_ENDPOINT_URL = None
 
+    # The stream-digest receipt HMACs with SHIELD_ENCRYPTION_KEY and fails closed when it
+    # is unset -- correct for a serving process, and it made this command unrunnable on a
+    # fresh install. `llm-shield-proxy benchmark` has been exiting 2 with "SHIELD_ENCRYPTION_KEY
+    # is required for the stream digest receipt" since 2026-08-30, including in this
+    # repository's own public benchmark workflow, and the documented reproduction steps did
+    # not work for anyone who had not already configured a key.
+    #
+    # This process serves no traffic: it measures the engines in memory and exits. So it
+    # supplies an ephemeral evaluation-only key and says so, exactly as the audit signing key
+    # already does. A configured key is still used when one is present, and nothing here
+    # relaxes the requirement on any serving path.
+    if not getattr(settings, "SHIELD_ENCRYPTION_KEY", None):
+        import secrets
+
+        settings.SHIELD_ENCRYPTION_KEY = secrets.token_urlsafe(32)
+        print(
+            "SHIELD_ENCRYPTION_KEY is unset; generated an ephemeral evaluation-only key for "
+            "this offline profile. Receipts from this run are not verifiable against a stable "
+            "key, and no serving path accepts a generated key.",
+            file=sys.stderr,
+        )
+
     from llm_shield_proxy.conformance import run_conformance, write_conformance_report
 
     try:

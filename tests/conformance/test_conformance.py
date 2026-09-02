@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from llm_shield_proxy.cli import benchmark_main
@@ -68,3 +69,42 @@ def test_conformance_rejects_too_few_iterations():
         assert "at least 10" in str(exc)
     else:
         raise AssertionError("Expected low iteration count to be rejected")
+
+
+def test_local_profile_runs_on_a_fresh_install_without_an_encryption_key(tmp_path, monkeypatch):
+    """`llm-shield-proxy benchmark` must work with nothing configured.
+
+    The stream-digest receipt HMACs with SHIELD_ENCRYPTION_KEY and fails closed when it is
+    unset. That is correct for a serving process and it made this command exit 2 on every
+    fresh install from 2026-08-30 onwards -- including in this repository's own public
+    benchmark workflow, which was red for that reason while the documented reproduction
+    steps told readers to run exactly this. Reproduced in a subprocess, because the parent
+    pytest process has a key from the developer's .env.
+    """
+    import subprocess
+    import sys
+
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("SHIELD_ENCRYPTION_KEY",)
+    }
+    environment["TELEMETRY_ENABLED"] = "false"
+    environment.pop("TELEMETRY_ENDPOINT_URL", None)
+    destination = tmp_path / "local.json"
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "llm_shield_proxy.cli", "benchmark",
+            "--iterations", "20", "--json-out", str(destination),
+        ],
+        capture_output=True, text=True, env=environment, timeout=600,
+        # Away from the repository root on purpose: Settings reads a local `.env`, and the
+        # maintainer's own .env supplies the key that hid this defect for two days.
+        cwd=str(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ephemeral evaluation-only key" in result.stderr
+    report = json.loads(destination.read_text(encoding="utf-8"))
+    assert report["passed"] is True
