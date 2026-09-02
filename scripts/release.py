@@ -69,7 +69,7 @@ def bump_version_files(bump_type: str) -> tuple[str, str]:
             f.write(chart_content)
 
     # Git commit and tag
-    run_command(["git", "add", "pyproject.toml", main_path, "README.md", chart_path])
+    run_command(["git", "add", "pyproject.toml", main_path, "README.md", chart_path, "scripts/release.py"])
     run_command(["git", "commit", "--no-verify", "-m", f"chore(release): bump version to {new_version}"])
     run_command(["git", "tag", f"v{new_version}"])
 
@@ -92,32 +92,55 @@ def main():
         action="store_true",
         help="Skip uploading to PyPI",
     )
+    parser.add_argument(
+        "--test-pypi",
+        dest="test_pypi",
+        action="store_true",
+        help="Upload to TestPyPI instead of production PyPI",
+    )
+    parser.add_argument(
+        "--skip-push",
+        dest="skip_push",
+        action="store_true",
+        help="Skip pushing git commits and tags to remote",
+    )
     args = parser.parse_args()
 
     # 1. Bump version
     bump_version_files(args.bump_type)
 
-    # 2. Clean dist directory
+    # 2. Clean dist directory (preserve user-owned subdirectories)
     dist_dir = "dist"
     if os.path.exists(dist_dir):
-        print("\n--- Cleaning old dist directory ---")
-        shutil.rmtree(dist_dir)
+        print("\n--- Cleaning old package archives in dist directory ---")
+        for item in os.listdir(dist_dir):
+            if item.endswith((".whl", ".tar.gz", ".zip")):
+                try:
+                    os.remove(os.path.join(dist_dir, item))
+                except OSError as e:
+                    print(f"Warning: could not remove {item}: {e}")
 
     # 3. Build package
     print("\n--- Building package ---")
     run_command([sys.executable, "-m", "build"])
 
-    # 4. Upload to PyPI
-    if not args.skip_pypi:
+    # 4. Upload to PyPI / TestPyPI
+    if args.test_pypi:
+        print("\n--- Uploading to TestPyPI ---")
+        run_command(f"{sys.executable} -m twine upload --repository testpypi dist/*.whl dist/*.tar.gz", shell=True)
+    elif not args.skip_pypi:
         print("\n--- Uploading to PyPI ---")
         # Use shell=True for glob expansion on Windows
-        run_command(f"{sys.executable} -m twine upload dist/*", shell=True)
+        run_command(f"{sys.executable} -m twine upload dist/*.whl dist/*.tar.gz", shell=True)
     else:
         print("\n--- Skipping PyPI upload as requested ---")
 
     # 5. Push to GitHub
-    print("\n--- Pushing to GitHub (with tags) ---")
-    run_command(["git", "push", "origin", "main", "--tags"])
+    if not args.skip_push:
+        print("\n--- Pushing to GitHub (with tags) ---")
+        run_command(["git", "push", "origin", "main", "--tags"])
+    else:
+        print("\n--- Skipping git push to remote as requested ---")
 
     print("\n[SUCCESS] Release completed successfully!")
 
