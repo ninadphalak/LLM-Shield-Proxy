@@ -53,7 +53,7 @@ class StreamDigestReceipt:
 
         # Sign the payload using the explicitly configured SHIELD_ENCRYPTION_KEY.
         # Sort keys to ensure deterministic JSON structure for HMAC verification
-        key_str = getattr(settings, "SHIELD_ENCRYPTION_KEY", None)
+        key_str = settings.SHIELD_ENCRYPTION_KEY
         if not key_str:
             raise ValueError("SHIELD_ENCRYPTION_KEY is required for the stream digest receipt")
         key = key_str.encode("utf-8")

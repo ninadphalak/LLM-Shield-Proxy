@@ -52,3 +52,30 @@ def test_vault_store_session_persistence():
     e1 = store.get_vault(None)
     e2 = store.get_vault(None)
     assert e1 is not e2
+
+
+def test_configured_vault_encryption_key_is_used(monkeypatch):
+    """A configured VAULT_ENCRYPTION_KEY must produce a stable DEK, not a per-process one."""
+    import hashlib
+
+    from llm_shield_proxy.core.config import settings
+    from llm_shield_proxy.engines import vault as vault_module
+
+    monkeypatch.setattr(settings, "VAULT_ENCRYPTION_KEY", "operator-supplied-key")
+    monkeypatch.setattr(vault_module, "_PROCESS_DEK", None)
+
+    expected = hashlib.sha256(b"operator-supplied-key").digest()
+    assert vault_module.get_vault_dek() == expected
+    assert vault_module.get_vault_dek() == expected
+
+
+def test_unset_vault_encryption_key_falls_back_to_ephemeral_dek(monkeypatch):
+    from llm_shield_proxy.core.config import settings
+    from llm_shield_proxy.engines import vault as vault_module
+
+    monkeypatch.setattr(settings, "VAULT_ENCRYPTION_KEY", None)
+    monkeypatch.setattr(vault_module, "_PROCESS_DEK", None)
+
+    dek = vault_module.get_vault_dek()
+    assert len(dek) == 32
+    assert vault_module.get_vault_dek() == dek

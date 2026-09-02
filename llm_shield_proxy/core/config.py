@@ -179,6 +179,10 @@ class Settings(BaseSettings):
     SHIELD_ENCRYPTION_KEY: Optional[str] = Field(
         default=None, description="256-bit AES-GCM encryption key for stateless cryptographic masking (base64 or hex)"
     )
+    VAULT_ENCRYPTION_KEY: Optional[str] = Field(
+        default=None,
+        description="Key material for the session vault DEK. Unset derives an ephemeral per-process key.",
+    )
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
         default=True, description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
     )

@@ -17,7 +17,6 @@ if sys.platform == "win32":
 import datetime
 import hashlib
 import hmac
-import ipaddress
 import logging
 import re
 import socket
@@ -61,13 +60,11 @@ from llm_shield_proxy.observability.metrics import (
 from llm_shield_proxy.observability.telemetry_dispatcher import dispatch_telemetry
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
+from llm_shield_proxy.security.egress_guard import is_public_ip
 from llm_shield_proxy.security.tool_rbac import (
     BasePolicyResolver,
     BoundedLockMap,
-    InMemoryPolicyResolver,
-    OPAPolicyResolver,
-    RedisPolicyResolver,
-    VaultPolicyResolver,
+    build_policy_resolver,
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
@@ -120,23 +117,12 @@ def get_virtual_key_id(client_auth: str) -> str:
 
 
 def _is_safe_ip(ip_str: str) -> bool:
-    """Validates that resolved IP address is strictly public and safe from SSRF."""
-    try:
-        ip_obj = ipaddress.ip_address(ip_str)
-        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-            ip_obj = ip_obj.ipv4_mapped
-        return not (
-            ip_obj.is_private
-            or ip_obj.is_loopback
-            or ip_obj.is_link_local
-            or ip_obj.is_multicast
-            or ip_obj.is_reserved
-            or ip_obj.is_unspecified
-            # Security Note: Binding to 0.0.0.0 is explicitly required for Docker container deployments
-            or str(ip_obj) in ("255.255.255.255", "0.0.0.0")  # nosec B104 # noqa: S104
-        )
-    except ValueError:
-        return False
+    """Validates that resolved IP address is strictly public and safe from SSRF.
+
+    Delegates to the egress firewall's baseline denylist so the proxy and the MCP
+    gate cannot drift into two different answers for the same address.
+    """
+    return is_public_ip(ip_str)
 
 
 async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[str]]:
@@ -575,14 +561,8 @@ async def get_policy_resolver(request: Request) -> BasePolicyResolver:
         }
     shared_state = request.app.state.rbac_state
 
-    http_client = get_http_client(request)
-    if settings.OPA_URL:
-        return OPAPolicyResolver(http_client, settings.OPA_URL, shared_state)
-    if settings.ENABLE_VAULT_SECRETS and settings.VAULT_ADDR and settings.VAULT_TOKEN:
-        return VaultPolicyResolver(http_client, settings.VAULT_ADDR, settings.VAULT_TOKEN, shared_state)
-    if hasattr(vault_store, "async_client"):
-        return RedisPolicyResolver(vault_store.async_client, shared_state)
-    return InMemoryPolicyResolver(shared_state)
+    redis_client = vault_store.async_client if hasattr(vault_store, "async_client") else None
+    return build_policy_resolver(get_http_client(request), shared_state, redis_client)
 
 
 # -----------------------------------------------------------------------------
@@ -1133,6 +1113,8 @@ async def _proxy_catch_all_internal(
                         upstream_res.raise_for_status()
                         break
                     except (httpx.RequestError, httpx.HTTPStatusError) as err:
+                        logger.warning(f"Upstream streaming attempt failed: {err}")
+
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response
                             # MUST explicitly close the leaked stream to free the HTTP/2 connection pool
@@ -1176,7 +1158,7 @@ async def _proxy_catch_all_internal(
                         except Exception:  # nosec B110 noqa: S110
                             # Security Note: Silently dropping upstream connection closure errors to prevent worker crashes
                             pass
-                    status_code = upstream_res.status_code if (upstream_res and hasattr(upstream_res, 'status_code')) else 503
+                    status_code = upstream_res.status_code if upstream_res is not None else 503
                     AuditLogger.log_redaction_event(
                         x_session_id,
                         vault.type_counters,
@@ -1297,6 +1279,7 @@ async def _proxy_catch_all_internal(
                             fallback_url = x_shield_fallback_url or settings.FALLBACK_BASE_URL
                             if fallback_url:
                                 is_fallback = True
+                                attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
                                 # Fallback URLs are plain configured FQDNs, never IP-rewritten,
                                 # so normal httpx hostname-based TLS applies -- no SNI override.
@@ -1312,7 +1295,7 @@ async def _proxy_catch_all_internal(
                         break
 
                 if upstream_res is None or upstream_res.is_error:
-                    status_code = upstream_res.status_code if (upstream_res and hasattr(upstream_res, 'status_code')) else 503
+                    status_code = upstream_res.status_code if upstream_res is not None else 503
                     AuditLogger.log_redaction_event(
                         x_session_id,
                         vault.type_counters,
@@ -1371,22 +1354,7 @@ async def _proxy_catch_all_internal(
                             rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
 
                     if watermark_text:
-                        if (
-                            "choices" in rehydrated_res
-                            and isinstance(rehydrated_res["choices"], list)
-                            and rehydrated_res["choices"]
-                        ):
-                            msg = rehydrated_res["choices"][0].get("message", {})
-                            if isinstance(msg, dict) and "content" in msg and isinstance(msg["content"], str):
-                                msg["content"] += watermark_text
-                        elif (
-                            "content" in rehydrated_res
-                            and isinstance(rehydrated_res["content"], list)
-                            and rehydrated_res["content"]
-                        ):
-                            block = rehydrated_res["content"][0]
-                            if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
-                                block["text"] += watermark_text
+                        _append_watermark(rehydrated_res, watermark_text)
 
                     # FinOps Usage Metering for REST
                     if enable_finops_metering and background_tasks is not None:
@@ -1409,7 +1377,7 @@ async def _proxy_catch_all_internal(
                             if total_tokens > 0:
                                 background_tasks.add_task(_record_metrics, virtual_key_id, model, prompt_tokens, completion_tokens, total_tokens, x_session_id)
 
-                    if getattr(settings, "ANONYMOUS_USAGE_TRACKING", True) and settings.TELEMETRY_ENDPOINT_URL:
+                    if settings.ANONYMOUS_USAGE_TRACKING and settings.TELEMETRY_ENDPOINT_URL:
                         _usage = res_json.get("usage", {}) if res_json else {}
                         _model = res_json.get("model", "unknown") if res_json else "unknown"
                         _total_tokens = _usage.get("total_tokens", 0) if isinstance(_usage, dict) else 0
@@ -1433,7 +1401,9 @@ async def _proxy_catch_all_internal(
                         status_code=upstream_res.status_code,
                         headers=res_headers,
                     )
-                except Exception:
+                except Exception as exc:
+                    # Structured rehydration failed; fall back to rehydrating the raw body.
+                    logger.warning(f"Structured response rehydration failed, using raw-text fallback: {exc}")
                     loop = asyncio.get_running_loop()
                     rehydrated_text = await loop.run_in_executor(None, vault.rehydrate, upstream_res.text)
                     return Response(
@@ -1487,8 +1457,28 @@ async def _proxy_catch_all_internal(
     )
 
 
+def _append_watermark(res: Dict[str, Any], watermark_text: str) -> None:
+    """Appends the watermark to the first assistant text in an OpenAI or Anthropic body."""
+    choices = res.get("choices")
+    if isinstance(choices, list) and choices:
+        msg = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+            msg["content"] += watermark_text
+        return
+
+    blocks = res.get("content")
+    if isinstance(blocks, list) and blocks:
+        block = blocks[0]
+        if isinstance(block, dict) and isinstance(block.get("text"), str):
+            block["text"] += watermark_text
+
+
 def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
-    """Recursively walks choices, messages, tool calls, and content blocks to rehydrate tokens."""
+    """Rehydrates tokens in the known OpenAI and Anthropic response shapes.
+
+    This is shape-specific, not a general walk: anything outside the fields
+    enumerated below is returned unchanged.
+    """
     if not isinstance(res_json, dict):
         return res_json
 
