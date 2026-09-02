@@ -18,8 +18,10 @@ arbitrary internet traffic cannot enter the capture record and unattributed hits
 recorded and reported rather than dropped. The project does not host a capture service.
 """
 
+import errno
 import io
 import json
+import os
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -140,24 +142,46 @@ class _Squatter(BaseHTTPRequestHandler):
 # --------------------------------------------------------------------------
 
 
-def test_self_probe_aborts_when_another_process_holds_the_capture_port(capture_port):
-    """The hijack shape confirmed end to end: a loopback listener takes everything.
+def test_a_held_capture_port_fails_the_run_closed(capture_port):
+    """A pre-existing listener on the capture port must never yield a report.
 
-    ``allow_reuse_address`` is left at HTTPServer's default, so on Windows this bind
-    SUCCEEDS -- which is precisely why the flag was not a fix. The probe is what fails
-    the run closed, and it does so identically on every platform.
+    The two platforms fail closed at DIFFERENT points, and both are correct:
+
+    - POSIX refuses the second bind outright with ``EADDRINUSE``, so the run ends
+      before the probe is reached. The CLI turns that into "Benchmark failed", exit 2.
+    - Windows lets the bind succeed (``allow_reuse_address`` is left at HTTPServer's
+      default, which is exactly why clearing that flag was not a fix) and the squatter
+      takes every request. The post-bind self-probe is what stops it there.
+
+    What must hold on both is the outcome: an OSError and no report.
+    ``CaptureUnreachableError`` subclasses OSError deliberately so one except clause
+    covers both. Asserting the Windows path specifically is what made this test fail
+    on Linux the first time it ever ran there.
     """
     squatter = ThreadingHTTPServer(("127.0.0.1", capture_port), _Squatter)
     threading.Thread(target=squatter.serve_forever, daemon=True).start()
     try:
-        with pytest.raises(CaptureUnreachableError) as excinfo:
+        with pytest.raises(OSError) as excinfo:
             _run(_gateway(capture_port), capture_port)
-        assert "self-probe" in str(excinfo.value)
     finally:
         squatter.shutdown()
         squatter.server_close()
 
+    error = excinfo.value
+    if isinstance(error, CaptureUnreachableError):
+        assert "self-probe" in str(error)
+    else:
+        assert error.errno == errno.EADDRINUSE, error
 
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason=(
+        "POSIX refuses the duplicate bind with EADDRINUSE, so the hijack this mutation "
+        "demonstrates cannot occur there -- which is why the probe exists for Windows, "
+        "where the bind succeeds and the squatter silently takes the traffic."
+    ),
+)
 def test_reverting_the_self_probe_lets_the_hijack_report_a_gateway_failure(
     capture_port, monkeypatch
 ):
