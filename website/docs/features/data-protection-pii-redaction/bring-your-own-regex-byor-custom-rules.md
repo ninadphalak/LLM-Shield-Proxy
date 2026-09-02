@@ -61,4 +61,4 @@ A: Custom BYOR entities are currently treated as structural strings. If Syntheti
 The built-in patterns cover documented formats such as selected credit-card and email shapes. Custom RE2-compatible rules can add an internal identifier such as `EMP-XYZ-123`; evaluate false positives, false negatives, latency, and reload behavior on a representative corpus.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+Tests: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

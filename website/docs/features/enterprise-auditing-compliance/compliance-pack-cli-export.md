@@ -79,5 +79,6 @@ The command collects the supplied files, checks the evidence it can verify, and 
 a summary and checksums. Review its missing-evidence fields and verification status before giving
 it to an auditor.
 
-## Related Tests
-See [`tests/test_compliance_report.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_compliance_report.py) for reference implementations and tamper-detection edge cases.
+## Tests
+
+[`tests/test_compliance_report.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_compliance_report.py) covers report generation and tamper detection.

@@ -28,6 +28,9 @@ To protect the bounded streaming path, pull requests must preserve the published
 
 - Lead with what the feature does, what changes for the operator, and what it does not prove.
 - Use short sentences, active voice, and common words. Define necessary technical terms on first use.
+- Name the product or component directly. Avoid indirect labels that make the reader look elsewhere
+  for the name.
+- Do not use em dashes. Split the thought into two sentences or use a colon.
 - State measured results with their workload and environment. Do not turn component measurements
   into end-to-end claims.
 - Avoid marketing adjectives, metaphors, and absolute claims such as “zero overhead,” “seamless,”

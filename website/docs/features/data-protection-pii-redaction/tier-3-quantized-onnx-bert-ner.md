@@ -57,4 +57,4 @@ A: It adds model- and host-dependent inference time. Benchmark the exact ONNX fi
 Depending on the selected model and training data, contextual inference may distinguish uses such as a person's name from a brand. Quantization can reduce model size and change accuracy and latency; publish the model, corpus, thresholds, and measurements for any quality claim.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+Tests: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

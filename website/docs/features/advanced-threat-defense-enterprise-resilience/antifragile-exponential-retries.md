@@ -61,4 +61,4 @@ jitter to reduce synchronized retries. Retries can still increase latency, cost,
 load, so keep the attempt limit small and test replay behavior.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_antifragile_dispatcher.py).
+Tests: [`tests/test_antifragile_dispatcher.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_antifragile_dispatcher.py).

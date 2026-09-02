@@ -61,8 +61,8 @@ harness starts. Two deployment modes decide how strong the resulting observation
 
 ### Capture mode: loopback
 
-The default. The capture binds `127.0.0.1`, so only a gateway you run yourself — a local
-process, a container, a pod you can route out of — can reach it. This is the **stronger**
+The default. The capture binds `127.0.0.1`, so only a gateway you run yourself - a local
+process, a container, a pod you can route out of - can reach it. This is the **stronger**
 observation: the address is unreachable from outside, so every request that arrives is the
 target's.
 
@@ -86,7 +86,7 @@ includes the API key, extra header values, or protected fixture values.
 
 A gateway in a container is still a loopback-shaped case as far as trust goes, but it
 needs an address it can route to. Bind a reachable interface and name that address
-explicitly — which puts the run in public mode, with the token requirement that implies:
+explicitly - which puts the run in public mode, with the token requirement that implies:
 
 ```python
 capture_host="0.0.0.0",
@@ -141,18 +141,18 @@ does not handle certificates.
 A public capture **will** receive scan traffic. It is recorded and reported, never
 silently dropped:
 
-- `unattributed_requests` — requests that did not present the capture token. Expected to
+- `unattributed_requests` - requests that did not present the capture token. Expected to
   be non-zero on a public address. **Does not fail the check**: gating on it would fail a
   valid run because of unrelated traffic.
-- `unattributed_uninspectable_requests` — of those, how many the harness could not parse.
+- `unattributed_uninspectable_requests` - of those, how many the harness could not parse.
   Ordinary noise on a public address (TLS handshakes into a plaintext port, random
   probes), so it does not fail the check either.
-- `unattributed_leaked_entity_types` — protected fixture values found in unattributed
+- `unattributed_leaked_entity_types` - protected fixture values found in unattributed
   traffic. This **does** fail the boundary check, because the fixture is synthetic and
   unrelated traffic should not contain it. It is reported in its own field rather than folded into
   `leaked_entity_types`, so the artifact never asserts the target sent something a
   stranger sent. The unattributed haystacks are also inspected separately and never joined
-  into the target's channels — concatenating anonymous internet traffic into the
+  into the target's channels - concatenating anonymous internet traffic into the
   cross-request joins would let a third party who knows the fixture and your capture URL
   manufacture a leak finding against the measured gateway.
 
@@ -183,12 +183,12 @@ benchmark command.
 ### Can a hosted gateway actually be pointed at your capture?
 
 Checked against vendor documentation rather than assumed. Both can, and both require
-HTTPS and a publicly routable host — which is exactly what the tunnel provides.
+HTTPS and a publicly routable host - which is exactly what the tunnel provides.
 
 | Target | Custom upstream? | Mechanism | Constraint that matters |
 |---|---|---|---|
 | Cloudflare AI Gateway | Yes | **Custom Providers** (Beta): `POST /accounts/{id}/ai-gateway/custom-providers` with a `base_url`, or the dashboard's **Add Custom Provider**. Documented use case: "Connect to your organization's self-hosted AI models". | `base_url` **must start with `https://`**. Needs an API token with `AI Gateway - Edit`. |
-| Portkey (hosted) | Yes | **`custom_host`**, as the `x-portkey-custom-host` request header, an SDK argument, a Gateway Config target, or Model Catalog's "Local/Privately hosted provider". `forward_headers` passes an `Authorization` header through unprocessed. | "Portkey blocks requests to private and reserved IP ranges by default" — a loopback or RFC1918 address will not work, a public tunnel hostname will. `custom_host` must include the `/v1` path. |
+| Portkey (hosted) | Yes | **`custom_host`**, as the `x-portkey-custom-host` request header, an SDK argument, a Gateway Config target, or Model Catalog's "Local/Privately hosted provider". `forward_headers` passes an `Authorization` header through unprocessed. | "Portkey blocks requests to private and reserved IP ranges by default" - a loopback or RFC1918 address will not work, a public tunnel hostname will. `custom_host` must include the `/v1` path. |
 
 Because `x-portkey-custom-host` is a per-request header, a Portkey run needs no dashboard
 configuration at all: pass it with `--target-header`/`extra_headers` and the harness points
@@ -235,12 +235,12 @@ The check searches for literal values, adjacent fragments, and values with separ
 It also joins each channel across requests in arrival order. Every report records the exact
 coverage in `inspection_scope`.
 
-A request the harness cannot fully inspect — unparseable, or too large or too deeply nested
-to walk within budget — is counted in `uninspectable_requests` and **fails** the boundary
+A request the harness cannot fully inspect - unparseable, or too large or too deeply nested
+to walk within budget - is counted in `uninspectable_requests` and **fails** the boundary
 check. Not having looked is not the same as having found nothing.
 
-`captured_requests: 0` also fails the check, and the harness cannot tell you why —
-see [Before you publish a row](#before-you-publish-a-row--run-validity).
+`captured_requests: 0` also fails the check, and the harness cannot tell you why -
+see [Before you publish a row](#before-you-publish-a-row-run-validity).
 
 Each run embeds a random five-word marker in the prompt, and at least three of those words
 must come back in a captured request for the boundary check to count it. Without that,
@@ -248,7 +248,7 @@ a target can exfiltrate to its real upstream and satisfy the check with one unre
 request to the capture server. The words are mundane nouns rather than a high-entropy
 token, because a conforming gateway's secret and person detectors redact the latter.
 
-### Before you publish a row — run validity
+### Before you publish a row: run validity
 
 These are the conditions that would make **this particular run** meaningless. They are the
 ones to check against the report's fields before treating an artifact as a result, and the
@@ -281,7 +281,7 @@ report lists them under `limitations.run_validity`.
   `marker_words_observed_max` distinguishes a partly redacted marker from one that never
   arrived.
 
-### What this method can never see — permanent limits
+### What this method can never see - permanent limits
 
 These hold in every run, and no configuration changes them. The report lists them under
 `limitations.method_limits`.
@@ -291,8 +291,8 @@ These hold in every run, and no configuration changes them. The report lists the
 - **Covert channels.** The profile inspects HTTP application data, not encodings in
   request counts, ordering, timing, connection metadata, packetization, or DNS/TLS
   metadata.
-- **One destination.** Leak detection covers the configured capture origin only. Egress to
-  any other destination is outside what this profile can observe.
+- **One destination.** The benchmark can inspect only requests sent to its capture server. It
+  cannot see requests the gateway sends anywhere else.
 - **Bounded reassembly.** Encoded and fragmented values are recovered within a request,
   and ordered fragments within the same channel across requests, but not arbitrary
   fragments separated by unrelated values or moved between channel types.
@@ -311,8 +311,8 @@ These hold in every run, and no configuration changes them. The report lists the
 Start with `outcome`, not `passed`. `passed` only says whether all five checks passed.
 `outcome` also accounts for the product's redaction claim and the configuration used.
 
-- `fail`: protected data reached the capture origin.
-- `no-leak-profile-not-met`: no protected data reached the capture, but another requirement
+- `fail`: the gateway sent an unmasked test value to the capture server.
+- `no-leak-profile-not-met`: no unmasked test value reached the capture server, but another requirement
   failed. A one-way anonymizer that cannot restore values is a common example.
 - `not-applicable`: the product does not offer redaction.
 - `redaction-not-enabled`, `inconclusive`, and `claim-unstated`: the run does not support a
@@ -322,12 +322,12 @@ Start with `outcome`, not `passed`. `passed` only says whether all five checks p
 [results table](./results#what-a-row-is-allowed-to-say).
 
 
-The five checks measure different things and a non-pass in one is not a leak finding in
-another. Read `configured_upstream_boundary` first: `leaked_entity_types` is the only field
-that reports protected data reaching the capture origin. The rest describe behaviour.
+The five checks measure different things. A failure in one check does not automatically mean that
+data leaked. Read `configured_upstream_boundary` first. Its `leaked_entity_types` field lists any
+unmasked test values found by the capture server. The other fields describe response behavior.
 
 - `response_fidelity` compares the client-visible stream to the value sent. A gateway that
-  anonymizes one-way — hashing, masking, or replacing with a type label, with no rehydration —
+  anonymizes one-way - hashing, masking, or replacing with a type label, with no rehydration -
   cannot reconstruct it and fails here while leaking nothing. `fragmentation_safety` gates on
   the same reconstruction, so it fails alongside it; `response_reconstructed` records which
   term was responsible.

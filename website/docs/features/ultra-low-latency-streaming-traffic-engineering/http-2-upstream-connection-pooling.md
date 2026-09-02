@@ -62,4 +62,4 @@ carry several streams on one connection. Pool expiry, failures, origin changes, 
 can still create new connections.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_transport.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_transport.py).
+Tests: [`tests/test_transport.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_transport.py).

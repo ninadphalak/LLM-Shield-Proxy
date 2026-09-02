@@ -58,4 +58,4 @@ A: The encoder is designed not to change visible code points, but zero-width cha
 This feature adds a keyed, zero-width correlation marker to supported output. If enough of the marker survives, a decoder can associate it with recorded metadata. It is removable and forgeable by parties with relevant access, and it does not independently establish who disclosed text or when.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_watermark.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_watermark.py).
+Tests: [`tests/test_watermark.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_watermark.py).

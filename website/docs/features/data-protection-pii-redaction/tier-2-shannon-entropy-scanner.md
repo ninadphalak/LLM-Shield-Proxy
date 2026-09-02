@@ -56,4 +56,4 @@ A: False positives are possible with any heuristic. The default threshold reduce
 The scanner computes Shannon entropy for selected candidates and flags values above configured thresholds. High entropy is neither necessary nor sufficient for a secret, so the tier can miss secrets and flag benign data.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).
+Tests: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

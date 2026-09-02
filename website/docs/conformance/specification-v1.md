@@ -10,9 +10,11 @@ This specification defines repeatable tests and minimum reporting requirements f
 
 ## 1. Security boundary and terminology
 
-**Configured upstream boundary** means the exact serialized request bytes presented by the gateway to its configured upstream network transport after all enabled transformations. In this specification, **zero egress** means:
+**Configured upstream boundary** means the request bytes the gateway sends to its selected model
+provider after applying every enabled change. In this specification, **zero egress** means:
 
-> Unredacted protected values detected under the declared configuration and vector set do not appear at the configured upstream boundary.
+> With the declared settings and test data, the outgoing provider request contains none of the
+> unmasked test values.
 
 It does not mean that a detector recognizes every possible real-world identifier, that encrypted/tokenized representations do not leave the network, or that no other deployment component can transmit data.
 
@@ -39,7 +41,9 @@ The runner MUST test every two-part character split of at least one registered p
 
 ### SPG-EGRESS-1: Raw protected-data egress
 
-The runner MUST serialize the post-transformation payload exactly as it would be presented at the configured upstream boundary and search for every declared protected value. The report MUST list entity classes and leak status, but MUST NOT contain the test values or transformed payload.
+The runner MUST inspect the exact request bytes the gateway would send to the model provider and
+search for every declared test value. The report MUST list the data types and whether any value was
+found. It MUST NOT contain the test values or changed request body.
 
 This test is configuration-scoped. A pass is not a population-level recall claim.
 

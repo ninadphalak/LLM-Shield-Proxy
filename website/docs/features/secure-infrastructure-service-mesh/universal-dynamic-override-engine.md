@@ -47,4 +47,4 @@ This feature supports selected request-scoped behavior without passing each valu
 The engine supports request-scoped overrides for authorized settings. Operators must restrict which identities and fields can override policy and test task isolation under concurrency.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).
+Tests: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

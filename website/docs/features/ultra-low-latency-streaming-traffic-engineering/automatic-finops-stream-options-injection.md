@@ -55,4 +55,4 @@ A: Token count depends on the provider tokenizer and substitute. Compare structu
 For supported provider requests, the proxy adds `stream_options.include_usage=true`. The provider may ignore or reject the option, and reported usage still requires validation before chargeback.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_finops_meter.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).
+Tests: [`tests/test_finops_meter.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).

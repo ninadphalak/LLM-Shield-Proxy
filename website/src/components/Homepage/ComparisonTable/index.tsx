@@ -5,28 +5,28 @@ import styles from './styles.module.css';
 const ROWS: {dimension: string; legacy: string; shield: string}[] = [
   {
     dimension: 'Streaming',
-    legacy: 'Buffers the full response before scanning, adding multi-second stalls to a real-time chat UX.',
-    shield: 'Scans and rehydrates incrementally. The open conformance report publishes scoped distributions; end-to-end latency must be profiled in the target deployment.',
+    legacy: 'A batch scanner may wait for the full response before it can inspect it.',
+    shield: 'Checks and restores values as SSE events arrive. Measure the total delay in your deployment.',
   },
   {
     dimension: 'Where scanning happens',
-    legacy: 'Cloud DLP APIs (AWS Comprehend, Google Cloud DLP, Azure AI Language) require sending raw data to their endpoint to be scanned.',
-    shield: 'Runs inside your boundary and tests whether declared protected values appear in the exact serialized payload presented to the configured upstream.',
+    legacy: 'A hosted DLP service receives the text that it scans.',
+    shield: 'Runs in your environment and can test the request sent to the configured model provider.',
   },
   {
-    dimension: 'The efficiency trade-off',
-    legacy: "Contextual NLP detection adds model-dependent memory and inference cost that should be measured on the selected runtime.",
-    shield: "Keeps neural detection optional. Allocation and retention measurements are published separately from production RSS claims.",
+    dimension: 'Detection cost',
+    legacy: 'NLP detection uses memory and compute that vary by model and runtime.',
+    shield: 'Makes the ONNX detector optional. Measure its memory and request time with your selected model.',
   },
   {
     dimension: 'Agent / tool-call traffic',
-    legacy: "Text-oriented tools don't reason about JSON structure - naive regex over raw JSON can corrupt syntax and crash agents.",
-    shield: 'Parses supported JSON-RPC payloads into an AST and masks selected leaf values; schema compatibility is tested separately.',
+    legacy: 'Replacing text directly in raw JSON can damage its syntax or change a field unexpectedly.',
+    shield: 'Parses supported JSON-RPC messages and changes selected string values. Test your actual schemas.',
   },
   {
     dimension: 'Data retention',
-    legacy: 'Many gateways log or cache prompts for debugging, creating a new data liability.',
-    shield: 'Stateless encryption or configured TTL-backed mappings, with persistence and memory boundaries documented for operators.',
+    legacy: 'Storage and logging behavior varies by service and configuration.',
+    shield: 'Offers encrypted in-band values or time-limited Redis mappings. The documentation states where plaintext can remain.',
   },
 ];
 
@@ -35,13 +35,13 @@ export default function ComparisonTable(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <div className={styles.header}>
-          <span className={styles.eyebrow}>Why not just use what you already have</span>
+          <span className={styles.eyebrow}>Design choices</span>
           <Heading as="h2" className={styles.title}>
-            Built for the parts of this problem that are actually hard
+            Compare the available approaches
           </Heading>
           <p className={styles.subtitle}>
-            This isn't the only way to redact PII - it's built specifically for the constraints of
-            real-time, self-hosted GenAI traffic. Here's where that focus shows up.
+            LLM-Shield-Proxy is one option for self-hosted, streaming traffic. These are the main
+            differences to test when comparing it with batch or hosted DLP tools.
           </p>
         </div>
 
@@ -50,7 +50,7 @@ export default function ComparisonTable(): ReactNode {
             <thead>
               <tr>
                 <th></th>
-                <th>Traditional DLP / cloud APIs</th>
+                <th>Batch or hosted DLP</th>
                 <th className={styles.highlightCol}>LLM-Shield-Proxy</th>
               </tr>
             </thead>
@@ -67,8 +67,8 @@ export default function ComparisonTable(): ReactNode {
         </div>
 
         <p className={styles.footnote}>
-          LLM-Shield-Proxy is not a model router or orchestration framework - it runs alongside
-          LangChain, LiteLLM, Portkey, and similar tools, sanitizing traffic before it reaches them.
+          LLM-Shield-Proxy is not a model router or orchestration framework. It can run alongside
+          LangChain, LiteLLM, Portkey, and similar tools.
         </p>
       </div>
     </section>

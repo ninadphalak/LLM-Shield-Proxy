@@ -3,7 +3,7 @@
 ## Abstract
 
 LLM-Shield-Proxy is an Apache-2.0, self-hosted gateway for inspecting LLM and MCP traffic inside an
-operator-controlled network. It provides tests for the configured-upstream boundary, incremental
+operator-controlled network. It provides tests for the request sent to the configured model provider, incremental
 SSE rehydration across tested fragment splits, policy checks for supported tool calls, and audit
 metadata that excludes configured sensitive values.
 

@@ -65,4 +65,4 @@ configured `UPSTREAM_API_KEY` fallback. It is not a schema-aware credential brok
 The proxy can centralize provider credential selection so application developers do not embed each provider key. Operators still own key provisioning, access control, rotation, revocation, observability, and incident response.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_multi_tenant.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_multi_tenant.py).
+Tests: [`tests/test_multi_tenant.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_multi_tenant.py).

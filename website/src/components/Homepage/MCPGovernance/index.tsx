@@ -5,18 +5,18 @@ import styles from './styles.module.css';
 
 const ALLOWED_STEPS: string[] = [
   'Agent calls tools/call "search_kb"',
-  'Virtual Key checked against allowed_tools',
-  'Arguments AST-walked, PII synthetically masked',
-  'Forwarded to your internal tool server',
-  'Result scrubbed, returned to the agent',
+  'Proxy checks the client key and allowed_tools policy',
+  'Proxy parses the arguments and replaces selected PII',
+  'Request goes to your internal tool server',
+  'Proxy checks the result and returns it to the agent',
 ];
 
 const FORBIDDEN_STEPS: string[] = [
   'Agent calls tools/call "shell_exec"',
-  'Virtual Key checked against blocked_tools',
-  'Gate trips before the router sends an upstream request',
-  'Ed25519-signed, hash-chained audit receipt emitted',
-  'JSON-RPC error -32003 on the tested denial path',
+  'Proxy checks the client key and blocked_tools policy',
+  'Proxy blocks the request before contacting the tool server',
+  'Configured audit logging records the denial',
+  'Agent receives JSON-RPC error -32003',
 ];
 
 export default function MCPGovernance(): ReactNode {
@@ -26,15 +26,13 @@ export default function MCPGovernance(): ReactNode {
         <div className={styles.header}>
           <span className={styles.eyebrow}>MCP tool governance</span>
           <Heading as="h2" className={styles.title}>
-            Your agents call tools. Something should decide which ones.
+            Decide which tools each client may call
           </Heading>
           <p className={styles.subtitle}>
-            Claude Desktop, Cursor, LangChain, and CrewAI all speak the Model Context Protocol -
-            JSON-RPC 2.0 calls that can read databases, run code, or send email. LLM-Shield-Proxy
-            sits in front of that traffic as a dedicated <code>/v1/mcp</code> gateway: every
-            supported tool calls are checked against the resolved per-role policy, selected
-            arguments and results are transformed, and configured audit evidence records the
-            decision before an allowed request is forwarded to the tool server.
+            LLM-Shield-Proxy provides an experimental <code>/v1/mcp</code> endpoint for a documented
+            subset of Model Context Protocol JSON-RPC calls. It checks each supported tool call
+            against the client's policy, replaces selected values in arguments and results, and
+            can record the decision. It is not a complete MCP implementation.
           </p>
         </div>
 

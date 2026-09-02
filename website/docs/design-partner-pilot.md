@@ -32,7 +32,7 @@ source records.
 
 ### Week 1 - Scope and baseline
 
-- identify the configured upstream boundary and data classes in scope;
+- identify the model-provider request to test and the data types in scope;
 - pin the proxy version, configuration, and deployment topology;
 - run the [privacy-safe offline assessment](/docs/guides/pilot-assessment); and
 - agree on success, failure, and stop conditions.
@@ -65,8 +65,8 @@ typical packet covers:
 
 1. **Reproducible installation:** a pinned package version or container digest starts with the
    documented configuration.
-2. **Configured-upstream boundary:** declared protected test values are absent from the
-   serialized request handed to the selected upstream client after enabled transformations.
+2. **Outgoing provider request:** the selected test values are absent from the request sent to the
+   model provider after the proxy applies its configured changes.
 3. **Streaming correctness:** the published fragmentation cases preserve valid SSE framing and
    the expected reconstructed content.
 4. **Detection scope:** the chosen detector configuration is evaluated on participant-owned

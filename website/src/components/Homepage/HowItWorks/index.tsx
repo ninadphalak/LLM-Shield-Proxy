@@ -6,22 +6,22 @@ const STEPS: {n: string; title: string; body: string}[] = [
   {
     n: '01',
     title: 'Point your SDK at the proxy',
-    body: 'Change one base_url. No rewrites, no new SDKs - the proxy speaks the OpenAI API spec and translates to Anthropic, Gemini, and vLLM under the hood.',
+    body: 'After configuring the proxy, change your client base_url to the proxy address. OpenAI-compatible clients can keep using the same request format.',
   },
   {
     n: '02',
-    title: 'Detect, in your VPC',
-    body: 'A 3-tier cascade - pre-compiled regex, Shannon-entropy secret scanning, and optional local ONNX NER - finds PII, PHI, and raw secrets before anything leaves your network.',
+    title: 'Find configured data types',
+    body: 'Local regex rules, secret scanning, and optional ONNX name detection inspect the request before it is sent to the model provider.',
   },
   {
     n: '03',
     title: 'Mask and forward',
-    body: 'Sensitive values are swapped per your policy (synthetic, tagged, scrubbed, or encrypted) and the sanitized payload continues on to your LLM provider.',
+    body: 'The proxy replaces selected values with synthetic data, tags, empty values, or encrypted text. It then sends the changed request to the model provider.',
   },
   {
     n: '04',
-    title: 'Stream back, rehydrated',
-    body: 'As the response streams over SSE, a bounded sliding window retains ambiguous placeholder prefixes and restores authorized values while preserving incremental delivery. Measure latency in your deployment profile.',
+    title: 'Restore allowed values',
+    body: 'As SSE events arrive, the proxy joins replacement tokens that were split between events and restores values the client may receive. Measure the added delay in your own deployment.',
   },
 ];
 
@@ -32,7 +32,7 @@ export default function HowItWorks(): ReactNode {
         <div className={styles.header}>
           <span className={styles.eyebrow}>How it works</span>
           <Heading as="h2" className={styles.title}>
-            A transparent proxy, not a black box
+            Four steps from client to provider and back
           </Heading>
         </div>
         <div className={styles.steps}>

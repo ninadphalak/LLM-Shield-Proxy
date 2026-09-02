@@ -25,7 +25,7 @@ const ROWS: Row[] = [
   },
   {
     target: 'LLM-Shield-Proxy',
-    note: 'reference implementation',
+    note: 'this project',
     outcome: 'pass',
     tone: 'pass',
     runs: '1 / 1',
@@ -70,42 +70,55 @@ export default function BenchmarkLead(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <div className={styles.header}>
-          <span className={styles.eyebrow}>The benchmark comes first</span>
+          <span className={styles.eyebrow}>What the first runs found</span>
           <Heading as="h2" className={styles.title}>
-            The first result exposed a biased test fixture
+            The first test values were biased
           </Heading>
         </div>
 
         <div className={styles.story}>
           <p>
-            All current comparison rows come from the initial project-run measurement set, so each one is labelled
-            <code>unreplicated</code> and published with its configuration and raw report.
+            All six current results were produced by this project on one workstation. No outside
+            contributor has repeated them, so every product result is marked <code>unreplicated</code>.
+          </p>
+          <p>The first prompt used invalid examples of all three data types:</p>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Old test value</th>
+                <th>Why Presidio rejected it</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>person@example.invalid</code></td>
+                <td><code>.invalid</code> is not a public domain suffix</td>
+              </tr>
+              <tr>
+                <td><code>123-45-6789</code></td>
+                <td>Presidio blocks this well-known invalid SSN sequence</td>
+              </tr>
+              <tr>
+                <td><code>4532-1234-5678-9012</code></td>
+                <td>The number fails the Luhn card-number checksum</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            LLM-Shield-Proxy matched the patterns without checking whether the values were valid.
+            This gave it an unfair advantage over validating detectors. A LiteLLM and Presidio run
+            revealed the problem. The affected result was not published, the values were replaced,
+            and all six configurations were tested again.
           </p>
           <p>
-            The prompt used to carry three fixed values, chosen to be safe to publish:{' '}
-            <code>person@example.invalid</code>, <code>123-45-6789</code>,{' '}
-            <code>4532-1234-5678-9012</code>. Every one is a value a <strong>validating</strong>{' '}
-            detector is built to reject: <code>.invalid</code> has no public suffix, that SSN is
-            a blacklisted sequence, and the card fails its Luhn checksum. Measured against a
-            pinned Presidio at <code>score_threshold: 0.0</code>: no <code>EMAIL_ADDRESS</code>,
-            no <code>US_SSN</code>, and no <code>CREDIT_CARD</code>.
-          </p>
-          <p>
-            The reference implementation matched all three without those validation checks. The
-            fixture therefore favored shape matching over validated detection. A run against
-            LiteLLM + Presidio exposed the issue, the affected row was withheld, the fixture was
-            corrected, and every row was rerun.
-          </p>
-          <p>
-            The benchmark also found two defects in this proxy’s streaming hot path. Both
-            are fixed and pinned by regression tests. No speed multiplier is published for that
-            fix because the original runner and raw samples were not retained.
+            The benchmark also found two streaming bugs in LLM-Shield-Proxy. Both are fixed and
+            covered by regression tests.
           </p>
           <p className={styles.weakness}>
-            <strong>Known limitation:</strong> a roughly 35-line <code>str.replace</code> shim with
-            no general detector can pass all five checks. Values now vary within fixed formats;
-            broader format variation was rejected after two of six variants produced false leak
-            results against a correctly redacting gateway.
+            <strong>Known limitation:</strong> the test uses three fixed data formats. A small
+            program written specifically for those formats can pass without being a general PII
+            detector. The values change on every run, but the formats do not. Testing more formats
+            caused two false failures in six trials.
           </p>
           <div className={styles.storyLinks}>
             <Link to="/docs/conformance/fixture-threat-model">Read the full fixture threat model →</Link>
@@ -162,10 +175,11 @@ export default function BenchmarkLead(): ReactNode {
         </div>
 
         <p className={styles.floor}>
-          <strong>Every measured row is currently unreplicated.</strong> A gateway needs 3 runs
-          from 3 distinct submitters before its result is treated as replicated. `fail` means one thing only:
-          protected data reached the capture. A gateway that never claimed to redact, or that
-          anonymizes one way and leaks nothing, gets a non-verdict outcome instead.
+          <strong>Every product result was run once by this project's maintainer.</strong> A result
+          becomes replicated only after three different people each submit a run of the same
+          gateway and configuration. <code>fail</code> means the gateway sent an unmasked test value
+          to the benchmark's capture server. Products that do not advertise PII redaction are
+          marked not applicable, not failed.
         </p>
 
         <div className={styles.actions}>

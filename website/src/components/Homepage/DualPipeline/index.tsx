@@ -8,15 +8,13 @@ export default function DualPipeline(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <div className={styles.header}>
-          <span className={styles.eyebrow}>Two kinds of traffic, one proxy</span>
+          <span className={styles.eyebrow}>Chat and structured requests</span>
           <Heading as="h2" className={styles.title}>
-            Not just chat. Your AI agents talk to each other too.
+            Protect text prompts and tool-call data
           </Heading>
           <p className={styles.subtitle}>
-            Most redaction tools only look at conversational text. But a growing share of GenAI
-            traffic is agents calling tools, functions, and other agents behind the scenes - and
-            that structured traffic carries sensitive data too. LLM-Shield-Proxy protects both,
-            automatically, with no configuration required to tell them apart.
+            LLM requests can contain plain text or structured JSON. LLM-Shield-Proxy has separate
+            paths for both. Configure and test the path used by your provider or tool.
           </p>
         </div>
 
@@ -27,10 +25,8 @@ export default function DualPipeline(): ReactNode {
               Human ↔ LLM (chat &amp; prompts)
             </Heading>
             <p className={styles.cardBody}>
-              When a person is chatting with an AI assistant, you choose how sensitive data gets
-              handled - swap it for a realistic-looking fake, replace it with a plain tag, destroy
-              it outright, or encrypt it in place. You can change this per request, without
-              restarting anything.
+              For chat text, choose whether to replace a sensitive value with a synthetic value,
+              a tag, an empty value, or encrypted text. The selected policy can vary by request.
             </p>
             <Link to="/docs/features/data-protection-pii-redaction/mode-per-request-masking-pipeline" className={styles.cardLink}>
               See the 4 masking modes →
@@ -43,11 +39,9 @@ export default function DualPipeline(): ReactNode {
               Machine ↔ Machine (agent tool calls)
             </Heading>
             <p className={styles.cardBody}>
-              When one AI system hands structured data to another - a tool call, a function
-              argument, a JSON-RPC message - the proxy automatically finds sensitive values hidden
-              inside that structure, replaces selected values, and can restore authorized values
-              afterward. Parsing and re-serializing the structure reduces syntax-corruption risk;
-              provider echo and rehydration behavior must be tested for the selected integration.
+              For supported JSON-RPC requests, the proxy parses the JSON and checks its string
+              values. It can replace selected values and restore them in the response. Test the
+              exact schemas and response behavior used by your integration.
             </p>
             <Link to="/docs/features/data-protection-pii-redaction/stateless-ast-aware-semantic-pii-firewall" className={styles.cardLink}>
               See the stateless agent firewall →

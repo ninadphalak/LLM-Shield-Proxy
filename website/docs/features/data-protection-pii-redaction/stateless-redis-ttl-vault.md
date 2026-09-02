@@ -57,4 +57,4 @@ This feature provides a shared, TTL-bounded mapping store whose security depends
 The Redis mode stores a temporary mapping from a substitute to the original value with a configured TTL. Expiry makes the key eligible for deletion; memory reclamation, persistence files, replicas, backups, snapshots, swap, and crash dumps depend on Redis and infrastructure configuration.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_vault.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_vault.py).
+Tests: [`tests/test_vault.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_vault.py).

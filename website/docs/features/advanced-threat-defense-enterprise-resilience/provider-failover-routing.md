@@ -59,4 +59,4 @@ A: In a non-production environment, direct the primary path to a controlled fail
 For selected failure modes, the proxy can attempt a configured secondary endpoint. The retry adds latency and may still fail or produce different behavior; surface failover in telemetry and test it with production-shaped requests.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).
+Tests: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

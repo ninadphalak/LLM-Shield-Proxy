@@ -19,8 +19,9 @@ marks it as required. The field is intended to carry encrypted context for state
 - Backends that receive the context field directly may need an explicit schema update or a proxy
   rehydration step before validation.
 
-The reference implementation tests recursive schema discovery and immutability. It does not claim
-universal OpenAI, Anthropic, Gemini, MCP-client, or Pydantic compatibility.
+LLM-Shield-Proxy tests recursive schema discovery and confirms that the input object is not changed
+in place. It does not claim compatibility with every OpenAI, Anthropic, Gemini, MCP, or Pydantic
+schema.
 
 ## Related implementation and tests
 

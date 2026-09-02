@@ -13,7 +13,7 @@ target. Project-run results do not count as independent reproductions.
 - Target: Uvicorn on `127.0.0.1:8899`
 - Controlled upstream: `http://127.0.0.1:8765/v1` (capture mode: `loopback`, the stronger mode)
 - Request iterations: 3
-- Outcome: `pass` — 5/5 checks, `leaked_entity_types: []`, `captured=3 correlated=3
+- Outcome: `pass` - 5/5 checks, `leaked_entity_types: []`, `captured=3 correlated=3
   uninspectable=0 marker_max=5`, 138 events, response reconstructed
 - Cross-request needle margin on this run: SSN 2 of 9 digits, CREDIT_CARD 2 of 16 - the
   documented validated-run margin, reproduced automatically rather than by hand
@@ -28,7 +28,7 @@ which detectors were loaded is not comparable to anything.
 | Tier 1 pre-compiled regex | **on** |
 | Tier 1 structural validation (issuer range, Luhn as a signal) | **on** |
 | Tier 2 Shannon entropy | **on**, threshold 4.5 bits, minimum length 16 |
-| Tier 3 quantized ONNX BERT-NER | **OFF** — `ENABLE_TIER3_ONNX_NER` defaults to `false` and no model was loaded |
+| Tier 3 quantized ONNX BERT-NER | **OFF** - `ENABLE_TIER3_ONNX_NER` defaults to `false` and no model was loaded |
 | Masking | default `SYNTHETIC` |
 | Agent-loop circuit breaker | on (default) |
 | Audit durability | `best_effort` (default) |
@@ -56,21 +56,11 @@ The target used evaluation-only `OVERRIDE_CLIENT_AUTH=true` and injected a non-p
 key for the controlled upstream. Secrets and synthetic fixture values are not written into
 the report or this record.
 
-## Two hot-path defects this benchmark found in this proxy
+## Two streaming bugs found by this benchmark
 
-Both were found by taking a competitor's better number seriously instead of dismissing it, and
-both are in the reference implementation.
-
-> **No timing figure is published for this, deliberately.** An earlier version of this record
-> carried per-event millisecond costs, a speed multiplier, and a head-to-head comparison against
-> another gateway. The runner that produced them and its raw samples were **not retained**, and
-> an independent re-measurement of the isolated rehydration path afterwards found the direction
-> correct but the magnitude substantially smaller than the original note claimed. Unreproducible
-> numbers were removed rather than caveated. Any future claim needs a versioned runner committed
-> to this repository alongside its raw output, measured end to end for every gateway compared.
-
-What survives is structural, and each item is pinned by a regression test that fails if it is
-reverted:
+An earlier version of this record included timing numbers, but the runner and raw samples were not
+saved. Those numbers were removed because they cannot be reproduced. The two bugs found during that
+work remain documented, and regression tests fail if either bug returns:
 
 1. **One OpenTelemetry span per SSE delta.** A `TracerProvider` is always installed and only the
    exporter is gated, so the span was opened even with telemetry disabled. It was also wrong as
@@ -84,10 +74,9 @@ reverted:
    a longer rehydrated value is not truncated; an absolute per-piece ceiling of
    `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH` fails closed on repeated-token amplification.
 
-`tests/test_streaming_write_efficiency.py` verifies write-count reduction, byte and framing
-equivalence, drip input, long-value pass-through, amplification rejection, reference-count
-bounding, cancellation cleanup, and one span per stream. Those are correctness and resource
-invariants -- **not** a latency threshold, and not evidence of a speed result.
+`tests/test_streaming_write_efficiency.py` checks the number of writes, output bytes, SSE framing,
+one-byte-at-a-time input, long restored values, size-limit failures, cancellation cleanup, and one
+span per stream. These are behavior and resource checks, not a speed comparison.
 
 **Two open policy questions**, recorded here because they bound what the `memory_bounded` check
 means for this implementation and both are the maintainer's call:
@@ -100,7 +89,7 @@ means for this implementation and both are the maintainer's call:
 
 ## Over-redaction, and what was done about it
 
-Separately measured on a 22-string corpus of ordinary business text — order numbers,
+Separately measured on a 22-string corpus of ordinary business text - order numbers,
 invoice ids, SKUs, ISBNs, tracking numbers, GL codes, cost centres, dates. None of it is
 PII.
 
