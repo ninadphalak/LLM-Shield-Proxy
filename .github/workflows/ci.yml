@@ -291,7 +291,7 @@ jobs:
         # this is the one check whose EXPECTED result is a failure.
         run: |
           set +e
-          pii-leak-benchmark --target-base-url capture://self --iterations 1             --capture-port 0 --json-out control.json
+          pii-leak-benchmark --target-base-url capture://self --iterations 1 --capture-port 0 --json-out control.json
           status=$?
           set -e
           if [ "$status" -ne 1 ]; then
