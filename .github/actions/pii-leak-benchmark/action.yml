@@ -12,6 +12,9 @@ author: "Ninad Phalak"
 # The report's `attestation` block records GITHUB_SHA, the repository and the run URL. It
 # is `self-reported` and the schema pins it to that value: it records who SAYS they ran
 # the harness. A public CI log is evidence a reader checks, not a claim the harness makes.
+# Set `attest-report: true` to add a DETACHED GitHub/Sigstore attestation over the
+# finished report bytes. The caller must grant `id-token: write` and
+# `attestations: write`; a composite action cannot grant permissions to itself.
 
 branding:
   icon: "shield"
@@ -106,6 +109,13 @@ inputs:
       control, or a product that does not claim redaction).
     required: false
     default: "true"
+  attest-report:
+    description: >-
+      Create detached GitHub/Sigstore provenance over the raw report. The caller must
+      grant id-token: write and attestations: write. Required for a submitted run to
+      count toward the independent-replication floor.
+    required: false
+    default: "false"
 
 outputs:
   outcome:
@@ -120,6 +130,9 @@ outputs:
   report-path:
     description: "Path to the raw report."
     value: ${{ steps.run.outputs.report }}
+  attestation-url:
+    description: "Verification page for the detached report attestation; empty when attest-report is false."
+    value: ${{ steps.attest.outputs.attestation-url }}
 
 runs:
   using: "composite"
@@ -231,6 +244,13 @@ runs:
               "capture origin, and nothing else does. Before publishing this as a row, read "
               "https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md")
         PY
+
+    - name: Attest the raw report
+      id: attest
+      if: ${{ inputs.attest-report == 'true' }}
+      uses: actions/attest@v4
+      with:
+        subject-path: ${{ inputs.json-out }}
 
     - name: Upload the raw report
       if: ${{ inputs.artifact-name != '' }}

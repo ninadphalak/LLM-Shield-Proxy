@@ -38,8 +38,8 @@ This artifact was regenerated against the released tree, so it supersedes an ear
 
 ## Independent reproductions
 
-**None. Zero rows in this document have been reproduced by anyone other than the maintainer.**
-That is the largest evidence gap here and the highest-value contribution anyone can make.
+**There are no independent reproductions yet.** This is the largest evidence gap and the most
+useful contribution another operator can make.
 
 [Reproduce a row](./reproducing), then [submit the artifact and its pinned
 configuration](./submitting). Do not send representative enterprise traffic or confidential
@@ -53,9 +53,9 @@ revision/image and redacted configuration — **never one without the other**.
 
 ### Replication is counted, not averaged
 
-Every measured row below was produced by this project's maintainer, against a target he
-installed himself, for a benchmark he wrote, beside a gateway he also wrote. Disclosure does not
-repair that. Only other people running it does, so the table counts who ran what:
+Every measured row below was produced by this project's maintainer. Because the benchmark and
+reference gateway share that maintainer, these runs are self-tests rather than independent
+reproductions. The table therefore counts who ran what:
 
 | Column | Meaning |
 | :--- | :--- |
@@ -70,11 +70,9 @@ rather than a verdict, however clean the measurement was. The maintainer's runs 
 toward the replication of any row, including a competitor's: three runs from one person is one
 setup measured three times.
 
-That floor is not applied selectively. **LLM-Shield-Proxy's own row is 1 run by 1 submitter and
-reads `unreplicated`** — it is the row with the strongest incentive behind it and the weakest
-evidence under it. The competitor rows are the ones a LiteLLM or Portkey engineer has both the
-means and the motive to re-run, and a run that contradicts one is the most useful thing anyone
-can contribute here.
+That floor applies equally to every target. **LLM-Shield-Proxy's own row is 1 run by 1 submitter
+and reads `unreplicated`.** LiteLLM and Portkey engineers can inspect the pinned configurations
+and rerun their rows; a contradictory run is as useful as a matching one.
 
 **Disagreements are published as disagreements.** Two runs of the same target and configuration
 that reach different outcomes both stay in the table, the target is marked `disputed`, and the
@@ -102,11 +100,9 @@ re-derives it, so a hand-edited report fails validation.
 | `inconclusive` | Not a row — nothing correlated | No |
 | `claim-unstated` | Not a row — no claim recorded | No |
 
-This exists because the harness can measure products it has no business judging. A gateway
-that offers caching, routing and observability and never claimed to redact PII is not a
-privacy failure; neither is a one-way anonymizer that leaks nothing and simply does not
-restore values. Both would otherwise be printed as "Fail" next to this project's own "Pass",
-which is an accusation a neutral referee cannot retract. `leaked_entity_types` remains the
+This distinction matters because a gateway that offers caching, routing, and observability but
+never claims to redact PII should not receive a redaction verdict. A one-way anonymizer that leaks
+nothing but does not restore values also needs a different outcome. `leaked_entity_types` remains the
 only field that reports protected data reaching the capture, and `leak_evidence` now records
 whether each finding was a `literal` match or one recovered only after normalization.
 
@@ -127,8 +123,8 @@ See the [hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor pr
 Redaction claims, with citations: LiteLLM claims PII masking via its
 [Presidio guardrail](https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2); Portkey
 claims [PII redaction and documents no rehydration](https://portkey.ai/docs/product/guardrails/pii-redaction);
-Cloudflare AI Gateway does not claim redaction at all, which is why publishing "Fail" for it
-would be a smear rather than a result.
+Cloudflare AI Gateway does not claim redaction, so its expected outcome is `not-applicable`, not
+`fail`.
 
 All six measured runs used `loopback` capture mode and 3 iterations. The four third-party runs
 were produced by harness revision `1cef0ff`; the reference-implementation and control rows were
@@ -140,13 +136,12 @@ The "expected" outcomes above are predictions from vendor documentation, not res
 are recorded so that a run which contradicts them is treated as a finding about the run
 rather than quietly published.
 
-Every measured row above was produced by this project's maintainer against a target he
-installed himself. That is a conflict of interest. It is disclosed, the pinned configuration
-and the raw artifact are published for each one, and **not one row has been independently
-reproduced** — which is why every one of them, including this project's own, reads
-`unreplicated`. See [submitting a result](./submitting) and [governance](./governance).
+Every measured row above was produced by this project's maintainer. The pinned configuration and
+raw artifact are published for review, but **none of the rows has been independently reproduced**.
+Every row, including this project's own, therefore reads `unreplicated`. See
+[submitting a result](./submitting) and [governance](./governance).
 
-### The first third-party runs found a defect in the fixture, not in the gateways
+### Third-party testing exposed a fixture defect
 
 The profile used to ship three protected values — `person@example.invalid`,
 `123-45-6789` and `4532-1234-5678-9012` — chosen to be safe to publish. Every one was a
@@ -155,9 +150,8 @@ that exact prefix, the card fails Luhn (checksum 68), and `.invalid` has no publ
 suffix. Stock Presidio returned no `US_SSN`, no `CREDIT_CARD` and no `EMAIL_ADDRESS` for
 any of them.
 
-So the benchmark scored a careful competitor worse than its own author's non-validating
-regex engine. **That was a bias in this project's favour, and it was found by running
-against a real third-party gateway rather than by reasoning.** LiteLLM with Presidio
+The fixture therefore favored this project's non-validating regex engine over a validating
+detector. **The bias was found by running against a real third-party gateway.** LiteLLM with Presidio
 enabled reported `leaked: ["SSN"]` against the old fixture and `leaked: []` against the
 same run with detectable values substituted; that row was withheld rather than published.
 
@@ -177,11 +171,9 @@ or speed multiplier is published anywhere in this repository.**
 A maintainer-local diagnostic did find two real hot-path defects in **this** proxy, and those
 are described in the per-target record. Its runner and raw samples were not retained, and an
 independent re-measurement of the isolated rehydration path found the direction correct but the
-magnitude substantially smaller than the original note claimed. So the defects and their fixes
-are published; the numbers are not. A performance claim here needs a versioned runner committed
-to this repository alongside its raw output, measured end to end, for every gateway compared —
-and until that exists, a wrong speed claim about a named competitor would be the same class of
-unretractable error as a wrong leak finding.
+magnitude substantially smaller than the original note claimed. The defects and their fixes are
+published; the numbers are not. A performance claim here needs a versioned runner committed to
+this repository alongside its raw output, measured end to end, for every gateway compared.
 
 Raw OpenAI should not receive synthetic protected fixtures merely to populate a table. The local
 capture endpoint supplies the correct pass-through negative control without transmitting those

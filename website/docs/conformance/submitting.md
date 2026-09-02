@@ -8,9 +8,9 @@ gateway does not read as a verdict until three runs from three distinct submitte
 
 ## Why replication is counted, not averaged
 
-Every measured row in the table today was produced by this project's maintainer, against a target
-he installed himself, for a benchmark he wrote, next to a gateway he also wrote. Disclosure does
-not fix that; only other people running it does.
+Every measured row in the table today was produced by this project's maintainer. Because the
+benchmark and reference gateway share that maintainer, the current rows are self-tests rather than
+independent reproductions. Only runs by other operators can change that status.
 
 So the table publishes, per target:
 
@@ -22,8 +22,7 @@ So the table publishes, per target:
 
 **Below 3 runs from 3 distinct submitters a target reads `unreplicated`, not a verdict.** That
 floor applies to LLM-Shield-Proxy's own row, which is 1 run by 1 submitter and labelled the
-reference implementation. It is the row with the strongest incentive behind it and the weakest
-evidence under it, and it is not exempt.
+reference implementation. It is not exempt from the same replication rule.
 
 The maintainer's runs never count toward the replication of *any* row, including a competitor's.
 Three maintainer runs are one person's setup measured three times.
@@ -101,38 +100,54 @@ heard of, and **especially** for runs that contradict a published row.
 ## Running it in your own CI
 
 A run that appears in your own repository's CI log, under your own account, is stronger evidence
-than a file emailed to a maintainer: the log is public, the commit is yours, and nothing about it
-depends on trusting this project.
+than a file emailed to a maintainer. A run counts toward the independent-replication floor only
+when the finished JSON bytes also carry verifiable, detached provenance from that CI run.
 
 A composite GitHub Action ships in this repository at
 [`.github/actions/pii-leak-benchmark`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/.github/actions/pii-leak-benchmark):
 
 ```yaml
-- uses: ninadphalak/LLM-Shield-Proxy/.github/actions/pii-leak-benchmark@main
-  with:
-    target-base-url: http://127.0.0.1:4000/v1
-    target-name: your-gateway
-    target-version: 1.2.3
-    redaction-claimed: claimed
-    redaction-claim-citation: https://your.docs/pii
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ninadphalak/LLM-Shield-Proxy/.github/actions/pii-leak-benchmark@v1.3.5
+        id: benchmark
+        with:
+          target-base-url: http://127.0.0.1:4000/v1
+          target-name: your-gateway
+          target-version: 1.2.3
+          redaction-claimed: claimed
+          redaction-claim-citation: https://your.docs/pii
+          attest-report: "true"
 ```
 
 It installs `pii-leak-benchmark` from PyPI, runs the profile, prints the outcome to the job
-summary and uploads the artifact. `GITHUB_SHA`, `GITHUB_REPOSITORY` and the run URL are recorded
-in the report's `attestation` block.
+summary, uploads the artifact, and uses GitHub OIDC plus Sigstore to sign detached provenance over
+the report digest. Verify the downloaded report against the repository that ran it:
 
-**That block is `self-reported` and the schema pins it to that value.** It records who *says* they
-ran the harness. It is not third-party attestation, and no submitter-typed field ever will be —
-binding a report to the run that produced it needs signed provenance over the report digest
-(GitHub OIDC, Sigstore), which is not built yet. A public CI log is currently the strongest
-available evidence, and it is evidence a *reader* checks, not something the harness asserts.
+```bash
+gh attestation verify pii-leak-benchmark-report.json -R submitter/repository
+```
+
+The JSON's internal `attestation` block remains `self-reported`: embedding a digest or signature
+inside the file being digested would be recursive. The proof is the detached GitHub attestation,
+whose subject is the finished file's SHA-256 and whose signing identity names the submitter's
+repository, workflow, commit and run. A hand-edited report no longer verifies against that proof.
 
 ## What is still missing
 
 Recorded here rather than in a roadmap, because it bounds what the table can currently mean:
 
 - **No independent reproduction exists yet.** Every row is `unreplicated`.
-- **Nothing binds a submitted report to the run that produced it.** A hand-written passing report
-  that satisfies every derivation rule would validate.
+- **Target identity still needs scrutiny.** Signed report provenance proves which workflow emitted
+  the JSON; it does not prove that the remotely measured process really was the version or image
+  named by the submitter. The pinned configuration, package/image digest, public log and vendor
+  review remain part of the evidence.
 - **The fixture is gameable by a format-matching shim** — measured, deliberately unfixed, and
   explained in the [fixture threat model](./fixture-threat-model).

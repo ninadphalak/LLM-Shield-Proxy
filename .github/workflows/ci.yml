@@ -311,6 +311,10 @@ jobs:
   benchmark-action:
     name: Composite action (third-party entry point)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     # The action is what an engineer at another gateway actually runs, in their own CI,
     # under their own account. It is pointed at the working tree rather than PyPI so
     # this job tests the commit under review and does not depend on a release.
@@ -329,6 +333,9 @@ jobs:
           capture-port: "0"
           source: "./pii-leak-benchmark"
           artifact-name: "composite-action-negative-control"
+          # Pull requests exercise the action without write credentials. A push to main
+          # additionally proves that the finished report bytes can be attested.
+          attest-report: ${{ github.event_name == 'push' && 'true' || 'false' }}
           # A leak is the expected result here.
           fail-on-non-pass: "false"
 
@@ -338,3 +345,7 @@ jobs:
           echo "leaked=${{ steps.control.outputs.leaked-entity-types }}"
           test "${{ steps.control.outputs.passed }}" = "false"
           test -n "${{ steps.control.outputs.leaked-entity-types }}"
+
+      - name: A main-branch run must publish verifiable report provenance
+        if: ${{ github.event_name == 'push' }}
+        run: test -n "${{ steps.control.outputs.attestation-url }}"

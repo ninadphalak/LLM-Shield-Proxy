@@ -2,29 +2,27 @@
 sidebar_position: 6
 ---
 
-# The fixture: two defects, one fixed and one accepted
+# The test fixture: one corrected bias and one known limitation
 
 The protected fixture is the three values the HTTP profile plants in its prompt and then
-looks for at the capture. Two separate things have been wrong with it, and they point in
-opposite directions.
+looks for at the capture. Review found two distinct issues:
 
 - **It was biased toward this project's own proxy.** All three values were *invalid
   specimens*, so a detector that validates its input correctly ignored them, while this
   project's non-validating regex engine caught them. **Fixed on 2026-09-01**, and the
   measurement that exposed it is preserved below.
 - **It is gameable.** A target that matches the three formats and substitutes them
-  passes without operating a detector on anything else. **Not fixed**, deliberately, and
-  value variation has since raised the price of that shim without removing it.
+  passes without operating a detector on anything else. **Not fully fixed by design.**
+  Values now vary per run, but the formats remain stable.
 
 Every number on this page was produced by running the harness or by querying a pinned
 Presidio analyzer. Nothing here is hypothetical.
 
-## Defect 1: the fixture measured carelessness as a virtue
+## Defect 1: the fixture favored non-validating detection
 
-**This is the more serious of the two, and it is the one nobody had to cheat to exploit.**
-The gameable-fixture problem below needs a vendor to commit deliberate fraud. This one
-needed nobody: any engineer at a competing gateway could have found it in ten minutes and
-reasonably concluded the fixture had been chosen to flatter its author.
+This was the more serious issue because it affected normal validating detectors. No special
+handling was required: a careful detector could reject the invalid specimens and appear worse
+than a detector that matched their shapes without validating them.
 
 The profile used to ship these three constants:
 
@@ -45,7 +43,7 @@ stock recognizer registry, `score_threshold: 0.0`, English:
 | `person@example.invalid` | `URL` 0.5, never `EMAIL_ADDRESS` | `EmailRecognizer.validate_result` requires a real public suffix via `tldextract`; `.invalid` has none | `bob@example.com` | `EMAIL_ADDRESS` 1.0 |
 
 Run against the whole prompt rather than value by value, stock Presidio returned exactly
-two findings — `DATE_TIME` over the card number and `URL` over part of the email — and
+two findings: `DATE_TIME` over the card number and `URL` over part of the email, with
 nothing at all for the SSN.
 
 ### What that did to a real product
@@ -57,15 +55,15 @@ equivalents, reported `leaked_entity_types: []`.
 
 This project's own proxy passed both, because `engines/pii_engine.py` Tier 1 is bare
 regex: `\d{3}-\d{2}-\d{4}` with no SSN range check and `(?:\d[ -]?){13,16}` with no Luhn.
-**The fixture rewarded the reference implementation for being less careful than the
-competitor it was scoring.** That row was withheld rather than published, and the fixture
-was replaced instead.
+For these values, the fixture gave the reference implementation an advantage unrelated to the
+property being measured. That row was withheld rather than published, and the fixture was
+replaced.
 
 ### The replacement
 
 Every value must now satisfy two properties at once.
 
-**VALID** — a detector that validates its input recognises it:
+**VALID** - a detector that validates its input recognises it:
 
 - Card: a Luhn-valid 16-digit PAN.
 - SSN: non-zero group and serial, outside every prefix on Presidio's invalidation list,
@@ -73,18 +71,18 @@ Every value must now satisfy two properties at once.
   `US_ITIN`.
 - Email: a real public suffix.
 
-**NON-REAL** — the value cannot identify anyone or route anywhere:
+**NON-REAL** - the value cannot identify anyone or route anywhere:
 
 - `example.com`, reserved for documentation by RFC 2606 §3.
 - The SSA has never issued a Social Security Number in the `900-999` area.
 - Card numbers are **drawn from a published list of test PANs, never generated.**
   Generating a Luhn-valid number in an issued BIN could produce a live card, so the
   harness will not do it. The card therefore carries six possible values where the SSN
-  carries about 3.1×10⁷ — a deliberate asymmetry, published in every report as
+  carries about 3.1×10⁷. This deliberate asymmetry is published in every report as
   `fixture.value_space_nominal`.
 
-One measured detail is worth keeping, because it is the whole problem in miniature: the
-SSA publishes `987-65-4320`–`987-65-4329` for use in advertising, which is the obvious
+One detail illustrates the validation problem: the
+SSA publishes `987-65-4320` through `987-65-4329` for use in advertising, which is the obvious
 "safe" SSN to reach for. Presidio scores it `US_ITIN` 0.5 and **no `US_SSN` at all**,
 because its SSN recognizer blacklists the prefix `98765432`. The officially safe value is
 precisely the one a careful detector ignores.
@@ -94,11 +92,11 @@ precisely the one a careful detector ignores.
 Round 7 recorded that exactly one valid IPv4 address, `123.45.67.89`, normalises to the
 same digits as the old SSN fixture, so a tunnel adding an `x-forwarded-for` header could
 produce an SSN finding against a gateway that had redacted correctly. That is no longer
-disclosed and lived with — it is **excluded by construction**: the generator resamples
+disclosed and accepted. It is now **excluded by construction**: the generator resamples
 any SSN whose digits some valid dotted quad could produce. A measured 37.3% of the
 nominal SSN space is rejected on that rule alone.
 
-### And a fail-open defect the old fixture had been hiding
+### An additional decoder defect found during correction
 
 The old SSN's digits, `123456789`, were a **substring** of the old card's digits,
 `4532123456789012`. Every "the SSN was recovered" assertion in the evasion suite could
@@ -107,33 +105,34 @@ decoder's alignment guard could not decode an 11-byte value out of a run carryin
 prefix character, so `x` + base64(SSN) was never recovered at all. Both are fixed, and a
 test now asserts that no protected needle is a substring of another.
 
-## Defect 2: the fixture is gameable, and stays that way
+## Known limitation: fixed formats can be matched directly
 
-A ~35-line `str.replace` shim with no detector produced a schema-valid report passing
-every check. Value variation has since raised the price — the cheapest passing shim is now
-a working format matcher rather than three string comparisons — but it has not removed the
-weakness, and it never can: the formats must be stable for the profile to mean anything.
+A roughly 35-line `str.replace` shim with no detector produced a schema-valid report that passed
+every check. Value variation has made that shim less specific: it now needs a working format
+matcher rather than three string comparisons. The limitation remains because the formats must be
+stable for results to be comparable.
 
 ### Why the fixture is not randomised further
 
 Varying the **format** was measured and rejected. Of six plausible format variants, two
 (space-separated and dot-separated SSNs) produced **false leak findings against this
-project's own correctly-redacting gateway**. A one-in-three false-accusation rate on the
-harness's strongest claim is worse than the defect it would address.
+project's own correctly redacting gateway**. A one-in-three false leak rate is worse than the
+fixture weakness it would address.
 
 Varying the **value** inside a fixed format is a different proposition and was never
 tested in that earlier work. It has now been tested, and it costs nothing: values vary per
 run, formats are byte-identical, and the live proxy passes five consecutive profiles with
 `leaked: []` every time.
 
-### The real fix, still outstanding
+### The report-binding control
 
 Bind the **artifact** to the run rather than the fixture to a random value: OIDC-signed
 provenance over the report digest, produced by third-party CI under the submitter's own
-account. That converts fraud from "edit three constants" into "publish a fake gateway
-under your own name", which is a reputational act rather than a technical one. Until then
-every report carries the limitation in `limitations.method_limits`, and a published row
-requires a pinned configuration and a raw artifact as well as a passing JSON file.
+account. The composite action implements this with `attest-report: true`; a reviewer checks the
+downloaded JSON with `gh attestation verify`. Editing the JSON after the run then breaks
+verification. This still does not authenticate the measured remote process, so every published
+row requires the pinned package/image, configuration, public run, and raw artifact as well as a
+passing JSON file.
 
 ## What this page does not claim
 
@@ -143,5 +142,4 @@ all. `needle_proximity` and `needle_lengths` publish that margin per run.
 
 Neither defect is presented as fully solved. Defect 1 is fixed for the three entity types
 the profile carries; it says nothing about detectors this project has not measured.
-Defect 2 is open and disclosed. A referee that hides its own weaknesses has already
-stopped being one.
+Defect 2 remains open and disclosed.
