@@ -78,6 +78,8 @@ The [results table](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/we
 
 A submission needs the pinned configuration **and** the raw artifact, never one without the other. See [submitting](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md).
 
+To check a report before you send it, install `pii-leak-benchmark[validate]` and validate it against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json) — the schema is published in the repository rather than bundled here, so there is exactly one copy of it and it cannot drift from the specification. It re-derives `outcome` in both directions, so a hand-edited report fails validation.
+
 ## Relationship to LLM-Shield-Proxy
 
 This harness was extracted from [LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy), which is one of the gateways it scores and is labelled in the table as the reference implementation. The dependency runs one way only — the proxy may use the benchmark, the benchmark never imports the proxy, and a test enforces it. Reports validate against that repository's `spec/v1.0.0` Streaming Privacy Gateway schemas, which keep the SPG name.
