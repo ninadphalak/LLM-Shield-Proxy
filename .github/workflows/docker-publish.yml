@@ -6,7 +6,8 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  # anchore/sbom-action attaches the generated SBOM to published releases.
+  contents: write
   packages: write
   id-token: write # Required for Sigstore/cosign keyless (OIDC) signing
 
