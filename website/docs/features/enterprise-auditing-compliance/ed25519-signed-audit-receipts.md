@@ -4,7 +4,9 @@
 
 ## What it does
 
-The audit logger signs canonical hash-chained records emitted through its instrumented paths with Ed25519. Given a separately trusted public key and a complete supplied chain, a verifier can detect altered records within that chain without possessing the private key; an unanchored deleted suffix remains outside that evidence.
+The audit logger signs canonical hash-chained records with Ed25519 on instrumented paths. A
+verifier with a separately trusted public key can detect changes within the supplied chain. It
+cannot detect deletion of an unanchored suffix.
 
 Signing does not make the storage immutable and does not, by itself, establish legal non-repudiation. Those outcomes depend on key custody, identity binding, retention controls, and operating procedures.
 

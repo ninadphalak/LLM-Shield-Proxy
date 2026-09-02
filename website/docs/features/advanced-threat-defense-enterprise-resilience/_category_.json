@@ -1,10 +1,10 @@
 {
-  "label": "Advanced Threat Defense & Enterprise Resilience",
+  "label": "Traffic Controls and Resilience",
   "position": 5,
   "link": {
     "type": "generated-index",
-    "title": "Advanced Threat Defense & Enterprise Resilience",
-    "description": "Agent loop circuit breakers, blast-radius limits, canary prompt tripwires, provider failover, and FinOps chargeback metering for resilient multi-tenant deployments.",
+    "title": "Traffic Controls and Resilience",
+    "description": "Agent-loop limits, per-entity rate limits, prompt markers, provider failover, and usage-cost estimates.",
     "slug": "/features/advanced-threat-defense-enterprise-resilience"
   }
 }

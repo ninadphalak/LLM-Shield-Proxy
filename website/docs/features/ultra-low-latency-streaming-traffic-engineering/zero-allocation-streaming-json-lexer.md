@@ -6,7 +6,8 @@
 The **Streaming JSON Lexer** parses incremental response events without retaining the complete response history. It uses `orjson` for JSON serialization and parsing where that code path applies.
 
 ## How It Works
-Traditional HTTP proxies load entire JSON bodies into memory, converting them into massive Python dictionaries. Under high concurrency, this causes massive spikes in the Resident Set Size (RSS) and forces the Python Garbage Collector to freeze the event loop.
+This path processes supported JSON and SSE fragments incrementally so it does not retain the full
+response history. Parsing still creates Python and native allocations.
 
 1. **Native JSON implementation:** The lexer uses `orjson` on supported parsing paths.
 2. **Bounded state:** Incremental parsing avoids retaining the full response history; allocations still occur and are measured by the conformance benchmark.
@@ -17,9 +18,9 @@ Traditional HTTP proxies load entire JSON bodies into memory, converting them in
 flowchart TD
     A[Raw TCP Socket] --> B(orjson Rust Lexer)
     B --> C(Parse JSON Frame)
-    C --> D[C/Rust Memory Space]
+    C --> D[Current Parser State]
     D --> E[Python Redaction Generator]
-    E --> F[Garbage Collection Bypassed]
+    E --> F[Emit Processed Fragment]
 ```
 
 
@@ -31,7 +32,7 @@ View diagram on GitHub mobile 📱 -->
 - **Memory behavior:** Bounded parser state prevents retained input from growing with stream duration. Process RSS and concurrency capacity require the published service-level protocol.
 
 ## Configuration Flags
-The lexer is deeply embedded into the proxy's core and operates automatically without specific configuration flags.
+The lexer is part of the streaming path and has no separate enable flag.
 
 ## Critical Logic & Edge Cases
 * **Invalid payload handling:** Malformed JSON can be rejected on paths that parse a complete JSON value. Confirm status codes and buffering behavior for request bodies, SSE fragments, and truncated streams separately.
@@ -49,9 +50,7 @@ A: JSON objects require string keys, but integration limits also include support
 A: Bounded parser state reduces one memory-growth risk, but it does not guarantee that a pod cannot run out of memory. Enforce payload and concurrency limits and validate peak RSS under load.
 
 
-## Plainspeak
-This feature is an incremental data reader designed to limit retained state.
-
+## Practical effect
 Instead of retaining the complete response, it keeps only the state needed for the current parsing decision. It still allocates memory, so the conformance and service benchmarks report that behavior rather than calling it allocation-free.
 
 ## Related Tests

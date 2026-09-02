@@ -1,31 +1,41 @@
-# HIPAA Compliance (Security & Transmission Rules)
+# HIPAA technical safeguard support
 
-## Overview: Safeguarding ePHI in the Generative AI Era
+Sending electronic protected health information (ePHI) to an LLM service requires an
+organization-specific legal, contractual, security, and risk analysis. LLM-Shield-Proxy can
+support selected technical safeguards. It cannot determine whether an organization or deployment
+is HIPAA compliant.
 
-The Health Insurance Portability and Accountability Act (HIPAA), specifically the Security Rule and Transmission Security standard (45 CFR § 164.312), mandates that Covered Entities implement technical security measures to guard against unauthorized access to electronic Protected Health Information (ePHI) that is being transmitted over an electronic communications network.
+## Transmission controls
 
-Sending ePHI to an LLM service requires an organization-specific legal, contractual, security, and risk analysis. LLM-Shield-Proxy can transform configured ePHI patterns inside an operator-controlled deployment and test declared values at the configured upstream boundary; it cannot establish that a deployment is HIPAA compliant or that every ePHI value was detected.
+On supported request paths, the proxy can replace detected values before sending the transformed
+request to the configured upstream. The conformance harness can test whether its declared fixtures
+reached that upstream boundary. It does not prove that every ePHI value was detected or that no
+other network path exists.
 
-## Elimination of ePHI Egress
+The proxy also supports inbound TLS/mTLS and outbound certificate verification or client
+certificates. Operators must still configure trust roots, certificate identity mapping,
+authorization, revocation, key custody, routing, and monitoring.
 
-The proxy can support one pre-upstream transformation control for configured traffic. HIPAA compliance depends on the organization's full administrative, physical, technical, contractual, and operational safeguards; detector coverage and routing boundaries require independent validation.
+## Detection and masking
 
-### Tier-1 & Tier-2 Local Redaction
-Before any prompt is dispatched to a third-party cloud LLM, it is processed locally:
-- **Tier 1 (Structured Identifiers):** Pre-compiled `google-re2` patterns scan for configured formats such as Social Security Numbers, Medical Record Numbers, phone numbers, and IP addresses. Detection quality depends on patterns and corpus; custom RE2-compatible rules can be added via `custom_regex.yaml`.
-- **Tier 2 (Unstructured Data):** A Shannon entropy heuristic identifies high-entropy secret-like candidates for configured handling.
+- Tier 1 uses configured RE2 patterns for structured shapes such as SSNs, medical-record numbers,
+  phone numbers, and IP addresses.
+- Tier 2 uses an entropy heuristic for selected secret-like candidates.
+- Tier 3 can run a compatible operator-supplied ONNX entity model. Accuracy depends on the exact
+  model, tokenizer, threshold, language, and clinical evaluation corpus.
+- `STATELESS_CRYPTO` can encrypt selected detected values inside the payload with AES-256-GCM.
+  Model changes or token loss can prevent rehydration.
 
-### Clinical Context Awareness (Tier-3 ONNX BERT-NER)
-Medical data is often conversational and unstructured (e.g., doctor's notes). The proxy utilizes a **Quantized ONNX BERT-NER** model executing natively in-memory.
-- **Bring Your Own Model (BYOM):** The architecture natively supports the ingestion of specialized healthcare models such as **BioBERT** and **ClinicalBERT**. This allows the proxy to achieve high-accuracy, context-aware entity extraction for medical conditions, patient names, and pharmaceutical regimens without relying on external NLP APIs.
+None of these controls guarantees complete ePHI detection. Validate false negatives and false
+positives with synthetic clinical fixtures before production use.
 
-## Transmission Security (45 CFR § 164.312)
+## Access and integrity evidence
 
-If a use case requires the LLM to reference a specific patient entity without knowing who the patient is, the proxy employs **In-Band Stateless Synthetic**.
+Configured identity and policy resolvers can restrict supported operations. Hash-chained,
+Ed25519-signed audit records can expose changes within the supplied evidence. The default audit
+mode is best effort; use an acknowledged durability mode when missing events must fail the
+operation. Immutable retention and deleted-suffix detection require separate storage and external
+anchoring.
 
-### Encrypted In-Transit Envelopes
-- Detected ePHI is masked using **AES-256-GCM envelope encryption** directly within the payload.
-- The external LLM receives a cryptographically secure cipher-token (e.g., `[[AES:GCM:8f7a9...]]`). It processes the clinical reasoning based on the surrounding text, and the proxy decrypts the cipher-token dynamically as the SSE stream returns to the clinician.
-- Boundary conformance tests can verify that declared unredacted ePHI fixtures do not reach the configured upstream. Detection coverage and the organization's HIPAA obligations require separate validation.
-
-*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details on the cryptographic lifecycle).*
+See the [architecture](/docs/architecture), [limitations](/docs/limitations), and
+[compliance evidence boundaries](/docs/compliance-overview) for the exact boundaries.

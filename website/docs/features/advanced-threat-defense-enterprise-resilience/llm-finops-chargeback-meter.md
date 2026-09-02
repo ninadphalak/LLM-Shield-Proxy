@@ -1,15 +1,20 @@
-# LLM FinOps Chargeback Meter
+# Token Usage Cost Estimates
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **LLM FinOps Chargeback Meter** provides enterprise-grade observability into AI consumption. It actively intercepts token usage statistics from upstream providers (like OpenAI and Anthropic) and streams them asynchronously as Prometheus metrics. This allows organizations to build strict, multi-tenant chargeback models, billing individual departments or users down to the exact fraction of a cent.
+The meter reads supported provider usage fields and records Prometheus
+metrics with configured tenant metadata. These metrics can support internal cost allocation. They
+are not an invoice and do not calculate exact cost on their own.
 
 ## How It Works
-Without the proxy, an enterprise using a single corporate OpenAI key has no idea if the Marketing department is burning \`10,000 a month on GPT-4 while HR uses \`100.
+When several teams share one provider account, provider totals may not show which internal team
+made each request. The proxy adds configured identity and routing labels to the usage it observes.
 
-1. **Usage Interception:** The proxy monitors the final chunk of Server-Sent Events (SSE) or the JSON root of non-streaming responses for the `usage` object (e.g., `prompt_tokens`, `completion_tokens`).
-2. **Metadata Tagging:** It enriches this raw usage data with critical metadata: the `virtual_key_id`, the `applied_role_name`, the selected `model`, and the target `upstream_provider`.
+1. **Usage extraction:** The proxy checks the final SSE event or non-streaming response for a
+   supported `usage` object, such as `prompt_tokens` and `completion_tokens`.
+2. **Metadata labels:** It records the usage with `virtual_key_id`, `applied_role_name`, `model`,
+   and `upstream_provider` labels when available.
 3. **Asynchronous Emission:** Enriched metrics use a bounded background path to reduce request-path work. Queueing, serialization, synchronization, CPU use, and drops still require measurement.
 
 
@@ -46,12 +51,12 @@ View diagram on GitHub mobile 📱 -->
 A: No. The proxy acts as a Prometheus exporter. You configure your existing Prometheus/Datadog agent to scrape the proxy's `/metrics` endpoint. The data is stored and queried inside your existing TSDB (Time Series Database).
 
 **Q: Does this meter track the tokens saved by the PII redaction engine?**
-A: Yes! The proxy exposes a specific metric `shield_proxy_tokens_saved_total` which calculates the delta between the length of the original bracketed structural tags and the length of the highly-optimized synthetic masked entities, allowing you to calculate the exact ROI (Return on Investment) of the proxy.
+A: It exposes `shield_proxy_tokens_saved_total`, which records a difference between selected
+replacement representations. This is not a provider token bill, cost saving, or ROI calculation.
+Validate it against the tokenizer and pricing used by the selected provider before using it.
 
 
-## Plainspeak
-This feature is a highly detailed billing meter that helps companies figure out exactly which team is spending money on AI.
-
+## Practical effect
 This feature associates observed provider usage events with configured tenant metadata. Use it for allocation estimates only after reconciling retries, cached or reasoning tokens, missing usage chunks, pricing changes, and the provider invoice.
 
 ## Related Tests

@@ -2,7 +2,9 @@
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
-The LLM-Shield-Proxy employs a **3-Tier Cascade Engine** to detect and redact sensitive data. Below is an exhaustive list of the data types natively detected by Tiers 1 and 2, along with representative samples of semantic types covered by Tier 3 NLP models.
+LLM-Shield-Proxy uses three detector tiers. Tiers 1 and 2 have the built-in patterns and
+heuristics listed below. Tier 3 uses an operator-supplied model, so its entity types depend on
+that model.
 
 ---
 
@@ -13,7 +15,9 @@ All ten native pattern names below have focused redaction, non-disclosure, and r
 
 **Native Tier 1 pattern catalog:**
 1. **`CREDIT_CARD`**: 13-16 digits with optional spaces or hyphens. Every matching run is redacted. Selected issuer prefixes and the Luhn checksum contribute only to an internal confidence value; neither can drop a match. A finite issuer table cannot exclude private-label, gift, or newly assigned cards, and a one-digit error or transposition can make a genuine card fail Luhn. See [validation as a signal](#validation-is-a-signal-not-a-gate).
-2. **`SSN`**: US Social Security Numbers (e.g., `XXX-XX-XXXX`). Deliberately unvalidated: a general-ledger code of the same shape is indistinguishable from a real SSN, so both are redacted.
+2. **`SSN`**: US Social Security Number shapes such as `XXX-XX-XXXX`. The detector does not
+   validate issuance. A general-ledger code with the same shape is also redacted because the
+   pattern cannot distinguish it from an SSN.
 3. **`EMAIL`**: Standard email addresses. The domain is not checked against a public-suffix list, so a reserved or non-routable domain still matches.
 4. **`PHONE`**: Selected 7- or 10-digit domestic shapes with optional country prefix and common separators. Extensions are not part of the native expression. Punctuation is not a validation gate: a bare international number can be legitimate, so every native-regex match is redacted.
 5. **`IP_ADDRESS`**: IPv4 network addresses.
@@ -30,25 +34,21 @@ prefixes and Luhn affect internal confidence, but every 13--16 digit native-rege
 redacted. `PHONE` has no structural rejection rule: a 12--15 digit international number
 may be written without a leading plus or separator. A validator exception keeps the span.
 
-**Measured precision cost.** On a 22-string corpus of ordinary business text — order
-numbers, invoice ids, SKUs, ISBNs, tracking numbers, GL codes, cost centres, dates — the
-current detector matches something in **17 of 22 strings (77.3%, 18 spans)**. The
-structural signals intentionally do not improve that result: dropping card values that
-fail both a finite issuer table and Luhn reduced it to 11 of 22, but allowed an
-unrecognised private-label shape with a transposed digit to escape redaction. Dropping
-bare long phone matches similarly allowed plausible international numbers to escape. The
-fail-safe boundary takes precedence over those apparent precision gains.
+**Measured false positives.** On a 22-string corpus of ordinary business text, the detector
+matched **17 strings and 18 spans (77.3% of strings)**. The corpus includes order numbers,
+invoice IDs, SKUs, ISBNs, tracking numbers, ledger codes, cost centres, and dates.
 
-The false positives are deliberate. `ddd-dd-dddd` ledger codes are structurally identical
-to a real SSN. Other 13--16 digit business identifiers are indistinguishable at this
-boundary from private-label, gift, newly assigned, or mistyped cards. Narrowing further
-would trade a possible disclosure for a cosmetic precision gain.
+Using issuer tables and Luhn to reject card-shaped matches reduced the count to 11 strings, but
+it also missed a private-label-shaped value after a digit transposition. Rejecting bare long
+phone matches also missed plausible international numbers. Those rejection rules were not used.
 
-**What is not implemented:** the validator computes a confidence value
-(`high` / `medium`) alongside its keep/drop decision, but that confidence is **not**
-currently attached to the span, the audit record, or the OTel span. Only the keep/drop
-decision reaches the detection path. If a validator raises for any reason the span is
-kept, never dropped.
+As a result, the detector keeps known false positives. A `ddd-dd-dddd` ledger code has the same
+shape as an SSN. A 13--16 digit business identifier can have the same shape as a private-label,
+gift, new, or mistyped card number. The pattern alone cannot safely tell them apart.
+
+**Confidence is internal only.** The validator computes `high` or `medium`, but does not attach
+that value to the detected span, audit record, or OpenTelemetry span. The detection path receives
+only the decision to keep the match. If validation raises an exception, the match is kept.
 
 > [!TIP]
 > You can easily add your own Tier 1 detectors using the [Bring Your Own Regex (BYOR)](bring-your-own-regex-byor-custom-rules.md) feature via `policies.yaml`.
@@ -56,7 +56,8 @@ kept, never dropped.
 ---
 
 ## 🧠 Tier 2: Shannon Entropy (Unstructured Secrets & Cryptography)
-Because developers often leak proprietary API keys or database passwords that don't match a standard Regex format, Tier 2 acts as a mathematical dragnet.
+Tier 2 checks selected token candidates that may not match a known key prefix or structured
+pattern.
 
 **What gets detected:**
 - **Cryptographic Keys & Salts**: High-entropy strings exceeding `\tau_H \ge 4.5` bits/symbol.
@@ -66,7 +67,8 @@ Because developers often leak proprietary API keys or database passwords that do
 ---
 
 ## 🤖 Tier 3: NLP NER Models (Semantic & Contextual Data)
-Tier 3 utilizes Named Entity Recognition (NER) models (like Presidio or local ONNX runtimes) to understand the semantic meaning of low-entropy text.
+Tier 3 runs a compatible local ONNX Named Entity Recognition (NER) model. The model uses nearby
+text to classify configured entity types.
 
 Tiers 1 and 2 target configured structured formats and high-entropy candidates; both can produce false positives and false negatives. Tier 3 can add contextual entity detection, with quality depending on the selected model, thresholds, language, and evaluation corpus.
 

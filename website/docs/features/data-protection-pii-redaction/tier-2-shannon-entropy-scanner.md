@@ -6,10 +6,12 @@
 The **Tier 2 Shannon Entropy Scanner** complements configured patterns by scoring selected token candidates with Shannon entropy. It can identify some high-entropy secret shapes that have no known prefix, but it can also miss low-entropy secrets and flag benign identifiers.
 
 ## How It Works
-Instead of relying on massive, slow dictionaries of potential secret formats, the proxy applies Information Theory.
+The scanner calculates Shannon entropy for selected Base64- and hexadecimal-shaped candidates.
 
-1. **Sliding Window Evaluation:** The engine runs a vectorized O(N) math loop that evaluates the bit density of text using Shannon's Entropy formula: `H(S) = -\sum p(c) \log_2 p(c)`.
-2. **Algorithmic Thresholds:** It isolates high-density character strings and evaluates them against strict thresholds. It targets Base64 strings with an entropy `\ge 4.5` bits/char and Hexadecimal strings with `\ge 3.4` bits/char.
+1. **Candidate scoring:** The engine calculates character entropy with
+   `H(S) = -\sum p(c) \log_2 p(c)`.
+2. **Thresholds:** It compares candidates with the configured thresholds. The defaults target
+   Base64 at `\ge 4.5` bits per character and hexadecimal at `\ge 3.4`.
 3. **Scoped Measurement:** Benchmark the scanner separately from the complete request path, using the intended chunk-size and input distribution.
 
 
@@ -28,7 +30,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Extremely low. The math-bound loop bypasses the Python GIL using vectorized operations.
+- **Overhead:** Cost depends on candidate count, length, decoding, runtime, and concurrency.
+  Measure it with representative input.
 
 ## Configuration Flags
 
@@ -49,9 +52,7 @@ A: Regex dictionaries can miss proprietary key formats. Entropy adds a format-in
 A: False positives are possible with any heuristic. The default threshold reduces matches on ordinary prose, but deployments should validate URLs, identifiers, and domain-specific text against their own corpus.
 
 
-## Plainspeak
-This feature acts like a randomness detector. While some sensitive information (like phone numbers) has a predictable format, things like passwords or secret API keys just look like random gibberish.
-
+## Practical effect
 The scanner computes Shannon entropy for selected candidates and flags values above configured thresholds. High entropy is neither necessary nor sufficient for a secret, so the tier can miss secrets and flag benign data.
 
 ## Related Tests

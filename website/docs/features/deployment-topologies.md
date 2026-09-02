@@ -1,14 +1,18 @@
 # Deployment Topologies
 
-LLM-Shield-Proxy is designed for highly regulated enterprise environments where data egress is strictly controlled. By default, the proxy operates in **Zero-Egress Mode**, ensuring that no unredacted data or PII ever leaves your secure Corporate VPC.
+LLM-Shield-Proxy can sit between an application and an LLM provider. It transforms detected values
+before the configured upstream request and can restore mapped values on supported response paths.
+Detection is not complete, so network policy and deployment tests must enforce the intended egress
+boundary.
 
-Below are the two primary deployment topologies supported by the proxy.
+The diagrams below show two common deployment topologies.
 
 ---
 
 ## 1. Standard Egress to Cloud LLM
 
-In this topology, the enterprise application resides within the secure Corporate VPC. The LLM-Shield-Proxy is deployed as an internal gateway. It intercepts the traffic, performs cryptographic masking and PII redaction, and then securely routes the sanitized payload over the internet to a Cloud LLM Provider (like OpenAI, Anthropic, or Azure).
+The application sends supported requests to the proxy inside the private network. The proxy applies
+the configured detection and masking rules, then sends the transformed request to the provider.
 
 ```mermaid
 flowchart LR
@@ -23,7 +27,7 @@ flowchart LR
         LLM((Cloud LLM Provider))
     end
 
-    Proxy -- "Sanitized Prompt (Zero Egress)" --> LLM
+    Proxy -- "Transformed Prompt" --> LLM
     LLM -. "Streaming Reply" .-> Proxy
     Proxy -. "Rehydrated Stream" .-> App
 
@@ -40,7 +44,7 @@ flowchart LR
 
 ---
 
-## 2. Air-Gapped Egress Gateway Mode
+## 2. Internal egress gateway
 
 For organizations whose workload network policy denies direct internet egress, LLM-Shield-Proxy can route its configured upstream client through an internal egress gateway such as Squid, Envoy, or a corporate proxy. Enforce and test the deny policy outside the application as well.
 
@@ -74,5 +78,7 @@ flowchart LR
 
 ### Setup Instructions
 1. Deploy `LLM-Shield-Proxy` alongside your application.
-2. In your proxy configuration or environment variables, configure standard HTTP proxy routing (e.g., set `HTTPS_PROXY=http://internal-egress-gateway:3128`).
-3. The LLM-Shield-Proxy will automatically route all sanitized outbound connections through the designated Egress Gateway, maintaining strict air-gap compliance.
+2. Enable `AIR_GAPPED_MODE` and set `EGRESS_GATEWAY_URL` to the internal gateway.
+3. Use firewall and DNS policy to block direct internet routes from the proxy.
+4. Test every enabled provider, adapter, telemetry path, model download, update path, and failure
+   path. The application setting alone does not prove an air gap or regulatory compliance.

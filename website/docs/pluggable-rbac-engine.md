@@ -1,12 +1,12 @@
-# Implementation Reference: Pluggable Policy Resolution Engine
+# Implementation Reference: Policy Resolution
 
-## Architectural Overview
-To satisfy enterprise constraints, the Tool-Call RBAC Engine in LLM-Shield-Proxy decouples the **Control Plane** (where policies are stored) from the **Data Plane** (where policies are enforced).
+The MCP tool-policy path separates policy storage from request-time enforcement. A resolver returns
+the allowed and blocked tools for a virtual key. The router applies that decision before it sends a
+supported tool call upstream.
 
-Because policy resolution sits on a streaming request path, its remote operations must be asynchronous, bounded, and fail closed.
+## Resolver interface
 
-## 1. The Abstract Base Class (ABC)
-The core interface is defined by `BasePolicyResolver`. All enterprise adapters must inherit from this and implement the async resolution method.
+Resolvers implement the asynchronous `BasePolicyResolver` interface:
 
 ```python
 from abc import ABC, abstractmethod
@@ -14,35 +14,41 @@ from abc import ABC, abstractmethod
 class BasePolicyResolver(ABC):
     @abstractmethod
     async def resolve_policy(self, virtual_key: str) -> dict:
-        """
-        Must return a dictionary mapping allowed and blocked tool scopes:
-        {"allowed_tools": [...], "blocked_tools": [...]}
-        """
+        """Return allowed and blocked tool scopes for this key."""
         pass
+```
 
-## 2. High-Speed Cache: RedisPolicyResolver
+## Available resolvers
 
-The Redis-backed implementation can resolve cached policy without an external HTTP call on that cache hit. Redis access, serialization, cache misses, and resolver behavior still have measurable cost.
+- **In-memory/YAML:** loads local role mappings and supports periodic reloads.
+- **Redis:** reads cached policy from Redis without an external HTTP policy call on a cache hit.
+- **OPA:** requests a decision from a configured Open Policy Agent endpoint and keeps a local
+  stale-while-revalidate snapshot.
+- **Vault:** reads policy from a configured HashiCorp Vault path and keeps a local
+  stale-while-revalidate snapshot.
+- **Custom:** applications can supply another `BasePolicyResolver` implementation.
 
-* **Implementation Detail:** Uses asyncio Redis clients (`redis.asyncio`) and `orjson`; measure process RSS and resolver latency under the intended concurrency.
-* **Fail-closed logic:** If `shield:rbac:{virtual_key}` is missing or expired, the Redis resolver returns no allowed tools and the supported tool-call path rejects the request before its configured upstream action.
+These resolvers have different authentication, timeout, cache, revocation, and failure behavior.
+Test the selected resolver against the real backend before deployment. A cache hit still includes
+serialization and local processing, and a remote refresh adds network work.
 
-## 3. Enterprise Infrastructure Adapters (Stubs)
+## Request behavior
 
-To integrate with global Zero-Trust architectures, the engine includes standard adapters mapped to the `BasePolicyResolver`:
-* **OPAPolicyResolver:** Resolves scopes against Cloud Native Computing Foundation (CNCF) Rego policies.
-* **VaultPolicyResolver:** Resolves scopes dynamically from HashiCorp Vault KV engines.
-*(Note: Active external network bindings for OPA/Vault are scheduled for v1.2).*
+The router resolves policy for the current request. With a non-empty allowlist, an unlisted tool is
+denied. An empty allowlist denies every tool by default. Setting
+`MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY` changes that behavior to allow every tool not explicitly
+blocked and emits a critical startup warning.
 
-## 4. Dependency Injection & Dynamic Stream Evaluation
+Policy changes take effect according to the resolver's reload or cache rules. They do not change a
+decision that a request has already resolved.
 
-The `RBACValidator` accepts the policy resolver via constructor injection. This prevents tight coupling and allows the execution plane to dynamically adapt to the deployment environment.
+## Evidence and limits
 
-Policy resolution occurs at the documented per-stream boundary. A policy change affects requests according to resolver caching and when each stream resolves policy; it does not retroactively change an already resolved decision.
+Tests cover fragmented tool names, resolver decisions, Redis integration, cache invalidation, and
+selected failure paths. They do not prove backend availability, complete MCP protocol support, or
+correct policy for a particular deployment. The `/v1/mcp` route implements a documented JSON-RPC
+subset; it is not a complete MCP Streamable HTTP transport.
 
-## 5. Security & Validation (Test Strategy)
-
-The pluggable architecture is validated using `unittest.mock.AsyncMock` (or `fakeredis`).
-* **Vector:** A mock Redis client is seeded with a blocked tool (`exec_sql`).
-* **Execution:** A fragmented byte-stream representing the JSON tool call is fed into the `StreamingToolParser`.
-* **Assertion:** The parser yields the key, the `RBACValidator` invokes the `RedisPolicyResolver`, and a `ToolAccessForbiddenException` is raised at the tested boundary. Separate payload-size, line-size, timeout, and load tests cover resource-exhaustion risks.
+See the [MCP Tool Governance guide](/docs/guides/mcp-tool-governance) for configuration and the
+[OPA and Vault resolver page](/docs/features/ultra-low-latency-streaming-traffic-engineering/opa-vault-rbac-resolvers)
+for cache and failure semantics.

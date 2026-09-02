@@ -3,7 +3,7 @@
 The [specification governance process](/docs/conformance/governance) defines normative changes,
 independent review, conflicts, versioning, and result labels.
 
-The Open Conformance Lab is the vendor-neutral evidence surface for streaming privacy gateways. It separates correctness, security boundaries, and environment-scoped measurements so implementers can reproduce a claim instead of trusting a product tagline.
+The Open Conformance Lab publishes repeatable tests for streaming privacy gateways. It separates correctness checks from security boundaries and environment-specific measurements.
 
 The lab is Apache-2.0 licensed. The specification, vectors, runner, report schema, and implementation are inspectable and reusable without a license fee, account, hosted service, or paid edition.
 
@@ -18,11 +18,11 @@ The lab is Apache-2.0 licensed. The specification, vectors, runner, report schem
 | Audit integrity | Do chain, sequence, fingerprint, and Ed25519 checks pass-and does a tampered negative control fail? |
 | Memory | Is retained streaming state bounded and is the measurement labeled correctly as allocation data or process RSS? |
 
-Latency remains a **publication** requirement (SPG-LATENCY-1), not a scored check. The former `latency_measurement` check gated on percentiles of monotonic-clock deltas being non-negative, which cannot fail under any implementation or any input; a check that cannot fail is not evidence. The distributions are still published under `microbenchmarks`.
+Latency is a **publication** requirement (SPG-LATENCY-1), not a scored check. The old check only verified that elapsed times were non-negative, so it could not distinguish a good implementation from a bad one. Reports still publish the measured distributions under `microbenchmarks`.
 
 Read the normative [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), review the [published results table](./results), [reproduce the local and HTTP profiles](./reproducing), or [submit a run](./submitting).
 
-## The harness is a separate distribution, on purpose
+## The harness is a separate package
 
 The endpoint-neutral HTTP profile ships as **`pii-leak-benchmark`** — standard library plus
 `httpx`, importing no gateway of any kind:
@@ -32,12 +32,12 @@ pip install pii-leak-benchmark
 pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1
 ```
 
-It used to install as part of the reference proxy's own package, which was backwards twice
-over: it put the name of one of the measured products on the neutral measurer, and it asked an
-engineer at another gateway to install a competing gateway's stack in order to measure their
-own. The specification keeps the Streaming Privacy Gateway name; only the tool was renamed. The
-dependency direction is one-way and a regression test enforces it — the proxy may use the
-benchmark, the benchmark never imports the proxy.
+The harness used to be part of the reference proxy package. That made other gateway teams
+install a competing gateway to run the test. It also tied the supposedly neutral test tool to
+one product. The specification name is unchanged, but the tool now ships separately.
+
+The proxy may depend on the benchmark. The benchmark never imports the proxy, and a regression
+test enforces that boundary.
 
 ## Cross-implementation HTTP profile
 
@@ -47,9 +47,8 @@ observed content as one-character SSE events, and lets the harness verify downst
 reconstruction. This design can evaluate different gateways without importing their detector or
 streaming classes.
 
-The HTTP profile is narrower than the local profile: it does not remotely infer
-process RSS or audit integrity. Those properties require separate artifacts rather than a
-fabricated pass.
+The HTTP profile is narrower than the local profile. It does not measure process RSS or audit
+integrity on a remote target. Those claims require separate evidence.
 
 ## Claim levels
 
@@ -57,9 +56,9 @@ fabricated pass.
 - **Independently reproduced:** an unaffiliated party publishes the raw report for the same tagged revision.
 - **Production-profiled:** a separately documented service-level experiment includes ASGI, HTTP/TLS, concurrency, networking, upstream behavior, error rate, and process RSS.
 
-**Every published row today is project-run and none is independently reproduced**, so every one
-of them — including this project's own — reads `unreplicated` in the table. A target does not
-read as a verdict below 3 runs from 3 distinct submitters, and the maintainer's runs never count
-toward anyone's replication. See [submitting a result](./submitting).
+**Every published row is currently project-run. None has been independently reproduced.** Each
+row therefore says `unreplicated`, including the reference implementation. A result needs three
+runs from three submitters before the table presents a verdict. Maintainer runs do not count
+toward that total. See [submitting a result](./submitting).
 
 Passing the local harness does not establish population-level detector accuracy, a universal latency or memory ceiling, regulatory compliance, or immutable WORM retention.

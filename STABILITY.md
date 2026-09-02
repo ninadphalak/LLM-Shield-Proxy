@@ -107,7 +107,7 @@ operator configuration.
 - FinOps `stream_options` injection
 - Edge-level agent identity enforcer (JWT / DPoP)
 - Canary prompt tripwires (requires `SHIELD_WATERMARK_SECRET`)
-- Entity-weighted blast radius limits
+- Entity-weighted request limits
 - LLM FinOps meter
 - Provider failover routing
 - Bounded exponential retries (requires a configured upstream)
@@ -144,7 +144,7 @@ and the notes may be useful, not because they are on a path to support.
 
 | Exploration | What it is, and what limits it |
 |---|---|
-| Dynamic canary watermarking and steganography | Injects zero-width Unicode characters keyed with the operator-supplied `SHIELD_WATERMARK_SECRET`, for internal leak forensics. Enabling watermarking without the secret fails startup, and different secrets produce different identity fingerprints for the same credential. Zero-width marks do not survive most normalization, copy-paste, JSON re-encoding, or markdown rendering, and must not be injected into code or structured output. Treat it as a tracing aid for non-adversarial leak paths, not as a control against an adversary who can strip characters. |
+| Zero-width correlation marker | Injects zero-width Unicode characters keyed with the operator-supplied `SHIELD_WATERMARK_SECRET`, for internal correlation. Enabling watermarking without the secret fails startup, and different secrets produce different identity fingerprints for the same credential. Zero-width marks do not survive most normalization, copy-paste, JSON re-encoding, or markdown rendering, and must not be injected into code or structured output. Treat it as a tracing aid for non-adversarial paths, not as a control against an adversary who can strip characters. |
 | Scoped MCP JSON-RPC gateway and pluggable tool-call RBAC | An exploration of brokering `tools/list`, `tools/call`, and `resources/read` inside a controlled network boundary, with no initialization, capability negotiation, sessions, or GET/SSE channel. It is not drop-in for any MCP SDK. Empty allowlists deny every tool by default; intentional blocklist-only deployments must set `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY`, which emits a critical startup warning that every unblocked tool is permitted. MCP is still moving and this project has not committed to tracking it. |
 | Context-aware tool catalog pruner | Its Redis path **is** now verified against Redis 7 in CI (cache write with a clamped TTL, cache hit, per-tenant isolation, policy-version invalidation, including a tenant's first invalidation). It sits here as a scope statement rather than an evidence one: it serves the `tools/list` method of a protocol subset this project has not committed to tracking. |
 | Dynamic MCP tool schema rewriting | Schema rewriting cannot compel a model or parser to echo the added fields. |

@@ -27,7 +27,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Protects the Python event loop from blocking recursively, ensuring multi-tenant proxy stability.
+- **Overhead:** The proxy must parse and traverse enough of the payload to enforce the limit. The
+  check reduces deep-recursion risk but does not guarantee service stability.
 
 ## Configuration Flags
 The depth limit bounds one parser dimension. Payload size, string length, concurrency, detector cost, and downstream processing require separate limits and tests.
@@ -37,13 +38,16 @@ The depth limit bounds one parser dimension. Payload size, string length, concur
 | `AST_MAX_DEPTH` | Maximum allowed recursive JSON depth (default: 40). |
 
 ## Critical Logic & Edge Cases
-* **Tool-Call Preservation:** Legitimate autonomous agent workflows (like AutoGen) can generate heavily nested arguments. A depth of 40 comfortably accommodates massive, legitimate schemas (which rarely exceed depth 10) while effectively neutralizing malicious `{"a":{"a":{"a":...}}}` payloads.
-* **Immediate Socket Severing:** Because the proxy operates as a stream interceptor, exceeding the depth limit triggers a hard socket drop before the payload is ever forwarded to OpenAI or Anthropic, protecting your upstream billing quotas.
+* **Legitimate nesting:** Complex tool arguments can be deeply nested. Test the limit against the
+  actual schemas used by clients; the project does not claim that depth 40 fits every valid input.
+* **Rejection point:** An over-limit request returns HTTP 400 before upstream forwarding on the
+  supported path. The server and middleware have already done some parsing and receive work.
 
 ## FAQ
 
 **Q: Has a legitimate LangChain or MCP payload ever hit the depth limit of 40?**
-A: No. Standard OpenAI schemas, even with complex nested tool arguments and multi-modal message arrays, rarely exceed a depth of 15. A depth of 40 is exclusively reached by malfunctioning code or intentional algorithmic complexity attacks.
+A: The project does not have evidence for every LangChain, MCP, or multimodal schema. Measure the
+maximum depth of the payloads you accept and set the limit with room for expected changes.
 
 **Q: Does this protect against massive strings (megabytes of text) as well?**
 A: Depth protection addresses nesting only. Apply payload and line-size limits, validate RE2 and fallback behavior, and measure memory and CPU under the intended concurrency.
@@ -52,9 +56,7 @@ A: Depth protection addresses nesting only. Apply payload and line-size limits, 
 A: On the main HTTP path, authentication is evaluated before application JSON parsing. The ASGI server, middleware, headers, body receive path, and infrastructure still perform work, so enforce ingress body, header, connection, timeout, and rate limits too.
 
 
-## Plainspeak
-This feature acts as a safety limit against overwhelming the system with overly complex data.
-
+## Practical effect
 Deeply nested JSON can consume parser and traversal resources. The configured depth check rejects payloads beyond its supported boundary; combine it with body-size, line-size, timeout, concurrency, and infrastructure limits.
 
 ## Related Tests

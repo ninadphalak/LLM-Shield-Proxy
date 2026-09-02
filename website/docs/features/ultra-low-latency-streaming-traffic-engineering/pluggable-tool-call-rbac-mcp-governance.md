@@ -49,7 +49,7 @@ A: No. It supports a documented JSON-RPC subset and does not implement initializ
 A: Instrumented decisions can emit configured audit, OTel, or OSCAL metadata. Delivery and completeness depend on settings and downstream systems, and the artifacts do not establish SOC 2 compliance.
 
 
-## Plainspeak
+## Practical effect
 This feature is a policy checkpoint for supported tool calls on one scoped gateway route.
 
 For supported calls, the route resolves caller policy before forwarding. Its effectiveness depends on routing all relevant calls through the route and configuring a resolver that denies the intended operations and fails as required.

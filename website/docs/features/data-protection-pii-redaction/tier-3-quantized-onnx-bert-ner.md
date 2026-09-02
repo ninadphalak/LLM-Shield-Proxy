@@ -33,25 +33,27 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `ENABLE_TIER3_ONNX_NER` | Toggles deep neural entity extraction. Defaults to `false` for maximum speed. | [View in deployment.md](/docs/deployment) |
+| `ENABLE_TIER3_ONNX_NER` | Enables the optional ONNX entity model. Defaults to `false`. | [View in deployment.md](/docs/deployment) |
 | `ONNX_MODEL_PATH` | Path to a custom quantized Hugging Face ONNX model and tokenizer. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Script-Aware Non-Latin & CJK Rehydration:** Standard word boundaries (spaces) break in logographic scripts (Chinese, Japanese, Korean). The engine isolates ASCII boundaries securely while treating CJK ideographs continuously to prevent sub-word stream corruption.
-* **Fallback Heuristics:** If `ONNX_MODEL_PATH` is not set but Tier 3 is enabled, it gracefully falls back to heuristic keyword detection.
+* **Non-Latin and CJK text:** Languages without spaces need different boundary tests. Validate
+  detection and rehydration with the exact model, tokenizer, script, and streaming format.
+* **Fallback:** If `ONNX_MODEL_PATH` is missing while Tier 3 is enabled, the current path falls
+  back to heuristic detection. Treat that as reduced coverage and monitor it explicitly.
 
 ## FAQ
 
 **Q: Can I use my own domain-specific model for Medical records (HIPAA)?**
-A: Yes! This is the "Bring Your Own Model" (BYOM) feature. You can export any Hugging Face model (e.g., BioBERT, ClinicalBERT) to ONNX, point `ONNX_MODEL_PATH` to the directory, and the proxy will use it for contextual extraction.
+A: You can supply a compatible ONNX model and tokenizer through `ONNX_MODEL_PATH`. The current
+runtime path expects a compatible input and label shape; not every Hugging Face export works.
+Test the exported model before using it for medical data.
 
 **Q: Does enabling this break the microsecond streaming latency?**
 A: It adds model- and host-dependent inference time. Benchmark the exact ONNX file, provider, payload distribution, and concurrency, and report service-level p50/p95/p99.
 
 
-## Plainspeak
-This feature is a highly efficient artificial intelligence reader. Instead of just looking for strict patterns like 9-digit numbers, it actually reads the surrounding sentence to understand the context.
-
+## Practical effect
 Depending on the selected model and training data, contextual inference may distinguish uses such as a person's name from a brand. Quantization can reduce model size and change accuracy and latency; publish the model, corpus, thresholds, and measurements for any quality claim.
 
 ## Related Tests

@@ -59,7 +59,7 @@ A: No. It only appends JSONL to a file path. An operator must separately define 
 A: A caller can pass both transport instances to `DecisionTraceExporter`, but the main proxy does not currently expose configuration that does so.
 
 
-## Plainspeak
+## Practical effect
 These are integration primitives for custom evidence delivery, not a ready-to-enable GRC connector.
 
 If custom code calls these classes, they can attempt one HTTP delivery or one file append. They are not a Vanta, Drata, or Sprinto integration, and they are not active in the proxy request path today.

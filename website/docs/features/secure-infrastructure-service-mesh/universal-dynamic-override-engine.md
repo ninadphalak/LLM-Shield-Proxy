@@ -6,7 +6,8 @@
 The **Request-Scoped Dynamic Override Engine** exposes a documented allowlist of settings through policy and request context. Security-sensitive, process-start, connection-pool, and resource-lifecycle settings are not automatically safe to override; add tests before extending the allowlist.
 
 ## How It Works
-Passing a user's specific override preferences down through 15 layers of nested function calls (Router -> Middleware -> Redaction Engine -> SSE Buffer -> Network Egress) creates messy, unmaintainable code.
+The implementation carries approved request-scoped settings through Python context variables so
+each layer does not need another function parameter.
 
 1. **Context Initialization:** When a request is received, the proxy extracts specific HTTP headers (like `X-Shield-Masking-Mode`) or tenant-specific settings from the policy YAML.
 2. **Contextvars Injection:** These overrides are injected into Python `contextvars.ContextVar` objects at the very top of the call stack.

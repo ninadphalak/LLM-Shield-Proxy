@@ -1,6 +1,6 @@
 [⬅️ Back to README](/)
 
-# 🚀 Deployment: Infrastructure & Resiliency
+# Deployment and Resilience
 
 For visual diagrams of Air-Gapped and VPC setups, refer to the **[Deployment Topologies](/docs/features/deployment-topologies.md)** guide. The **[Air-Gapped Egress Gateway Mode](/docs/features/air-gapped-egress)** guide documents the internal-gateway routing, DNS pinning, TLS, and credential-forwarding boundary in detail.
 
@@ -94,10 +94,10 @@ Policies can supply request-scoped overrides for settings that the implementatio
 | **Audit signing** | `AUDIT_SIGNING_PRIVATE_KEY` | `None` | Stable Ed25519 PEM/base64/hex private material. Unset keys are ephemeral and unsuitable for cross-restart verification. |
 | **Audit signing** | `AUDIT_SIGNING_KEY_FILE` | `None` | Preferred production option. Path to a secret-manager-mounted Ed25519 key; takes precedence and fails startup if unreadable or invalid. |
 | **Audit, Forensics & Legal** | `FIPS_STRICT_MODE` | `True` | Strict fail-closed validation for FIPS 140-3 KAT tests. |
-| **Agent Circuit Breaker** | `ENABLE_AGENT_BREAKER` | `True` | Enable Composite Agent Loop Circuit Breaker. |
+| **Agent Circuit Breaker** | `ENABLE_AGENT_BREAKER` | `True` | Enable the duplicate-request loop breaker. |
 | **Agent Circuit Breaker** | `AGENT_BREAKER_THRESHOLD` | `3` | Consecutive duplicate turns before tripping the circuit breaker. |
 | **Agent Identity Enforcer** | `AGENT_IDENTITY_ENFORCER` | `"off"` | Agent Identity Enforcer mode (`"off"`, `"lenient"`, `"strict"`). |
-| **Leak Forensics** | `ENABLE_WATERMARKING` | `False` | Enable Dynamic Canary Watermarking & Steganography. |
+| **Output correlation** | `ENABLE_WATERMARKING` | `False` | Add a keyed zero-width correlation marker to configured output. |
 | **Leak Forensics** | `SHIELD_WATERMARK_SECRET` | `None` | Operator secret for HMAC-SHA256 watermark and identity fingerprints; required when watermarking or canary tripwires are enabled. |
 | **MCP RBAC** | `MCP_EMPTY_ALLOWLIST_MODE` | `DENY_ALL` | `DENY_ALL` rejects every tool when `allowed_tools` is empty. `BLOCKLIST_ONLY` explicitly permits tools not named in `blocked_tools` and emits a critical startup warning. |
 | **OTel & Tracing** | `TELEMETRY_ENABLED` | `False` | Enable W3C traceparent distributed telemetry export. |
@@ -105,7 +105,7 @@ Policies can supply request-scoped overrides for settings that the implementatio
 | **OTel & Tracing** | `ANONYMOUS_USAGE_TRACKING` | `True` | Enable anonymous, opt-out volumetric telemetry. |
 | **Tripwire** | `ENABLE_CANARY_TRIPWIRE` | `False` | Enable deterministic prompt-extraction tripwire. |
 | **Tripwire** | `CANARY_TOKEN` | `None` | Cryptographic canary string, auto-generated if unset. |
-| **Blast Radius Limits** | `ENABLE_BLAST_RADIUS_LIMITS` | `False` | Enable Entity-Weighted Blast Radius Limits. |
+| **Entity request limits** | `ENABLE_BLAST_RADIUS_LIMITS` | `False` | Apply the configured token bucket to detected entity counts. |
 | **Blast Radius Limits** | `BLAST_RADIUS_BURST_CAPACITY` | `100` | Maximum bucket size for PII entity exfiltration limit. |
 | **Blast Radius Limits** | `BLAST_RADIUS_REPLENISH_RATE_PER_MIN` | `10` | Tokens added back per minute to the bucket. |
 | **FinOps Metering** | `ENABLE_FINOPS_METERING` | `True` | Enable token metering and FinOps telemetry. |
@@ -168,9 +168,14 @@ This configuration secures the listener with HTTPS, mandates inbound mTLS (`CLIE
 
 ### TLS SNI Pinning on Dynamic Upstream Override
 
-When `ALLOW_CLIENT_UPSTREAM_OVERRIDE=True` (via `X-Upstream-Base-Url`) or `AIR_GAPPED_MODE` is active, the proxy resolves the target hostname, validates the IP against the SSRF denylist, and pins the outbound connection to that specific IP -- closing the DNS-rebinding window between the check and the actual connection. Pinning a socket to a bare IP would normally break TLS, since certificate hostname verification is checked against whatever host is in the connection URL, and real certificates don't carry IP SANs. To avoid that, the proxy separately passes the original FQDN through as `extensions={"sni_hostname": ...}` on the outbound `httpx` request, so:
+When `ALLOW_CLIENT_UPSTREAM_OVERRIDE=True` or `AIR_GAPPED_MODE` is active, the proxy resolves the
+target hostname and pins the connection to the checked IP. This prevents a second DNS lookup from
+changing the destination before the connection. For TLS, the proxy passes the original hostname
+through `extensions={"sni_hostname": ...}` so certificate verification still uses the domain:
 
 - The socket connects to the pinned, SSRF-validated IP.
 - TLS SNI negotiation and certificate hostname verification happen against the real domain.
 
-No configuration is required for this -- it's automatic whenever the proxy pins a connection to a resolved IP. It does **not** apply to `FALLBACK_BASE_URL`/`X-Shield-Fallback-URL` failover targets, which are plain configured FQDNs and use ordinary hostname-based TLS.
+This happens automatically on paths that pin a resolved IP. It does **not** apply to
+`FALLBACK_BASE_URL` or `X-Shield-Fallback-URL`; those failover targets use normal hostname-based
+TLS.

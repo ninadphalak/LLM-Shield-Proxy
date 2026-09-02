@@ -4,8 +4,8 @@ sidebar_position: 7
 
 # Runbook: measuring a hosted gateway
 
-Executable start to finish by someone who has not read the design discussion. It covers
-Cloudflare AI Gateway and Portkey, the two hosted targets in the comparison table.
+This runbook covers Cloudflare AI Gateway and Portkey, the two hosted targets in the comparison
+table.
 
 Everything here that does not need a vendor account has been run. Everything that does
 is marked **NOT RUN** and is drawn from vendor documentation, cited inline. Do not
@@ -54,8 +54,8 @@ Bind the capture to **loopback** and let the tunnel reach it. The port is then n
 directly exposed to the internet, only the tunnel hostname is.
 
 ```bash
-# 1. Install the harness. Base install is stdlib + httpx -- no gateway, no proxy stack.
-python -m pip install llm-shield-proxy
+# 1. Install the standalone harness. It does not install a gateway.
+python -m pip install pii-leak-benchmark
 python -m pip install jsonschema          # optional, to validate the artifact yourself
 
 # 2. Start a tunnel. Cloudflare quick tunnels need NO account.
@@ -89,14 +89,12 @@ Relevant because the tunnel sits in the path on every hosted row.
 | Headers removed | none |
 | Effect on leak matching | Digits per request rise from 20 to 93, but **needle proximity is unchanged** (SSN 2 of 9 direct and tunnelled) |
 
-One consequence is enumerated rather than suppressed. The capture inspects request
-headers as an egress channel, because a gateway could hide values there. Exactly one
-valid IPv4 address — `123.45.67.89` — normalizes to the same digits as the SSN fixture,
-so a client connecting from it produces an SSN finding against a gateway that redacted
-correctly. Suppressing header inspection to remove that would open a real evasion
-channel, so instead every finding publishes `leak_evidence` with `match: literal` or
-`match: normalized`. **Check that field before calling anything a leak.** The 16-digit
-card needle is unreachable by any IPv4.
+The capture inspects request headers because they are another egress path. The valid IPv4 address
+`123.45.67.89` has the same digits as the old SSN fixture, so an `x-forwarded-for` header could
+create a false SSN finding. Current fixtures exclude that collision.
+
+Each finding records `leak_evidence` as either `literal` or `normalized`. Check that field before
+reporting a leak.
 
 ## Step 2a — Cloudflare AI Gateway  **(NOT RUN — needs an account)**
 

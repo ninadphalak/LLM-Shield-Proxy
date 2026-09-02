@@ -49,7 +49,7 @@ A: For the supported path, start by pointing the client's `base_url` to the prox
 A: The documented ingress path transforms configured content before provider translation, and the response path normalizes provider output before supported rehydration. Exercise each provider envelope and content type because adapters can expose different fields.
 
 
-## Plainspeak
+## Practical effect
 Providers expose different request fields, streaming events, tool semantics, and error behavior. The implemented adapters translate a documented subset; applications must test unsupported fields and semantic differences before switching providers.
 
 ## Related Tests

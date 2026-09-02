@@ -14,8 +14,7 @@ looks for at the capture. Review found two distinct issues:
   formats and substitutes them can pass without operating a general detector. **This
   remains a known limitation.** Values now vary per run, but the formats remain stable.
 
-Every number on this page was produced by running the harness or by querying a pinned
-Presidio analyzer. Nothing here is hypothetical.
+The measurements below come from the harness and a pinned Presidio analyzer.
 
 ## Defect 1: the fixture favored non-validating detection
 
@@ -80,20 +79,17 @@ Every value must now satisfy two properties at once.
   carries about 3.1×10⁷. This deliberate asymmetry is published in every report as
   `fixture.value_space_nominal`.
 
-One detail illustrates the validation problem: the
-SSA publishes `987-65-4320` through `987-65-4329` for use in advertising, which is the obvious
-"safe" SSN to reach for. Presidio scores it `US_ITIN` 0.5 and **no `US_SSN` at all**,
-because its SSN recognizer blacklists the prefix `98765432`. The officially safe value is
-precisely the one a careful detector ignores.
+The SSA publishes `987-65-4320` through `987-65-4329` for advertising examples. Presidio does
+not classify those values as `US_SSN` because its SSN recognizer blocks the prefix `98765432`.
+It instead scores them as `US_ITIN` 0.5. This makes the official example unsuitable for this
+test.
 
 ### A false-positive class removed at the same time
 
-Round 7 recorded that exactly one valid IPv4 address, `123.45.67.89`, normalises to the
-same digits as the old SSN fixture, so a tunnel adding an `x-forwarded-for` header could
-produce an SSN finding against a gateway that had redacted correctly. That is no longer
-disclosed and accepted. It is now **excluded by construction**: the generator resamples
-any SSN whose digits some valid dotted quad could produce. A measured 37.3% of the
-nominal SSN space is rejected on that rule alone.
+The old SSN fixture had the same digits as the valid IPv4 address `123.45.67.89`. A tunnel could
+therefore add an `x-forwarded-for` value that looked like a leaked SSN. The generator now rejects
+any SSN whose digits can also form a valid IPv4 address. That rule rejects 37.3% of the nominal
+SSN value space.
 
 ### An additional decoder defect found during correction
 
@@ -125,13 +121,13 @@ run, formats are byte-identical, and the live proxy passes five consecutive prof
 
 ### The report-binding control
 
-Bind the **artifact** to the run rather than the fixture to a random value: OIDC-signed
-provenance over the report digest, produced by third-party CI under the submitter's own
-account. The composite action implements this with `attest-report: true`; a reviewer checks the
-downloaded JSON with `gh attestation verify`. Editing the JSON after the run then breaks
-verification. This still does not authenticate the measured remote process, so every published
-row requires the pinned package/image, configuration, public run, and raw artifact as well as a
-passing JSON file.
+With `attest-report: true`, the composite action asks CI to sign the report digest through OIDC.
+A reviewer can check the downloaded JSON with `gh attestation verify`; later edits break that
+verification.
+
+This proves which CI run produced the artifact. It does not prove the identity or configuration
+of a remote target. A published row therefore also needs the pinned package or image,
+configuration, run details, and raw artifact.
 
 ## What this page does not claim
 

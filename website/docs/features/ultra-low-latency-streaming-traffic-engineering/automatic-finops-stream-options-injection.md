@@ -8,9 +8,10 @@
 ## How It Works
 By default, the OpenAI API does not return token usage statistics (input/output counts) on streaming requests unless specifically requested.
 
-1. **Transparent Mutation:** When a client initiates a `stream: true` request, the proxy intercepts the JSON body.
+1. **Request mutation:** For a supported `stream: true` request, the proxy updates the JSON body.
 2. **FinOps injection:** On the supported OpenAI-style payload path, the proxy sets `stream_options.include_usage` to `true` when metering is enabled. Validate behavior for caller-supplied values and non-OpenAI adapters.
-3. **Usage Extraction:** When the final SSE chunk arrives containing the `usage` object, the proxy extracts this data, attaches the specific tenant's Virtual Key ID to it, and ships it asynchronously to the OpenTelemetry / Prometheus chargeback metrics engine.
+3. **Usage extraction:** If the final SSE event contains a supported `usage` object, the proxy
+   records it with the available tenant label through the metrics path.
 
 
 ```mermaid
@@ -28,7 +29,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Virtually none. The usage data is routed to a bounded background queue for asynchronous metric publication.
+- **Overhead:** Request mutation, usage parsing, queue operations, labels, and metric updates use
+  resources. Queue pressure can drop metrics.
 
 ## Configuration Flags
 
@@ -49,9 +51,7 @@ A: Applications can set the option themselves. Central injection can reduce conf
 A: Token count depends on the provider tokenizer and substitute. Compare structural, synthetic, scrub, and cryptographic modes on the actual model before making a cost claim.
 
 
-## Plainspeak
-This feature acts as an automatic accountant that tracks exactly how much AI computing power is being used.
-
+## Practical effect
 For supported provider requests, the proxy adds `stream_options.include_usage=true`. The provider may ignore or reject the option, and reported usage still requires validation before chargeback.
 
 ## Related Tests

@@ -1,14 +1,18 @@
-# Composite Agent Loop Circuit Breaker
+# Agent Loop Circuit Breaker
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Composite Agent Loop Circuit Breaker** tracks configured request and tool-call signals. When a configured threshold is reached, it terminates the affected flow. It is a bounded heuristic, not a complete detector for every looping or high-cost agent behavior.
+The circuit breaker tracks configured request and tool-call signals. When a threshold is reached,
+it terminates the affected flow. It is a bounded heuristic, not a complete detector for every
+looping or high-cost agent behavior.
 
 ## How It Works
 When autonomous agents are given tools, they can repeat failed actions until another limit intervenes. For example, an agent may resubmit the same SQL query and consume additional tokens and tool capacity.
 
-1. **Stateful Trajectory Tracking:** The proxy utilizes the [Stateless Redis TTL Vault](/docs/features/data-protection-pii-redaction/stateless-redis-ttl-vault) to track a hash of the `tool_calls` array for a specific `session_id`.
+1. **Stateful trajectory tracking:** The proxy uses the
+   [Redis TTL Vault](/docs/features/data-protection-pii-redaction/stateless-redis-ttl-vault) to
+   track a hash of the `tool_calls` array for a `session_id`.
 2. **Loop Detection:** If the proxy observes the exact same tool payload being executed more than `N` times consecutively within the same short-lived session, it flags a hallucination loop.
 3. **Circuit Breaking:** On the catch-all HTTP path, the proxy returns HTTP 429 with `X-Shield-Circuit-Breaker: TRIPPED` after the configured duplicate threshold. It does not inject a replacement system message.
 
@@ -49,7 +53,7 @@ A: The configured identical-payload rule does not count calls whose normalized a
 A: Client applications must pass a consistent `X-Session-ID` header. The proxy uses this header to isolate loop tracking.
 
 
-## Plainspeak
+## Practical effect
 This feature provides a threshold-based stop for one class of repeated agent action.
 
 Sometimes an agent repeats the same action without making progress. The circuit breaker compares the signals it is configured to track and intervenes after a threshold; it can miss changing loops and can flag legitimate repetition, so pair it with time, token, and tool budgets.

@@ -1,33 +1,40 @@
-# ISO 42001, NIST SP 800-53 Rev. 5, & FIPS 140-3
+# NIST, ISO/IEC 42001, and FIPS evidence support
 
-## Overview: Enterprise Governance & Cryptographic Integrity
+LLM-Shield-Proxy can produce selected evidence for NIST SP 800-53 and ISO/IEC 42001 control
+assessments. It also runs narrow cryptographic known-answer tests. These features do not certify
+the application, cryptographic module, deployment, or organization.
 
-Federal and high-assurance enterprise deployments require adherence to the most stringent AI risk management and cryptographic integrity standards available, including ISO/IEC 42001 (AI Management Systems), NIST SP 800-53 Rev. 5 (Security and Privacy Controls), and FIPS 140-3 (Cryptographic Module Security).
+## OSCAL assessment output
 
-The LLM-Shield-Proxy acts as the central governance dispatcher and cryptographic boundary for these deployments.
+The offline assessment and decision-trace components can create OSCAL 1.2
+`assessment-results` artifacts. OSCAL is a machine-readable exchange format. The output records
+selected observations; it does not prove that a control is effective or complete.
 
-## ISO/IEC 42001 & NIST SP 800-53 Rev. 5
+The default assessment-plan reference is a placeholder. Replace it with the plan used by the
+deployment before treating the artifact as formal evidence. GRC delivery also requires explicit
+application wiring or a separate connector; the proxy does not automatically send these records
+to Vanta, Drata, or another GRC service.
 
-Both ISO 42001 and NIST SP 800-53 Rev. 5 emphasize continuous risk management, systemic oversight, and the automated generation of compliance artifacts.
+## Audit evidence
 
-### Universal Decision Trace Exporter & OSCAL
-Manual control mapping becomes costly and inconsistent as event volume grows. The proxy can export low-level events in formats that support a broader GRC workflow.
-- **Automated Mapping:** The proxy's **GRC Dispatcher** captures low-level interception and redaction events and maps these AI system decisions to automated **NIST OSCAL (Open Security Controls Assessment Language)** compliance artifacts.
-- **GRC Integration:** These OSCAL artifacts, alongside OpenTelemetry `gen_ai.*` spans, are continuously dispatched to external GRC and observability tools (e.g., Vanta, Drata, Datadog). This provides auditors with a real-time, provable dashboard of the system's risk posture.
+Audit records can use SHA-256 predecessor links and Ed25519 signatures. With a separately trusted
+public key, the verifier checks continuity and authenticity within the supplied chain. Local
+storage is not WORM, the default delivery mode can drop events, and an external anchor is needed
+to detect deletion from the end of a chain.
 
-### Tamper-Evident Logging & Traceability
-As required by NIST Audit and Accountability (AU) controls:
-- **Hash chaining and signatures:** Security events can use sequential SHA-256 linking and Ed25519 signatures for offline integrity and authenticity checks. These mechanisms do not make local storage WORM; immutable retention must be configured separately.
-- **RFC 6902 Differential Logs:** Logs strictly record the categories of data manipulated (JSON patch differential logs) ensuring that the logging infrastructure itself does not become a toxic data asset.
+RFC 6902 output can describe selected mutation operations without storing the original matched
+value. Verify errors, custom fields, traces, and downstream log systems because the format alone
+does not guarantee data minimization.
 
-## FIPS 140-3 Integrity Controls
+## FIPS 140-3 boundary
 
-For deployments within the US Department of Defense, federal agencies, or highly regulated financial sectors, cryptographic modules must adhere to FIPS 140-3 standards.
+At startup, the application runs fixed SHA-256 and AES-256-GCM known-answer tests. With
+`FIPS_STRICT_MODE=true`, a failed test stops startup. A pass shows only that those test vectors
+produced the expected results in that run.
 
-### Cryptographic Known Answer Tests (KAT)
-To detect specific cryptographic implementation or configuration failures at startup:
-- **Algorithm Self-Tests:** The system enforces rigorous cryptographic **Known Answer Tests (KAT)** at boot time for both the **SHA-256** hashing engine and the **AES-256-GCM** envelope encryption engine.
-- **Execution:** During initialization, the proxy feeds predetermined inputs into selected cryptographic operations and compares the outputs with expected test vectors. A passing KAT is not a FIPS 140-3 validation of the application or deployment.
-- **Failure Halting:** If a KAT fails (indicating hardware degradation, memory corruption, or binary tampering), the proxy will aggressively halt initialization and refuse to route traffic, preventing any unencrypted or improperly hashed data from traversing the network.
+The tests do not make Python, OpenSSL, the host, or the application a FIPS 140-3 validated
+cryptographic module. A FIPS claim requires a validated module operated within its security
+policy and an assessment of the complete deployment boundary.
 
-*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details).*
+See the [compliance evidence boundaries](/docs/compliance-overview) and
+[FIPS and differential audit feature page](/docs/features/enterprise-auditing-compliance/fips-140-3-kat-rfc-6902-differential-audit-logging).

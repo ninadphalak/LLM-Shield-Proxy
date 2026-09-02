@@ -9,11 +9,9 @@ llm-shield-proxy benchmark \
   --json-out CONFORMANCE_LATEST.json
 ```
 
-The **local** profile measures this project's own engines in process, so it needs the
-gateway installed. **The HTTP profile does not, and is no longer part of this package at
-all.** It ships as its own distribution, `pii-leak-benchmark` - standard library plus
-`httpx`, with no gateway dependency - so measuring one gateway does not require installing
-another:
+The **local** profile runs this project's engines in process, so the gateway must be installed.
+The HTTP profile is a separate package named `pii-leak-benchmark`. It uses the standard library
+and `httpx` and does not install this gateway:
 
 ```bash
 pip install pii-leak-benchmark
@@ -45,11 +43,9 @@ Confirm that:
 5. timing scope excludes components not exercised;
 6. memory scope distinguishes Python allocations from process RSS.
 
-There is deliberately no `latency_measurement` check. It gated on percentiles of
-monotonic-clock deltas being non-negative, which cannot fail under any implementation
-or any input, and a check that cannot fail is not evidence — it inflated the check
-count without adding a bit of information. The timings are still published under
-`microbenchmarks`, as labeled measurements rather than as a passed gate.
+There is no `latency_measurement` pass/fail check. The old check only confirmed that elapsed
+times were non-negative, so it provided no useful evidence. Reports still publish the timings
+under `microbenchmarks`.
 
 Use `benchmarks/REPORTING.md` for a production-shaped comparison. Publish unsuccessful runs and deviations alongside successful results.
 
@@ -124,21 +120,15 @@ report = run_http_conformance(
 Three things are required and enforced:
 
 - **`capture_host` beyond loopback** binds a reachable interface.
-- **`capture_public_url`** is the externally reachable base URL the target will actually
-  be configured with. It is required whenever the bind is not loopback, because a wildcard
-  bind has no address anything can connect to and publishing `http://0.0.0.0:8765/v1` as
-  the URL to configure is simply wrong. This is also the URL the harness advertises in
-  `capture.target_must_be_preconfigured_for` and probes.
-- **`capture_token`** is required in public mode. The capture is on the open internet;
-  without a token any traffic at all could enter the capture record. Configure the target's
-  **upstream API key** to this value — every OpenAI-compatible gateway forwards it as
-  `Authorization: Bearer …`, which is what the capture checks. An
-  `x-conformance-capture-token` header is accepted too, for gateways that rewrite auth.
+- **`capture_public_url`** is the public base URL configured on the target. It is required
+  outside loopback because `0.0.0.0` is a bind address, not a destination. The harness probes
+  this URL and records it in `capture.target_must_be_preconfigured_for`.
+- **`capture_token`** identifies target traffic on a public capture. Configure the target's
+  **upstream API key** to this value if it forwards that key as `Authorization: Bearer …`.
+  Gateways that rewrite authorization can send `x-conformance-capture-token` instead.
 
-**TLS is assumed to be terminated by your tunnel.** The capture speaks plaintext HTTP/1.x
-behind it. The harness implements no certificate handling and does not need to: both
-hosted gateways checked below require an `https://` upstream, and every common tunnel
-already provides one.
+**The tunnel must terminate TLS.** The capture server behind it accepts plaintext HTTP/1.x and
+does not handle certificates.
 
 > Public mode is a **weaker observation** and the report says so in `capture.mode` and in
 > `checks.configured_upstream_boundary.capture_mode`. Attribution rests on a token the
@@ -215,12 +205,8 @@ aborts the run unless the capture recorded it. A run whose capture cannot be rea
 measures nothing, and the report it would otherwise emit is schema-valid and reads as a
 gateway failure.
 
-This replaces an earlier attempt to make the socket bind refuse a stolen port, which did
-not work: measured on Windows 11, the hijack happens when the two sockets bind *different*
-addresses, and there it happens with or without `SO_REUSEADDR`, while the matching-address
-case was already refused. Probing the channel catches every hijack shape on every
-platform, and also catches a firewall, a stray `HTTP_PROXY` environment variable, and a
-dead server.
+This replaces a socket-option check that did not detect every port conflict on Windows 11.
+The probe directly tests the route and can also reveal firewall, proxy, or server problems.
 
 The probe uses a per-run secret path with no digits in it, and its record is bucketed out
 of `captured_requests`, the correlation count and the leak haystacks, so it cannot move
@@ -240,16 +226,14 @@ traffic elsewhere.
 
 ### What the boundary check inspects
 
-Every request the target makes to the capture origin is recorded — any path, any method,
-the request line, the request headers, chunk extensions, trailers, and the body — because a
-gateway that posts raw values to a sibling route, or carries them in a metadata header,
-has leaked them just as surely as one that puts them in the chat payload. Bodies are read
-under both `content-length` and chunked framing, decompressed when `content-encoding` says
-to, then walked over every JSON type: strings, numbers, dictionary keys, character-code
-arrays, and base64, hex or percent-encoded runs found inside strings. Values are matched
-literally, across adjacent fragments, and with separators stripped, and each channel is
-also joined in order across captured requests. The `inspection_scope` field in every report
-states the coverage that run actually applied.
+The capture records every request from the target, regardless of path or method. It inspects the
+request line, headers, chunk metadata, trailers, and body. Body inspection supports
+`content-length` and chunked framing, declared compression, JSON values and keys, character-code
+arrays, and base64, hex, or percent-encoded text.
+
+The check searches for literal values, adjacent fragments, and values with separators removed.
+It also joins each channel across requests in arrival order. Every report records the exact
+coverage in `inspection_scope`.
 
 A request the harness cannot fully inspect — unparseable, or too large or too deeply nested
 to walk within budget — is counted in `uninspectable_requests` and **fails** the boundary
@@ -324,14 +308,17 @@ These hold in every run, and no configuration changes them. The report lists the
 
 ### Reading a non-pass
 
-Start with `outcome`, not `passed`. `passed` is the raw measurement -- did all five checks
-pass -- and it is deliberately not the publishable verdict. `outcome` is derived from what
-the product claims about PII redaction, what was configured, and then the measurement:
-`fail` means protected data reached the capture origin and nothing else does.
-`no-leak-profile-not-met` is a non-pass with no leak (typically a one-way anonymizer that
-never restores the value); `not-applicable` means the product never offered redaction;
-`redaction-not-enabled`, `inconclusive` and `claim-unstated` are not verdicts at all.
-`outcome_rationale` spells out which applies. See the
+Start with `outcome`, not `passed`. `passed` only says whether all five checks passed.
+`outcome` also accounts for the product's redaction claim and the configuration used.
+
+- `fail`: protected data reached the capture origin.
+- `no-leak-profile-not-met`: no protected data reached the capture, but another requirement
+  failed. A one-way anonymizer that cannot restore values is a common example.
+- `not-applicable`: the product does not offer redaction.
+- `redaction-not-enabled`, `inconclusive`, and `claim-unstated`: the run does not support a
+  verdict.
+
+`outcome_rationale` explains the result. See the
 [results table](./results#what-a-row-is-allowed-to-say).
 
 

@@ -3,7 +3,8 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Bring-Your-Own-Regex (BYOR)** allows enterprise security operators to inject their own proprietary detection rules into the proxy without modifying the core source code. It is designed to extend the Tier 1 detection cascade to catch custom corporate identifiers, internal project codenames, or proprietary billing tokens.
+**Bring-Your-Own-Regex (BYOR)** loads custom Tier 1 detection rules from YAML. It lets operators
+match internal identifiers or other known text shapes without changing the source code.
 
 ## How It Works
 BYOR patterns are loaded and compiled with the Tier 1 rules. Pattern count, candidate distribution, engine availability, and fallback behavior affect cost; benchmark the configured rule set.
@@ -56,9 +57,7 @@ A: Currently, regex compilation is performed at the FastAPI `lifespan` event for
 A: Custom BYOR entities are currently treated as structural strings. If Synthetic Masking is enabled, custom entities will typically be masked using an anonymized hash or generic placeholder unless a specific canonical locale provider is mapped to the custom rule name.
 
 
-## Plainspeak
-This feature allows you to teach the system how to recognize your company's own unique sensitive data.
-
+## Practical effect
 The built-in patterns cover documented formats such as selected credit-card and email shapes. Custom RE2-compatible rules can add an internal identifier such as `EMP-XYZ-123`; evaluate false positives, false negatives, latency, and reload behavior on a representative corpus.
 
 ## Related Tests

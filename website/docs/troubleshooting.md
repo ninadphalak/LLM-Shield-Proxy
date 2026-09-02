@@ -1,12 +1,14 @@
 [⬅️ Back to README](/)
 
-# 🚑 Troubleshooting & Configuration Guide
+# Troubleshooting and Configuration
 
-This guide helps you resolve common configuration errors and understand the proxy's "Fail Closed" design principles when deploying LLM-Shield-Proxy locally or in production.
+This guide explains common startup, dependency, and traffic failures.
 
 ## Why is my proxy failing to start or dropping traffic?
 
-LLM-Shield-Proxy is engineered as **Critical Compliance Infrastructure**. By design, it operates on a strict **Fail Closed** principle. This means if any configuration is missing, incorrect, or if a backend dependency (like Redis) goes down, the proxy will aggressively drop traffic rather than risking a data leak by failing open.
+Some security paths fail closed, which means they reject traffic when a required check or
+dependency is unavailable. Other paths use configurable fallbacks or asynchronous delivery. Check
+the setting named in the error instead of assuming one failure policy applies to the whole proxy.
 
 ### Common Fail Closed Configurations
 

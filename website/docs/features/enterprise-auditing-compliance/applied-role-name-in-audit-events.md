@@ -9,8 +9,9 @@ The **Applied Role Name in Audit Events** feature records the role name returned
 When a user authenticates, their `virtual_key_id` maps to a specific role (e.g., `role_data_scientist`).
 
 1. **Context Propagation:** During the authentication phase, the resolved role name is injected into Python's `contextvars`.
-2. **Event Enrichment:** Whenever the proxy emits a hash-chained audit record or an OSCAL assessment artifact, it pulls the role name from the context variable.
-3. **Structured Output:** The event is permanently tagged with `"applied_role_name": "role_data_scientist"`.
+2. **Event enrichment:** Supported audit and OSCAL paths read the role name from request context.
+3. **Structured output:** The emitted event can include
+   `"applied_role_name": "role_data_scientist"`. Retention depends on the configured sink.
 
 
 ```mermaid
@@ -31,7 +32,8 @@ View diagram on GitHub mobile 📱 -->
 - **Overhead:** Adds a role-name field to supported events. Measure serialization, queue, signing, and retention cost in the chosen audit mode.
 
 ## Configuration Flags
-This feature is natively embedded in the logging and policy engines.
+No separate flag enables this field. It appears only on the instrumented event paths that supply
+the resolved role.
 
 ## Critical Logic & Edge Cases
 * **Fallback role:** Main-route behavior depends on whether a `default_role` exists and on `SHIELD_FAILURE_MODE`; the MCP resolver has separate defaults. Test the actual event field for mapped, fallback, and denied callers.
@@ -43,9 +45,7 @@ This feature is natively embedded in the logging and policy engines.
 A: Recording `applied_role_name` can help connect an observed decision to the policy name selected at that boundary. Auditors still need evidence for identity mapping, policy contents and approvals, configuration history, completeness, and control operation.
 
 
-## Plainspeak
-This feature acts as a strict "who authorized this?" tracker on the audit logs.
-
+## Practical effect
 The supported audit events can include the role name resolved at the decision boundary. This helps an auditor join an event to policy evidence, but does not by itself prove identity mapping, policy contents, approval history, completeness, or control effectiveness.
 
 ## Related Tests
