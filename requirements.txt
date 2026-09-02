@@ -14,7 +14,7 @@ cryptography>=41.0.0
 google-re2>=1.1.20231101
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0
-PyJWT>=2.8.0
+PyJWT>=2.13.0
 
 # Restored when pyproject's base dependencies were reduced to the conformance
 # harness (httpx only) and the gateway stack moved to the [proxy] extra. Both CI and
@@ -27,3 +27,4 @@ grpclib>=0.4.3   # api/grpc_service.py, api/ext_proc_pb.py (Envoy ext_proc)
 betterproto>=2.0.0b6   # api/ext_proc_pb.py
 opentelemetry-exporter-otlp>=1.20.0   # observability/tracing.py
 jsonschema>=4.0.0   # not a runtime import; tests/conformance/test_spec_schema.py needs it
+
