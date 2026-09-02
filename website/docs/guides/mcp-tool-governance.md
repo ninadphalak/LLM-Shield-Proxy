@@ -1,4 +1,4 @@
-# MCP Tool Governance: Implementation & Configuration Guide
+# MCP Tool Policy Configuration
 
 [⬅️ Back to Policy-as-Code](/docs/policies) · [Feature Catalog](/docs/features-overview)
 
@@ -20,9 +20,8 @@ applying four checks on the documented request paths before the corresponding up
    [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall).
 3. **AST-aware PII/secret redaction** - a recursive walk of the entire JSON-RPC payload (not
    just top-level strings), sanitizing arguments outbound and tool results inbound.
-4. **Dynamic catalog pruning** - supported `tools/list` responses are filtered so the returned catalog does not
-   *sees* a tool it isn't authorized to call, reducing prompt-injection surface and hallucinated
-   tool selection.
+4. **Catalog policy filtering** - supported `tools/list` responses omit tools that policy denies.
+   This enforces catalog visibility; it does not rank tools or infer task relevance.
 
 This guide covers the wire protocol, the policy schema, and starting client configuration for
 Claude Desktop, Cursor, and Python agent frameworks.
@@ -53,13 +52,10 @@ sequenceDiagram
     Shield-->>Agent: JSON-RPC result (sanitized)
 ```
 
-> **Why "scrub" and not "rehydrate" on the way back?** The proxy's chat/completion path
-> rehydrates masked values because the *same* text round-trips through the LLM and back to
-> the same user. A tool call is different: the value the tool server returns is **new** data
-> (a row from a database, a file's contents) - there is nothing to rehydrate. So the outbound
-> leg uses a one-way `ScrubVault` (`[REDACTED]`-style) instead of the reversible `Vault` used
-> inbound, because this is terminal, agent/human-facing text, not a payload that has to satisfy
-> a strict tool-call schema on the other end.
+> **Why scrub instead of rehydrate on the return path?** Chat responses can restore values that
+> the proxy masked in the original prompt. Tool results contain new data, so there may be no
+> matching original value to restore. The return path therefore uses one-way `[REDACTED]`-style
+> replacements.
 
 ### 1.2 Forbidden tool call (fail-closed short-circuit)
 
@@ -81,9 +77,8 @@ sequenceDiagram
     Shield-->>Agent: JSON-RPC error -32003<br/>"Tool forbidden for active role"
 ```
 
-The forbidden path is intentionally the *cheapest* path through the router: the RBAC check
-runs before sanitization and before any `httpx` call is opened, so a hostile or compromised
-agent hammering a blocked tool costs the proxy a dict lookup, not an upstream round-trip.
+The RBAC check runs before sanitization and before the proxy opens an upstream request. A denied
+call therefore stops without contacting the tool server.
 
 ### 1.3 SSRF-blocked tool call (egress policy violation)
 
@@ -134,10 +129,10 @@ reads three more optional keys off the same dict - `egress_mode`, `allowed_domai
 > allowlist, even in `DENY_ALL`, so an unintentionally unusable policy is visible. Wire the
 > `YamlPolicyResolver` recipe below or OPA before exposing the route.
 
-Below is a complete, production-ready `policies.yaml` defining three enterprise roles with
-granular tool allow-lists, PII entity scopes, and per-role rate limits - using the same
-Universal Dynamic Override Engine that powers [Role-Based Policy-as-Code](/docs/policies), so
-every key below is just a `Settings` field override, no special-cased schema.
+The following `policies.yaml` is a starting example with three roles, tool allowlists, PII entity
+scopes, and per-role rate limits. Review the values and test failure modes before deployment.
+Each setting uses the same role-override path described in
+[Role-Based Policy-as-Code](/docs/policies).
 
 ```yaml
 # =========================================================
@@ -607,7 +602,7 @@ resolved IP and the CIDR rule it tripped attached in `details` - this is the rec
 - [SSRF & DNS-Rebinding Egress Firewall](/docs/features/secure-infrastructure-service-mesh/ssrf-dns-rebinding-egress-firewall) - the `egress_mode`/`allowed_domains`/`additional_denied_cidrs` policy schema, DNS-rebinding-safe resolution, and fail-closed semantics behind §1.3/§3.3.
 - [Role-Based Policy-as-Code (RBAC)](/docs/policies) - the underlying `policies.yaml` engine and Universal Override system.
 - [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) - the `BasePolicyResolver` interface and OPA/Vault adapters.
-- [Context-Aware Tool Catalog Pruner](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner) - the caching layer behind `tools/list` pruning.
+- [Tool Catalog Policy Filter](/docs/features/ultra-low-latency-streaming-traffic-engineering/context-aware-mcp-discovery-pruner) - policy filtering and caching for supported `tools/list` responses.
 - [Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts) - the signing pipeline used by the instrumented audit events shown above.
 
 ## Related Tests

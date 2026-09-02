@@ -2,7 +2,7 @@
 
 # Contributing to LLM-Shield-Proxy
 
-Thank you for your interest in contributing to LLM-Shield-Proxy! We welcome community contributions, bug reports, and enhancements.
+Contributions, bug reports, and documentation corrections are welcome.
 
 ## Code of Conduct
 All contributors are expected to uphold respectful, inclusive, and professional communication.
@@ -23,6 +23,17 @@ To protect the bounded streaming path, pull requests must preserve the published
 
 3. **Code Style & Formatting:**
    - Code must adhere to PEP 8 standard formatting and include type hints where applicable.
+
+## Documentation style
+
+- Lead with what the feature does, what changes for the operator, and what it does not prove.
+- Use short sentences, active voice, and common words. Define necessary technical terms on first use.
+- State measured results with their workload and environment. Do not turn component measurements
+  into end-to-end claims.
+- Avoid marketing adjectives, metaphors, and absolute claims such as “zero overhead,” “seamless,”
+  or “production-ready.”
+- Preserve negative results and known limitations. If evidence is missing, say that directly.
+- Treat examples as starting points, not deployment-ready configurations.
 
 ## Submission Workflow
 1. Fork the repository and create a feature branch (`git checkout -b feature/amazing-feature`).

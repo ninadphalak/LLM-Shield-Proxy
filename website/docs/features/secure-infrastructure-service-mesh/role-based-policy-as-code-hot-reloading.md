@@ -46,7 +46,7 @@ View diagram on GitHub mobile 📱 -->
 A: No. TLS certificates and core `google-re2` compilations (BYOR) operate at a lower C++ level and currently require a graceful pod restart to take effect. Hot-reloading strictly applies to the RBAC roles and routing settings in `policies.yaml`.
 
 
-## Plainspeak
+## Practical effect
 The local resolver periodically checks the policy file and replaces the active validated mapping when it detects a change. Reload time includes the polling interval and file propagation; a process crash, invalid file, or dependency failure can still interrupt service.
 
 ## Related Tests

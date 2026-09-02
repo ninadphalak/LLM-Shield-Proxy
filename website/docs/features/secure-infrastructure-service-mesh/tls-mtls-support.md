@@ -1,12 +1,12 @@
-# Comprehensive TLS & mTLS Support
+# TLS and mTLS Configuration
 
 LLM-Shield-Proxy exposes documented inbound TLS/mTLS and outbound trust/client-certificate options. A secure deployment also requires protocol/cipher policy, identity mapping, revocation, key custody, rotation, ingress behavior, and network controls.
 
 ## Architectural Overview
 
-When operating as an AI Gateway, the proxy must secure data both on the **inbound** connection (from internal corporate clients and autonomous agents) and on the **outbound** connection (to upstream LLM providers or corporate egress gateways).
-
-The proxy implements TLS termination using the native `uvicorn` high-performance async loops, and manages outbound TLS utilizing `httpx` and `ssl` contexts.
+The proxy can terminate TLS on inbound connections and configure certificate verification or a
+client certificate on outbound connections. `uvicorn` handles the inbound listener; `httpx` and
+Python SSL contexts handle the supported outbound path.
 
 ### Request Flow Diagram
 
@@ -37,7 +37,7 @@ llm-shield-proxy --tls-cert-file /path/to/server.crt --tls-key-file /path/to/ser
 *Alternatively via Environment Variables:* `TLS_CERT_FILE` and `TLS_KEY_FILE`.
 
 ### Inbound Mutual TLS (mTLS)
-To enforce strict zero-trust authentication, require connecting clients to present a valid certificate signed by a specific Certificate Authority (CA).
+To require client certificates, provide the CA bundle that the inbound listener should trust.
 
 Providing `--client-ca-file` configures `ssl.CERT_REQUIRED`, so the TLS handshake rejects clients that do not present a certificate accepted by the configured trust store. Certificate validity still depends on trust, revocation strategy, identity mapping, and server configuration.
 ```bash
@@ -66,17 +66,21 @@ llm-shield-proxy --insecure-skip-verify
 ### Outbound Mutual TLS (mTLS)
 If your upstream API gateway (e.g., an internal corporate firewall or proxy) requires LLM-Shield-Proxy itself to authenticate, provide the proxy's client certificate and key.
 
-The proxy will bundle these into a tuple and securely pass them to the underlying asynchronous HTTP client.
+The proxy passes these file paths to the asynchronous HTTP client as its client-certificate
+configuration.
 ```bash
 export OUTBOUND_CLIENT_CERT=/path/to/proxy-client.crt
 export OUTBOUND_CLIENT_KEY=/path/to/proxy-client.key
 llm-shield-proxy
 ```
 
-## Plainspeak
+## Practical effect
 
-**The Problem:** When building enterprise AI systems, data must be encrypted in transit. Simply using standard HTTPS verifies that the server is legitimate, but it doesn't verify the *client*. Furthermore, standard internet CA roots do not work inside highly secure, air-gapped VPCs where external internet traffic is blocked.
+Standard TLS authenticates the server to the client. Mutual TLS also requires the client to
+present a certificate.
 
-**The Solution:** This feature provides complete end-to-end cryptographic control.
-1. **Inbound mTLS** requires a client certificate accepted by the configured trust store before HTTP handling. Authorization still requires mapping the certificate identity to policy.
-2. **Outbound custom CAs and mTLS** let the proxy present a configured client certificate and validate servers against a selected trust bundle. This authenticates certificate possession and chain acceptance; authorization, revocation, name constraints, key custody, and network routing remain separate controls.
+1. **Inbound mTLS** rejects clients whose certificates are not accepted by the configured trust
+   store. Application authorization still requires a separate identity-to-policy mapping.
+2. **Outbound custom CAs and mTLS** let the proxy use a selected trust bundle and present a client
+   certificate. Authorization, revocation, name constraints, key custody, and routing remain
+   separate controls.

@@ -6,21 +6,24 @@
 The **Security Response Headers** middleware adds configured headers to responses that traverse the middleware stack. Some server, framework, proxy, and early-failure responses can follow different paths, so verify success, streaming, error, and infrastructure-generated responses.
 
 ## How It Works
-Modern web security requires strict directives to prevent browsers from executing malicious behaviors (like MIME-sniffing or clickjacking).
+The middleware sets browser security headers on responses that pass through the supported
+application path.
 
 1. **Middleware Injection:** A FastAPI middleware layer adds headers to responses that traverse that application path.
 2. **Configured values:** The middleware sets the documented header values; infrastructure-generated or bypass responses require separate verification.
 3. **The Headers:**
-   - `X-Content-Type-Options: nosniff` (Prevents MIME-sniffing vulnerabilities).
-   - `X-Frame-Options: DENY` (Prevents Clickjacking by disallowing iframe embedding).
-   - `Strict-Transport-Security: max-age=31536000; includeSubDomains` (HSTS: Forces all future connections from the client to use HTTPS for the next year).
+   - `X-Content-Type-Options: nosniff` asks browsers not to guess a different content type.
+   - `X-Frame-Options: DENY` asks browsers not to embed the response in a frame.
+   - `Strict-Transport-Security: max-age=31536000; includeSubDomains` tells compatible browsers
+     to use HTTPS for the host and its subdomains for one year after receiving the header over
+     HTTPS.
 
 
 ```mermaid
 flowchart LR
     A[Upstream LLM Response] --> B(Proxy Middleware)
     B --> C(Inject Security Headers)
-    C --> D[Armored HTTP Response]
+    C --> D[HTTP Response with Security Headers]
     D --> E[Client Browser]
 ```
 
@@ -36,7 +39,9 @@ View diagram on GitHub mobile 📱 -->
 These headers provide browser hardening defaults; they do not establish OWASP compliance or replace application-specific CSP, CORS, TLS, cookie, and content-handling review.
 
 ## Critical Logic & Edge Cases
-* **HSTS Preloading:** The `Strict-Transport-Security` header includes a 1-year `max-age`. If the proxy is accidentally exposed over plain HTTP (port 80) without a TLS terminator in front of it, browsers will forcefully upgrade subsequent requests to HTTPS.
+* **HSTS scope:** Browsers honor HSTS only after receiving it over HTTPS. The one-year setting can
+  affect subdomains because `includeSubDomains` is enabled. Confirm that this is appropriate for
+  every affected host before deployment.
 * **CORS interaction:** Security and CORS headers are configured separately, but browser behavior depends on their combined values. Test the intended origins, methods, credentials, and error responses.
 
 ## FAQ
@@ -45,7 +50,7 @@ These headers provide browser hardening defaults; they do not establish OWASP co
 A: The application middleware is intended to add them to the initial SSE response. Verify this through the selected ASGI server, ingress, error path, and TLS terminator; the headers do not encrypt transport by themselves.
 
 
-## Plainspeak
+## Practical effect
 These response headers ask compatible browsers to disable MIME sniffing, framing, and future plaintext HTTP access for the configured host. Their effect depends on HTTPS, browser support, intermediaries, and the rest of the application's security policy.
 
 ## Related Tests

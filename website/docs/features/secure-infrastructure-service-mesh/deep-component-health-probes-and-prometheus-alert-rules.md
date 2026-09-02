@@ -1,4 +1,4 @@
-# Deep Component Health Probes and Prometheus Alert Rules
+# Component Health Probes and Prometheus Alerts
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
@@ -6,7 +6,8 @@
 **Deep Component Health Probes** expose selected dependency and process signals to Kubernetes. A successful probe is a point-in-time readiness signal, not proof of security, correctness, future availability, or every upstream path.
 
 ## How It Works
-If a proxy pod loses connection to the Redis Vault but continues accepting traffic, it could result in catastrophic tokenization failures or data leaks.
+Readiness checks let Kubernetes stop routing new traffic to a pod when selected configured
+dependencies are unavailable.
 
 1. **Liveness (`/livez`, with `/health` and `/healthz` aliases):** Returns a lightweight application response; it does not exercise dependencies.
 2. **Readiness (`/readyz`):** Checks that Tier 1 patterns are present, an enabled ONNX session is loaded, an enabled Vault integration has cached secrets, and a configured Redis store answers a PING within the implementation's fixed timeout.
@@ -47,12 +48,11 @@ The current Redis PING timeout is fixed at 0.5 seconds in `api/health.py`; there
 A: The repository includes a `prometheus-rules.yaml` file in the `/deploy/` directory, containing best-practice thresholds for latency, error rates, and probe failures.
 
 **Q: Will the probe fail if the upstream LLM is down?**
-A: No upstream request or socket check is part of the current readiness implementation. An upstream outage can therefore coexist with a 200 readiness response.
+A: No. The current readiness check makes no upstream request and opens no upstream socket. It can
+return 200 while the upstream provider is unavailable.
 
 
-## Plainspeak
-This feature acts like a highly sensitive heart monitor for the proxy.
-
+## Practical effect
 The liveness route is shallow, while readiness checks a documented subset of local and configured dependency state. Kubernetes may remove an unready Pod from service; paging depends on the operator's monitoring stack.
 
 ## Related Tests

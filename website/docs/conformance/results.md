@@ -2,7 +2,11 @@
 
 ## Published reference run
 
-The repository includes a machine-readable v1.0.0 pre-release report at `benchmarks/results/conformance-v1.0.0-pre-release-windows.json`. It covers all six scored domains and publishes the required timing distributions. Timing and allocation values are environment-scoped and are intentionally not promoted as total proxy latency or a universal memory ceiling.
+The repository includes a machine-readable v1.0.0 pre-release report at
+`benchmarks/results/conformance-v1.0.0-pre-release-windows.json`. It covers all six scored
+domains and includes the required timing distributions. The timing and allocation values apply
+only to the recorded environment and operations. They are not end-to-end latency or process-wide
+memory limits.
 
 **Run:** 2026-09-02 on Windows 11, CPython 3.14.7, AMD64; 2,000 timing samples per operation.
 
@@ -10,11 +14,13 @@ The repository includes a machine-readable v1.0.0 pre-release report at `benchma
 
 **SHA-256:** `bfb50c51a272ce5150c982e34a6592cd36eb0d9bdf4f5378dc81c902b7c38158`
 
-This is a **project-run measurement**, not an independently reproduced result: one run, one
-submitter, on one machine. The `+working-tree` suffix on the source label means the artifact
-was written by the same run that produced the checksum above, before that commit existed. The
-`Reproducible Public Benchmark` workflow regenerates it from an exact commit SHA on every push
-to `main`.
+This is a **project-run measurement** from one submitter and one machine. No one outside the
+project has reproduced it yet.
+
+The `+working-tree` suffix means the run included source changes that had not been committed.
+`6573c0e...` was the latest commit at the time; the report tested that commit plus the local
+changes. The SHA-256 above identifies the report file. On every push to `main`, the
+`Reproducible Public Benchmark` workflow creates a new report tied to the pushed commit.
 
 | Domain | Latest status |
 | :--- | :--- |
@@ -25,7 +31,8 @@ to `main`.
 | Audit integrity | Pass - two signatures verified; tamper negative control detected |
 | Memory bound/measurement completeness | Pass - retained state within bound; allocation recorded; no RSS threshold |
 
-Latency is published rather than scored: the former `latency_measurement` check could not fail, so it was removed. The distributions below are the evidence it claimed to be.
+Latency is reported but not scored. The former `latency_measurement` check only verified that
+durations were non-negative, so it could not fail and was removed.
 
 ### In-process timing observations
 
@@ -34,26 +41,30 @@ Latency is published rather than scored: the former `latency_measurement` check 
 | Empty-vault buffer | 0.6 us | 0.7 us | 0.7 us |
 | Protected-token buffer | 5.2 us | 5.3 us | 5.8 us |
 
-This artifact was regenerated against the released tree, so it supersedes an earlier one measured before the streaming-path fixes. The two are **not** a like-for-like series and no ratio between them is published: a component observation on one machine is not a speed result. These are Windows in-process Python operation timings. They exclude ASGI, HTTP, TLS, network, upstream/model, concurrency, and durable audit I/O. The measured Python allocation peak was 32 bytes for the declared allocation scope; it is not process RSS.
+This report replaces an earlier report from before the streaming-path fixes. Do not compare the
+two as a performance series because the code and measurement conditions differ. The figures
+above measure in-process Python operations on one Windows machine. They exclude ASGI, HTTP, TLS,
+network, model, concurrency, and durable audit I/O. The reported 32-byte peak covers only the
+declared Python allocation scope; it is not process RSS.
 
 ## Independent reproductions
 
-**There are no independent reproductions yet.** Independent runs are welcome.
+**There are no independent reproductions yet.**
 
-[Reproduce a row](./reproducing), then [submit the artifact and its pinned
-configuration](./submitting). Do not send representative enterprise traffic or confidential
-prompts: the harness ships its own synthetic fixture precisely so you never have to.
+[Reproduce a row](./reproducing), then [submit the raw report and pinned
+configuration](./submitting). Use the synthetic fixture included with the harness. Do not use
+confidential prompts or representative enterprise traffic.
 
 ## Cross-implementation HTTP results
 
-The table is intentionally public before it is full. “Not run” is not a pass or a failure; it is
-an explicit work item. Every result links its raw report and its pinned target
-revision/image and redacted configuration — **never one without the other**.
+The table includes incomplete work. “Not run” means there is no measurement; it is neither a pass
+nor a failure. Every measured result must include both the raw report and a pinned target version
+with its redacted configuration.
 
 ### Replication is counted, not averaged
 
-Every measured row below comes from the initial project-run measurement set rather than an
-independent reproduction, so the table counts who ran what:
+All measured rows below were run by this project. The table records how many people have repeated
+each target and configuration:
 
 | Column | Meaning |
 | :--- | :--- |
@@ -63,30 +74,27 @@ independent reproduction, so the table counts who ran what:
 | **Dates** | first and most recent run |
 | **Status** | `unreplicated` until the floor is met; `disputed` when runs disagree |
 
-**The floor is 3 runs from 3 distinct submitters.** Below it a target reads `unreplicated`
-rather than a verdict, however clean the measurement was. Project-run rows do not count toward
-independent reproduction: three runs from one operator are one setup measured three times.
+The table requires **3 runs from 3 different submitters** before it treats a result as replicated.
+Until then, the status is `unreplicated`. Project-run rows do not count as independent
+reproductions. Three runs by one operator are still one independently configured setup.
 
-That floor applies equally to every target. **LLM-Shield-Proxy's own row is 1 run by 1 submitter
-and reads `unreplicated`.** LiteLLM and Portkey engineers can inspect the pinned configurations
-and rerun their rows; a result that differs from the published row is as useful as a
-matching one.
+The rule applies to every target. **LLM-Shield-Proxy has 1 run from 1 submitter, so its status is
+also `unreplicated`.** A repeat that disagrees with a published result is useful and should be
+submitted.
 
-**Disagreements are published as disagreements.** Two runs of the same target and configuration
-that reach different outcomes both stay in the table, the target is marked `disputed`, and the
-difference is described. A disagreement is usually a finding — an undocumented default, a
-version drift, a platform difference — and averaging it away destroys exactly the information
-that made it worth publishing.
+If two runs of the same target and configuration disagree, both remain in the table and the
+status becomes `disputed`. The table will describe the difference instead of averaging it away.
+Possible causes include configuration, version, and platform differences.
 
 See [submitting a result](./submitting) for what a run must carry and how it is checked.
 
 ### What a row is allowed to say
 
-A measurement is not a verdict. Every report carries an `outcome` derived from what the
-product **claims** about PII redaction (with a citation), what was **configured** for the
-run, and only then what was measured. The submitter supplies the claim and cannot type the
-outcome; the [published schema](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json)
-re-derives it, so a hand-edited report fails validation.
+The raw checks alone do not determine the published result. Each report records the product's
+cited PII-redaction claim, whether redaction was enabled, and what the run measured. The harness
+uses those fields to calculate `outcome`; the submitter cannot set it directly. The
+[published schema](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json)
+checks that calculation and rejects inconsistent edits.
 
 | `outcome` | Row reads | Is it a leak finding? |
 | :--- | :--- | :--- |
@@ -98,11 +106,10 @@ re-derives it, so a hand-edited report fails validation.
 | `inconclusive` | Not a row — nothing correlated | No |
 | `claim-unstated` | Not a row — no claim recorded | No |
 
-This distinction matters because a gateway that offers caching, routing, and observability but
-never claims to redact PII should not receive a redaction verdict. A one-way anonymizer that leaks
-nothing but does not restore values also needs a different outcome. `leaked_entity_types` remains the
-only field that reports protected data reaching the capture, and `leak_evidence` now records
-whether each finding was a `literal` match or one recovered only after normalization.
+A product that does not offer PII redaction receives no redaction verdict. A one-way anonymizer
+that sends no protected values upstream but does not restore them also receives a separate
+outcome. `leaked_entity_types` reports which protected data reached the capture.
+`leak_evidence` says whether each match was literal or found only after normalization.
 
 See the [hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor procedure.
 
@@ -124,54 +131,48 @@ claims [PII redaction and documents no rehydration](https://portkey.ai/docs/prod
 Cloudflare AI Gateway does not claim redaction, so its expected outcome is `not-applicable`, not
 `fail`.
 
-All six measured runs used `loopback` capture mode and 3 iterations. The four third-party runs
-were produced by harness revision `1cef0ff`; the reference-implementation and control rows were
-regenerated at the packaging split, whose diff to the harness is import paths, a probe
-user-agent string and one dead local variable — no inspection or scoring logic changed. See the
-[hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor procedure.
+All six measured runs used `loopback` capture mode and 3 iterations. Harness revision `1cef0ff`
+produced the four third-party runs. The reference and control rows were regenerated after a
+packaging change that altered import paths, the probe user-agent string, and one unused local
+variable. It did not change inspection or scoring. See the
+[hosted-gateway runbook](./hosted-gateway-runbook) for each vendor procedure.
 
-The "expected" outcomes above are predictions from vendor documentation, not results. They
-are recorded so that a run which contradicts them is treated as a finding about the run
-rather than quietly published.
+The “expected” outcomes come from vendor documentation. They are not measured results. If a run
+disagrees, the difference must be reviewed before publication.
 
-Every measured row above comes from the initial project-run measurement set. The pinned configuration and
-raw artifact are published for review, but **none of the rows has been independently reproduced**.
-Every row, including this project's own, therefore reads `unreplicated`. See
+Every measured row above was run by this project. The pinned configurations and raw reports are
+public, but **none has been independently reproduced**. Every row, including this project's own,
+therefore has the status `unreplicated`. See
 [submitting a result](./submitting) and [governance](./governance).
 
 ### Third-party testing exposed a fixture defect
 
-The profile used to ship three protected values — `person@example.invalid`,
-`123-45-6789` and `4532-1234-5678-9012` — chosen to be safe to publish. Every one was a
-value a *validating* detector is built to reject: Presidio's SSN recognizer blacklists
-that exact prefix, the card fails Luhn (checksum 68), and `.invalid` has no public
-suffix. Stock Presidio returned no `US_SSN`, no `CREDIT_CARD` and no `EMAIL_ADDRESS` for
-any of them.
+The old fixture used `person@example.invalid`, `123-45-6789`, and
+`4532-1234-5678-9012`. These values were safe to publish but invalid examples of their claimed
+data types. Presidio rejects the SSN prefix, the card fails its Luhn checksum, and `.invalid` has
+no public suffix. Stock Presidio therefore detected none of them as an SSN, credit card, or email
+address.
 
-The fixture therefore favored this project's non-validating regex engine over a validating
-detector. **The bias was found by running against a real third-party gateway.** LiteLLM with Presidio
-enabled reported `leaked: ["SSN"]` against the old fixture and `leaked: []` against the
-same run with detectable values substituted; that row was withheld rather than published.
+This gave the project's shape-only regex detector an unfair advantage over detectors that validate
+values. **A run against LiteLLM with Presidio exposed the bias.** It reported
+`leaked: ["SSN"]` with the old fixture and `leaked: []` when valid test values were substituted.
+The project withheld that row until the fixture was fixed.
 
-The fixture was replaced: every value is now both a valid specimen a validating detector
-recognises and drawn from reserved, non-routable space, and values vary per run with the
-format held byte-identical. The withheld row is the LiteLLM + Presidio row above, now
-published with the outcome produced by the corrected fixture. Full measurement, including the false-positive class
-this removed and a fail-open decoder defect the old fixture had been hiding, is in the
-[fixture threat model](./fixture-threat-model).
+The replacement fixture uses valid test values from reserved, non-routable ranges. Values change
+between runs while their formats stay the same. All rows were rerun, including the LiteLLM +
+Presidio row above. The [fixture threat model](./fixture-threat-model) documents the correction,
+a related false-positive case, and a decoder bug that the old fixture had hidden.
 
 ### Latency is not published at all
 
-`client_observed_latency` enforces no threshold and gates on sample completeness, and three
-iterations is a smoke test. **Nothing in this table is a speed comparison, and no timing figure
-or speed multiplier is published anywhere in this repository.**
+`client_observed_latency` checks only that every iteration produced a sample. It sets no speed
+threshold, and three iterations are only a smoke test. **This table does not compare speed.**
 
-A maintainer-local diagnostic did find two real hot-path defects in **this** proxy, and those
-are described in the per-target record. Its runner and raw samples were not retained, and an
-independent re-measurement of the isolated rehydration path found the direction correct but the
-magnitude substantially smaller than the original note claimed. The defects and their fixes are
-published; the numbers are not. A performance claim here needs a versioned runner committed to
-this repository alongside its raw output, measured end to end, for every gateway compared.
+A local diagnostic found two hot-path defects in this proxy. The per-target record describes the
+defects and fixes. The project did not keep the runner or raw samples, and a later isolated
+measurement found a much smaller effect. The project therefore publishes no numbers from that
+diagnostic. Any future performance comparison must use a versioned runner, retain raw output,
+measure end to end, and apply the same method to every gateway.
 
 Raw OpenAI should not receive synthetic protected fixtures merely to populate a table. The local
 capture endpoint supplies the correct pass-through negative control without transmitting those

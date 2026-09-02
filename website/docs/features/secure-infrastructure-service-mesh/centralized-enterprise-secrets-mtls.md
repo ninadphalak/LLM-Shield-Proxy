@@ -1,12 +1,15 @@
-# Centralized Enterprise Secrets & mTLS
+# Vault Secrets and mTLS
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Centralized Enterprise Secrets & mTLS** feature supports retrieving configured secrets from HashiCorp Vault and applying selected TLS credentials. Suitability for a regulated environment depends on the full deployment, trust, identity, rotation, logging, and operational controls.
+This feature supports retrieving configured secrets from HashiCorp Vault and applying selected TLS
+credentials. Suitability for a regulated environment depends on the full deployment, trust,
+identity, rotation, logging, and operational controls.
 
 ## How It Works
-Storing the `UPSTREAM_API_KEY` or `REDIS_PASSWORD` in a Kubernetes ConfigMap or local disk is a critical security vulnerability.
+Kubernetes ConfigMaps are not secret stores, and plaintext credential files can be copied or
+backed up. The Vault path lets the runtime fetch supported secrets at startup.
 
 1. **Vault Authentication:** On startup, the proxy authenticates to HashiCorp Vault using Kubernetes Service Account Tokens or Vault AppRole credentials.
 2. **In-Memory Hydration:** The runtime can fetch configured secrets into process memory without intentionally writing them to an application file. Secret-manager agents, swap, crash dumps, logs, and platform snapshots require separate controls.
@@ -27,7 +30,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Minimal. Vault tokens are cached using a non-blocking asynchronous TTL mechanism.
+- **Overhead:** Vault authentication, network requests, parsing, caching, and renewal use time and
+  resources. Measure startup and refresh behavior, including outages.
 
 ## Configuration Flags
 
@@ -37,7 +41,8 @@ View diagram on GitHub mobile 📱 -->
 | `VAULT_AUTH_METHOD` | The auth mechanism (`kubernetes`, `approle`, `token`). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Dynamic Lease Renewal:** If Vault issues a dynamic secret (like a short-lived PostgreSQL password for audit logs), the proxy spins up a background `asyncio` task to automatically renew the lease before it expires, ensuring zero downtime.
+* **Dynamic lease renewal:** A background `asyncio` task can renew a supported Vault lease before
+  expiry. Renewal can fail, and a valid lease does not guarantee uninterrupted service.
 * **Startup failure on configured auth error:** When Vault-backed secrets are required, authentication failure prevents that startup path from becoming ready. Test optional-secret and cached-secret behavior separately.
 
 ## FAQ
@@ -46,7 +51,7 @@ View diagram on GitHub mobile 📱 -->
 A: Currently, HashiCorp Vault is the natively supported provider for advanced dynamic leases and PKI (mTLS). However, basic secrets can be injected into the proxy's environment via standard Kubernetes Secrets integrations (like the External Secrets Operator) which bridge AWS/Azure into the pod.
 
 
-## Plainspeak
+## Practical effect
 This feature centralizes secret retrieval; it does not remove secrets from process memory or every platform persistence and observability path.
 
 Vault-backed retrieval can avoid application-managed plaintext credential files. Operators still need controls for Vault, workload identity, memory, swap, dumps, logs, backups, and administrator access.

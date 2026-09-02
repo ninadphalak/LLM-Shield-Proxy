@@ -1,9 +1,11 @@
-# Entity-Weighted Blast Radius Limits
+# Entity-Weighted Request Limits
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Entity-Weighted Blast Radius Limits** apply a token-bucket threshold to PII entities detected in supported inbound request paths. This can limit counted disclosures before upstream forwarding; it is not a complete exfiltration detector or a bound on undetected data.
+This feature applies a token-bucket threshold to PII entities detected in supported inbound request
+paths. It can limit counted disclosures before upstream forwarding; it is not a complete
+exfiltration detector or a bound on undetected data.
 
 ## How It Works
 Traditional rate limiters (e.g., 100 requests per minute) are easily bypassed by an attacker submitting a single request containing 10,000 credit card numbers.
@@ -44,13 +46,15 @@ View diagram on GitHub mobile 📱 -->
 ## FAQ
 
 **Q: What if I don't use Redis?**
-A: If the proxy is running in single-node, stateless mode without Redis, it utilizes a local Python `asyncio` implementation of the Token-Bucket algorithm. While effective for a single pod, Redis is highly recommended for production clusters to enforce global limits.
+A: Without Redis, the proxy uses an in-process token bucket. Its state is not shared with other
+pods, so each pod enforces its own limit. Use and test a shared Redis deployment when the limit
+must apply across replicas.
 
 **Q: Does it count entities on the request (ingress) or response (egress)?**
 A: The current catch-all integration deducts detected entities after inbound request redaction and before upstream forwarding. It does not count rehydrated response entities in the streaming return path.
 
 
-## Plainspeak
+## Practical effect
 This feature can stop a supported inbound request when its detected-entity weight exceeds the available bucket.
 
 Unlike a request-count limiter, this path weights a request by the entities the configured detectors found. Detector misses, unsupported payload paths, and outbound response content remain outside that specific bound.

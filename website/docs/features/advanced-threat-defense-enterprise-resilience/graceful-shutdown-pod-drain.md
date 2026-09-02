@@ -6,7 +6,8 @@
 **Graceful Shutdown / Pod Drain** gives active SSE streams a configured interval to finish during an orderly process shutdown. Streams can still be interrupted by the timeout, forced termination, node failure, network loss, or an uncoordinated orchestrator configuration.
 
 ## How It Works
-When Kubernetes wants to scale down a pod or deploy a new version, it sends a `SIGTERM` signal to the container. Traditional Python proxies often exit immediately, terminating all active TCP sockets.
+Kubernetes sends `SIGTERM` when it stops a pod during a scale-down or deployment. The proxy uses
+its shutdown interval to stop reporting ready and wait for active requests.
 
 1. **Signal Interception:** The proxy catches the `SIGTERM` signal at the FastAPI lifecycle level.
 2. **Readiness toggle:** The application changes its readiness response after receiving the shutdown signal. Kubernetes routing convergence depends on probe timing, endpoint propagation, ingress behavior, and existing connections.
@@ -39,7 +40,9 @@ View diagram on GitHub mobile 📱 -->
 | `DRAIN_TIMEOUT_SECONDS` | Maximum time to wait for active streams before forcing a shutdown (default 25s). | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Kubernetes `terminationGracePeriodSeconds`:** For this feature to work, your Kubernetes Deployment YAML *must* have a `terminationGracePeriodSeconds` value greater than the proxy's `DRAIN_TIMEOUT_SECONDS`. (e.g., set K8s to 30s, and the proxy to 25s). This gives the proxy the necessary time to drain before K8s sends a ruthless `SIGKILL`.
+* **Kubernetes `terminationGracePeriodSeconds`:** Set the Kubernetes termination grace period
+  above `DRAIN_TIMEOUT_SECONDS`, for example 30 seconds and 25 seconds. Otherwise Kubernetes can
+  send `SIGKILL` before the drain interval ends.
 * **Drain timeout:** If a stream does not finish, `DRAIN_TIMEOUT_SECONDS` bounds the graceful wait before forced termination. Coordinate it with the orchestrator's termination grace period.
 
 ## FAQ
@@ -54,7 +57,7 @@ A: The current middleware returns 429 for new requests observed after the draini
 A: The shared `httpx.AsyncClient` is closed after the configured drain wait in the application lifecycle. The implementation does not selectively close idle sockets at signal receipt.
 
 
-## Plainspeak
+## Practical effect
 This feature gives active streams time to finish during an orderly restart; streams that exceed the timeout or encounter a forced shutdown can still be interrupted.
 
 On shutdown, the application marks itself unready and gives active streams up to the configured drain timeout to finish. Streams can still be interrupted when the timeout, platform grace period, process failure, or upstream connection ends.

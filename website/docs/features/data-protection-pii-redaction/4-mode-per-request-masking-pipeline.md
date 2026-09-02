@@ -3,10 +3,13 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **4-Mode Per-Request Masking Pipeline** empowers client applications to dynamically select their desired redaction strategy on a per-request basis without requiring server restarts. By passing a specific HTTP header, engineers can choose exactly how sensitive data is masked before it hits the LLM.
+The **4-Mode Per-Request Masking Pipeline** lets an authorized request select one of four masking
+representations through a header. Policy can override the header. The selected mode changes how
+detected values are represented, not which values the detectors find.
 
 ## How It Works
-The proxy intercepts the `X-Shield-Masking-Mode` header and dynamically overrides the global `.env` configuration for the duration of that specific request using thread-safe `contextvars`.
+The proxy reads `X-Shield-Masking-Mode` and stores the allowed request-scoped setting in a
+`ContextVar` for the duration of that request.
 
 The available modes are:
 1. **`SYNTHETIC` (Default):** Replaces detected entities with deterministic, format-aware substitutes (e.g., synthetic SSNs or names) intended to retain useful downstream syntax. Task quality is workload-dependent.
@@ -37,7 +40,7 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **Request isolation:** Overrides use `contextvars.ContextVar` and explicit context propagation. Concurrency tests must cover task creation, background work, cleanup, and exception paths to detect context bleed.
-* **Vault Interoperability:** If a request switches to `STATELESS_CRYPTO`, the proxy intelligently bypasses the Redis TTL Vault for that specific payload, avoiding unnecessary network calls.
+* **Vault behavior:** `STATELESS_CRYPTO` does not use the Redis TTL Vault for that payload.
 
 ## FAQ
 
@@ -45,13 +48,14 @@ View diagram on GitHub mobile 📱 -->
 A: The header selects a masking representation, while entity selection comes from the active detector/profile configuration. Validate that authentication and policy prevent unauthorized mode changes and test each mode separately; representation can affect downstream schema and rehydration behavior.
 
 **Q: Can I force all clients to use a specific mode and ignore the header?**
-A: Yes. You can define a strict `enforced_masking_mode` within `policies.yaml` for a specific security role, which will override and ignore any header supplied by the client application.
+A: Set `enforced_masking_mode` for the role in `policies.yaml`. The resolved policy then overrides
+the client header.
 
 **Q: Why use `SCRUB` if it destroys the LLM context?**
 A: `SCRUB` replaces a detected value with a short marker and does not support rehydration. Token count and downstream task quality depend on the tokenizer, marker, and workload.
 
 
-## Plainspeak
+## Practical effect
 This feature lets an authorized caller or policy choose among the supported masking representations. Entity detection, downstream compatibility, and authorization remain separate concerns.
 
 Authorized requests can select among synthetic substitution, structural tags, one-way scrub, and configured cryptographic masking. Policy should restrict which callers may override the default.

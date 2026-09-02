@@ -4,9 +4,13 @@
 
 ## What it does
 
-Each audit event contains a SHA-256 link to the preceding event and is signed with Ed25519. The verifier detects edits, insertions, reordering, sequence gaps, malformed signatures, and unexpected signing-key fingerprints within the evidence it receives.
+Each audit event contains a SHA-256 link to the previous event and an Ed25519 signature. For the
+records it receives, the verifier checks edits, insertions, ordering, sequence gaps, signatures,
+and signing-key fingerprints.
 
-This is **tamper evidence**, not WORM storage by itself. A local append-only JSONL file can still be deleted or replaced by an administrator. To make a WORM retention claim, ship the file to storage whose immutability and retention controls are independently configured and tested (for example, an object-lock or compliance-mode archive).
+This provides **tamper evidence**, not WORM storage. An administrator can still delete or replace
+the local JSONL file. A WORM claim requires a separately configured and tested immutable-retention
+system, such as object-lock or compliance-mode storage.
 
 ## Delivery modes
 

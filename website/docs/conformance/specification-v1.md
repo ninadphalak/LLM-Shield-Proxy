@@ -73,7 +73,9 @@ Version 1.0.0 sets no universal RSS threshold.
 
 ## 4. Pass calculation
 
-The top-level result is `passed: true` only when all six SCORED domain result objects report `passed: true`. SPG-LATENCY-1 is a publication requirement, not a scored domain: its former check gated on percentiles of monotonic-clock deltas being non-negative, which cannot fail, so it produced no evidence and was removed from `checks`. The measurements it required are still mandatory and still published. A memory pass means that the required measurement and bound were produced; it does not mean an undeclared performance threshold was met.
+The top-level result is `passed: true` only when all six scored domains pass. SPG-LATENCY-1 is a publication requirement, not a scored domain. Its old check only verified that elapsed times were non-negative, so the check was removed. The required latency measurements must still be published.
+
+A memory pass means that the report includes the required measurement and demonstrates the declared bound. It does not establish any unstated performance threshold.
 
 ## 5. Reproducibility and publication
 

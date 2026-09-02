@@ -1,32 +1,33 @@
-# EU AI Act Compliance (Articles 12 & 14)
+# EU AI Act engineering support
 
-## Overview: High-Risk Systems & Oversight
+Whether the EU AI Act applies, how a system is classified, and which provider or deployer duties
+apply require a separate legal and system analysis. LLM-Shield-Proxy can support parts of a
+record-keeping and oversight design. It does not establish conformity.
 
-The EU AI Act classifies certain Generative AI deployments as "high-risk," imposing stringent requirements around traceability, continuous monitoring, and human oversight. A core challenge for enterprise architects is achieving this traceability without violating concurrent data minimization mandates (The Article 12 Paradox).
+## Article 12 record-keeping support
 
-The LLM-Shield-Proxy systematically addresses Articles 12 (Record-keeping) and 14 (Human oversight) through cryptographic attestation and hard systems-level containment.
+The proxy can emit audit metadata for instrumented events. Records may include sequence numbers,
+SHA-256 predecessor links, and Ed25519 signatures. The verifier can detect changes and gaps within
+the chain it receives.
 
-## Satisfying Article 12: Record-Keeping and Traceability
+This is not automatically a complete record of system operation:
 
-Article 12 mandates that high-risk AI systems automatically record events ('logs') over their lifetime to ensure traceability of the system's functioning.
+- the default `best_effort` mode can drop events when its bounded queue is full;
+- local JSONL files remain deletable by an administrator;
+- multiple workers have separate chains rather than one global order; and
+- deletion of an unanchored suffix cannot be detected from the shortened file alone.
 
-### Tamper-Evident Audit Chaining
-The proxy can generate privacy-safe audit metadata linked with sequential SHA-256 hashes and signed with Ed25519. Verification detects modification or sequence gaps in the records received. Durable local delivery is opt-in; WORM retention requires a separately configured immutable store and operating controls.
-- **Stream attestation receipt:** The proxy can compute a rolling SHA-256 digest over an SSE stream and emit an HMAC-signed receipt. It establishes integrity for the observed stream under the configured key; it is not independent proof of every upstream system's behavior.
+Use acknowledged audit delivery, independently managed retention, and external terminal-state
+anchors when the assessment requires those properties. OSCAL output can package selected
+observations for exchange; it does not prove control effectiveness.
 
-### NIST OSCAL Decision Traces
-The evidence tooling can emit OSCAL assessment-results artifacts and OpenTelemetry spans for supported events. GRC ingestion requires a separately implemented connector and field mapping; the artifacts do not establish continuous or complete record-keeping by themselves.
+## Article 14 human-oversight support
 
-## Satisfying Article 14: Human Oversight and Agent Containment
+Configured policy checks can deny supported tool calls, and the agent-loop breaker can return
+HTTP 429 after a repeated-action threshold. These controls can enforce specific operator-defined
+limits. They do not supply human review, explain model behavior, cover every tool route, or detect
+every unsafe loop.
 
-Article 14 dictates that high-risk systems must be designed to allow effective human oversight to prevent or minimize risks to health, safety, or fundamental rights.
-
-### Streaming Tool-Call RBAC
-As AI agents become autonomous, the risk of unauthorized lateral movement (e.g., executing malicious SQL or shell commands) increases exponentially.
-- **Mid-Stream Interception:** The proxy features pluggable streaming tool-call RBAC that intercepts JSON-RPC 2.0 / MCP (Model Context Protocol) function calls mid-stream.
-- **Policy Evaluation:** Tool calls (like `exec_sql`) are synchronously evaluated against OPA (Open Policy Agent) and HashiCorp Vault resolvers utilizing atomic dictionaries and thundering-herd locks.
-
-### Composite Agent Loop Circuit Breakers
-To prevent runaway autonomous loops-a critical risk in agentic architectures-the proxy implements **Composite Agent Loop Circuit Breakers**. If an agent begins rapidly iterating or executing repetitive, unverified tool calls without human-in-the-loop validation, the circuit breaker halts the execution.
-
-*(Reference the [Architecture & Cryptographic Data Flow](/docs/architecture) for deeper implementation details on the proxy's streaming capabilities).*
+Document who sets policy, who reviews denials and alerts, how an operator can intervene, and what
+happens when a policy service is unavailable. See [MCP tool governance](/docs/guides/mcp-tool-governance)
+and the [compliance evidence boundaries](/docs/compliance-overview).

@@ -4,18 +4,15 @@
 
 ## What It Does
 
-Autonomous agents don't just read text - via MCP `tools/call`, they hand the proxy URLs
-to fetch: webhooks, callback endpoints, "summarize this page" links. An agent that has been
-prompt-injected (or a malicious tool definition) can weaponize that into
-**Server-Side Request Forgery**: pointing a fetch at `http://169.254.169.254/latest/meta-data/`
-(cloud instance credentials), `http://127.0.0.1:6379/` (an internal Redis admin port), or an
-RFC 1918 address the agent has no business reaching.
+MCP `tools/call` arguments can contain URLs for webhooks, callbacks, or page retrieval. An
+untrusted prompt or tool definition can direct a permitted fetch tool toward an internal service.
+This is server-side request forgery (SSRF). Examples include cloud metadata endpoints, local
+services, and private-network addresses.
 
-The egress firewall (`llm_shield_proxy/security/egress_guard.py`) intercepts every
-`tools/call` on `POST /v1/mcp`, finds every `http://`/`https://` URL anywhere in the
-argument tree, and resolves + checks each one **before** the request is ever proxied
-upstream. It fails closed: an unresolvable, timed-out, or ambiguous hostname is treated as a
-violation, not passed through.
+On the supported `POST /v1/mcp` path, the egress check scans `tools/call` arguments for HTTP and
+HTTPS URLs. It resolves every address returned for each hostname and applies the configured
+domain and CIDR policy before forwarding the call. Unresolved, timed-out, or ambiguous hostnames
+are rejected.
 
 ## How It Works
 

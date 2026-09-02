@@ -3,10 +3,13 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Tier 1 Pre-Compiled Regex Engine** is the foundational layer of the LLM-Shield-Proxy's 3-Tier Redaction Cascade. It is designed to rapidly and deterministically identify structured sensitive data (e.g., SSNs, Emails, Credit Card Numbers, and Custom Corporate Identifiers) using pre-compiled regular expressions, ensuring they are redacted before they leave your VPC.
+The **Tier 1 Regex Engine** applies precompiled patterns to supported structured data such as SSN,
+email, card-number, and custom identifier shapes. A match is redacted on the supported request
+path before the upstream request is built.
 
 ## How It Works
-Unlike traditional proxies that evaluate regular expressions dynamically at runtime using standard backtracking engines (like Python's `re` module), LLM-Shield-Proxy utilizes the **`google-re2` C++ engine**.
+The proxy compiles supported patterns with **`google-re2`** at startup. RE2 does not use
+backtracking, but it also rejects features such as lookbehind and backreferences.
 
 1. **Startup Compilation:** During the FastAPI `lifespan` startup event, all predefined PII patterns and user-supplied custom regexes are compiled down into Deterministic Finite Automatons (DFAs).
 2. **Non-backtracking engine:** Supported patterns use RE2, avoiding catastrophic backtracking behavior.
@@ -45,9 +48,16 @@ custom_patterns:
 ```
 
 ## Critical Logic & Edge Cases
-* **Streaming Fragmentation:** The engine is tightly coupled with the `SSERehydrationBuffer`, ensuring that regexes safely evaluate across split Server-Sent Event (SSE) chunks by maintaining a prefix-overlap window.
-* **Non-Latin Scripts:** For CJK (Chinese, Japanese, Korean) texts where spaces are absent, the Tier 1 engine avoids catastrophic sub-word collisions by isolating ASCII alphanumeric boundaries securely.
-* **Structural validation is a signal, never a gate.** Every native `CREDIT_CARD` and `PHONE` regex match is redacted. Selected issuer prefixes and Luhn affect only an internal, unsurfaced card-confidence value: a finite table cannot exclude private-label or newly assigned cards, and a typo can invalidate Luhn. Phone punctuation carries no rejection authority because a bare 12--15 digit international number can be legitimate. On the documented 22-string business-text corpus, this fail-safe boundary retains 17 matched strings and 18 spans; an apparent 11-of-22 result was rejected because it leaked an unrecognised card shape after a transposition. Custom BYOR patterns are not validated at all. See [Supported PII types](supported-pii-types.md#validation-is-a-signal-not-a-gate).
+* **Streaming fragmentation:** `SSERehydrationBuffer` keeps a bounded suffix so it can reassemble
+  registered replacement tokens split across SSE chunks.
+* **Text boundaries:** Matching and rehydration use explicit ASCII-alphanumeric boundary rules.
+  Test CJK and other text without spaces against the exact configured patterns.
+* **Validation does not reject native card or phone matches.** Issuer prefixes and Luhn affect an
+  internal card-confidence value only. A finite issuer list can miss private-label or new cards,
+  and a typo can make a real card fail Luhn. Phone formatting is not used to reject a match because
+  an international number may contain no separator. The documented 22-string business corpus
+  therefore retains 17 matched strings and 18 spans. Custom BYOR patterns receive no structural
+  validation. See [Supported PII types](supported-pii-types.md#validation-is-a-signal-not-a-gate).
 
 ## FAQ
 
@@ -55,12 +65,14 @@ custom_patterns:
 A: RE2 does not support lookbehind or backreferences. If a rule needs unsupported context, redesign the rule or evaluate the optional NER tier; do not silently change engines.
 
 **Q: Does injecting thousands of custom regexes slow down the proxy?**
-A: No. The `re2` engine compiles them into a highly optimized state machine. While startup time might marginally increase, runtime matching remains practically constant-time and ultra-low latency.
+A: More rules increase compilation, matching, and memory work. RE2 avoids catastrophic
+backtracking for supported patterns, but performance still depends on rule count, pattern shape,
+input size, and concurrency. Benchmark the configured rules.
 
-## Plainspeak
-This feature quickly scans text for sensitive information like Social Security Numbers and email addresses using pre-defined search patterns (like a highly advanced "CTRL+F").
-
-RE2 avoids the catastrophic-backtracking failure mode found in some regex engines. It does not remove other CPU, memory, input-size, concurrency, or integration risks.
+## Practical effect
+Tier 1 finds configured text shapes such as SSNs and email addresses. RE2 avoids catastrophic
+backtracking for supported patterns. It does not remove other CPU, memory, input-size,
+concurrency, or integration risks.
 
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

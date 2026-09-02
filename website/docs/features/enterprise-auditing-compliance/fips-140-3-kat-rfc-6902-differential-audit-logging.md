@@ -9,7 +9,10 @@ This feature provides cryptographic implementation self-tests and structured mut
 Some assurance programs require evidence that cryptographic primitives pass known-answer self-tests and that application transformations are recorded. These artifacts are narrower than cryptographic-module validation or proof of complete runtime behavior.
 
 1. **Cryptographic KAT:** At application startup, the proxy runs fixed SHA-256 and AES-256-GCM test vectors. With `FIPS_STRICT_MODE=true`, a failure aborts startup. Passing these application-level tests is not a FIPS 140-3 module validation or deployment certification.
-2. **RFC 6902 Differential Logging:** Instead of just logging "We redacted PII", the proxy calculates the exact diff between the original prompt and the redacted prompt. It emits an RFC 6902 compliant JSON Patch array (e.g., `[{"op": "replace", "path": "/messages/0/content", "value": "***"}]`).
+2. **RFC 6902 mutation metadata:** On supported paths, the proxy can record caller-supplied JSON
+   Patch operations such as
+   `[{"op": "replace", "path": "/messages/0/content", "value": "***"}]`. The audit setting does
+   not independently prove that the patch is a complete diff of every payload change.
 
 
 ```mermaid
@@ -49,7 +52,7 @@ A: The KAT checks fixed primitive operations at startup. Cipher availability and
 A: RFC 6902 is machine-readable, so a reviewer can reproduce documented patch operations on supplied artifacts. That does not prove that no omitted operation, alternate path, or logging event occurred.
 
 
-## Plainspeak
+## Practical effect
 This feature provides a narrow, reproducible startup self-test and optional structured mutation metadata for reviewers.
 
 With strict mode enabled, startup runs fixed cryptographic test vectors and aborts on a failed self-test. A passing application-level known-answer test detects some implementation or environment faults; it does not establish FIPS validation, key safety, or correct operation for every later request.

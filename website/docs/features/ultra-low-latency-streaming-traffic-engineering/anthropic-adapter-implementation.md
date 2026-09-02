@@ -6,11 +6,15 @@
 The **Anthropic Adapter Implementation** translates a documented subset of OpenAI-style chat fields and Anthropic response events. It can support selected clients without an Anthropic SDK, but it does not cover every OpenAI or Anthropic feature and does not remove semantic differences between models.
 
 ## How It Works
-Anthropic's Messages API enforces several strict contracts that the OpenAI API does not. The adapter normalizes these differences at the network edge:
+Anthropic's Messages API and the OpenAI chat API use different request and streaming shapes. The
+adapter translates the documented subset below:
 
-1. **System Prompt Extraction:** OpenAI allows multiple `system` messages anywhere in the array. Anthropic requires a top-level `system` string. The adapter extracts all `system` roles, concatenates them safely, and lifts them to the root JSON object.
-2. **Strict Alternation (User/Assistant):** Claude rejects requests where two `user` messages occur consecutively. The adapter detects this and merges consecutive contents, separated by newlines, into a single valid message block.
-3. **Multi-Content Block Normalization:** Anthropic streams back complex events like `message_start`, `content_block_start`, `content_block_delta`, and `message_delta`. The adapter's asynchronous generator converts these proprietary events back into standard OpenAI `choices[0].delta.content` Server-Sent Events (SSE) chunks on the fly.
+1. **System messages:** The adapter moves supported OpenAI-style `system` content to Anthropic's
+   top-level `system` field.
+2. **Role sequence:** It merges consecutive messages with the same supported role using newline
+   separators.
+3. **Streaming events:** It converts supported Anthropic events such as `content_block_delta` into
+   OpenAI-style `choices[0].delta.content` SSE events.
 
 
 ```mermaid
@@ -43,16 +47,18 @@ The adapter engages automatically when the proxy detects an Anthropic target URL
 ## FAQ
 
 **Q: Can I use Claude 3.5 Sonnet directly from my existing OpenAI SDK?**
-A: Yes! Set the model string in your SDK to `claude-3-5-sonnet-20240620`, point your base URL to the proxy, and the proxy will automatically route and translate the request to Anthropic.
+A: The adapter is unit-tested for a text-focused subset but has not been validated against the
+live Anthropic API. Check the current Anthropic model name and test every request field, tool,
+streaming event, and error path you use.
 
 **Q: Does Anthropic's SSE stream break the sliding-window buffer?**
 A: The adapter normalizes supported Anthropic events before the rehydration buffer. Rehydration still depends on token preservation, event coverage, buffer behavior, and the selected masking mode; exercise provider-specific fragmentation fixtures.
 
 
-## Plainspeak
-This feature specifically handles the unique, strict conversational rules required by Anthropic's Claude AI.
-
-Anthropic is extremely picky about how a conversation is formatted (for example, it requires exactly alternating "User" and "Assistant" messages). If your application sends messages out of order, Anthropic will reject them. This adapter acts as a smart editor, automatically reformatting and fixing your message history in real-time so that Anthropic accepts it without complaints.
+## Practical effect
+The adapter converts a documented subset of OpenAI-style messages and Anthropic streaming events.
+It may merge messages or move system content, which can change semantics. It is not a complete
+compatibility layer and must be tested against the pinned provider API.
 
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).
