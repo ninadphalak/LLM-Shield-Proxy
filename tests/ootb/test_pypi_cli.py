@@ -97,6 +97,12 @@ async def test_canary_tripwire_aborts_connection(async_test_client, httpx_mock):
     settings.ENABLE_CANARY_TRIPWIRE = True
     settings.CANARY_TOKEN = "[SHIELD_TRIPWIRE_X99]"
     settings._valid_virtual_keys_set = frozenset(["sk-proxy-team-a"])
+    # The canary directive is derived from SHIELD_WATERMARK_SECRET and the upstream call
+    # needs a credential. Both came from an untracked local `.env`, so in CI the request
+    # failed before it ever reached the upstream: the mocked response went unrequested
+    # and pytest-httpx errored at teardown. Red on main since 2026-08-30.
+    settings.SHIELD_WATERMARK_SECRET = "test-watermark-secret-not-a-real-secret"
+    settings.UPSTREAM_API_KEY = "sk-test-upstream-not-a-real-key"
 
     payload = {
         "model": "gpt-4",

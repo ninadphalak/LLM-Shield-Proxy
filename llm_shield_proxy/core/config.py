@@ -428,8 +428,15 @@ class Settings(BaseSettings):
         if not os.path.exists(path):
             return
 
+        # Read once, before the branch. `current_mtime` used to be assigned only on the
+        # non-forced path while the success branch below assigns it unconditionally, so
+        # every FORCED reload raised UnboundLocalError -- swallowed by the broad handler
+        # and logged as "Failed loading policies YAML configuration". The policies were
+        # in fact applied, but the mtime bookkeeping and the success log were lost, and
+        # the error text said the opposite of what had happened.
+        current_mtime = os.path.getmtime(path)
+
         if not force:
-            current_mtime = os.path.getmtime(path)
             # Invalidate mtime cache if the file path itself has changed (e.g., new temp file in tests)
             if path != self._policies_path:
                 self._policies_mtime = 0.0

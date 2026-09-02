@@ -23,7 +23,23 @@ client = TestClient(app)
 
 
 @pytest.fixture
-def sni_override_settings():
+def upstream_key():
+    """An upstream credential, because the request path returns 500 without one.
+
+    These tests were passing only on a machine with an untracked `.env` supplying
+    `UPSTREAM_API_KEY`. In CI, where no `.env` exists, the proxy answered 500
+    "Upstream provider API Key is missing in proxy configuration" before reaching the
+    behaviour under test, and this file has been red on main since 2026-08-30. A test
+    must configure what it depends on.
+    """
+    original = settings.UPSTREAM_API_KEY
+    settings.UPSTREAM_API_KEY = "sk-test-upstream-not-a-real-key"
+    yield
+    settings.UPSTREAM_API_KEY = original
+
+
+@pytest.fixture
+def sni_override_settings(upstream_key):
     original_override = settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE
     original_keys = settings._valid_virtual_keys_set
     settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE = True
@@ -74,7 +90,7 @@ def test_dynamic_upstream_override_pins_ip_but_preserves_sni(sni_override_settin
     assert req.extensions.get("sni_hostname") == "custom-upstream.example.com"
 
 
-def test_default_upstream_routing_has_no_sni_override(httpx_mock):
+def test_default_upstream_routing_has_no_sni_override(upstream_key, httpx_mock):
     """When upstream_base isn't rewritten to an IP (the common case: no dynamic
     override, no air-gapped gateway), no sni_hostname extension should be injected --
     ordinary hostname-based httpx TLS applies unmodified.

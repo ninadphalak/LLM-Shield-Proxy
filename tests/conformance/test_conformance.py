@@ -10,6 +10,11 @@ from llm_shield_proxy.conformance import run_conformance, write_conformance_repo
 
 def test_conformance_checks_fragmentation_sse_and_upstream_boundary(monkeypatch):
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1767225600")
+    # GITHUB_SHA wins over the override by design, so on a GitHub runner this asserted
+    # the runner's commit and failed. It has been red in CI since 2026-08-30 while
+    # passing on every developer machine, which is the whole failure mode of a test
+    # that reads the ambient environment.
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
     monkeypatch.setenv("LLM_SHIELD_SOURCE_REVISION", "test-revision")
 
     report = run_conformance(iterations=20)

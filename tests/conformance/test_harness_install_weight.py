@@ -181,6 +181,10 @@ def test_build_attestation_is_available_without_the_proxy():
     script = textwrap.dedent(
         """
         import os, sys
+        # GITHUB_SHA wins over the override by design, and it is set on every GitHub
+        # runner -- the same ambient-environment trap that made three other tests in
+        # this repository pass locally and fail in CI.
+        os.environ.pop("GITHUB_SHA", None)
         os.environ["PII_LEAK_BENCHMARK_SOURCE_REVISION"] = "abc123"
         from pii_leak_benchmark.provenance import build_attestation
         block = build_attestation()

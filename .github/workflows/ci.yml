@@ -276,7 +276,10 @@ jobs:
                      "exceptiongroup", "click", "rich", "pygments", "markdown-it-py", "mdurl"}
           frozen = subprocess.run([sys.executable, "-m", "pip", "list", "--format=freeze"],
                                   capture_output=True, text=True, check=True).stdout
-          installed = {line.split("==")[0].strip().lower() for line in frozen.splitlines() if line.strip()}
+          # Normalise underscores: pip reports `typing_extensions`, the project name is
+          # `typing-extensions`, and the difference failed this job on every Python.
+          installed = {line.split("==")[0].strip().lower().replace("_", "-")
+                       for line in frozen.splitlines() if line.strip()}
           extra = sorted(installed - allowed)
           print("installed:", sorted(installed))
           assert not extra, f"the benchmark install pulled {extra}"
