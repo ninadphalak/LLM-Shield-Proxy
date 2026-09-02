@@ -4,13 +4,17 @@
 
 The repository includes a machine-readable v1.0.0 pre-release report at `benchmarks/results/conformance-v1.0.0-pre-release-windows.json`. It covers all six scored domains and publishes the required timing distributions. Timing and allocation values are environment-scoped and are intentionally not promoted as total proxy latency or a universal memory ceiling.
 
-**Run:** 2026-08-30 on Windows 11, CPython 3.14.7, AMD64; 10,000 timing samples per operation.
+**Run:** 2026-09-02 on Windows 11, CPython 3.14.7, AMD64; 2,000 timing samples per operation.
 
-**Source label:** `7e959d9d8f9ff6b85e05d9d9ce4642ad3cfb3fed+working-tree`
+**Source label:** `6573c0e60b34203ba4882a78d0da7812ddb514dc+working-tree`
 
-**SHA-256:** `57ef55181da29df9a5d74b138f0e1f030170db204e012a482c7e950575cdfafe`
+**SHA-256:** `bfb50c51a272ce5150c982e34a6592cd36eb0d9bdf4f5378dc81c902b7c38158`
 
-Because the implementation changes are not yet committed, this is a transparent **maintainer pre-release self-test**, not a release-grade independently reproducible result. CI should regenerate the report from an exact commit SHA before a formal release.
+This is a **maintainer self-test**, not an independently reproduced result: one run, one
+submitter, on one machine. The `+working-tree` suffix on the source label means the artifact
+was written by the same run that produced the checksum above, before that commit existed. The
+`Reproducible Public Benchmark` workflow regenerates it from an exact commit SHA on every push
+to `main`.
 
 | Domain | Latest status |
 | :--- | :--- |
@@ -27,10 +31,10 @@ Latency is published rather than scored: the former `latency_measurement` check 
 
 | Operation | p50 | p95 | p99 |
 | :--- | ---: | ---: | ---: |
-| Empty-vault buffer | 23.1 us | 41.4 us | 57.6 us |
-| Protected-token buffer | 34.3 us | 58.8 us | 84.2 us |
+| Empty-vault buffer | 0.6 us | 0.7 us | 0.7 us |
+| Protected-token buffer | 5.2 us | 5.3 us | 5.8 us |
 
-These are Windows in-process Python operation timings. They exclude ASGI, HTTP, TLS, network, upstream/model, concurrency, and durable audit I/O. The measured Python allocation peak was 4,656 bytes for the declared allocation scope; it is not process RSS.
+This artifact was regenerated against the released tree, so it supersedes an earlier one measured before the streaming-path fixes. The two are **not** a like-for-like series and no ratio between them is published: a component observation on one machine is not a speed result. These are Windows in-process Python operation timings. They exclude ASGI, HTTP, TLS, network, upstream/model, concurrency, and durable audit I/O. The measured Python allocation peak was 32 bytes for the declared allocation scope; it is not process RSS.
 
 ## Independent reproductions
 

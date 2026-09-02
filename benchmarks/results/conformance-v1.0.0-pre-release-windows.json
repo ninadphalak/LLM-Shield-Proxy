@@ -58,10 +58,10 @@
     "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
     "python": "3.14.7"
   },
-  "generated_at": "2026-09-01T12:14:28.025560Z",
+  "generated_at": "2026-09-02T03:11:44.457557Z",
   "implementation": {
     "name": "llm-shield-proxy",
-    "version": "1.3.3"
+    "version": "1.3.5"
   },
   "limitations": [
     "This local harness is not an end-to-end proxy throughput benchmark.",
@@ -69,39 +69,39 @@
     "Results from shared or power-managed hosts should not be compared as controlled measurements."
   ],
   "memory": {
-    "current_bytes": 120,
+    "current_bytes": 0,
     "iterations": 2000,
-    "peak_bytes": 4656,
+    "peak_bytes": 32,
     "retained_characters": 5,
     "retention_bound_characters": 8,
     "scope": "Python allocations during empty-vault buffer processing; not process RSS"
   },
   "microbenchmarks": {
     "empty_vault_buffer": {
-      "mean": 65447.1,
-      "p50": 60900.0,
-      "p95": 117600.0,
-      "p99": 172100.0
+      "mean": 654.8,
+      "p50": 600.0,
+      "p95": 700.0,
+      "p99": 700.0
     },
     "iterations": 2000,
     "no_op": {
-      "mean": 260.1,
-      "p50": 200.0,
-      "p95": 400.0,
-      "p99": 800.0
+      "mean": 101.25,
+      "p50": 100.0,
+      "p95": 200.0,
+      "p99": 200.0
     },
     "protected_token_buffer": {
-      "mean": 62008.1,
-      "p50": 51200.0,
-      "p95": 117600.0,
-      "p99": 163300.0
+      "mean": 5292.5,
+      "p50": 5200.0,
+      "p95": 5300.0,
+      "p99": 5800.0
     },
     "scope": "in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and model latency",
     "unit": "nanoseconds"
   },
   "passed": true,
   "schema": "llm-shield.streaming-privacy-conformance/v1.0.0",
-  "source_revision": "fe99dca410930f01aa1addc05354cff9be9bd35e+working-tree",
+  "source_revision": "6573c0e60b34203ba4882a78d0da7812ddb514dc+working-tree",
   "specification": {
     "href": "https://project-0039f5fd-ac66-4a1c-9e0.web.app/docs/conformance/specification-v1",
     "name": "Streaming Privacy Gateway Conformance Specification",
