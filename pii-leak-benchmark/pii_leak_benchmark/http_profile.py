@@ -312,7 +312,7 @@ class CaptureUnreachableError(OSError):
 # would 404 or mismatch an origin-rooted probe and abort an honest run. The 24-letter
 # secret is what makes the path unguessable; the prefix carries no security.
 _PROBE_PATH_TEMPLATE = "/__conformance_capture_probe__/{token}"
-_PROBE_TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+_PROBE_TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyz"  # nosec B105 - an alphabet, not a secret
 _PROBE_TOKEN_LENGTH = 24
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})
 

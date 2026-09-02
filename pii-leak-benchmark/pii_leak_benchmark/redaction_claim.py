@@ -41,7 +41,7 @@ CLAIM_VALUES = (CLAIM_CLAIMED, CLAIM_NOT_OFFERED, CLAIM_UNKNOWN)
 # The publishable classification of the run. `passed` remains the raw measurement --
 # did all five checks pass -- and is never overwritten. These say what a table cell is
 # permitted to read.
-OUTCOME_PASS = "pass"
+OUTCOME_PASS = "pass"  # nosec B105 - a verdict value, not a credential
 OUTCOME_FAIL = "fail"
 OUTCOME_NOT_APPLICABLE = "not-applicable"
 OUTCOME_NOT_ENABLED = "redaction-not-enabled"
