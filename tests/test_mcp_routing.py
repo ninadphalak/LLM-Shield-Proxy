@@ -458,3 +458,88 @@ def test_batch_notifications_without_id_yield_no_response_entry(httpx_mock):
     body = response.json()
     assert len(body) == 1
     assert body[0]["id"] == 20
+
+
+# ---------------------------------------------------------------------------
+# Upstream IP pinning (SSRF check-to-connect window)
+# ---------------------------------------------------------------------------
+
+
+def test_upstream_hostname_is_dialed_by_pinned_ip_with_hostname_preserved(httpx_mock, monkeypatch):
+    """The router must connect to the IP that cleared the egress check, not re-send the hostname.
+
+    Negative control: revert the dispatch to the raw `X-Shield-Upstream-URL` and this fails --
+    httpx_mock would see the hostname URL, which is exactly the second, unchecked DNS lookup
+    that DNS rebinding exploits.
+    """
+    _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})
+
+    async def _fake_resolve(host: str):
+        assert host == "upstream.example.com"
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _fake_resolve
+    )
+
+    httpx_mock.add_response(
+        method="POST",
+        url="http://93.184.216.34/mcp",
+        json={"jsonrpc": "2.0", "id": 77, "result": {"ok": True}},
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={
+            "X-Shield-Virtual-Key": "test-key",
+            "X-Shield-Upstream-URL": "http://upstream.example.com/mcp",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 77,
+            "method": "tools/call",
+            "params": {"name": "search_docs", "arguments": {"q": "hello"}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert "error" not in response.json()
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 1
+    sent = requests[0]
+    # Dialed by IP...
+    assert str(sent.url) == "http://93.184.216.34/mcp"
+    assert "upstream.example.com" not in str(sent.url)
+    # ...but the upstream still sees its own virtual host.
+    assert sent.headers["host"] == "upstream.example.com"
+
+
+def test_upstream_hostname_resolving_to_metadata_ip_is_blocked_before_any_dispatch(httpx_mock, monkeypatch):
+    """A hostname upstream target that resolves into a denied range never reaches the network."""
+    _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})
+
+    async def _fake_resolve(host: str):
+        return ["169.254.169.254"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _fake_resolve
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={
+            "X-Shield-Virtual-Key": "test-key",
+            "X-Shield-Upstream-URL": "http://metadata.example.com/mcp",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 78,
+            "method": "tools/call",
+            "params": {"name": "search_docs", "arguments": {"q": "hello"}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == -32003
+    assert httpx_mock.get_requests() == []

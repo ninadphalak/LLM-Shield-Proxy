@@ -11,9 +11,19 @@ three optional keys:
         "additional_denied_cidrs": ["10.50.0.0/16"],
     }
 
-DNS Rebinding Protection: every A/AAAA record returned for a hostname is checked, not
-just the first -- a resolver that answers with one public IP and one
-`169.254.169.254` is rejected on the strength of the second record alone.
+DNS Rebinding Protection is two-part, and BOTH parts are required:
+
+1. Every A/AAAA record returned for a hostname is checked, not just the first -- a resolver
+   that answers with one public IP and one `169.254.169.254` is rejected on the strength of
+   the second record alone.
+2. The IP that cleared the check is PINNED into the request that follows. Checking records
+   alone closes nothing on its own: the HTTP client would otherwise perform its own second
+   DNS lookup at connect time, and a low-TTL attacker-controlled zone can answer public to
+   the check and `169.254.169.254` to the connection. `resolve_pinned_target()` returns the
+   validated IP already substituted into the URL, with the original hostname carried in the
+   `Host` header and in the TLS `sni_hostname` extension so certificate verification still
+   runs against the real name. Callers that dispatch a request MUST use it rather than
+   calling `evaluate_url()` and then re-sending the original URL.
 
 Fail-Closed: DNS resolution failures, timeouts, and empty answers are treated as
 violations. There is no code path that lets an unresolved or ambiguous hostname
@@ -29,7 +39,7 @@ import re
 import socket
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional, Sequence, Union
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 IPNetwork = Union["ipaddress.IPv4Network", "ipaddress.IPv6Network"]
 IPAddress = Union["ipaddress.IPv4Address", "ipaddress.IPv6Address"]
@@ -190,8 +200,12 @@ async def evaluate_url(
     *,
     resolver: Optional[AsyncResolver] = None,
     timeout: float = DEFAULT_DNS_TIMEOUT_SECONDS,
-) -> None:
+) -> List[str]:
     """Fail-closed egress check for a single URL. Raises `EgressPolicyViolationError` on any violation.
+
+    Returns the validated IPs on success. Callers that go on to make a request must pin one of
+    them (see `resolve_pinned_target`) instead of handing the original hostname to an HTTP
+    client, which would re-resolve it and reopen the rebinding window this check just closed.
 
     `resolver` is injectable (async `host -> [ip, ...]`) so tests -- and DNS-rebinding
     simulations in particular -- can control exactly what a hostname "resolves" to
@@ -231,6 +245,91 @@ async def evaluate_url(
                 matched_ip=ip_str,
                 matched_rule=str(blocked_net),
             )
+
+    return candidate_ips
+
+
+@dataclass(frozen=True)
+class PinnedTarget:
+    """An egress destination whose IP was fixed at validation time.
+
+    `url` has the validated IP substituted for the hostname, so the HTTP client connects to
+    the address that actually cleared the policy instead of resolving the name a second time.
+    `headers` carries the original `host:port` so upstream virtual-host routing still works,
+    and `extensions` carries `sni_hostname` so TLS SNI *and* certificate hostname verification
+    still run against the real hostname (httpcore passes it to `start_tls(server_hostname=...)`).
+
+    Spread both into the request::
+
+        target = await resolve_pinned_target(url, policy)
+        await client.post(target.url, headers={**headers, **target.headers},
+                          extensions=target.extensions, ...)
+    """
+
+    url: str
+    headers: dict
+    extensions: dict
+    host: str
+    ip: str
+
+
+def pin_url_to_ip(url: str, ip: str) -> PinnedTarget:
+    """Rewrites `url` to connect to `ip` while preserving the original hostname semantics.
+
+    A URL whose host is already an IP literal is returned unchanged with empty overrides --
+    there is no name to re-resolve, so there is nothing to pin.
+    """
+    parsed = urlsplit(url)
+    host = extract_host(url)
+
+    if _literal_ip(host) is not None:
+        return PinnedTarget(url=url, headers={}, extensions={}, host=host, ip=host)
+
+    # `netloc.rpartition("@")` yields ("", "", netloc) when there is no userinfo, so the
+    # no-credentials case needs no branch of its own.
+    userinfo, at_sep, hostport = parsed.netloc.rpartition("@")
+    if not at_sep:
+        hostport = parsed.netloc
+
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise EgressPolicyViolationError(url=url, host=host, reason=f"invalid_port: {exc}") from exc
+
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError as exc:
+        raise EgressPolicyViolationError(url=url, host=host, reason=f"invalid_pinned_ip: {ip!r}") from exc
+
+    ip_host = f"[{ip_obj}]" if ip_obj.version == 6 else str(ip_obj)
+    new_hostport = f"{ip_host}:{port}" if port is not None else ip_host
+    new_netloc = f"{userinfo}@{new_hostport}" if at_sep else new_hostport
+    pinned_url = urlunsplit((parsed.scheme, new_netloc, parsed.path, parsed.query, parsed.fragment))
+
+    # `hostport` is the host:port exactly as the caller wrote it, which is precisely what the
+    # Host header should say -- reconstructing it from `host` would drop a non-default port.
+    headers = {"host": hostport}
+    extensions = {"sni_hostname": host} if parsed.scheme.lower() == "https" else {}
+    return PinnedTarget(url=pinned_url, headers=headers, extensions=extensions, host=host, ip=str(ip_obj))
+
+
+async def resolve_pinned_target(
+    url: str,
+    policy: Optional[dict] = None,
+    *,
+    resolver: Optional[AsyncResolver] = None,
+    timeout: float = DEFAULT_DNS_TIMEOUT_SECONDS,
+) -> PinnedTarget:
+    """`evaluate_url` + `pin_url_to_ip`: the check and the pin as one indivisible step.
+
+    This is the entry point for any caller that is about to dispatch a request. Calling
+    `evaluate_url` and then requesting the original URL leaves the check-to-connect window
+    open, which is the whole vulnerability the pin exists to close.
+    """
+    candidate_ips = await evaluate_url(url, policy, resolver=resolver, timeout=timeout)
+    if not candidate_ips:
+        raise EgressPolicyViolationError(url=url, host=extract_host(url), reason="dns_resolution_empty")
+    return pin_url_to_ip(url, candidate_ips[0])
 
 
 def find_urls(value: Any, *, max_depth: int = MAX_WALK_DEPTH) -> List[str]:

@@ -7,6 +7,8 @@ from llm_shield_proxy.security.egress_guard import (
     compile_policy,
     evaluate_url,
     find_urls,
+    pin_url_to_ip,
+    resolve_pinned_target,
     scan_arguments,
 )
 
@@ -264,3 +266,112 @@ async def test_missing_host_rejected():
     with pytest.raises(EgressPolicyViolationError) as exc_info:
         await evaluate_url("http:///path-only", policy=None)
     assert exc_info.value.reason == "missing_host"
+
+
+# ---------------------------------------------------------------------------
+# IP pinning: closing the check-to-connect (TOCTOU) DNS-rebinding window
+# ---------------------------------------------------------------------------
+
+
+def test_pin_url_to_ip_substitutes_ip_and_carries_hostname_in_host_header():
+    target = pin_url_to_ip("https://api.example.com/v1/mcp", "93.184.216.34")
+    assert target.url == "https://93.184.216.34/v1/mcp"
+    assert target.headers == {"host": "api.example.com"}
+    assert target.host == "api.example.com"
+    assert target.ip == "93.184.216.34"
+
+
+def test_pin_url_to_ip_sets_sni_hostname_so_tls_verification_still_uses_the_real_name():
+    """httpcore passes sni_hostname to start_tls(server_hostname=...), which drives both SNI
+    and certificate hostname verification -- without it, pinning would break cert checks."""
+    target = pin_url_to_ip("https://api.example.com/v1/mcp", "93.184.216.34")
+    assert target.extensions == {"sni_hostname": "api.example.com"}
+
+
+def test_pin_url_to_ip_omits_sni_extension_for_plaintext_http():
+    target = pin_url_to_ip("http://api.example.com/v1/mcp", "93.184.216.34")
+    assert target.extensions == {}
+
+
+def test_pin_url_to_ip_preserves_non_default_port_in_both_url_and_host_header():
+    target = pin_url_to_ip("https://api.example.com:8443/v1/mcp", "93.184.216.34")
+    assert target.url == "https://93.184.216.34:8443/v1/mcp"
+    assert target.headers == {"host": "api.example.com:8443"}
+
+
+def test_pin_url_to_ip_brackets_ipv6_literal_in_rewritten_url():
+    target = pin_url_to_ip("https://api.example.com:8443/v1", "2606:2800:220:1:248:1893:25c8:1946")
+    assert target.url == "https://[2606:2800:220:1:248:1893:25c8:1946]:8443/v1"
+    assert target.headers == {"host": "api.example.com:8443"}
+
+
+def test_pin_url_to_ip_preserves_path_query_and_userinfo():
+    target = pin_url_to_ip("https://user:pw@api.example.com/v1/mcp?a=1&b=2", "93.184.216.34")
+    assert target.url == "https://user:pw@93.184.216.34/v1/mcp?a=1&b=2"
+    assert target.headers == {"host": "api.example.com"}
+
+
+def test_pin_url_to_ip_is_a_noop_when_host_is_already_an_ip_literal():
+    """There is no name to re-resolve, so there is nothing to pin and no Host override needed."""
+    target = pin_url_to_ip("http://93.184.216.34/mcp", "93.184.216.34")
+    assert target.url == "http://93.184.216.34/mcp"
+    assert target.headers == {}
+    assert target.extensions == {}
+
+
+def test_pin_url_to_ip_rejects_a_non_ip_pin_value():
+    with pytest.raises(EgressPolicyViolationError) as exc_info:
+        pin_url_to_ip("https://api.example.com/", "not-an-ip")
+    assert exc_info.value.reason.startswith("invalid_pinned_ip")
+
+
+@pytest.mark.asyncio
+async def test_evaluate_url_returns_the_validated_ips_for_pinning():
+    resolver = _resolver({"api.example.com": ["93.184.216.34", "93.184.216.35"]})
+    ips = await evaluate_url("https://api.example.com/", policy=None, resolver=resolver)
+    assert ips == ["93.184.216.34", "93.184.216.35"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_pins_the_ip_that_cleared_the_policy():
+    resolver = _resolver({"api.example.com": ["93.184.216.34"]})
+    target = await resolve_pinned_target("https://api.example.com/v1/mcp", policy=None, resolver=resolver)
+    assert target.url == "https://93.184.216.34/v1/mcp"
+    assert target.headers == {"host": "api.example.com"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_fails_closed_on_blocked_host_without_returning_a_target():
+    resolver = _resolver({"attacker.example.com": ["169.254.169.254"]})
+    with pytest.raises(EgressPolicyViolationError) as exc_info:
+        await resolve_pinned_target("http://attacker.example.com/", policy=None, resolver=resolver)
+    assert exc_info.value.reason == "ip_in_denied_cidr"
+    assert exc_info.value.matched_ip == "169.254.169.254"
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_closes_the_rebinding_window_between_check_and_connect():
+    """The regression that motivated pinning.
+
+    A rebinding zone answers public while the policy is being checked, then metadata on the
+    NEXT lookup -- the one an HTTP client would perform when it connects. Checking every A
+    record does not help here: at check time there is only one record, and it is clean. The
+    only defence is that no second lookup ever happens, i.e. the returned URL names the
+    validated IP rather than the hostname.
+    """
+    lookups = []
+
+    async def rebinding_resolver(host: str):
+        lookups.append(host)
+        # First answer clears the firewall; every later answer is the cloud metadata service.
+        return ["93.184.216.34"] if len(lookups) == 1 else ["169.254.169.254"]
+
+    target = await resolve_pinned_target(
+        "https://rebind.example.com/v1/mcp", policy=None, resolver=rebinding_resolver
+    )
+
+    assert len(lookups) == 1
+    assert "rebind.example.com" not in target.url
+    assert target.url == "https://93.184.216.34/v1/mcp"
+    # A second resolution of this hostname would have yielded the metadata address.
+    assert await rebinding_resolver("rebind.example.com") == ["169.254.169.254"]

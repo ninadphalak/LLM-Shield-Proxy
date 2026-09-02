@@ -23,7 +23,12 @@ from llm_shield_proxy.engines.masking import ScrubVault
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
-from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, evaluate_url, scan_arguments
+from llm_shield_proxy.security.egress_guard import (
+    EgressPolicyViolationError,
+    PinnedTarget,
+    resolve_pinned_target,
+    scan_arguments,
+)
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, build_policy_resolver
 
 logger = logging.getLogger(__name__)
@@ -199,7 +204,7 @@ async def _process_single_call(
     allowed: set,
     blocked: set,
     virtual_key: str,
-    upstream_url: Optional[str],
+    upstream: Optional[PinnedTarget],
     http_client: httpx.AsyncClient,
     egress_policy: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
@@ -266,7 +271,7 @@ async def _process_single_call(
                 else None
             )
 
-    if not upstream_url:
+    if upstream is None:
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "No upstream MCP server configured") if has_id else None
 
     active_profile = pii_engine.get_profile(virtual_key)
@@ -290,10 +295,14 @@ async def _process_single_call(
         # Reuse the app's shared, pooled HTTP/2 client rather than opening a fresh
         # connection per call: under sustained agentic traffic a per-call client
         # here would mean a fresh TCP/TLS handshake for every tool invocation.
+        # `upstream.url` holds the IP that cleared the egress check, with the real
+        # hostname carried in Host/sni_hostname, so httpx cannot re-resolve the name
+        # and land somewhere the policy rejected.
         upstream_res = await http_client.post(
-            upstream_url,
+            upstream.url,
             content=orjson.dumps(forward_payload),
-            headers={"content-type": "application/json"},
+            headers={"content-type": "application/json", **upstream.headers},
+            extensions=upstream.extensions,
             timeout=30.0,
         )
         upstream_res.raise_for_status()
@@ -377,9 +386,15 @@ async def mcp_gateway(
     # outbound request below -- it must clear the same egress firewall applied to URLs found
     # inside tool arguments, not just those. Checked once per gateway call since upstream_url
     # is constant across an entire batch.
+    #
+    # `resolve_pinned_target` both checks and PINS: it returns the validated IP already
+    # substituted into the URL. Validating here and then handing the hostname to httpx would
+    # let it resolve a second time at connect, so a low-TTL attacker zone could answer public
+    # to this check and 169.254.169.254 to the connection. The pin is what closes that window.
+    upstream: Optional[PinnedTarget] = None
     if upstream_url:
         try:
-            await evaluate_url(upstream_url, egress_policy)
+            upstream = await resolve_pinned_target(upstream_url, egress_policy)
         except EgressPolicyViolationError as exc:
             AuditLogger.log_security_event(
                 event_type="mcp_egress_policy_violation",
@@ -417,7 +432,7 @@ async def mcp_gateway(
 
         responses = []
         for item in req_data:
-            resp = await _process_single_call(item, allowed, blocked, virtual_key, upstream_url, http_client, egress_policy)
+            resp = await _process_single_call(item, allowed, blocked, virtual_key, upstream, http_client, egress_policy)
             if resp is not None:
                 responses.append(resp)
 
@@ -425,7 +440,7 @@ async def mcp_gateway(
             return Response(status_code=204)
         return JSONResponse(status_code=200, content=responses)
 
-    resp = await _process_single_call(req_data, allowed, blocked, virtual_key, upstream_url, http_client, egress_policy)
+    resp = await _process_single_call(req_data, allowed, blocked, virtual_key, upstream, http_client, egress_policy)
     if resp is None:
         return Response(status_code=204)
     return JSONResponse(status_code=200, content=resp)

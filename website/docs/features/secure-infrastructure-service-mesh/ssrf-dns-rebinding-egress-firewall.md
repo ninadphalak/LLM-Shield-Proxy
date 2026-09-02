@@ -21,17 +21,27 @@ are rejected.
    AST-walk shape the [3-Tier PII cascade](/docs/guides/mcp-tool-governance) already uses
    for redaction, run on the *raw* pre-sanitization arguments so the host actually being
    evaluated is the one an upstream tool would receive.
-2. **Full DNS-rebinding-safe resolution.** For each URL, `evaluate_url()` resolves the
-   hostname to *every* A/AAAA record it has (`socket.getaddrinfo` via the asyncio executor,
-   under a `wait_for` timeout) and checks **all of them** - not just the first. An attacker
+2. **Every DNS record is checked, not just the first.** For each URL, `evaluate_url()`
+   resolves the hostname to *every* A/AAAA record it has (`socket.getaddrinfo` via the
+   asyncio executor, under a `wait_for` timeout) and checks **all of them**. An attacker
    who answers with one public IP and one `169.254.169.254` record is caught on the second
    record alone.
-3. **Baseline denylist.** The current guard applies RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
+3. **The checked IP is the IP that gets dialed.** Checking records is only half of
+   rebinding safety. If the guard approved a hostname and then handed that hostname to the
+   HTTP client, the client would look it up a *second* time when it opened the connection -
+   and an attacker running the domain with a very short TTL can answer with a public address
+   for the check and `169.254.169.254` for the connection. So the guard does not hand back a
+   hostname. `resolve_pinned_target()` returns the approved IP already substituted into the
+   URL, and the proxy connects to that. The real hostname still travels in the `Host` header
+   and in the TLS handshake (`sni_hostname`), so virtual-host routing and certificate
+   verification work exactly as before - pinning does not weaken TLS. There is no second
+   lookup to poison.
+4. **Baseline denylist.** The current guard applies RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
    `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local/cloud metadata
    (`169.254.0.0/16` - where `169.254.169.254` lives), CGNAT, and the IETF
    documentation/reserved ranges (plus IPv6 equivalents) are blocked unconditionally. There
    is no policy override that re-opens them - only `additional_denied_cidrs` to add more.
-4. **Per-virtual-key policy.** `evaluate_url(url, policy)` takes the exact same `dict`
+5. **Per-virtual-key policy.** `evaluate_url(url, policy)` takes the exact same `dict`
    `BasePolicyResolver.resolve_policy()` already returns for `allowed_tools`/`blocked_tools`
    (see [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine)), extended with
    three optional keys:
@@ -48,7 +58,7 @@ are rejected.
    host whose resolved IP isn't in a denied CIDR. `ALLOWLIST_ONLY` additionally requires the
    hostname to match a glob in `allowed_domains` (`fnmatch`-style - `*.internal.corp` matches
    `tools.internal.corp` but not the bare `internal.corp`) before its IP is even checked.
-5. **Literal IPs skip DNS entirely.** `http://169.254.169.254/...` is checked directly
+6. **Literal IPs skip DNS entirely.** `http://169.254.169.254/...` is checked directly
    against the CIDR set - an attacker doesn't need a rebinding hostname if the literal IP
    already gets through, so literal and resolved paths share the same check.
 

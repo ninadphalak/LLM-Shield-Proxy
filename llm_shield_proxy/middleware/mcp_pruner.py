@@ -7,7 +7,7 @@ import orjson
 import redis.asyncio as redis
 
 from llm_shield_proxy.observability.audit import AuditLogger
-from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, evaluate_url
+from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, resolve_pinned_target
 
 
 class MCPDiscoveryPrunerMiddleware:
@@ -122,8 +122,12 @@ class MCPDiscoveryPrunerMiddleware:
             # is the actual destination of the outbound request below, so it must clear the same
             # egress firewall used for tool-argument URLs elsewhere in the gateway. Checked before
             # the cache lookup so a forbidden target can never be cached or reach the network.
+            #
+            # Pinned, not merely checked: the returned target carries the validated IP in its URL
+            # so httpx cannot re-resolve the hostname at connect time and be rebound to a blocked
+            # address between this check and the request below.
             try:
-                await evaluate_url(upstream_url, policy)
+                upstream = await resolve_pinned_target(upstream_url, policy)
             except EgressPolicyViolationError as exc:
                 AuditLogger.log_security_event(
                     event_type="mcp_egress_policy_violation",
@@ -171,7 +175,14 @@ class MCPDiscoveryPrunerMiddleware:
 
             # Managed httpx client inside context manager to prevent connection leaks
             async with httpx.AsyncClient(http2=True) as client:
-                async with client.stream("POST", upstream_url, json=req_data, timeout=10.0) as resp:
+                async with client.stream(
+                    "POST",
+                    upstream.url,
+                    json=req_data,
+                    headers=upstream.headers,
+                    extensions=upstream.extensions,
+                    timeout=10.0,
+                ) as resp:
                     resp.raise_for_status()
 
                     body_bytes = bytearray()
