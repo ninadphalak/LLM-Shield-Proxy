@@ -24,7 +24,7 @@ from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.security.egress_guard import EgressPolicyViolationError, evaluate_url, scan_arguments
-from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, InMemoryPolicyResolver, OPAPolicyResolver
+from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, build_policy_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,6 @@ MAX_BATCH_SIZE = 100
 
 def _get_mcp_policy_resolver_for_app(app: Any) -> BasePolicyResolver:
     """Build the configured MCP resolver against application-scoped state."""
-    from llm_shield_proxy.core.config import settings
-
     if not hasattr(app.state, "mcp_rbac_state"):
         from collections import OrderedDict
 
@@ -63,11 +61,11 @@ def _get_mcp_policy_resolver_for_app(app: Any) -> BasePolicyResolver:
         }
     shared_state = app.state.mcp_rbac_state
 
-    if settings.OPA_URL:
-        http_client = getattr(app.state, "http_client", None) or httpx.AsyncClient()
-        return OPAPolicyResolver(http_client, settings.OPA_URL, shared_state)
+    from llm_shield_proxy.engines.vault import vault_store
 
-    return InMemoryPolicyResolver(shared_state)
+    http_client = getattr(app.state, "http_client", None) or httpx.AsyncClient()
+    redis_client = vault_store.async_client if hasattr(vault_store, "async_client") else None
+    return build_policy_resolver(http_client, shared_state, redis_client)
 
 
 async def get_mcp_policy_resolver(request: Request) -> BasePolicyResolver:

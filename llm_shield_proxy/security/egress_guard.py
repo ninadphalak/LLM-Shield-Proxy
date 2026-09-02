@@ -144,6 +144,24 @@ def _blocking_network(ip_str: str, denied_networks: Sequence[IPNetwork]) -> Opti
     return None
 
 
+BASELINE_DENIED_NETWORKS: tuple = tuple(
+    ipaddress.ip_network(cidr, strict=False) for cidr in BASELINE_DENIED_CIDRS
+)
+
+
+def is_public_ip(ip_str: str) -> bool:
+    """True when `ip_str` parses and falls outside every baseline-denied range.
+
+    Single source of truth for "is this resolved address safe to egress to", shared by
+    the MCP egress gate and the proxy's upstream-override SSRF check.
+    """
+    try:
+        ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return _blocking_network(ip_str, BASELINE_DENIED_NETWORKS) is None
+
+
 def extract_host(url: str) -> str:
     parsed = urlsplit(url)
     if parsed.scheme.lower() not in ("http", "https"):

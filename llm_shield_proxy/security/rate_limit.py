@@ -69,8 +69,8 @@ class InMemoryBucket:
 
 class DistributedRateLimiter:
     def __init__(self):
-        maxsize = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_MAXSIZE", 50_000)
-        ttl = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS", 3600)
+        maxsize = settings.RATE_LIMIT_LOCAL_CACHE_MAXSIZE
+        ttl = settings.RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS
         self._in_memory_buckets: TTLCache[str, InMemoryBucket] = TTLCache(maxsize=maxsize, ttl=ttl)
         self._lua_sha: Optional[str] = None
         self._lock = asyncio.Lock()
@@ -133,8 +133,8 @@ class DistributedBlastRadiusLimiter:
     Acts as a fail-safe that halts compromised agents attempting bulk data exfiltration.
     """
     def __init__(self):
-        maxsize = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_MAXSIZE", 50_000)
-        ttl = getattr(settings, "RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS", 3600)
+        maxsize = settings.RATE_LIMIT_LOCAL_CACHE_MAXSIZE
+        ttl = settings.RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS
         self._in_memory_buckets: TTLCache[str, InMemoryBucket] = TTLCache(maxsize=maxsize, ttl=ttl)
         self._lua_sha: Optional[str] = None
         self._lock = asyncio.Lock()

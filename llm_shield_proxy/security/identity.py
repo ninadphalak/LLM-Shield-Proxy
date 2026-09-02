@@ -117,11 +117,11 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             raise jwt.InvalidIssuerError("Missing issuer claim")
 
         # Strict Default-Closed Allowlist
-        allowed_issuers = tenant_policy.get("allowed_issuers", []) if tenant_policy else getattr(settings, "ALLOWED_ISSUERS", [])
+        allowed_issuers = tenant_policy.get("allowed_issuers", []) if tenant_policy else settings.ALLOWED_ISSUERS
         if not allowed_issuers or issuer not in allowed_issuers:
             raise jwt.InvalidIssuerError("Unauthorized issuer")
 
-        allowed_audiences = tenant_policy.get("allowed_audiences", []) if tenant_policy else getattr(settings, "ALLOWED_AUDIENCES", [])
+        allowed_audiences = tenant_policy.get("allowed_audiences", []) if tenant_policy else settings.ALLOWED_AUDIENCES
 
         # Finding 1: Check audience before fetching JWKS over network
         if allowed_audiences and unverified_claims.get("aud") not in allowed_audiences:

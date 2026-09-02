@@ -27,8 +27,8 @@ def resolve_masking_mode(header_value: Optional[str] = None) -> MaskingMode:
             pass
 
     # Respect legacy boolean flag if explicitly set to False in tests/env
-    enable_synthetic = getattr(settings, "ENABLE_SYNTHETIC_SWAPPING", True)
-    default_mode_str = getattr(settings, "SHIELD_DEFAULT_MASKING_MODE", "SYNTHETIC").upper()
+    enable_synthetic = settings.ENABLE_SYNTHETIC_SWAPPING
+    default_mode_str = settings.SHIELD_DEFAULT_MASKING_MODE.upper()
 
     if not enable_synthetic and default_mode_str == "SYNTHETIC":
         return MaskingMode.STRUCTURAL_TAG
@@ -61,7 +61,7 @@ class HmacVault:
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
-        secret = getattr(settings, "SHIELD_WATERMARK_SECRET", None)
+        secret = settings.SHIELD_WATERMARK_SECRET
         if not secret:
             raise ValueError("SHIELD_WATERMARK_SECRET is required for HMAC vault")
         hashed = hmac.new(secret.encode("utf-8"), original_val.encode("utf-8"), hashlib.sha256).hexdigest()

@@ -211,6 +211,25 @@ class InMemoryPolicyResolver(BasePolicyResolver):
         return {"allowed_tools": [], "blocked_tools": []}
 
 
+def build_policy_resolver(
+    http_client: httpx.AsyncClient,
+    shared_state: Dict[str, Any],
+    redis_client: Optional[Any] = None,
+) -> BasePolicyResolver:
+    """Selects the configured RBAC backend.
+
+    Single source of truth so the proxy path and the MCP path cannot resolve the
+    same virtual key against different backends.
+    """
+    if settings.OPA_URL:
+        return OPAPolicyResolver(http_client, settings.OPA_URL, shared_state)
+    if settings.ENABLE_VAULT_SECRETS and settings.VAULT_ADDR and settings.VAULT_TOKEN:
+        return VaultPolicyResolver(http_client, settings.VAULT_ADDR, settings.VAULT_TOKEN, shared_state)
+    if redis_client is not None:
+        return RedisPolicyResolver(redis_client, shared_state)
+    return InMemoryPolicyResolver(shared_state)
+
+
 QUOTE_BYTE = 0x22      # ord('"')
 BACKSLASH_BYTE = 0x5C  # ord('\\')
 COLON_BYTE = 0x3A      # ord(':')

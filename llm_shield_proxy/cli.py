@@ -359,7 +359,7 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     # supplies an ephemeral evaluation-only key and says so, exactly as the audit signing key
     # already does. A configured key is still used when one is present, and nothing here
     # relaxes the requirement on any serving path.
-    if not getattr(settings, "SHIELD_ENCRYPTION_KEY", None):
+    if not settings.SHIELD_ENCRYPTION_KEY:
         import secrets
 
         settings.SHIELD_ENCRYPTION_KEY = secrets.token_urlsafe(32)

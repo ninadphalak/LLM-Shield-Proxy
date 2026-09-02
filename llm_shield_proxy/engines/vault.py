@@ -45,7 +45,7 @@ _PROCESS_DEK: Optional[bytes] = None
 def get_vault_dek() -> bytes:
     """Retrieves or derives 256-bit Data Encryption Key (DEK) for AES-256-GCM vault security."""
     global _PROCESS_DEK
-    key_src = getattr(settings, "VAULT_ENCRYPTION_KEY", None) or getattr(settings, "SECRET_KEY", None)
+    key_src = settings.VAULT_ENCRYPTION_KEY
     if key_src:
         return hashlib.sha256(key_src.encode("utf-8")).digest()
     if _PROCESS_DEK is None:

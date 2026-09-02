@@ -40,6 +40,8 @@ def test_ssrf_ipv6_and_special_ip_rejection():
         "169.254.169.254",  # AWS/GCP Metadata
         "fe80::1",  # Link-Local IPv6
         "fc00::1",  # Unique Local IPv6 (Private)
+        "100.64.1.1",  # Carrier-grade NAT (RFC 6598)
+        "64:ff9b::7f00:1",  # NAT64 tunnelling an IPv4 loopback
     ]
     for ip in unsafe_ips:
         assert not _is_safe_ip(ip), f"Unsafe IP {ip} was erroneously accepted by _is_safe_ip!"
