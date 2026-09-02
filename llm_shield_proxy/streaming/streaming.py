@@ -19,6 +19,65 @@ from llm_shield_proxy.observability.tracing import tracer
 from llm_shield_proxy.streaming.json_lexer import StreamingJSONLexer
 
 
+class _BoundedOutputCoalescer:
+    """Aggregate small output pieces without making write boundaries a memory risk.
+
+    The byte budget governs only aggregation. A single encoded SSE line may be
+    larger than the target and is returned directly, because ASGI write boundaries
+    are not SSE protocol boundaries and truncating a rehydrated value would corrupt
+    the response. The caller separately enforces an absolute per-piece ceiling.
+    """
+
+    _MAX_PARTS = 1024
+
+    def __init__(self, byte_budget: int) -> None:
+        if byte_budget <= 0:
+            raise ValueError("SSE coalescing byte budget must be positive")
+        self.byte_budget = byte_budget
+        self._parts: list[bytes] = []
+        self._size = 0
+
+    def push(self, piece: bytes) -> tuple[bytes, ...]:
+        if not piece:
+            return ()
+
+        if len(piece) > self.byte_budget:
+            if self._parts:
+                ready = b"".join(self._parts)
+                self._parts.clear()
+                self._size = 0
+                # At most two references: the bounded aggregate and one
+                # indivisible oversized line.
+                return (ready, piece)
+            # Do not copy, truncate, or split one encoded line merely to satisfy
+            # the aggregation target.
+            return (piece,)
+
+        if self._parts and (
+            self._size + len(piece) > self.byte_budget
+            or len(self._parts) >= self._MAX_PARTS
+        ):
+            ready = b"".join(self._parts)
+            self._parts.clear()
+            self._parts.append(piece)
+            self._size = len(piece)
+            return (ready,)
+
+        # Hot path: retain the already-encoded bytes object. No copy and no
+        # temporary result collection is allocated before the empty return.
+        self._parts.append(piece)
+        self._size += len(piece)
+        return ()
+
+    def drain(self) -> tuple[bytes, ...]:
+        if not self._parts:
+            return ()
+        ready = b"".join(self._parts)
+        self._parts.clear()
+        self._size = 0
+        return (ready,)
+
+
 class SSERehydrationBuffer:
     """Sliding-window buffer preventing partial entity token leakage across SSE stream chunks.
 
@@ -32,10 +91,24 @@ class SSERehydrationBuffer:
 
     MAX_TAG_LENGTH: int = 64
 
-    def __init__(self, vault: Vault) -> None:
+    def __init__(self, vault: Vault, max_output_bytes: Optional[int] = None) -> None:
         self.vault: Vault = vault
         self.content_buffer: str = ""
         self.lexer: StreamingJSONLexer = StreamingJSONLexer()
+        self.max_output_bytes = max_output_bytes
+
+    def _rehydrate(self, text: str, retention_length: int) -> str:
+        # Only the built-in implementation declares the allocation-time cap.
+        # Vault subclasses/adapters may preserve the historical two-argument
+        # rehydrate contract; the encoded-output boundary below still checks
+        # their returned piece before it is queued.
+        if getattr(type(self.vault), "rehydrate", None) is Vault.rehydrate:
+            return self.vault.rehydrate(
+                text,
+                retention_length=retention_length,
+                max_output_bytes=self.max_output_bytes,
+            )
+        return self.vault.rehydrate(text, retention_length=retention_length)
 
     def _calculate_retention_length(self, text: str) -> int:
         """Calculates the minimum trailing retention boundary needed for text.
@@ -101,48 +174,52 @@ class SSERehydrationBuffer:
         Returns:
             Safe text slice ready for downstream client consumption.
         """
-        with tracer.start_as_current_span("buffer_flush"):
-            emitted_parts = []
+        # No span here. This runs once per SSE delta; a span here would emit one
+        # span per token to any collector. rehydrate_sse_stream opens one span for
+        # the whole stream.
+        emitted_parts = []
 
-            if delta_text:
-                self.content_buffer += delta_text
+        if delta_text:
+            self.content_buffer += delta_text
 
-                # Enforce maximum safety length on the buffer
-                if len(self.content_buffer) > 64 * 1024:
-                    raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+            # Enforce maximum safety length on the buffer
+            if len(self.content_buffer) > 64 * 1024:
+                raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
 
-                # In a fast-path, empty token_to_original can just skip rehydrate
-                token_to_original = getattr(self.vault, "token_to_original", None)
-                if (
-                    token_to_original is not None
-                    and not token_to_original
-                    and type(self.vault).__name__ != "StatelessCryptoVault"
-                ):
-                    pass
-                else:
-                    # Calculate dynamic prefix retention bound
-                    retention_length = self._calculate_retention_length(self.content_buffer)
-
-                    # Apply boundary-aware rehydration up to the retention boundary
-                    self.content_buffer = self.vault.rehydrate(self.content_buffer, retention_length=retention_length)
-
-                # Recalculate retention in case replacements modified the tail
+            # In a fast-path, empty token_to_original can just skip rehydrate
+            token_to_original = getattr(self.vault, "token_to_original", None)
+            if (
+                token_to_original is not None
+                and not token_to_original
+                and type(self.vault).__name__ != "StatelessCryptoVault"
+            ):
+                pass
+            else:
+                # Calculate dynamic prefix retention bound
                 retention_length = self._calculate_retention_length(self.content_buffer)
 
-                if retention_length == 0 or len(self.content_buffer) <= retention_length:
-                    if retention_length == 0:
-                        emitted_parts.append(self.content_buffer)
-                        self.content_buffer = ""
-                else:
-                    emitted = self.content_buffer[:-retention_length]
-                    self.content_buffer = self.content_buffer[-retention_length:]
-                    emitted_parts.append(emitted)
+                # Apply boundary-aware rehydration up to the retention boundary
+                self.content_buffer = self._rehydrate(
+                    self.content_buffer, retention_length=retention_length
+                )
 
-            if is_final and self.content_buffer:
-                emitted_parts.append(self.vault.rehydrate(self.content_buffer, retention_length=0))
-                self.content_buffer = ""
+            # Recalculate retention in case replacements modified the tail
+            retention_length = self._calculate_retention_length(self.content_buffer)
 
-            return "".join(emitted_parts)
+            if retention_length == 0 or len(self.content_buffer) <= retention_length:
+                if retention_length == 0:
+                    emitted_parts.append(self.content_buffer)
+                    self.content_buffer = ""
+            else:
+                emitted = self.content_buffer[:-retention_length]
+                self.content_buffer = self.content_buffer[-retention_length:]
+                emitted_parts.append(emitted)
+
+        if is_final and self.content_buffer:
+            emitted_parts.append(self._rehydrate(self.content_buffer, retention_length=0))
+            self.content_buffer = ""
+
+        return "".join(emitted_parts)
 
 
 async def rehydrate_sse_stream(
@@ -158,7 +235,9 @@ async def rehydrate_sse_stream(
     Slowloris buffer poisoning, and ensures buffer is flushed before [DONE].
 
     Time Complexity: O(C) amortized per SSE chunk.
-    Space Complexity: O(B) bounded by MAX_SSE_LINE_LENGTH.
+    Space Complexity: O(B), where coalesced writes are bounded by
+    MAX_SSE_LINE_LENGTH and one rehydrated output piece is bounded by
+    MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH.
 
     Args:
         raw_stream: Upstream raw byte generator from httpx streaming response.
@@ -174,11 +253,21 @@ async def rehydrate_sse_stream(
 
     async def _inner_stream() -> AsyncGenerator[bytes, None]:
         nonlocal watermark_text
-        buffer = SSERehydrationBuffer(vault)
         line_accumulator = ""
         client_disconnected = False
+        stream_aborted = False
         max_line_length = settings.MAX_SSE_LINE_LENGTH
+        # One accepted upstream line can contain a token representing data from
+        # one accepted request. Allow that request-bounded value plus the input
+        # line's own framing, but fail closed on repeated-token amplification.
+        max_output_piece_bytes = settings.MAX_PAYLOAD_SIZE_BYTES + max_line_length
+        buffer = SSERehydrationBuffer(vault, max_output_bytes=max_output_piece_bytes)
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+        def _bounded_output(piece: bytes) -> bytes:
+            if len(piece) > max_output_piece_bytes:
+                raise ValueError("Rehydrated SSE output exceeded maximum safe length")
+            return piece
 
         cached_id = "chatcmpl-watermark"
         cached_object = "chat.completion.chunk"
@@ -202,6 +291,17 @@ async def rehydrate_sse_stream(
                 if failed_open:
                     yield chunk
                     continue
+
+                # Lines produced from THIS upstream chunk, emitted in writes no
+                # larger than max_line_length unless one indivisible encoded line
+                # itself exceeds that aggregation target.
+                # An SSE event is two lines (the data line and the blank
+                # terminator), so yielding per line cost two ASGI messages and two
+                # chunked-transfer frames per event, the second one byte long.
+                outgoing = _BoundedOutputCoalescer(max_line_length)
+
+                def _queue_output(piece: bytes) -> tuple[bytes, ...]:
+                    return outgoing.push(_bounded_output(piece))
 
                 try:
                     chunk_text = decoder.decode(chunk, final=False)
@@ -232,7 +332,8 @@ async def rehydrate_sse_stream(
                         stripped = line.strip()
 
                         if stripped.startswith("event: "):
-                            yield (line + "\n").encode("utf-8")
+                            for ready in _queue_output((line + "\n").encode("utf-8")):
+                                yield ready
                             continue
 
                         if stripped.startswith("data: ") and stripped != "data: [DONE]":
@@ -341,13 +442,18 @@ async def rehydrate_sse_stream(
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
 
-                            yield (line + "\n").encode("utf-8")
+                            for ready in _queue_output((line + "\n").encode("utf-8")):
+                                yield ready
                         elif stripped == "data: [DONE]":
                             # Flush the buffer completely BEFORE yielding the [DONE] signal
                             remaining = buffer.process_delta_text("", is_final=True)
                             if remaining:
                                 flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                                flush_piece = (
+                                    f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                                )
+                                for ready in _queue_output(flush_piece):
+                                    yield ready
 
                             if watermark_text:
                                 if is_anthropic_stream:
@@ -360,7 +466,9 @@ async def rehydrate_sse_stream(
                                             {"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}
                                         ],
                                     }
-                                    yield f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
+                                    watermark_piece = (
+                                        f"data: {json.dumps(anthropic_chunk).decode('utf-8')}\n\n".encode()
+                                    )
                                 else:
                                     watermark_obj = {
                                         "id": cached_id,
@@ -371,18 +479,37 @@ async def rehydrate_sse_stream(
                                             {"index": 0, "delta": {"content": watermark_text}, "finish_reason": None}
                                         ],
                                     }
-                                    yield f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                                    watermark_piece = (
+                                        f"data: {json.dumps(watermark_obj).decode('utf-8')}\n\n".encode()
+                                    )
+                                for ready in _queue_output(watermark_piece):
+                                    yield ready
                                 watermark_text = ""  # prevent double yield
 
-                            yield (line + "\n").encode("utf-8")
+                            for ready in _queue_output((line + "\n").encode("utf-8")):
+                                yield ready
                         else:
-                            yield (line + "\n").encode("utf-8")
+                            for ready in _queue_output((line + "\n").encode("utf-8")):
+                                yield ready
+
+                    for ready in outgoing.drain():
+                        yield ready
 
                 except Exception as e:
                     import logging
 
+                    buffered = outgoing.drain()
+                    if buffered:
+                        # Already rehydrated and safe. These were yielded before
+                        # the write coalescing above, so dropping them here would
+                        # change behaviour on the failure path rather than only
+                        # the framing.
+                        for ready in buffered:
+                            yield ready
+
                     if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
                         logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_CLOSED): {e}")
+                        stream_aborted = True
                         return
                     else:
                         logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_OPEN): {e}")
@@ -396,7 +523,7 @@ async def rehydrate_sse_stream(
             client_disconnected = True
             raise
         finally:
-            if not client_disconnected and not failed_open:
+            if not client_disconnected and not failed_open and not stream_aborted:
                 trailing_text = decoder.decode(b"", final=True)
                 if trailing_text:
                     line_accumulator += trailing_text
@@ -430,9 +557,20 @@ async def rehydrate_sse_stream(
                 if line_accumulator:
                     yield line_accumulator.encode("utf-8")
 
+    # One span for the whole stream, replacing one span per delta. Started
+    # explicitly rather than as a context manager because this generator yields
+    # inside the region, and a context-managed current span across yields leaks
+    # span context between tasks.
+    flush_span = tracer.start_span("buffer_flush")
+    emitted_chunks = 0
     try:
         async for outgoing_chunk in _inner_stream():
+            emitted_chunks += 1
             attestation.update(outgoing_chunk)
             yield outgoing_chunk
     finally:
+        try:
+            flush_span.set_attribute("sse.emitted_chunks", emitted_chunks)
+        finally:
+            flush_span.end()
         attestation.emit_audit_receipt()

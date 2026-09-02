@@ -1,4 +1,9 @@
 {
+  "attestation": {
+    "commit_sha": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+    "runner": "SwiftX",
+    "verification": "self-reported"
+  },
   "capture": {
     "authentication_required": false,
     "bind_host": "127.0.0.1",
@@ -7,8 +12,8 @@
     "self_probe": {
       "performed": true,
       "recorded": true,
-      "round_trip_ms": 138.76020000316203,
-      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/dtcgthhgifhrmetukajzvqyx"
+      "round_trip_ms": 140.631299931556,
+      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/pdhilkwwcnnmcybairbeycdr"
     },
     "target_must_be_preconfigured_for": "http://127.0.0.1:8765/v1"
   },
@@ -16,10 +21,10 @@
     "client_observed_latency": {
       "iterations": 3,
       "iterations_measured": 3,
-      "mean": 23.44810008071363,
-      "p50": 20.025000208988786,
-      "p95": 20.025000208988786,
-      "p99": 20.025000208988786,
+      "mean": 25.079966755583882,
+      "p50": 21.538899978622794,
+      "p95": 21.538899978622794,
+      "p99": 21.538899978622794,
       "passed": true,
       "threshold_enforced": false,
       "unit": "milliseconds"
@@ -90,8 +95,8 @@
     },
     "fragmentation_safety": {
       "coalescing_not_distinguished": true,
-      "events_observed": 135,
-      "events_observed_max": 135,
+      "events_observed": 134,
+      "events_observed_max": 134,
       "one_character_events_requested": true,
       "passed": true,
       "response_reconstructed": true
@@ -138,12 +143,12 @@
     "values_published": false,
     "varies_per_run": true
   },
-  "generated_at": "2026-09-01T19:42:55.028070Z",
-  "harness_revision": "unknown",
+  "generated_at": "2026-09-01T21:01:19.546562Z",
+  "harness_revision": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
   "implementation": {
     "labels_are_operator_supplied": true,
     "name": "raw-openai-compatible-pass-through",
-    "version": "negative-control"
+    "version": "harness-negative-control"
   },
   "limitations": {
     "method_limits": [

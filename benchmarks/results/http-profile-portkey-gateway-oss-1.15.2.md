@@ -49,7 +49,7 @@ name, or they will record a 500 that the vendor's own build does not produce.
 ## Run 1 — default configuration, no guardrails
 
 Artifact: `http-profile-portkey-gateway-oss-1.15.2-default.json`
-(SHA-256 `29a282a7f4a50c757ff1c1904e60f3cc549260c28f7492807b2fa2e0858b39bf`)
+(SHA-256 `acd79ad14b76ff6f9c2f6aa1d8659abf351394cb88beb9edae46a3e8ef8196e8`)
 
 No `x-portkey-config`, no hooks.
 
@@ -69,7 +69,7 @@ Redaction claim recorded: `claimed`, **not** configured for this run, cited to
 ## Run 2 — redaction enabled via `default.regexReplace`
 
 Artifact: `http-profile-portkey-gateway-oss-1.15.2-regexreplace.json`
-(SHA-256 `ede323843649af35c37e099268ff16d51dce6e8df2997e53303574533b45b097`)
+(SHA-256 `b72a949c8fcf3a5f5b858f8c90c16a668c1848bacac8668d48e84bf8c809f19f`)
 
 Sent as the `x-portkey-config` request header:
 
@@ -126,34 +126,56 @@ one.**
 | `sse_validity` | **pass** — `status_codes: [200]` |
 | `client_observed_latency` | **pass** — 3 of 3 iterations measured |
 | `response_fidelity` | fail — `[REDACTED]` is one-way; the original value is never restored |
-| `fragmentation_safety` | fail — gates on the same reconstruction. Streaming itself was fine: `events_observed: 116` |
+| `fragmentation_safety` | fail — gates on the same reconstruction. Streaming itself was fine: `events_observed: 117` |
 
 Publish this as "no leak; does not meet the reversible-masking requirement". Portkey redacted
 everything it was asked to redact and sent nothing protected to the upstream. The profile
 requires *reversible* masking, and one-way replacement is a different design, not a privacy
 failure. This independently reproduces the prediction recorded before any Portkey run existed.
 
-## Latency observations — NOT a comparison
+## Latency observations — NOT from this profile
 
-`client_observed_latency` enforces no threshold; it gates on sample completeness. Three
-iterations is a smoke test, the runs were serialised on one loaded developer workstation, and
-the capture upstream echoes one SSE event per character, so these numbers are recorded for
-completeness and **must not be presented comparatively**. Raise the iteration count and run the
-targets under equal conditions before drawing any conclusion.
+`client_observed_latency` in the artifacts above enforces no threshold and three
+iterations is a smoke test. A separate maintainer-local diagnostic recorded 150
+iterations per point, 25 discarded as warmup, every gateway pointed at the same fixed
+upstream, one request at a time to completion of the stream, on one loaded developer
+workstation. Portkey is running here as a local Node process on Windows from the vendor
+image's own tree; this is not a tuned deployment and the numbers should not be read as
+one.
 
-| Run | mean ms | p50 ms |
-| :--- | ---: | ---: |
-| Raw capture negative control | 41.6 | 38.1 |
-| Portkey Gateway OSS, default | 58.0 | 53.9 |
-| Portkey Gateway OSS + `regexReplace` | 51.9 | 51.9 |
-| LLM-Shield-Proxy (committed self-test) | 122.9 | 116.9 |
-| LiteLLM 1.99.0, default | 876.0 | 130.4 |
-| LiteLLM 1.99.0 + Presidio | 925.8 | 171.7 |
+The diagnostic runner and raw samples were not retained, so the exact figures below are
+not independently auditable and must not be cited as benchmark evidence. Re-measure with
+a versioned runner and raw artifact before making a performance claim.
 
-The mean/p50 gap on the LiteLLM rows is a first-request effect: the first iteration pays
-LiteLLM's lazy initialisation. On these samples Portkey OSS is the fastest gateway measured and
-LLM-Shield-Proxy is not; that is recorded rather than omitted, and it is not evidence of
-anything at n=3.
+Token-by-token upstream, p50 milliseconds:
+
+| Target | 200 events | 800 events | per event |
+| :--- | ---: | ---: | ---: |
+| Upstream directly (floor) | 0.77 | 0.77 | ~0 |
+| Minimal Starlette+httpx passthrough | 4.12 | 4.02 | ~0 |
+| LLM-Shield-Proxy | 12.69 | 24.55 | 0.020 ms |
+| Portkey Gateway OSS (no guardrail) | 47.00 | 47.27 | 0.0004 ms |
+| Portkey Gateway OSS + `regexReplace` | 46.95 | 47.47 | 0.0007 ms |
+
+The two gateways have opposite shapes. Portkey's cost is almost entirely **fixed** — about
+47 ms per request regardless of response length, and its `regexReplace` transform is free
+within measurement noise. LLM-Shield-Proxy's fixed cost is far lower and its cost grows
+with the number of SSE events.
+
+**An earlier three-iteration measurement showed Portkey at p50 52 ms against this proxy's
+117 ms, and that comparison was published as "not comparable at n=3". Investigating it
+properly found two real defects in this proxy**, both in the SSE response path: one
+OpenTelemetry span per SSE *delta* (11% of request-path CPU, and unusable telemetry — a
+500-token answer emitted 500 spans), and two ASGI writes per SSE event because the
+pipeline yielded each line separately, the second write being one byte. Before the fix the
+proxy cost **0.396 ms per event**; after, **0.020 ms**. The numbers above are post-fix.
+`tests/test_streaming_write_efficiency.py` pins both, and reverting either fails it.
+
+Extrapolating the two fits, they cross at roughly 1,400 SSE events: below that this proxy
+is faster because its fixed cost is far lower, above it Portkey is faster because its
+per-event cost is. A typical chat completion is well under 1,400 tokens, but a long
+document generation is not. Neither result is a general claim about either product, and
+the crossover is an extrapolation, not a measurement.
 
 Secrets and synthetic fixture values are not written into any report. Extra-header values are
 never recorded; only header names are.

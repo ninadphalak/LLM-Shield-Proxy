@@ -76,8 +76,8 @@ Policies can supply request-scoped overrides for settings that the implementatio
 | **`CUSTOM_REGEX_PATH`** | `str` | `None` | Path to `custom_regex.yaml` containing BYOR rules |
 | **`HTTP_TIMEOUT_SECONDS`** | `float` | `120.0` | Upstream HTTP request timeout in seconds |
 | **`HTTP_MAX_KEEPALIVE_CONNECTIONS`** | `int` | `10000` | Maximum keep-alive connections in HTTP pool |
-| **`MAX_PAYLOAD_SIZE_BYTES`** | `int` | `10485760` | Maximum allowed request body size |
-| **`MAX_SSE_LINE_LENGTH`** | `int` | `1048576` | Maximum allowed SSE line size (1MB) |
+| **`MAX_PAYLOAD_SIZE_BYTES`** | `int` | `10485760` | Maximum request body size; also contributes to the post-rehydration output-piece ceiling |
+| **`MAX_SSE_LINE_LENGTH`** | `int` | `1048576` | Maximum unparsed upstream SSE accumulator and output-coalescing target; one rehydrated line may exceed the target, subject to the absolute output-piece ceiling |
 | **`METRICS_BEARER_TOKEN`** | `str` | `None` | Bearer token protecting the `/metrics` endpoint |
 
 ### Advanced Feature Flags (Compliance, Security, and Engineering)
