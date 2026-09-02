@@ -4,6 +4,8 @@
 [![PyPI: llm-shield-proxy](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green&label=llm-shield-proxy)](https://pypi.org/project/llm-shield-proxy/)
 [![PyPI: pii-leak-benchmark](https://img.shields.io/pypi/v/pii-leak-benchmark.svg?color=green&label=pii-leak-benchmark)](https://pypi.org/project/pii-leak-benchmark/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
 This repository is two things, and the first one matters more:
 
@@ -116,6 +118,22 @@ for chunk in stream:
 A real completion needs an upstream key and a client-auth configuration — copy
 [`.env.example`](.env.example) and follow the [deployment guide](website/docs/deployment.md) rather
 than treating the health check as a production validation.
+
+### How the reference implementation works
+
+Inbound, the proxy detects configured sensitive values and replaces them before the request crosses
+the upstream boundary. Outbound, a bounded prefix-aware buffer reconstructs placeholders split
+across SSE chunks and restores registered values as the stream continues. Structured JSON payloads
+take a separate syntax-preserving mutation path and still require provider/tool schema testing.
+
+<a href="website/docs/assets/diagram-dual-pipeline.svg?v=2">
+  <img src="website/docs/assets/diagram-dual-pipeline.svg?v=2" alt="LLM privacy proxy dual-pipeline redaction architecture" width="900" />
+</a>
+
+The maintained component map and deployment diagrams live in the
+[architecture guide](website/docs/architecture.md),
+[architecture whitepaper](website/docs/architecture-whitepaper.md), and
+[deployment guide](website/docs/deployment.md).
 
 | Area | What is implemented | Where the evidence stops |
 |---|---|---|
