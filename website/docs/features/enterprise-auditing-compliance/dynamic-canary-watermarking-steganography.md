@@ -1,9 +1,11 @@
-# Dynamic Canary Watermarking & Steganography
+# Zero-Width Correlation Marker
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Dynamic Canary Watermarking & Steganography** can add a keyed zero-width correlation marker to configured output. If enough of the marker survives copying and normalization, the decoder can associate it with recorded metadata. The marker is removable and does not by itself establish who disclosed content.
+This feature can add a keyed zero-width correlation marker to configured output. If enough of the
+marker survives copying and normalization, the decoder can associate it with recorded metadata.
+The marker is removable and does not by itself establish who disclosed content.
 
 ## How It Works
 Copied text often loses provenance. A zero-width marker can provide one investigation signal, subject to false attribution, removal, normalization, and chain-of-custody limits.
@@ -21,7 +23,7 @@ flowchart TD
     C --> D[Visible Text with Invisible Fingerprint]
     D --> E[User Copies Text]
     E -.->|Leak Discovered| F[Forensic Extraction]
-    F --> G[Identify Leaker ID]
+    F --> G[Compare with Retained Metadata]
 ```
 
 
@@ -52,9 +54,7 @@ A: These are valid Unicode code points, but applications can render, normalize, 
 A: The encoder is designed not to change visible code points, but zero-width characters can affect search, normalization, token counts, copy/paste, accessibility tools, signatures, or downstream parsers. Test the complete client workflow.
 
 
-## Plainspeak
-This feature acts as an invisible tracking tag to help catch leaks.
-
+## Practical effect
 This feature adds a keyed, zero-width correlation marker to supported output. If enough of the marker survives, a decoder can associate it with recorded metadata. It is removable and forgeable by parties with relevant access, and it does not independently establish who disclosed text or when.
 
 ## Related Tests

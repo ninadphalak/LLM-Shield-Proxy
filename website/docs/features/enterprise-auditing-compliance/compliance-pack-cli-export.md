@@ -3,13 +3,13 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-Proving compliance today typically means a compliance officer manually stitching together
-OSCAL exports, audit log excerpts, and integrity checksums into something an external
-auditor can actually review. **Compliance-Pack CLI Export** collapses that into one
-command: `llm-shield-proxy compliance-report --framework=[hipaa|soc2|nist] --out=pack.zip`
-bundles OSCAL assessment-results artifacts, a verified tamper-evident audit-log summary, and a
-SHA-256 file-integrity manifest into a single `.zip`, with a generated Markdown summary an
-auditor can read directly.
+**Compliance-Pack CLI Export** creates a ZIP file containing an OSCAL assessment-results
+artifact, an audit-log verification summary when a log is supplied, a SHA-256 manifest, and a
+Markdown summary. Run it with
+`llm-shield-proxy compliance-report --framework=[hipaa|soc2|nist] --out=pack.zip`.
+
+The pack organizes evidence. It does not certify compliance or prove that omitted evidence and
+controls are complete.
 
 ## How It Works
 1. **Audit Evidence Verification:** Given `--audit-log`, the CLI re-walks the signed JSONL
@@ -38,10 +38,9 @@ flowchart TD
 ```
 
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-  over the audit log (O(N) in event count) with no impact on the running proxy.
-- **Overhead:** Zero - runs entirely outside the request path, typically as a scheduled
-  job or on-demand before an audit.
+- **Performance:** Verification reads the supplied audit log, so work grows with event count.
+- **Runtime effect:** The command runs outside the proxy request path. It still consumes CPU,
+  memory, and file I/O wherever it is executed.
 
 ## Configuration Flags
 This is a CLI subcommand, not a runtime engine flag:
@@ -55,9 +54,9 @@ This is a CLI subcommand, not a runtime engine flag:
 | `--pubkey-file` | PEM file with the proxy's Ed25519 audit public key, to verify receipt signatures. |
 
 ## Critical Logic & Edge Cases
-* **Missing Evidence Is Not an Error:** Omitting `--audit-log` or `--oscal-file` produces a
-  pack with `chain_valid: null` / an empty OSCAL shell rather than failing - useful for
-  smoke-testing the pack format before wiring up log capture.
+* **Missing evidence is allowed:** Omitting `--audit-log` or `--oscal-file` produces a pack with
+  `chain_valid: null` or an empty OSCAL shell. Such a pack tests the file format but is not complete
+  audit evidence.
 * **Non-Zero Exit on Tamper:** The CLI exits `1` when hash-chain verification fails,
   so it can gate a CI job or scheduled compliance run rather than silently produce a pack
   that documents its own tampering.
@@ -75,10 +74,10 @@ optional OSCAL artifact - so it can run as a standalone step in a compliance pip
 A: Yes - since it's a plain CLI with a non-zero exit code on integrity failure, it fits
 directly into a cron job or CI pipeline that archives the resulting `.zip` on a schedule.
 
-## Plainspeak
-This is the "generate the audit binder" button. Instead of a compliance officer manually
-copy-pasting log excerpts and OSCAL JSON into a folder before an audit, one command
-verifies the evidence is intact and hands you a `.zip` you can email to an auditor.
+## Practical effect
+The command collects the supplied files, checks the evidence it can verify, and writes a ZIP with
+a summary and checksums. Review its missing-evidence fields and verification status before giving
+it to an auditor.
 
 ## Related Tests
 See [`tests/test_compliance_report.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_compliance_report.py) for reference implementations and tamper-detection edge cases.

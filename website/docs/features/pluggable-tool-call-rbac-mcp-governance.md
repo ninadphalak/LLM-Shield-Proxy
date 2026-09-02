@@ -2,11 +2,12 @@
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
-## What It Does
-**Pluggable Tool-Call Role-Based Access Control (RBAC)** provides strict governance over autonomous AI agents. When an LLM attempts to execute a tool (e.g., calling an API, running a SQL query, or modifying a file via the Model Context Protocol (MCP)), this engine intercepts the execution request mid-stream and validates it against your corporate security policies.
+## What it does
 
-## How It Works
-AI Agents are inherently unpredictable. Without strict enforcement, an agent might decide to execute `drop_database_table` instead of `select_users`.
+This feature checks supported MCP tool calls against the role resolved for the request. A denied
+call returns an error before the proxy contacts the tool server.
+
+## How it works
 
 1. **Streaming JSON Interception:** As the LLM streams its decision to use a tool, the proxy uses a bounded-state parser to inspect the `name` or `method` field of the `tool_calls` payload.
 2. **Policy Resolution:** The tool name is validated against a pluggable backend (e.g., a Redis Policy Store, HashiCorp Vault, or Open Policy Agent (OPA)).
@@ -27,7 +28,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Extremely lightweight execution enforcing Zero Trust without delaying agent interactions.
+- **Overhead:** Includes parsing and policy resolution. Measure it with the resolver and traffic
+  pattern used in production.
 
 ## Configuration Flags
 
@@ -38,7 +40,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **Allowlist behavior:** With a non-empty `allowed_tools` policy on the documented resolver/path, an unlisted tool is denied. An empty allowlist denies every tool by default. `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY` is the explicit allow-all-except-blocked mode and emits a critical startup warning; verify resolver configuration at startup.
-* **Graceful Degradation:** When rejecting a tool call, the proxy does not simply return an HTTP 500. It injects a synthetic JSON-RPC error back into the stream, telling the LLM "You do not have permission to use this tool," allowing the agent to dynamically recover and choose a different action.
+* **Denial response:** A rejected call returns a JSON-RPC permission error instead of contacting
+  the tool server. The calling agent decides whether and how to recover.
 
 ## FAQ
 

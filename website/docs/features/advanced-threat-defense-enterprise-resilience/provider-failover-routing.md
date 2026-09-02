@@ -6,7 +6,8 @@
 **Provider Failover Routing** can attempt a pre-authorized secondary endpoint for selected primary-provider failures. It adds a recovery option but does not establish zero downtime, successful replay, or equivalent model behavior.
 
 ## How It Works
-High Availability (HA) requires resilience against massive centralized outages.
+A single provider can fail. For selected errors, the proxy can retry the request through a
+configured secondary endpoint.
 
 1. **Error Interception:** The proxy's `httpx` client wraps outbound connections in an exception handler. If it detects a `502 Bad Gateway`, `503 Service Unavailable`, `504 Gateway Timeout`, or a severe `ConnectTimeout`, it intercepts the failure.
 2. **Key-Swapping & Rerouting:** For an eligible failure, the proxy selects the configured fallback key and base URL and attempts the payload through the fallback path.
@@ -28,7 +29,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Retries utilize native `asyncio` to prevent thread blocking.
+- **Overhead:** Retry waits are asynchronous, but failover still adds request time, connection
+  work, and provider usage.
 
 ## Configuration Flags
 
@@ -38,8 +40,11 @@ View diagram on GitHub mobile 📱 -->
 | `FALLBACK_API_KEY` | The API key for the secondary provider. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
-* **Model name preservation:** The routing path preserves the requested model name rather than intentionally substituting a lower-tier name. Operators must verify what that name resolves to at each provider and whether semantics match.
-* **4xx Errors are Ignored:** The proxy only fails over on network timeouts and 50x server errors. If OpenAI returns a `400 Bad Request` (e.g., context window exceeded), the proxy passes the error directly to the client, as failing over would simply result in the exact same 400 error on the secondary provider.
+* **Model name preservation:** The routing path sends the requested model name to the fallback.
+  Operators must verify that the name exists there and provides the intended behavior.
+* **4xx responses do not trigger failover:** The proxy returns client and request errors directly.
+  A fallback might behave differently, but automatically replaying an invalid, unauthorized, or
+  quota-limited request could hide the real problem or duplicate side effects.
 
 ## FAQ
 
@@ -50,9 +55,7 @@ A: The repository includes an Anthropic adapter for supported OpenAI-style field
 A: In a non-production environment, direct the primary path to a controlled failing endpoint and verify whether the configured failure class triggers the fallback. Assert the audit signal, latency, response shape, and behavior when the fallback also fails.
 
 
-## Plainspeak
-This feature acts as an intelligent traffic cop for your AI requests.
-
+## Practical effect
 For selected failure modes, the proxy can attempt a configured secondary endpoint. The retry adds latency and may still fail or produce different behavior; surface failover in telemetry and test it with production-shaped requests.
 
 ## Related Tests

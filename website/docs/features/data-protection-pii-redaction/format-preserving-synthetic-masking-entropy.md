@@ -3,17 +3,16 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Format-Preserving Synthetic Masking** is the proxy's default Data Loss Prevention (DLP) substitution strategy. Instead of replacing sensitive data with structural tags (e.g., turning a name into `[PERSON_1]`), it deterministically replaces the data with a realistic, unbracketed synthetic entity (e.g., turning "John Doe" into "Michael Smith", or a real SSN into a validly formatted fake SSN).
+**Synthetic masking** replaces a detected value with a deterministic, format-aware substitute
+instead of a bracketed tag. For example, it can replace a name with another name or an SSN-shaped
+value with a reserved synthetic value. The substitute is not proof of a valid or issued identity.
 
 > [!TIP]
 > **Wondering what specific types of data are detected?** Check out the [Supported PII & Sensitive Data Types](supported-pii-types.md) feature guide for an exhaustive list.
 
 ## How It Works
-Traditional structural tagging damages the performance of Large Language Models in two critical ways:
-1. **Grammatical Damage:** Bracketed tags `[LIKE_THIS_1]` disrupt the natural language attention weights of transformer models, degrading the quality of the LLM's reasoning and generation.
-2. **BPE Token Bloat:** Byte-Pair Encoding tokenizers split brackets and underscores into multiple tokens, increasing the cost of the prompt and slowing down generation.
-
-LLM-Shield-Proxy solves this utilizing robust canonical locale substitution combined with deterministic hashing:
+Structural tags and realistic substitutes can affect tokenization and model output differently.
+The proxy offers synthetic masking so operators can test a format-aware option:
 1. **Deterministic Mapping:** Within the documented mapping scope, the same detected value is intended to receive the same substitute. Verify scope and multi-replica behavior for the selected vault mode.
 2. **Coherent Substitution:** Rather than generic structural strings, the underlying generation logic respects mathematical formats and regional locales:
    - **Credit Cards:** A real Visa card number is swapped with a validly checksummed (Luhn algorithm) synthetic Visa card number.
@@ -51,11 +50,13 @@ View diagram on GitHub mobile 📱 -->
 A: Set `ENABLE_SYNTHETIC_SWAPPING=false` to select structural tags such as `[PERSON_1]`. Confirm the effective setting at startup and test client/model handling of those tags.
 
 **Q: Does generating synthetic data slow down the request?**
-A: No. The proxy caches the generated synthetic entities in the active session's memory vault, meaning the substitution generator is only invoked once per unique entity, keeping latency near zero.
+A: Generation and vault lookup add work. Repeated values can reuse a stored mapping within its
+scope, but latency depends on the vault, number of entities, payload, and concurrency. Measure the
+configured mode.
 
 
-## Plainspeak
-This feature creates realistic fake data to replace sensitive information.
+## Practical effect
+This feature replaces detected data with format-aware synthetic values.
 
 Short structural markers and realistic-looking substitutes can affect models differently. Synthetic mode is intended to retain some surface format, but accuracy, privacy, token use, and task quality must be compared on representative fixtures.
 

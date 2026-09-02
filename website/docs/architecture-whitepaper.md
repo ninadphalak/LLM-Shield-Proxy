@@ -1,8 +1,11 @@
-# Enterprise Streaming-Privacy Gateway: Architecture Whitepaper
+# Streaming-Privacy Gateway Architecture
 
 ## Abstract
 
-LLM-Shield-Proxy is an Apache-2.0, self-hosted gateway for inspecting LLM and MCP traffic inside an operator-controlled network. Its defensible contribution is not a generic "AI gateway" claim: it is an independently testable configured-upstream privacy boundary, fragmentation-safe incremental SSE rehydration, policy enforcement for streamed tool calls, and privacy-safe audit evidence.
+LLM-Shield-Proxy is an Apache-2.0, self-hosted gateway for inspecting LLM and MCP traffic inside an
+operator-controlled network. It provides tests for the configured-upstream boundary, incremental
+SSE rehydration across tested fragment splits, policy checks for supported tool calls, and audit
+metadata that excludes configured sensitive values.
 
 The gateway can support technical controls used in SOC 2, HIPAA, EU AI Act, and ISO/IEC 42001 programs. It does not certify a system or organization as compliant.
 

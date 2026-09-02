@@ -6,11 +6,14 @@
 **Provider Failover with Per-Request Override** can route eligible requests to a configured secondary endpoint after selected failures. It does not establish zero downtime, provider equivalence, or successful replay.
 
 ## How It Works
-Relying on a single AI provider introduces significant availability risks. This feature operates natively in the routing plane:
+A configured fallback gives selected failed requests a second route:
 
-1. **Global Failover:** If `FALLBACK_BASE_URL` is configured, and a request to the primary `UPSTREAM_BASE_URL` returns a 50x server error or times out, the proxy automatically retries the identical request against the fallback endpoint.
-2. **Key-Swapping:** When failing over, the proxy intelligently swaps the authentication header, replacing the primary `UPSTREAM_API_KEY` with the `FALLBACK_API_KEY`.
-3. **Per-Request Client Override:** A client application can bypass the global configuration entirely by injecting the `X-Shield-Fallback-URL` HTTP header. The proxy prioritizes this header, enabling dynamic, client-driven routing.
+1. **Global fallback:** For configured eligible failures, the proxy can replay the request to
+   `FALLBACK_BASE_URL`.
+2. **Fallback credentials:** The failover path uses `FALLBACK_API_KEY` for the supported
+   authentication header.
+3. **Per-request override:** When client upstream overrides are enabled and authorized,
+   `X-Shield-Fallback-URL` can select the fallback URL. Egress policy must approve the target.
 
 
 ```mermaid
@@ -27,7 +30,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Retries are managed via asynchronous jitter, ensuring failed requests do not block the connection pool.
+- **Overhead:** Retry waits are asynchronous, but failover still keeps a request active and adds
+  connection, latency, quota, and possible duplicate-work costs.
 
 ## Configuration Flags
 
@@ -38,7 +42,8 @@ View diagram on GitHub mobile 📱 -->
 | `X-Shield-Fallback-URL` | Client HTTP header to dynamically override the fallback destination. | [View in POLICIES.md](/docs/policies) |
 
 ## Critical Logic & Edge Cases
-* **No Unapproved Downgrades:** The proxy will *only* failover to explicitly approved URLs. It protects enterprises from situations where an application silently downgrades to a weaker, cheaper model (e.g., GPT-4 to GPT-3.5) without security authorization.
+* **Target approval:** Only use configured or authorized fallback URLs that pass egress checks.
+  URL approval does not prove that the fallback model has equivalent quality, privacy, or policy.
 * **Replay risk:** LLM requests are not inherently idempotent; a failed attempt may have reached the first provider or consumed quota. The configured predicate excludes handled 4xx client errors, but operators must assess duplication, billing, and side effects.
 
 ## FAQ
@@ -50,7 +55,7 @@ A: Cross-provider fallback requires a configured adapter and can change supporte
 A: Failover begins after the configured failure predicate or timeout. A shorter timeout can increase false failovers and duplicate work; tune it from observed latency distributions.
 
 
-## Plainspeak
+## Practical effect
 This feature provides an operator-configured secondary route for selected failures. Availability still depends on both providers, the network, credentials, models, quotas, and replay behavior.
 
 For configured eligible failures, the proxy can attempt a pre-authorized fallback endpoint. The attempt adds latency, can fail, and may produce different model behavior. Per-request routing inputs must be authenticated and constrained by the SSRF and policy controls.

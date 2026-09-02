@@ -13,7 +13,9 @@ The conformance harness checks the proxy's distinctive streaming safety properti
 llm-shield-proxy benchmark --iterations 2000 --json-out CONFORMANCE_LATEST.json
 ```
 
-The JSON report records schema version, source revision when available, runtime/platform details, iteration count, pass/fail evidence, allocation observations, and p50/p95/p99 timing distributions. It deliberately excludes the actual test PII and reconstructed placeholder values.
+The JSON report records its schema and source revision, runtime details, iteration count, check
+evidence, allocation observations, and p50/p95/p99 timing distributions. It does not include the
+test values or reconstructed placeholders.
 
 ## Endpoint-neutral gateway profile
 

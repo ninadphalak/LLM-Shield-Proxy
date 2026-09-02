@@ -1,6 +1,7 @@
-# 🛡️ Role-Based Policy-as-Code (RBAC)
+# Role-Based Policy Configuration
 
-LLM-Shield-Proxy provides a system called "Policy-as-Code" via a file named `policies.yaml`. This file allows you to define custom security rules (roles) and assign them to specific users, clients, or departments (identified by a `virtual_key_id` or `x-tenant-id`).
+`policies.yaml` defines roles and maps request identifiers, such as `virtual_key_id` or
+`x-tenant-id`, to those roles.
 
 Instead of applying the same global security rules to everyone, you can give a trusted internal developer team a "relaxed" security profile (for faster response times), while enforcing strict data protection rules for an external customer-facing application.
 
@@ -13,26 +14,28 @@ The dynamic settings path can apply supported role-specific values. It should no
 While you can override network limits (e.g., `RATE_LIMIT_RPM`, `MAX_PAYLOAD_SIZE_BYTES`) or masking modes (`SHIELD_DEFAULT_MASKING_MODE`), the core security features commonly overridden are:
 
 1. **`ENABLE_CANARY_TRIPWIRE`** (bool):
-   - **What it does:** Silently injects a unique, tracking "honeytoken" string into the system prompt before sending it to the LLM.
+   - **What it does:** Adds a unique marker to the system prompt before sending it upstream.
    - **How it helps:** If the inspected output contains the marker, the proxy records a correlation signal. Marker matches do not prove intent or attribution and can be evaded or triggered accidentally.
    - **When to use:** Enable this for any external, untrusted, or customer-facing applications where prompt security is a concern.
-   - [Learn more about Canary Tripwires](/docs/features/advanced-threat-defense-enterprise-resilience/cryptographic-canary-prompt-tripwires)
+   - [Learn more about Prompt Correlation Markers](/docs/features/advanced-threat-defense-enterprise-resilience/cryptographic-canary-prompt-tripwires)
 
 2. **`ENABLE_BLAST_RADIUS_LIMITS`** (bool):
    - **What it does:** Monitors the number of sensitive entities (like credit cards or SSNs) detected in a single session.
    - **How it helps:** When the configured entity threshold is crossed, the proxy blocks the applicable request or stream path. It limits that observed path; it does not rule out missed entities or other egress paths.
    - **When to use:** Enable this for high-risk applications handling bulk financial or healthcare data.
-   - [Learn more about Blast Radius Limits](/docs/features/advanced-threat-defense-enterprise-resilience/entity-weighted-blast-radius-limits)
+   - [Learn more about Entity-Weighted Request Limits](/docs/features/advanced-threat-defense-enterprise-resilience/entity-weighted-blast-radius-limits)
 
 3. **`ENABLE_FINOPS_METERING`** (bool):
    - **What it does:** Extracts token usage statistics from the LLM provider's response stream.
    - **How it helps:** Attributes reported token usage to the configured tenant or role. Reconcile provider invoices, retries, cached tokens, and missing usage events before using it for chargeback.
    - **When to use:** Enable this when you need to track budgets across different teams or bill clients for their AI usage.
-   - [Learn more about FinOps Metering](/docs/features/advanced-threat-defense-enterprise-resilience/llm-finops-chargeback-meter)
+   - [Learn more about Token Usage Cost Estimates](/docs/features/advanced-threat-defense-enterprise-resilience/llm-finops-chargeback-meter)
 
 4. **`ENABLE_TIER3_ONNX_NER`** (bool):
-   - **What it does:** Activates a Deep Learning AI model (Named Entity Recognition) to read the text and find complex sensitive data based on context, not just simple patterns.
-   - **How it helps:** Finds hidden PII (Personally Identifiable Information) that standard regular expressions miss. However, it takes slightly longer to run.
+   - **What it does:** Runs the configured ONNX named-entity recognition model in addition to
+     pattern checks.
+   - **How it helps:** Can find contextual entities that regular expressions miss. Accuracy and
+     latency depend on the selected model and workload.
    - **When to use:** Enable it when the risk analysis requires contextual detection, including workloads subject to HIPAA safeguards. The selected model still needs corpus-specific validation and does not establish compliance.
 
 
@@ -44,7 +47,8 @@ While you can override network limits (e.g., `RATE_LIMIT_RPM`, `MAX_PAYLOAD_SIZE
 
 ## Example `policies.yaml` Template
 
-Below is a production-ready template that defines three distinct roles. Copy and paste this into your `policies.yaml` file.
+This starting template defines three example roles. Review every value before using it in a
+deployment.
 
 ```yaml
 # =========================================================
@@ -58,13 +62,13 @@ roles:
   # Strict Compliance Role (For External / Customer-Facing Apps)
   # ---------------------------------------------------------
   strict_compliance_role:
-    # Inject tracking tokens to catch prompt hackers
+    # Add a correlation marker to the prompt
     ENABLE_CANARY_TRIPWIRE: true
-    # Halt the stream if a user tries to upload massive amounts of PII
+    # Stop the supported path after the configured entity threshold
     ENABLE_BLAST_RADIUS_LIMITS: true
-    # Track exactly how many tokens this app consumes for billing
+    # Record provider-reported token usage for cost estimates
     ENABLE_FINOPS_METERING: true
-    # Use the heavy AI model for maximum data privacy scanning
+    # Run the configured ONNX named-entity model
     ENABLE_TIER3_ONNX_NER: true
     # Universal Overrides: Restrict payload size for this tenant
     MAX_PAYLOAD_SIZE_BYTES: 204800

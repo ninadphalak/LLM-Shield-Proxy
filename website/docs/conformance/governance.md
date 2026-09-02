@@ -4,9 +4,9 @@ The Streaming Privacy Gateway (SPG) specification is intended to become an
 implementation-neutral test contract. LLM-Shield-Proxy is its first reference implementation,
 not the authority that certifies itself or other products.
 
-This governance model is deliberately lightweight while the community is small. It makes
-maintainer control visible, creates a path for independent reviewers, and avoids implying neutral
-consensus before that consensus exists.
+The community is still small, so the initial maintainer currently has substantial control. This
+process records that control and explains how independent reviewers can join. A maintainer-only
+decision is not community consensus.
 
 ## Scope
 
@@ -79,12 +79,12 @@ Results identify who ran and funded them:
 Payment, equipment, cloud credits, consulting, and pre-publication review rights must be disclosed.
 Failed and partial runs remain valid contributions when their artifacts are reproducible.
 
-**Replication is counted per target, and the floor is 3 runs from 3 distinct submitters.** Below
-it a target reads `unreplicated` in the [results table](./results) rather than as a verdict --
-including this project's own reference implementation, which today is 1 run by 1 submitter. The
-maintainer's runs never count toward the replication of any row, and runs that disagree are
-published as separate rows rather than averaged. The full submission path, including what a run
-must carry and how it is checked, is in [submitting a result](./submitting).
+A target needs three runs from three submitters before the results table presents a verdict.
+Until then, it says `unreplicated`. The reference implementation currently has one run from one
+submitter, so it is also unreplicated.
+
+Maintainer runs do not count toward replication. Conflicting runs appear as separate rows instead
+of being averaged. [Submitting a result](./submitting) lists the required files and review steps.
 
 ## No certification program yet
 

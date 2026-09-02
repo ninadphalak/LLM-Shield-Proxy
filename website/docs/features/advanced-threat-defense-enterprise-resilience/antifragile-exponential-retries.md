@@ -1,16 +1,18 @@
-# Antifragile Exponential Retries
+# Exponential Retries
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Antifragile Exponential Retries** feature shields client applications from transient network instability and API throttling. When an upstream provider returns a recoverable error (like a `429 Too Many Requests` or a brief `502 Bad Gateway`), the proxy automatically absorbs the failure and retries the request using an exponential backoff algorithm before giving up.
+The **Exponential Retries** feature retries selected temporary failures, such as configured 429
+and 502 responses. It waits longer between attempts and stops after the configured limit.
 
 ## How It Works
 If a client app simply retries immediately after a `429`, it contributes to a "thundering herd" problem, causing the API provider to throttle them further.
 
 1. **Jittered Backoff:** The proxy uses the `tenacity` library to implement `wait_exponential_jitter`. If the first request fails, the proxy waits ~1 second. If the second fails, it waits ~2 seconds, then ~4 seconds, up to a configurable maximum.
 2. **Randomized Jitter:** A random delay spreads retry attempts and reduces synchronized retry bursts; collisions and correlated load can still occur.
-3. **Respecting `Retry-After`:** If the upstream provider includes a strict `Retry-After` HTTP header, the proxy intelligently parses it and suspends the specific request task for that exact duration.
+3. **`Retry-After`:** When a supported response includes a valid `Retry-After` header, the proxy
+   waits for the specified period before retrying.
 
 
 ```mermaid
@@ -29,7 +31,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Suspends the specific `asyncio` task using `asyncio.sleep()`, yielding control back to the event loop so other concurrent requests can continue processing unhindered.
+- **Overhead:** `asyncio.sleep()` does not block the event-loop thread, but the request remains
+  active and consumes time, memory, connection capacity, and retry quota.
 
 ## Configuration Flags
 
@@ -39,7 +42,9 @@ View diagram on GitHub mobile 📱 -->
 
 ## Critical Logic & Edge Cases
 * **Non-Recoverable Errors:** The configured retry predicate excludes handled client errors such as `400 Bad Request` and `401 Unauthorized`. Add tests when changing the exception or status-code mapping.
-* **Streaming Idempotency:** Text generation is fundamentally idempotent. However, if the proxy is handling a state-mutating tool execution (like executing a SQL insert on behalf of an agent), it relies on the downstream system's idempotency keys.
+* **Replay effects:** Retrying text generation can produce a different answer or duplicate provider
+  charges. Retrying a state-changing tool can repeat the action. Use downstream idempotency keys
+  where available and test every retried operation.
 
 ## FAQ
 
@@ -50,10 +55,10 @@ A: Possibly, depending on how aggressive your client's timeout settings are. If 
 A: No. The proxy executes retries *first*. Only if the `MAX_RETRIES` limit is entirely exhausted will the proxy escalate the failure to the Provider Failover Routing engine to attempt the secondary mirror.
 
 
-## Plainspeak
-This feature teaches the system how to be patient and polite when the internet is struggling.
-
-Sometimes a server gets overwhelmed and drops a connection. Instead of immediately hammering the server with a million retry requests (which just makes the crash worse), this feature forces the proxy to wait a little bit, then try again. If it fails again, it waits a little bit *longer*. This elegant, increasing delay gives the broken server time to recover.
+## Practical effect
+For selected temporary failures, the proxy waits and tries again. Each wait generally grows, with
+jitter to reduce synchronized retries. Retries can still increase latency, cost, and upstream
+load, so keep the attempt limit small and test replay behavior.
 
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_antifragile_dispatcher.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_antifragile_dispatcher.py).

@@ -3,12 +3,15 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Service Mesh Native gRPC ext_proc Integration** allows the proxy to operate directly inside modern Kubernetes service meshes (like Istio, Linkerd, or Envoy). Instead of acting as a standalone HTTP reverse proxy, LLM-Shield-Proxy can run as an Envoy External Processing (`ext_proc`) sidecar, intercepting and mutating payloads with near-zero network overhead.
+The **gRPC `ext_proc` integration** lets an Envoy filter send supported request and response body
+messages to LLM-Shield-Proxy for processing. This is an alternative to the standalone HTTP reverse
+proxy path. It adds gRPC, serialization, scheduling, and mutation work that must be measured.
 
 ## How It Works
 Routing traffic out of a service mesh to an external HTTP proxy and back adds redundant TCP handshakes and serialization latency.
 
-1. **Envoy Delegation:** When an application inside the mesh sends an HTTP request to OpenAI, the Envoy sidecar intercepts it and delegates it to the LLM-Shield-Proxy via a high-speed gRPC stream over a Unix Domain Socket (UDS).
+1. **Envoy delegation:** A configured Envoy `ext_proc` filter sends supported messages to the
+   proxy over gRPC, optionally through a Unix socket.
 2. **Buffer Mutation:** The proxy receives the raw HTTP body buffers via gRPC, applies the Tier 1/2/3 PII masking, and streams the mutated buffers back to Envoy.
 3. **Envoy forwarding:** Envoy forwards the processor's result according to its filter configuration. Applications may observe changed bodies, headers, timing, status, or error behavior and should be integration-tested.
 
@@ -26,7 +29,8 @@ View diagram on GitHub mobile 📱 -->
 
 ## Performance Profile
 - **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Eliminates the need for the proxy to manage outbound TLS/HTTPS connections, offloading that entirely to Envoy.
+- **Overhead:** Envoy owns the upstream connection on this path. The `ext_proc` exchange still adds
+  gRPC messages, body buffering or streaming, serialization, and proxy processing.
 
 ## Configuration Flags
 
@@ -45,10 +49,11 @@ View diagram on GitHub mobile 📱 -->
 A: Yes. The FastAPI HTTP path and Envoy `ext_proc` path are separate deployment options. Enable and validate only the path the topology uses, including its authentication, failure policy, body modes, and streaming behavior.
 
 
-## Plainspeak
-This feature allows the proxy to operate like a high-speed internal organ of the network, rather than an external checkpoint.
-
-Normally, sending data out to a security proxy and back wastes precious milliseconds. This feature allows the proxy to "plug in" directly to the deep plumbing of an advanced network (a Service Mesh). The data flows straight through it natively without having to leave the fast lane, making the security checks almost entirely invisible to the network speed.
+## Practical effect
+Envoy can call the proxy as an external processor instead of routing the application through the
+proxy's HTTP endpoint. This changes where the proxy sits in the request path; it does not make the
+security checks free. Test body modes, timeouts, failure policy, streaming, and latency with the
+exact Envoy configuration.
 
 ## Related Tests
 See the following test file for reference implementations and edge-case testing: [`tests/test_grpc_ext_proc.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_grpc_ext_proc.py).

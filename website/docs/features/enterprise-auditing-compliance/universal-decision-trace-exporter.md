@@ -1,4 +1,4 @@
-# Universal Decision Trace Exporter
+# Decision Trace Exporter
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
@@ -6,7 +6,8 @@
 The **Decision Trace Exporter** adds supported proxy decision metadata to OpenTelemetry (OTel) traces. It covers instrumented paths and enabled exporters, not every security boundary or decision.
 
 ## How It Works
-Modern cloud infrastructure relies heavily on distributed tracing (Jaeger, Zipkin, Datadog) to understand request lifecycles.
+The exporter turns selected decision fields into OpenTelemetry spans when application code calls
+it.
 
 1. **Explicit invocation:** A caller constructs `DecisionTraceExporter` and calls `record_decision(...)`; the current catch-all and MCP routes do not invoke it automatically.
 2. **Span emission:** That method creates a `gen_ai.client.operation.tool_call` span and attaches the fields present in its arguments.
@@ -49,9 +50,7 @@ A: These products accept OTLP in supported configurations, but endpoint format, 
 A: No. OTel traces are designed for observability and may be sampled or retained briefly. The audit chain is a separate evidence path; use durable delivery and independently configured immutable retention where required.
 
 
-## Plainspeak
-This feature translates the proxy's complex security decisions into a standard format that corporate monitoring tools can easily understand.
-
+## Practical effect
 This feature packages selected decision metadata into OpenTelemetry spans so a configured collector can process it. Treat the resulting traces as sampled observability data, not a complete or durable audit record.
 
 ## Related Tests

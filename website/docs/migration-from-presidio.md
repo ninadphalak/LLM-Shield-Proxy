@@ -1,9 +1,8 @@
 # Evaluating a Migration from Microsoft Presidio
 
-Microsoft Presidio is a solid open-source PII detection SDK, but it was built as a batch
-NLP toolkit, not a real-time LLM traffic gateway. Bolting it in front of a streaming chat
-completion endpoint requires the application team to integrate detection, response-stream handling,
-state, and policy enforcement into its request path.
+Microsoft Presidio is an open-source PII detection SDK, not an LLM traffic gateway. Using it on a
+streaming chat path requires the application team to add request integration, response-stream
+handling, state, and policy enforcement.
 
 LLM-Shield-Proxy is a reverse proxy with a supported OpenAI-compatible subset. An evaluation can
 start by pointing a test client's base URL at it, but replacing Presidio requires a detector-quality,

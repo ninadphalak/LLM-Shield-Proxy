@@ -1,4 +1,4 @@
-# Stateless Redis TTL Vault
+# Redis TTL Mapping Store
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
@@ -51,7 +51,7 @@ A: The Redis TTL is refreshed when the vault is retrieved and when updated mappi
 A: Yes, mapping values contain originals. Protect Redis with network controls, authentication, TLS, least privilege, and appropriate storage encryption; a VPC boundary alone is insufficient.
 
 
-## Plainspeak
+## Practical effect
 This feature provides a shared, TTL-bounded mapping store whose security depends on Redis and infrastructure configuration.
 
 The Redis mode stores a temporary mapping from a substitute to the original value with a configured TTL. Expiry makes the key eligible for deletion; memory reclamation, persistence files, replicas, backups, snapshots, swap, and crash dumps depend on Redis and infrastructure configuration.

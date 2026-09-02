@@ -1,15 +1,21 @@
-# Context-Aware Tool Catalog Pruner (MCP Discovery)
+# Tool Catalog Policy Filter (MCP Discovery)
 
 ## Overview
-Dumping massive tool catalogs into an LLM's context window inflates token costs and directly causes agent hallucinations. To address this and support MCP Progressive Discovery (SEP-2549), the proxy intercepts JSON-RPC `server/discover` and `tools/list` payloads at the network edge.
+The pruner removes tools that the resolved policy does not allow from supported `tools/list`
+responses. Its middleware also recognizes `server/discover`, but the shipped `/v1/mcp` route does
+not expose that method. The pruner does not infer which allowed tools are relevant to the user's
+current task.
 
 ## Architectural Mechanics
-* **O(1) RBAC Pruning:** Tool access is evaluated against tenant-specific `frozenset` collections. Unauthorized tool signatures are silently redacted from the `result.tools` array before the payload reaches the LLM.
-* **Multi-Tenant Redis Caching:** Filtered tool definitions are cached using `redis.asyncio` with composite BLAKE3 keys (`mcp:tools:{tenant_id}:{upstream_hash}`).
-* **Dynamic TTL Clamping:** The proxy dynamically parses the upstream `_meta.ttlMs` cache metadata. It enforces a safety floor of 30 seconds and a ceiling of 3600 seconds, defaulting to 300 seconds if the upstream server provides no TTL.
+* **Policy filtering:** The middleware checks tool names against tenant-specific `frozenset`
+  collections and removes disallowed entries from `result.tools`.
+* **Redis cache:** Filtered tool definitions can be cached with `redis.asyncio` under a composite
+  tenant and upstream hash key.
+* **TTL limits:** Upstream `_meta.ttlMs` values are clamped between 30 and 3,600 seconds. The
+  default is 300 seconds.
 * **Event-Driven Invalidation:** A handled `notifications/tools/list_changed` message invalidates the affected cache entry. Delivery loss, races, TTL, multi-process caches, and resolver propagation can still produce stale observations.
 
-## Plainspeak
-This feature prevents the AI from getting confused or distracted by giving it too many tool options at once.
-
-If an AI connects to a system with thousands of different available tools or databases, seeing that massive list will overwhelm the AI and slow it down. This feature acts like a smart librarian. It figures out exactly what the AI actually needs for its specific task, and trims the list down to only show the most relevant tools, keeping the AI focused and fast.
+## Practical effect
+The pruner hides tools that policy denies before an allowed `tools/list` result reaches the model.
+This can reduce catalog size. It does not rank tools, understand the task, or prove that a smaller
+catalog improves model behavior.

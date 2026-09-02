@@ -53,7 +53,7 @@ A: No. It appends the proxy container but does not rewrite the application conta
 A: No. Helm, Kustomize, Terraform, or a service-mesh configuration can manage the sidecar and application routing instead.
 
 
-## Plainspeak
+## Practical effect
 This endpoint can place the proxy container beside an application container. It does not make the application use that proxy. Routing, bypass prevention, resource planning, and compatibility testing remain separate deployment work.
 
 ## Related Tests

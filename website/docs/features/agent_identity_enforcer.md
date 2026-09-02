@@ -4,7 +4,9 @@ The Agent Identity Enforcer validates configured workload-identity and proof-of-
 
 ## Architectural Overview
 
-By default, LLM-Shield-Proxy trusts upstream clients based on virtual API keys. The Agent Identity Enforcer upgrades this to a cryptographic zero-trust model where every tool-call intent is validated against a signed Workload Identity (JWT) and a Demonstrating Proof-of-Possession (DPoP) proof.
+By default, LLM-Shield-Proxy authenticates clients with virtual API keys. When enabled, the
+Agent Identity Enforcer also requires a signed workload JWT and a Demonstrating Proof-of-Possession
+(DPoP) proof for supported agent operations.
 
 This middleware validates proofs using cached JSON Web Key Sets (JWKS), enforces per-tenant policies, and records validated identity metadata in a signed sequential SHA-256 audit chain.
 
@@ -23,8 +25,8 @@ sequenceDiagram
         Enforcer-->>Agent: HTTP 401 Unauthorized (Connection Dropped)
     else Proofs Validated
         Enforcer->>Enforcer: Cryptographically verify JWT via cached JWKS
-        Enforcer->>Enforcer: Resolve O(1) RBAC tenant policies
-        Enforcer->>Audit: Seal agent_identity_claim in SHA-256 chain
+        Enforcer->>Enforcer: Resolve tenant policy
+        Enforcer->>Audit: Record agent_identity_claim in signed chain
         Enforcer->>LLM: Forward sanitized request
         LLM-->>Agent: HTTP Response
     end
@@ -72,19 +74,17 @@ cache:
 * This is enforced regardless of `"lenient"` vs `"strict"` mode -- replay protection isn't
   part of the `htm`/`htu` tier that lenient mode relaxes.
 
-Replay protection is per-process (the cache isn't currently shared across replicas via
-Redis), so a proof reused against a *different* pod within the TTL window would not be
-caught today. Treat this the same as any other per-process cache in the proxy (e.g. the
-in-memory rate limiter fallback): sufficient for single-replica or sticky-routing
-deployments, and a natural extension point (a Redis-backed `SETNX` with the same 300s TTL)
-for multi-replica fleets that need cross-pod replay detection.
+Replay protection is per process. A proof can be replayed against another replica during the
+TTL window because the cache is not shared through Redis. Use a single replica or sticky routing
+if that limitation is acceptable. Multi-replica deployments that require cross-pod replay
+detection need a shared store, such as Redis `SETNX` with the same 300-second TTL.
 
-## Plainspeak
+## In plain English
 
-Imagine a company with 50 different AI agents performing automated tasks like reading emails or querying databases.
+Shared API keys identify a tenant, not an individual agent process. The optional identity enforcer
+requires each supported operation to carry a signed workload identity and a proof bound to the
+request. The proxy validates both, applies policy, and records the decision metadata for later
+review.
 
-**The Problem:** Normally, when an agent requests an action (like "delete database row"), it uses a generic, shared API password. If an agent goes rogue, the security team knows a password was used, but they cannot prove exactly *which* agent used it or verify that it had the authority to act at that exact second.
-
-**The Solution:** Before an agent can execute a tool, it presents a signed DPoP/workload token instead of relying only on a shared password. The proxy validates the proof against policy and records identity metadata, time, and decision in its tamper-evident audit chain for later verification.
-
-It is the difference between a building having a single front-door key that everyone shares, versus requiring every individual to scan a biometric badge every single time they open a door.
+This improves attribution within the configured trust model. It does not prove who controlled the
+agent, protect a stolen signing key, or replace authorization policy.

@@ -58,7 +58,7 @@ A: Invalid JSON is handled according to the stream parser's tested error path. T
 A: The adapter handles a documented subset of Anthropic event shapes. Test the selected model, tools, content blocks, errors, stop events, fragmentation, and provider-version changes before relying on rehydration.
 
 
-## Plainspeak
+## Practical effect
 This feature bounds placeholder lookahead while preserving incremental delivery in the tested fixtures. User-visible pacing and end-to-end latency depend on the complete service path.
 
 An SSE response can split a sensitive token across chunks. The sliding window retains a configured suffix so supported matches can span boundaries, then yields older content. Coverage depends on window size, detector behavior, encoding, and provider framing; measure the added delay.
