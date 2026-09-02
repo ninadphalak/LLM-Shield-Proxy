@@ -12,10 +12,10 @@ const SIMULATED_LLM_LATENCY_MS = 400;
 type Phase = 'idle' | 'typing' | 'sent' | 'received';
 
 const MODE_OPTIONS: {value: MaskMode; label: string; blurb: string}[] = [
-  {value: 'SYNTHETIC', label: 'Synthetic', blurb: 'Realistic fake values that preserve tone and token count.'},
+  {value: 'SYNTHETIC', label: 'Synthetic', blurb: 'Fictional values with a similar format.'},
   {value: 'STRUCTURAL_TAG', label: 'Structural', blurb: 'Explicit bracketed tags like [PERSON_1].'},
-  {value: 'SCRUB', label: 'Scrub', blurb: 'One-way destruction - nothing is kept, so nothing comes back.'},
-  {value: 'STATELESS_CRYPTO', label: 'AES-256-GCM', blurb: 'In-band authenticated ciphertext. Zero Redis dependency.'},
+  {value: 'SCRUB', label: 'Scrub', blurb: 'One-way removal. The original value cannot be restored.'},
+  {value: 'STATELESS_CRYPTO', label: 'AES-256-GCM', blurb: 'Encrypted text carried in the request. Redis is not required.'},
 ];
 
 const ENTITY_COLORS: Record<string, string> = {
@@ -31,15 +31,15 @@ const ENTITY_COLORS: Record<string, string> = {
 const PHASE_LABEL: Record<Phase, string> = {
   idle: 'Type a prompt, or load an example below, to begin',
   typing: '⌨️ Typing…',
-  sent: '🛰️ Redacted payload sent to LLM - awaiting response…',
-  received: '✅ Response received - PII rehydrated for your screen',
+  sent: '🛰️ Masked request sent to the simulated model',
+  received: '✅ Response received and allowed values restored',
 };
 
 const AGENT_PHASE_LABEL: Record<Phase, string> = {
   idle: 'Pick a Tier 3 example above to load a tool-call payload',
   typing: '⏳ Building JSON-RPC payload…',
-  sent: '🛰️ Redacted payload sent to LLM - awaiting response…',
-  received: '✅ Response received - PII rehydrated for the calling agent',
+  sent: '🛰️ Masked request sent to the simulated model',
+  received: '✅ Response received and allowed values restored',
 };
 
 type TerminalPart = {text: string; kind: 'comment' | 'sensitive' | 'protected' | 'restored' | null};
@@ -199,10 +199,8 @@ function RehydratedPayload({segments, mode}: {segments: RedactionResult['segment
 type TrafficType = 'CHAT' | 'AGENT';
 
 const AGENT_BLURB =
-  'This structured JSON-RPC / MCP demo uses AES-256-GCM (Stateless Crypto) - Scrub and Structural ' +
-  'Tags would break the payload schema. Tier 1 regex, Tier 2 synthesis, and Tier 3 NER still scan every ' +
-  'string value inside the JSON tree exactly as they do for chat text - switch the Tier 3 example above ' +
-  'to see it fire on different fields.';
+  'This JSON-RPC example uses AES-256-GCM so the original value can be restored without Redis. ' +
+  'The preview checks every string in the JSON object. Choose another example to see which fields match.';
 
 export default function InteractiveShieldDemo(): ReactNode {
   const [text, setText] = useState(TEMPLATES[0].text);
@@ -262,18 +260,15 @@ export default function InteractiveShieldDemo(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <div className={styles.header}>
-          <span className={styles.eyebrow}>Try it yourself - no signup, no server, no data leaves your browser</span>
+          <span className={styles.eyebrow}>Browser preview with fictional data</span>
           <Heading as="h2" className={styles.title}>
-            Use the synthetic examples below to preview configured masking in your browser.
+            See how each masking mode changes a request
           </Heading>
           <p className={styles.subtitle}>
-            This browser-local preview demonstrates Tier 1 (regex) and Tier 2 (format-preserving
-            synthesis) detection - nothing here calls a real LLM or leaves your machine. The
-            production engine adds a local ONNX NER model (Tier 3) for free-text names and
-            organizations, and genuine AES-256-GCM for the AES-256-GCM mode - and runs that identical
-            three-tier cascade on supported string values inside structured JSON-RPC / tool-call traffic too,
-            not a separate or reduced pipeline. Switch <strong>Traffic type</strong> to{' '}
-            <strong>Agent tool call</strong> below to see it fire inside a JSON payload.
+            This preview runs in your browser. It does not contact a model or send data anywhere.
+            It demonstrates the regex and synthetic-value paths with fictional examples. The server
+            can also use an optional local ONNX model and real AES-256-GCM encryption. Choose{' '}
+            <strong>Agent tool call</strong> to see how string values in JSON are handled.
           </p>
         </div>
 
@@ -399,13 +394,10 @@ export default function InteractiveShieldDemo(): ReactNode {
               )}
             </div>
             <p className={styles.agentCaption}>
-              This is the exact same Tier 1/2/3 cascade as the chat demo, run against the{' '}
-              <code>notes</code> string inside a real JSON-RPC <code>tools/call</code> envelope - the proxy
-              recursively scans every string value in the payload tree, not just top-level or
-              "known" fields. This structured tool-call demo uses <strong>AES-256-GCM (Stateless Crypto)</strong>{' '}
-              instead of Scrub or Structural Tags because those modes can alter the payload's expected values and
-              break the calling agent's schema. The proxy restores the original value before handing the
-              response back. No Redis, no database, no long-term storage.
+              This example checks the <code>notes</code> value inside a JSON-RPC{' '}
+              <code>tools/call</code> request. The proxy recursively checks string values, including
+              nested fields. This preview uses <strong>AES-256-GCM</strong> so the original value can
+              be restored without a Redis mapping. Test your own tool schemas before deployment.
             </p>
           </>
         ) : (
@@ -482,29 +474,28 @@ export default function InteractiveShieldDemo(): ReactNode {
             </div>
             {mode === 'SCRUB' && phase === 'received' && sentResult && sentResult.totalEntities > 0 && (
               <p className={styles.scrubNote}>
-                Scrub mode destroys the original values on the way in - there's nothing stored to restore,
-                so the response above still shows the redacted placeholders. Switch to Synthetic,
-                Structural, or AES-256-GCM to see full rehydration.
+                Scrub mode does not save the original values, so it cannot restore them in the
+                response. Choose Synthetic, Structural, or AES-256-GCM to preview restoration.
               </p>
             )}
           </>
         )}
 
         <div className={styles.terminalSection}>
-          <span className={styles.eyebrow}>Zero code changes</span>
+          <span className={styles.eyebrow}>Client setup</span>
           <Heading as="h3" className={styles.subsectionTitle}>
-            Point your existing SDK at the proxy - that's the whole integration
+            Change the client address after configuring the proxy
           </Heading>
           <p className={styles.terminalIntro}>
-            Same request. Same SDK. The only change is the <code>base_url</code> - everything upstream
-            of the proxy is invisible to your existing agents, scripts, and machine-to-machine tool calls.
+            OpenAI-compatible clients can keep the same request format. Set <code>base_url</code> to
+            the proxy address and configure provider and client keys on the server.
           </p>
           <div className={styles.terminal}>
             <div className={styles.terminalBar}>
               <span className={styles.dot} style={{background: '#ff5f57'}} />
               <span className={styles.dot} style={{background: '#febc2e'}} />
               <span className={styles.dot} style={{background: '#28c840'}} />
-              <span className={styles.terminalTitle}>machine-to-machine · zero code changes</span>
+              <span className={styles.terminalTitle}>OpenAI-compatible client setup</span>
             </div>
             <pre className={styles.terminalBody}>
               <TerminalBody parts={TERMINAL_LINES} />

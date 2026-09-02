@@ -9,31 +9,37 @@ pii-leak-benchmark --target-base-url http://127.0.0.1:8899/v1
 
 Standard library plus `httpx`. You should not have to install one gateway to measure another.
 
-## The first result exposed a biased fixture
+## What changed after the first benchmark run
 
-All current comparison rows come from the initial project-run measurement set, not independent reproductions. Each row is therefore labelled `unreplicated` and published with its configuration and raw report for other people to check.
+All current results were produced by this project on one workstation. No outside contributor has repeated them yet. The results table marks each product result as `unreplicated` and links to the configuration and report for that run.
 
-The prompt used to carry three fixed values chosen to be safe to publish: `person@example.invalid`, `123-45-6789`, and `4532-1234-5678-9012`. A validating detector rejects all three: `.invalid` is not a real public suffix, that SSN is a blacklisted sequence, and the card fails its Luhn checksum. A pinned Presidio at `score_threshold: 0.0` returned no `EMAIL_ADDRESS`, `US_SSN`, or `CREDIT_CARD` finding for them.
+The first test prompt contained three invalid examples:
 
-The reference implementation used regexes without those validation checks, so it caught all three. The fixture therefore favored shape matching over validated detection. A run against LiteLLM + Presidio exposed the problem: it reported `leaked: ["SSN"]` with the old fixture and `leaked: []` when valid specimens were substituted. That row was withheld, the fixture was replaced with valid specimens drawn from reserved space, and all six rows were rerun.
+| Old test value | Why Presidio rejected it |
+| :--- | :--- |
+| `person@example.invalid` | `.invalid` is not a public domain suffix |
+| `123-45-6789` | Presidio blocks this well-known invalid SSN sequence |
+| `4532-1234-5678-9012` | The number fails the Luhn card-number checksum |
 
-The benchmark also exposed two defects in LLM-Shield-Proxy's streaming hot path: an OpenTelemetry span opened for every SSE delta even with export disabled, and the data line and its terminating blank line were emitted as separate writes. Both are fixed.
+LLM-Shield-Proxy matched the text patterns but did not perform those validity checks. This gave it an unfair advantage over detectors that validate values. A LiteLLM and Presidio run revealed the problem: the old values produced `leaked: ["SSN"]`, while valid test values produced `leaked: []`. The project did not publish the affected result. It replaced the fixture with valid, reserved test values and reran all six configurations.
 
-The [fixture threat model](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/fixture-threat-model.md) also documents a remaining limitation: a roughly 35-line `str.replace` shim with no general detector can pass all five checks. The formats remain fixed because broader format randomization produced false leak findings in two of six variants against a correctly redacting gateway. Values now vary within those formats. Submitted CI runs can also use detached GitHub/Sigstore provenance over the finished report bytes. That prevents a hand-edited report from posing as workflow output, but it cannot prove that the measured process was the claimed target image.
+The benchmark also found two streaming bugs in LLM-Shield-Proxy. It created an OpenTelemetry span for every SSE event even when export was off, and it sent each event's blank terminator as a separate write. Both bugs are fixed and covered by regression tests.
+
+**Known limitation:** the test uses three fixed data formats. A small program written specifically for those formats can pass without being a general PII detector. The values change on every run, but the formats do not. Testing more formats caused two false failures in six trials. The [fixture threat model](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/fixture-threat-model.md) contains the measurements and the full change record.
 
 ## What it measures
 
-The harness stands a controlled capture server in front of the gateway's configured upstream, sends a prompt containing synthetic-but-valid personal data, and inspects **every channel** the gateway could use to reach the capture: request line, method, headers, chunk extensions, trailers, and the decoded JSON body.
+You configure the gateway to use the benchmark's capture server as its model provider. The benchmark starts that server and sends a prompt containing valid but fictional personal data. The capture server checks the URL, HTTP method, headers, chunk extensions, trailers, and decoded JSON body for those values.
 
 | Check | Fails when |
 | :--- | :--- |
-| `configured_upstream_boundary` | a protected value reaches the capture in any channel |
+| `configured_upstream_boundary` | the gateway sends an unmasked test value to the capture server |
 | `response_fidelity` | the client does not get the original values back |
 | `sse_validity` | the response is not a valid SSE stream |
-| `fragmentation_safety` | the stream is not reconstructible across events |
+| `fragmentation_safety` | the client cannot rebuild the response from its SSE events |
 | `client_observed_latency` | an iteration did not complete |
 
-Anything the capture cannot inspect, such as an unsupported protocol or malformed header line, **fails closed**. Ten adversarial rounds are recorded in the repository; the rule that survived them is *enumerate the channel, not the encoding*.
+If the capture cannot safely inspect part of a request, such as an unsupported protocol or malformed header line, the run ends with an error instead of assuming that no value leaked. The repository records ten rounds of tests against bypass attempts.
 
 ## A measurement is not a verdict
 
@@ -41,14 +47,14 @@ Anything the capture cannot inspect, such as an unsupported protocol or malforme
 
 | `outcome` | Meaning |
 | :--- | :--- |
-| `pass` / `fail` | verdicts. **`fail` means one thing: protected data reached the capture** |
+| `pass` / `fail` | verdicts. `fail` means the gateway sent an unmasked test value to the capture server |
 | `no-leak-profile-not-met` | non-pass with **no leak**; a one-way anonymizer that never restores values |
 | `not-applicable` | the product does not claim PII redaction at all |
 | `redaction-not-enabled` | it offers redaction; it was not turned on. A configuration statement |
 | `inconclusive` | nothing correlated to your run; not attributable |
 | `claim-unstated` | no claim recorded. The fail-closed default |
 
-You cannot type the outcome: it is derived, and the published schema re-derives it in both directions, so a hand-edited report fails validation. This avoids calling a caching or routing gateway a privacy failure when it never claimed to redact PII.
+The harness calculates the outcome from the product's documented claim, the run configuration, and the measurements. A submitter cannot choose it. The report schema checks the calculation and rejects an inconsistent edit. Products that do not advertise PII redaction are marked `not-applicable`, not failed.
 
 ## Running it
 
@@ -80,14 +86,14 @@ Hosted gateways are measurable too, by binding the capture behind your own tunne
 
 ## Submitting a result
 
-The [results table](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/results.md) records, per gateway, how many independent runs exist and **how many distinct people** produced them. Below three runs from three distinct submitters, a gateway reads `unreplicated`, not a verdict. The reference implementation's row is currently 1 run by 1 submitter.
+Every product result currently has one run from this project's maintainer. A result becomes `replicated` only after three different people each submit a run of the same gateway and configuration. Until then, the table marks it `unreplicated`. This includes LLM-Shield-Proxy.
 
-A submission needs the pinned configuration **and** the raw artifact, never one without the other. See [submitting](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md).
+A submission needs both the exact configuration and the JSON report produced by the run. See [submitting](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md).
 
 To check a report before you send it, install `pii-leak-benchmark[validate]` and validate it against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json). The schema is published in the repository rather than bundled here, so there is exactly one copy. It re-derives `outcome` in both directions, so a hand-edited report fails validation.
 
 ## Relationship to LLM-Shield-Proxy
 
-This harness was extracted from [LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy), which is one of the gateways it scores and is labelled in the table as the reference implementation. The dependency runs one way only: the proxy may use the benchmark, the benchmark never imports the proxy, and a test enforces it. Reports validate against that repository's `spec/v1.0.0` Streaming Privacy Gateway schemas, which keep the SPG name.
+This harness was extracted from [LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy), which is one of the gateways in the results table. The proxy may import the benchmark, but the benchmark never imports the proxy. A test enforces that separation. Reports use the Streaming Privacy Gateway schemas in the repository's `spec/v1.0.0` directory.
 
 Apache-2.0.

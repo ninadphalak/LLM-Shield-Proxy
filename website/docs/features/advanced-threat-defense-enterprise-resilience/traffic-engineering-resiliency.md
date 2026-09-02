@@ -62,4 +62,4 @@ limit receive HTTP 429. The event-loop lag check can reject some new requests wi
 These controls reduce overload risk but do not guarantee availability.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).
+Tests: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

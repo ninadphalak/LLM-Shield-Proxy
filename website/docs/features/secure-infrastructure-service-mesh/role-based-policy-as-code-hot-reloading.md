@@ -50,4 +50,4 @@ A: No. TLS certificates and core `google-re2` compilations (BYOR) operate at a l
 The local resolver periodically checks the policy file and replaces the active validated mapping when it detects a change. Reload time includes the polling interval and file propagation; a process crash, invalid file, or dependency failure can still interrupt service.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).
+Tests: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

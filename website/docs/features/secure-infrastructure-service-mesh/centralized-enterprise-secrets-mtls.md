@@ -57,4 +57,4 @@ This feature centralizes secret retrieval; it does not remove secrets from proce
 Vault-backed retrieval can avoid application-managed plaintext credential files. Operators still need controls for Vault, workload identity, memory, swap, dumps, logs, backups, and administrator access.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_vault_mtls.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_vault_mtls.py).
+Tests: [`tests/test_vault_mtls.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_vault_mtls.py).

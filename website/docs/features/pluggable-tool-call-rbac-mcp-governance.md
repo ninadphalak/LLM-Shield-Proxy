@@ -53,4 +53,4 @@ A: The gateway can enforce configured tool and egress policies on traffic routed
 
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).
+Tests: [`tests/test_tool_rbac_and_compliance.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_tool_rbac_and_compliance.py).

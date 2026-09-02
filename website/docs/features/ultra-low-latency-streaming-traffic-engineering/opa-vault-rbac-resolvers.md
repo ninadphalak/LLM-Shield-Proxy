@@ -69,4 +69,4 @@ immutable retention requires a separate configured store.
 The resolver can query an external policy or secret system and cache supported results. Authorization latency, cache staleness, revocation, availability, and failure behavior require deployment-specific tests.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+Tests: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

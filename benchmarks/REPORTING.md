@@ -96,6 +96,6 @@ while keeping the repository as the living implementation.
 - Is each headline tied to a report version and exact environment?
 - Are p95/p99 based on enough samples and accompanied by failures?
 - Are memory figures labeled as RSS, peak RSS, or Python allocation, without mixing them?
-- Does "zero egress" mean the exact serialized pre-upstream boundary was inspected?
+- Did the test inspect the exact request bytes sent to the model provider?
 - Are WORM, compliance, and cryptographic claims limited to what was actually tested?
 - Can a third party execute the protocol without private infrastructure or data?

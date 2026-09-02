@@ -35,7 +35,7 @@ pii-leak-benchmark \
 ```
 
 The capture returns the transformed prompt as one-character SSE events. The report checks the
-configured-upstream boundary, SSE validity, fragmentation behavior, response fidelity, and
+request sent to the configured model provider, SSE validity, split-event behavior, response fidelity, and
 client-observed local latency. It leaves process memory and audit integrity outside this HTTP
 profile because those properties require target-specific evidence.
 

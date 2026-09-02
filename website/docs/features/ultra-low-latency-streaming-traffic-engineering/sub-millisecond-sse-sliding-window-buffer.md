@@ -11,7 +11,7 @@ Streaming transports can split a placeholder such as `[PERSON_1]` across events 
 LLM-Shield-Proxy addresses the tested placeholder case with a sliding window:
 1. **SSE event processing:** As response bytes are received through the HTTP client, the stream parser processes supported SSE `data:` payloads; the application does not directly observe raw TCP frame boundaries.
 2. **Mathematical Overlap Retention:** The buffer evaluates the chunk against the Vault mappings, but *retains* a trailing overlap equal to $LL = max(0, max_token_length - 1).
-3. **Prefix-aware rehydration:** The buffer retains bounded trailing prefixes so the published placeholder fixtures can be reconstructed across tested chunk splits.
+3. **Split-token handling:** The buffer keeps the end of one event when it might be the start of a replacement token completed by the next event. The retained text has a fixed limit.
 4. **Bounded release and write aggregation:** Content outside the retained lookahead can be yielded downstream. Small encoded lines are coalesced only up to `MAX_SSE_LINE_LENGTH`. A single longer rehydrated line is emitted intact rather than truncated; repeated-token expansion fails closed once one output piece would exceed `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH`.
 
 
@@ -64,4 +64,4 @@ This feature bounds placeholder lookahead while preserving incremental delivery 
 An SSE response can split a sensitive token across chunks. The sliding window retains a configured suffix so supported matches can span boundaries, then yields older content. Coverage depends on window size, detector behavior, encoding, and provider framing; measure the added delay.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_streaming.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_streaming.py).
+Tests: [`tests/test_streaming.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_streaming.py).

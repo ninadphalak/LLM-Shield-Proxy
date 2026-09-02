@@ -53,4 +53,4 @@ A: The documented ingress path transforms configured content before provider tra
 Providers expose different request fields, streaming events, tool semantics, and error behavior. The implemented adapters translate a documented subset; applications must test unsupported fields and semantic differences before switching providers.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_provider_adapters.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).
+Tests: [`tests/test_provider_adapters.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).

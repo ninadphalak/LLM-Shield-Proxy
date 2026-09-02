@@ -10,7 +10,7 @@ table.
 Everything here that does not need a vendor account has been run. Everything that does
 is marked **NOT RUN** and is drawn from vendor documentation, cited inline. Do not
 convert a row in [the results table](./results) from `Not run` until you have the
-pinned configuration and the raw artifact.
+pinned configuration and the JSON report produced by the run.
 
 ## Before anything else: what your row is allowed to say
 
@@ -24,11 +24,11 @@ re-derives it, so a hand-edited report fails validation.
 | `outcome` | Means | Publish it as |
 | :--- | :--- | :--- |
 | `pass` | Claims redaction, it was enabled, every check passed | Pass |
-| `fail` | **Protected data reached the capture origin.** The only leak finding | Fail — with `leak_evidence` |
-| `no-leak-profile-not-met` | Nothing leaked, but a behavioural check failed — usually one-way anonymization that never restores the value | "No leak; does not meet the reversible-masking requirement". **Never as a privacy failure** |
-| `not-applicable` | The product does not claim PII redaction at all | "Not applicable — no redaction feature offered" |
+| `fail` | **The gateway sent an unmasked test value to the capture server.** This is the only leak finding | Fail, with `leak_evidence` |
+| `no-leak-profile-not-met` | No test value leaked, but another check failed, usually because one-way anonymization never restores the value | "No leak; original-value restoration was not provided." Do not call this a privacy failure |
+| `not-applicable` | The product does not claim PII redaction at all | "Not applicable - no redaction feature offered" |
 | `redaction-not-enabled` | It offers redaction; you did not turn it on | A configuration statement. Enable it and re-run |
-| `inconclusive` | Nothing correlated — the target never reached your capture | Not a row. Fix the configuration and re-run |
+| `inconclusive` | Nothing correlated - the target never reached your capture | Not a row. Fix the configuration and re-run |
 | `claim-unstated` | You did not record the claim | Not a row |
 
 Two traps this table exists to prevent, both already reproduced:
@@ -45,7 +45,7 @@ Two traps this table exists to prevent, both already reproduced:
   `no-leak-profile-not-met`, not a Fail. Presidio's `replace`/`hash`/`mask` behave the
   same way.
 
-## Step 1 — a public capture (no vendor account needed)
+## Step 1 - a public capture (no vendor account needed)
 
 A hosted gateway cannot reach your loopback. You expose and control the capture endpoint;
 this project does not operate a shared capture service.
@@ -75,16 +75,16 @@ against a local gateway: the probe validated the advertised URL through the tunn
 (`advertised_url_reachable: true`), all three iterations correlated, nothing leaked, and
 the token stayed out of the artifact.
 
-### What the tunnel does to the request — measured
+### What the tunnel does to the request - measured
 
 Relevant because the tunnel sits in the path on every hosted row.
 
 | Property | Result |
 | :--- | :--- |
-| HTTP version at the capture | HTTP/1.1. No HTTP/2 downgrade problem — cloudflared speaks HTTP/1.1 to the origin |
+| HTTP version at the capture | HTTP/1.1. No HTTP/2 downgrade problem - cloudflared speaks HTTP/1.1 to the origin |
 | Transfer framing | `content-length` preserved. **No chunked re-framing** |
 | Body | Byte-identical to the direct request |
-| `Authorization` | **Survives intact** — this is what makes token attribution work |
+| `Authorization` | **Survives intact** - this is what makes token attribution work |
 | Headers added | 10: `cf-ray`, `cf-connecting-ip`, `cf-ipcountry`, `cf-visitor`, `cf-warp-tag-id`, `cf-ew-via`, `cf-worker`, `cdn-loop`, `x-forwarded-for`, `x-forwarded-proto` |
 | Headers removed | none |
 | Effect on leak matching | Digits per request rise from 20 to 93, but **needle proximity is unchanged** (SSN 2 of 9 direct and tunnelled) |
@@ -96,7 +96,7 @@ create a false SSN finding. Current fixtures exclude that collision.
 Each finding records `leak_evidence` as either `literal` or `normalized`. Check that field before
 reporting a leak.
 
-## Step 2a — Cloudflare AI Gateway  **(NOT RUN — needs an account)**
+## Step 2a - Cloudflare AI Gateway  **(NOT RUN - needs an account)**
 
 **Account tier.** [AI Gateway is available on all
 plans](https://developers.cloudflare.com/ai-gateway/reference/pricing/) and its core
@@ -106,7 +106,7 @@ gateway itself.
 
 **Point it at your tunnel.** Cloudflare requires a
 [Custom Provider](https://developers.cloudflare.com/ai-gateway/configuration/custom-providers/)
-whose `base_url` **must start with `https://`** — which the tunnel gives you.
+whose `base_url` **must start with `https://`** - which the tunnel gives you.
 
 ```bash
 curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai-gateway/custom-providers" \
@@ -140,36 +140,36 @@ pii-leak-benchmark \
 **Expect `outcome: not-applicable`.** The fixture will reach your capture and
 `leaked_entity_types` will list all three entities. That is a correct measurement of a
 product that never offered redaction, and it is **not** a failure. Publish the row as
-"Not applicable — detects and blocks, does not redact".
+"Not applicable - detects and blocks, does not redact".
 
 If you additionally enable DLP with the **Block** action, expect `captured_requests: 0`
 and `outcome: inconclusive`: the request never reaches the upstream. That is also not a
-Fail — it is the gateway doing exactly what Block means. Say so in the row rather than
+Fail - it is the gateway doing exactly what Block means. Say so in the row rather than
 publishing an `inconclusive` artifact as a result.
 
-## Step 2b — Portkey  **(NOT RUN — needs an account)**
+## Step 2b - Portkey  **(NOT RUN - needs an account)**
 
 **Account tier.** [Guardrails are on all
 plans](https://docs.portkey.ai/docs/product/guardrails), but the tiers differ:
 
 | Plan | Guardrails available | Enough to run this? |
 | :--- | :--- | :--- |
-| Developer (free) | `BASIC` only | **Yes** — `Regex Match` is BASIC and supports the Redact toggle |
-| Production | `BASIC`, `PARTNER`, `PRO` | Yes — includes the `Portkey Pro PII` detector |
+| Developer (free) | `BASIC` only | **Yes** - `Regex Match` is BASIC and supports the Redact toggle |
+| Production | `BASIC`, `PARTNER`, `PRO` | Yes - includes the `Portkey Pro PII` detector |
 | Enterprise | all + `custom` | Yes |
 
 Two materially different runs are possible, and a row **must say which**:
 
-- **Portkey Pro PII** (Production plan) — Portkey's own detector. Redacts `Phone number`,
+- **Portkey Pro PII** (Production plan) - Portkey's own detector. Redacts `Phone number`,
   `Email addresses`, `Location information`, `IP addresses`, `SSN`, `Names`,
   `Credit card information`, which covers all three fixture entity types. This measures
   *Portkey's detector*.
-- **Regex Match** (free Developer plan) — you supply the patterns. This measures
+- **Regex Match** (free Developer plan) - you supply the patterns. This measures
   *Portkey's gateway and guardrail engine with tester-authored patterns*, **not**
   Portkey's detection quality. Say that in `--redaction-config-reference`, or the row
   claims something it did not measure.
 
-**Enabling PII redaction** (required — a run without it is
+**Enabling PII redaction** (required - a run without it is
 `redaction-not-enabled`, not a verdict):
 
 1. Go to **Guardrails → Create**.
@@ -184,7 +184,7 @@ Two materially different runs are possible, and a row **must say which**:
 **Pointing it at your tunnel needs no dashboard step.** `custom_host` is a request
 header, so the harness can set it itself. Note that
 [Portkey blocks private and reserved IP ranges by
-default](https://portkey.ai/docs/integrations/llms/byollm) — a tunnel hostname works,
+default](https://portkey.ai/docs/integrations/llms/byollm) - a tunnel hostname works,
 loopback never will.
 
 ```bash
@@ -218,21 +218,21 @@ your tunnel unprocessed, so the capture can attribute the traffic.
 meet the reversible-masking requirement". **A `fail` here would be wrong and you should
 investigate the run before believing it.**
 
-## Step 3 — before you publish the row
+## Step 3 - before you publish the row
 
 Check all of these against the artifact:
 
-1. `outcome` — and read `outcome_rationale`. If it is not `pass`, `fail`, or
+1. `outcome` - and read `outcome_rationale`. If it is not `pass`, `fail`, or
    `no-leak-profile-not-met`, it is not a row.
 2. `capture.self_probe.advertised_url_reachable` is `true`. If false, the target may
    never have reached you; `captured_requests: 0` cannot distinguish that from a leak.
 3. `checks.configured_upstream_boundary.correlated_requests` equals your `--iterations`.
-4. `unattributed_requests` — expected to be non-zero on a public capture (internet scan
+4. `unattributed_requests` - expected to be non-zero on a public capture (internet scan
    traffic). It does not fail the check. `unattributed_leaked_entity_types` **does**.
-5. `leak_evidence` — for every entity in `leaked_entity_types`, is the match `literal`
+5. `leak_evidence` - for every entity in `leaked_entity_types`, is the match `literal`
    or `normalized`? A normalized-only match in the `headers` channel deserves a second
    look before you publish a leak result.
-6. `needle_proximity` against `needle_lengths` — equal means the value was present.
+6. `needle_proximity` against `needle_lengths` - equal means the value was present.
 7. Validate against the published schema:
    ```bash
    python -c "import json,sys;from jsonschema import Draft202012Validator as V; \
@@ -240,7 +240,7 @@ Check all of these against the artifact:
    ```
 8. `--iterations 3` is a smoke test. Raise it before presenting latency comparatively.
 
-## Step 4 — redact before committing
+## Step 4 - redact before committing
 
 The harness never writes the capture token, the target API key, or extra header
 **values** into the report (only header *names*). These it does write, and you must
@@ -249,10 +249,10 @@ decide about them:
 | Field | Contains | Action |
 | :--- | :--- | :--- |
 | `target.base_url` | For Cloudflare, **your account ID and gateway name** | Replace with a placeholder |
-| `capture.target_must_be_preconfigured_for` | Your tunnel hostname | Replace — a quick-tunnel hostname is ephemeral, but publishing it while the run is live exposes your capture |
+| `capture.target_must_be_preconfigured_for` | Your tunnel hostname | Replace - a quick-tunnel hostname is ephemeral, but publishing it while the run is live exposes your capture |
 | `capture.self_probe.url` | Your local bind address and port | Usually fine; replace if it is a real host |
 | `capture.self_probe.advertised_url` | Tunnel hostname + the probe secret | Replace |
-| `redaction_claim.configuration_reference` | Guardrail IDs | Keep — the row must reproduce. Do not include secrets in it |
+| `redaction_claim.configuration_reference` | Guardrail IDs | Keep - the row must reproduce. Do not include secrets in it |
 
 Redact by substituting a stable placeholder, and say in the accompanying `.md` that you
 did. Do not delete the fields: the schema requires them, and a report that no longer

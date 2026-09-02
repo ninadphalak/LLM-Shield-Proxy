@@ -72,4 +72,4 @@ certificate chain used in production.
 
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_air_gapped_egress.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_air_gapped_egress.py).
+Tests: [`tests/test_air_gapped_egress.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_air_gapped_egress.py).

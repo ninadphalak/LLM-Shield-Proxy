@@ -1,8 +1,8 @@
 # Streaming Privacy Gateway Specification Governance
 
-The Streaming Privacy Gateway (SPG) specification is intended to become an
-implementation-neutral test contract. LLM-Shield-Proxy is its first reference implementation,
-not the authority that certifies itself or other products.
+The Streaming Privacy Gateway (SPG) specification is intended to work with any compatible
+gateway. LLM-Shield-Proxy was the first gateway built against it, but this project does not certify
+LLM-Shield-Proxy or any other product.
 
 The community is still small, so the initial maintainer currently has substantial control. This
 process records that control and explains how independent reviewers can join. A maintainer-only
@@ -11,8 +11,8 @@ decision is not community consensus.
 ## Scope
 
 Governance covers normative conformance requirements, the report schema, result labeling,
-versioning, and the process for accepting independent implementations and reproductions. Product
-features and deployment defaults remain under the reference implementation's normal governance.
+versioning, and the process for accepting independent implementations and reproductions. The
+specification process does not govern LLM-Shield-Proxy features or deployment defaults.
 
 ## Roles
 
@@ -23,8 +23,8 @@ features and deployment defaults remain under the reference implementation's nor
 - **Specification maintainer:** a reviewer responsible for releases, repository hygiene, and
   recording decisions. Ninad Phalak is the initial maintainer.
 
-Reviewer status is earned through completed technical review, not purchased, granted for a
-testimonial, or conditioned on a favorable view of the reference implementation.
+Reviewer status comes from completed technical review. It cannot be purchased or exchanged for a
+testimonial, and reviewers do not need to support LLM-Shield-Proxy.
 
 ## Proposing a change
 
@@ -45,7 +45,7 @@ Editorial fixes that do not change observable conformance behavior may use a nor
 - The maintainer requests implementation, security-assurance, and operator review when those
   perspectives are affected.
 - A normative change should receive two approvals, including one person who did not author the
-  reference-implementation change.
+  related implementation change.
 - While fewer than two independent reviewers exist, the initial maintainer may merge a necessary
   change after the review window, but the decision record must be labeled **maintainer-only**. It
   must not be described as community consensus.
@@ -79,9 +79,9 @@ Results identify who ran and funded them:
 Payment, equipment, cloud credits, consulting, and pre-publication review rights must be disclosed.
 Failed and partial runs remain valid contributions when their artifacts are reproducible.
 
-A target needs three runs from three submitters before the results table presents a verdict.
-Until then, it says `unreplicated`. The reference implementation currently has one run from one
-submitter, so it is also unreplicated.
+A result becomes `replicated` only after three different people each submit a run of the same
+gateway and configuration. LLM-Shield-Proxy currently has one run from this project's maintainer,
+so its result is `unreplicated`.
 
 Maintainer runs do not count toward replication. Conflicting runs appear as separate rows instead
 of being averaged. [Submitting a result](./submitting) lists the required files and review steps.

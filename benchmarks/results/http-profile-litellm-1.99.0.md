@@ -32,7 +32,7 @@ during ASGI startup with `UnicodeEncodeError` while `click.echo`-ing its own ban
 the `cp1252` console codepage. `LITELLM_LOCAL_MODEL_COST_MAP=True` was set so the run
 makes no outbound call for the model-cost map.
 
-## Row 1 — default configuration, no PII masking
+## Row 1 - default configuration, no PII masking
 
 Artifact: `http-profile-litellm-1.99.0-default.json`
 (SHA-256 `dd107de45abd3ef6cf9c3c6f6e6b200e8bf7c8c8a82b932f2128d0f4b296c21c`)
@@ -59,13 +59,13 @@ about LiteLLM. LiteLLM does not mask PII unless a guardrail is attached, and non
 
 | Check | Result |
 | :--- | :--- |
-| `configured_upstream_boundary` | fail — `leaked_entity_types: [CREDIT_CARD, EMAIL, SSN]`, all three `literal`; `captured=3 correlated=3 uninspectable=0 marker_max=5` |
-| `fragmentation_safety` | **pass** — 134 events, response reconstructed |
-| `sse_validity` | **pass** — `status_codes: [200]` |
+| `configured_upstream_boundary` | fail - `leaked_entity_types: [CREDIT_CARD, EMAIL, SSN]`, all three `literal`; `captured=3 correlated=3 uninspectable=0 marker_max=5` |
+| `fragmentation_safety` | **pass** - 134 events, response reconstructed |
+| `sse_validity` | **pass** - `status_codes: [200]` |
 | `response_fidelity` | **pass** |
-| `client_observed_latency` | **pass** — 3 of 3 iterations measured |
+| `client_observed_latency` | **pass** - 3 of 3 iterations measured |
 
-## Row 2 — Presidio PII masking guardrail enabled
+## Row 2 - Presidio PII masking guardrail enabled
 
 Artifact: `http-profile-litellm-1.99.0-presidio.json`
 (SHA-256 `f660fa5b21ce2bdb705b83db1c513ad64aa5392c0c37600e2215fbd131621486`)
@@ -97,11 +97,11 @@ published as one.**
 
 | Check | Result |
 | :--- | :--- |
-| `configured_upstream_boundary` | **pass** — `leaked_entity_types: []`, `leak_evidence: []`; `captured=3 correlated=3 uninspectable=0 marker_max=5` |
-| `sse_validity` | **pass** — `status_codes: [200]` |
-| `client_observed_latency` | **pass** — 3 of 3 iterations measured |
-| `response_fidelity` | fail — the original values are never restored to the client |
-| `fragmentation_safety` | fail — gates on the same reconstruction; `events_observed: 1` |
+| `configured_upstream_boundary` | **pass** - `leaked_entity_types: []`, `leak_evidence: []`; `captured=3 correlated=3 uninspectable=0 marker_max=5` |
+| `sse_validity` | **pass** - `status_codes: [200]` |
+| `client_observed_latency` | **pass** - 3 of 3 iterations measured |
+| `response_fidelity` | fail - the original values are never restored to the client |
+| `fragmentation_safety` | fail - gates on the same reconstruction; `events_observed: 1` |
 
 ### What this configuration actually does, observed at a logging upstream
 
@@ -113,7 +113,7 @@ client receives: ... contact <URL>ith@<URL>SN <US_SSN>, card <CREDIT_CARD>
 
 Nothing protected reaches the upstream. Despite `output_parse_pii: true`, the client
 never receives the original values back, so on this profile's terms it is a **one-way
-anonymiser: no leak, reversible-masking requirement not met** — the same class as
+anonymiser: no leak, reversible-masking requirement not met** - the same class as
 Presidio's own `replace`/`hash`/`mask` operators, and the same class as Portkey. The
 client-visible stream also arrives as a single event, because the `output_parse_pii` path
 assembles the response before re-emitting it.
@@ -136,7 +136,7 @@ Nothing here is a speed comparison. `client_observed_latency` in the artifacts a
 threshold, gates on sample completeness, and runs three iterations; it is a completeness check
 wearing a latency name. A performance claim would need a versioned runner committed to this
 repository, run end to end against every gateway compared, with its raw output published beside
-it — and none exists.
+it - and none exists.
 
 Secrets and synthetic fixture values are not written into any report. The API key, the
 upstream key and extra-header values never appear in an artifact.

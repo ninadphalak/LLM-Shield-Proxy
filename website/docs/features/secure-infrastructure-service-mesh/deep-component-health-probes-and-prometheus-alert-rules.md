@@ -56,4 +56,4 @@ return 200 while the upstream provider is unavailable.
 The liveness route is shallow, while readiness checks a documented subset of local and configured dependency state. Kubernetes may remove an unready Pod from service; paging depends on the operator's monitoring stack.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_health_and_alerts.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_health_and_alerts.py).
+Tests: [`tests/test_health_and_alerts.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_health_and_alerts.py).

@@ -55,4 +55,4 @@ This feature is a policy checkpoint for supported tool calls on one scoped gatew
 For supported calls, the route resolves caller policy before forwarding. Its effectiveness depends on routing all relevant calls through the route and configuring a resolver that denies the intended operations and fails as required.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_proxy.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_proxy.py).
+Tests: [`tests/test_proxy.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_proxy.py).

@@ -52,4 +52,4 @@ A: No. It detects only the configured marker when that marker survives in the in
 The feature places a configured synthetic marker in model context and inspects the supported response path for that marker. A match is a tripwire signal; it can be triggered accidentally, evaded by transformation, or detected only after earlier bytes have been emitted.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+Tests: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

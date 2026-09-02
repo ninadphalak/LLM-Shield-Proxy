@@ -37,7 +37,7 @@ reports may add narrower constraints; none should imply a broader assurance than
   `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH` (11 MiB by default), which fails closed on
   repeated-token amplification. But (1) that couples the output ceiling to the request-size
   limit, so raising the request limit raises the amplification ceiling with it, and (2) the
-  rationale — "at most one accepted request's originals plus one accepted line of framing" —
+  rationale - "at most one accepted request's originals plus one accepted line of framing" -
   assumes every vault original arrived in the accepted request, which is unverified for
   session-scoped or custom vault population. Both are open policy questions, recorded here
   because they bound what the conformance profile's `memory_bounded` check means for this

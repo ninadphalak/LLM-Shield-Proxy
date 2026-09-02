@@ -8,7 +8,7 @@ LLM-Shield-Proxy is developing an open evidence base for streaming privacy gatew
 - [Reproduction guide](/docs/conformance/reproducing)
 - [Published and pending results](/docs/conformance/results)
 - [Audit evidence-plane status](/docs/evidence-plane-status)
-- Apache-2.0 reference implementation and machine-readable report schema
+- Apache-2.0 LLM-Shield-Proxy source and a machine-readable report schema
 
 ## Technical series
 

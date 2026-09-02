@@ -63,4 +63,4 @@ This feature gives active streams time to finish during an orderly restart; stre
 On shutdown, the application marks itself unready and gives active streams up to the configured drain timeout to finish. Streams can still be interrupted when the timeout, platform grace period, process failure, or upstream connection ends.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).
+Tests: [`tests/test_enterprise_resiliency.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_enterprise_resiliency.py).

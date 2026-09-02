@@ -4,10 +4,10 @@ import styles from './styles.module.css';
 // This count includes only qualifying reproductions submitted by an independent
 // operator. No published row has one yet.
 const STATS: {value: string; label: string}[] = [
-  {value: '6', label: 'Gateway configurations measured, raw artifacts published'},
-  {value: '0', label: 'Independent reproductions — every row reads unreplicated'},
-  {value: '1', label: 'Third-party dependency to run the benchmark (httpx)'},
-  {value: 'Apache 2.0', label: 'No license fee, no paid tier, no hosted service'},
+  {value: '6', label: 'Gateway configurations tested with reports published'},
+  {value: '0', label: 'Independent repetitions so far'},
+  {value: '1', label: 'Third-party Python dependency: httpx'},
+  {value: 'Apache 2.0', label: 'Open-source license'},
 ];
 
 export default function StatsBar(): ReactNode {

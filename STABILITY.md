@@ -9,9 +9,9 @@ correct; it simply has not been exercised end-to-end against the infrastructure 
 
 | Tier | Meaning | What you can rely on |
 |---|---|---|
-| **Supported** | Exercised end-to-end in CI against the infrastructure it targets — either because it needs none beyond `pip install llm-shield-proxy`, or because CI provisions the real thing (a Redis server, a Docker container, an HTTP/2 server). Every Supported entry carries a **scoped disclaimer naming exactly what was verified**. | Behavior is reproducible by a third party in minutes, on the versions and topology named in the disclaimer. Breaking changes follow the deprecation policy below. |
+| **Supported** | Exercised end-to-end in CI against the infrastructure it targets - either because it needs none beyond `pip install llm-shield-proxy`, or because CI provisions the real thing (a Redis server, a Docker container, an HTTP/2 server). Every Supported entry carries a **scoped disclaimer naming exactly what was verified**. | Behavior is reproducible by a third party in minutes, on the versions and topology named in the disclaimer. Breaking changes follow the deprecation policy below. |
 | **Beta** | Covered by tests, but the external system it integrates with is substituted in those tests (an in-memory exporter, a mocked backend), or behavior depends heavily on operator configuration. | The code path is exercised. The integration, your topology, and your failure modes are not. Integration-test before production. |
-| **Experimental** | Targets infrastructure that has not been exercised end-to-end in this repository, or implements a deliberate subset of a larger protocol. | Treat as a reference implementation and a starting point. Do not place on a production traffic path without your own validation. |
+| **Experimental** | Targets infrastructure that has not been exercised end-to-end in this repository, or implements a deliberate subset of a larger protocol. | Treat it as a starting point. Do not place it on a production traffic path without your own validation. |
 | **Research** | An exploration that is not on a path to being supported. It may rest on an approach with known limits, or on a protocol the project has not committed to tracking. | **Do not build on these. They may be removed in any release, without a deprecation period or a migration note.** Read them as published notes on an idea, not as a feature. |
 
 A note on the **Supported** definition. It used to read "runs with no external infrastructure",
@@ -26,7 +26,7 @@ a claim about evidence.
 
 This project is young and has been developed primarily by one maintainer. A long feature list
 from a young repository is a reason for suspicion, not confidence. Publishing which features
-carry independent evidence — and which do not — is more useful than publishing a longer list.
+carry independent evidence - and which do not - is more useful than publishing a longer list.
 
 Features are not removed when they land in Experimental. They are labeled so that you can tell
 the difference between "this is proven" and "this is implemented." Research is the one tier
@@ -44,7 +44,7 @@ Tiers are only as good as the pipeline behind them, so here is what
 | `test-and-lint` (Python 3.11, 3.12) | a **Redis 7** service container | the full suite, including `RedisVaultStore` and the MCP pruner against the real server, HTTP/2 negotiation and multiplexing against a real ALPN server, and OTel span export through a real `BatchSpanProcessor` |
 | `container-tests` | Docker on `ubuntu-latest` | the production image builds, starts, serves `/healthz` and `/readyz`, runs as uid 10001, drains in-flight requests on a real SIGTERM and exits 0; and the built wheel installs into a clean venv |
 | `tier3-onnx` | a checksum-pinned, cached quantized **DistilBERT multilingual NER** ONNX export | real `onnxruntime` inference through `ONNX_MODEL_PATH` and a real tokenizer, asserted with cases the regex fallback provably cannot produce |
-| `chart-verification` | **Helm 3.16** and **promtool 3.1** | both Helm charts lint and render — including the `PrometheusRule`, which the deploy chart could not render at all before this job existed — the rendered alert rules pass `promtool check rules`, alert expressions reference only metrics the app's Prometheus registry actually exports, and rendered probe paths are compared against the app's real routes |
+| `chart-verification` | **Helm 3.16** and **promtool 3.1** | both Helm charts lint and render - including the `PrometheusRule`, which the deploy chart could not render at all before this job existed - the rendered alert rules pass `promtool check rules`, alert expressions reference only metrics the app's Prometheus registry actually exports, and rendered probe paths are compared against the app's real routes |
 
 Every job fails rather than skips when its infrastructure is missing: the Redis
 step asserts a non-skipped run, and `SHIELD_REQUIRE_DOCKER`, `SHIELD_REQUIRE_ONNX`
@@ -63,22 +63,22 @@ Exercised end-to-end in CI. Each entry names the boundary of what was verified.
 - Format-preserving synthetic masking
 - JSON bomb / payload nesting depth protection
 - Dynamic schema rewriting (OpenAI tool schemas)
-- Tier 3 quantized ONNX BERT-NER — *verified in CI with a checksum-pinned quantized DistilBERT multilingual NER export: the session and tokenizer load, `onnxruntime` inference runs, and detections are asserted with cases the regex fallback cannot produce (single-token surnames, non-ASCII names) plus one it gets wrong (title-case phrases). **Two real constraints, asserted in the tests:** `detect_spans` feeds only `get_inputs()[0]` and `[1]`, so a three-input BERT export that also wants `token_type_ids` raises and is silently downgraded to the regex fallback — model choice is a compatibility constraint; and every non-`O` prediction is labelled `PERSON` without reading the model's `id2label`, so a location or organisation is reported as a person. Accuracy, latency and memory depend on the model you actually choose.*
-- Redis TTL session vault — *verified against Redis 7 in CI: cross-instance rehydration, server-side rolling TTLs, tenant key isolation, corrupt-payload degradation and session clearing. Other Redis versions, Cluster/Sentinel topologies, TLS/ACL configurations and eviction policies are untested. Mappings are stored as plaintext JSON.*
+- Tier 3 quantized ONNX BERT-NER - *verified in CI with a checksum-pinned quantized DistilBERT multilingual NER export: the session and tokenizer load, `onnxruntime` inference runs, and detections are asserted with cases the regex fallback cannot produce (single-token surnames, non-ASCII names) plus one it gets wrong (title-case phrases). **Two real constraints, asserted in the tests:** `detect_spans` feeds only `get_inputs()[0]` and `[1]`, so a three-input BERT export that also wants `token_type_ids` raises and is silently downgraded to the regex fallback - model choice is a compatibility constraint; and every non-`O` prediction is labelled `PERSON` without reading the model's `id2label`, so a location or organisation is reported as a person. Accuracy, latency and memory depend on the model you actually choose.*
+- Redis TTL session vault - *verified against Redis 7 in CI: cross-instance rehydration, server-side rolling TTLs, tenant key isolation, corrupt-payload degradation and session clearing. Other Redis versions, Cluster/Sentinel topologies, TLS/ACL configurations and eviction policies are untested. Mappings are stored as plaintext JSON.*
 
 **Streaming**
 - SSE sliding-window rehydration buffer
 - Bounded streaming JSON lexer
-- HTTP/2 upstream connection pooling — *verified in CI against a TLS ALPN server: the proxy's startup-built client negotiates `h2`, eight concurrent proxied requests multiplex over a single upstream TCP connection, and an `http/1.1`-only upstream still works. Measured against hypercorn, not against a commercial provider endpoint. `get_http_client`'s lazy fallback used to build an `http2=False` client, so a request served before or after the lifespan client existed silently dropped to HTTP/1.1; both paths now construct through a single `build_upstream_client()` factory, and CI asserts the two clients' pool configuration is identical.*
+- HTTP/2 upstream connection pooling - *verified in CI against a TLS ALPN server: the proxy's startup-built client negotiates `h2`, eight concurrent proxied requests multiplex over a single upstream TCP connection, and an `http/1.1`-only upstream still works. Measured against hypercorn, not against a commercial provider endpoint. `get_http_client`'s lazy fallback used to build an `http2=False` client, so a request served before or after the lifespan client existed silently dropped to HTTP/1.1; both paths now construct through a single `build_upstream_client()` factory, and CI asserts the two clients' pool configuration is identical.*
 
 **Runtime and operations**
-- Graceful shutdown / pod drain — *verified in CI against the built container image: a real SIGTERM to PID 1 lets an 8-second in-flight request finish and return a correctly rehydrated body, new connections stop being accepted, and the process exits 0 rather than being SIGKILLed. Single-process only; the drain counter does not coordinate across `WORKERS > 1`, and no Kubernetes pod lifecycle (preStop hook, endpoint removal) has been exercised.*
-- Request-ID correlation and sanitization — *verified in CI on real responses: a UUID4 is generated when absent, allowlisted inbound IDs are propagated, and hostile IDs (CRLF, oversized, empty) are replaced rather than reflected — on proxied, streaming, probe, 401 and sanitized-500 responses. **Not** returned on the drain 429, which is built before an ID is assigned.*
-- Security response headers — *verified in CI on success, 401, streaming, probe and sanitized-500 responses; the 500 handler stamps them itself, because Starlette builds that response outside the application middleware stack. **Not** set on the drain 429.*
-- Component health probes and Prometheus alert rules — *verified in CI: `/readyz`'s Redis component against a live Redis 7, `/healthz` and `/readyz` against the running container image, and both Helm charts rendered with real `helm` 3.16 — the rendered probe paths are compared against the routes the application actually serves, and the rendered alert rules pass real `promtool` 3.1 and reference only metrics the app's Prometheus registry exports. Rendering the charts for the first time found two blocking defects, both now fixed: the deploy chart's `PrometheusRule` did not render at all, and its Deployment probed `/health/ready` and `/health/live`, which the application does not serve. **No pod has been scheduled from either chart and no Prometheus server has evaluated these rules**, so kubelet probe behavior, pod lifecycle and live alert firing remain untested.*
+- Graceful shutdown / pod drain - *verified in CI against the built container image: a real SIGTERM to PID 1 lets an 8-second in-flight request finish and return a correctly rehydrated body, new connections stop being accepted, and the process exits 0 rather than being SIGKILLed. Single-process only; the drain counter does not coordinate across `WORKERS > 1`, and no Kubernetes pod lifecycle (preStop hook, endpoint removal) has been exercised.*
+- Request-ID correlation and sanitization - *verified in CI on real responses: a UUID4 is generated when absent, allowlisted inbound IDs are propagated, and hostile IDs (CRLF, oversized, empty) are replaced rather than reflected - on proxied, streaming, probe, 401 and sanitized-500 responses. **Not** returned on the drain 429, which is built before an ID is assigned.*
+- Security response headers - *verified in CI on success, 401, streaming, probe and sanitized-500 responses; the 500 handler stamps them itself, because Starlette builds that response outside the application middleware stack. **Not** set on the drain 429.*
+- Component health probes and Prometheus alert rules - *verified in CI: `/readyz`'s Redis component against a live Redis 7, `/healthz` and `/readyz` against the running container image, and both Helm charts rendered with real `helm` 3.16 - the rendered probe paths are compared against the routes the application actually serves, and the rendered alert rules pass real `promtool` 3.1 and reference only metrics the app's Prometheus registry exports. Rendering the charts for the first time found two blocking defects, both now fixed: the deploy chart's `PrometheusRule` did not render at all, and its Deployment probed `/health/ready` and `/health/live`, which the application does not serve. **No pod has been scheduled from either chart and no Prometheus server has evaluated these rules**, so kubelet probe behavior, pod lifecycle and live alert firing remain untested.*
 
 **Conformance and evidence**
-- Streaming privacy conformance harness — local in-process profile (`llm-shield-proxy benchmark`) and the endpoint-neutral HTTP profile, which ships as its own distribution, `pii-leak-benchmark`
+- Streaming privacy conformance harness - local in-process profile (`llm-shield-proxy benchmark`) and the endpoint-neutral HTTP profile, which ships as its own distribution, `pii-leak-benchmark`
 - Tamper-evident audit hash chaining
 - Ed25519-signed audit receipts and chain verification
 - FIPS KAT self-tests and RFC 6902 differential audit records
@@ -93,7 +93,7 @@ Exercised end-to-end in CI. Each entry names the boundary of what was verified.
 Exercised by tests, but with the external system substituted, or dependent on substantial
 operator configuration.
 
-- Asynchronous OpenTelemetry tracing — *span export is now verified through a real
+- Asynchronous OpenTelemetry tracing - *span export is now verified through a real
   `BatchSpanProcessor` into an `InMemorySpanExporter`: the request span, the nested detection-tier
   span and the streaming `buffer_flush` span are all exported, an inbound `traceparent` is adopted
   as the parent, and no PII appears in any serialized span. The OTLP-over-HTTP transport and a
@@ -183,6 +183,6 @@ not covered by this policy. See `website/docs/conformance/governance.md`.
 
 ## Moving a feature between tiers
 
-A feature moves up when independent evidence exists — a passing end-to-end test against the real
+A feature moves up when independent evidence exists - a passing end-to-end test against the real
 infrastructure in CI, or a reproducible deployment by someone other than the maintainer. Open an
 issue with the evidence and the tier will be updated.

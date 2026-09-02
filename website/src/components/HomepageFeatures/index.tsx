@@ -14,31 +14,31 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Configured-Boundary Data Protection',
+    title: 'Local Data Replacement',
     icon: '🔒',
     description: (
       <>
-        Transform protected values locally and test the exact serialized configured-upstream boundary. Supports privacy-control programs without claiming detector-perfect coverage.
+        Replace selected values before a request reaches the model provider. The included test checks whether its known values remain in the outgoing request.
       </>
     ),
     link: '/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy'
   },
   {
-    title: 'Bounded Streaming Rehydration',
+    title: 'Streaming Value Restoration',
     icon: '⚡',
     description: (
       <>
-        A bounded sliding-window buffer reconstructs placeholders across fragmented Server-Sent Events. Publish scoped latency distributions with the open conformance runner.
+        Join replacement tokens split across SSE events and restore allowed values without waiting for the full response. Measure delay with the included runner.
       </>
     ),
     link: '/docs/features/ultra-low-latency-streaming-traffic-engineering/sub-millisecond-sse-sliding-window-buffer'
   },
   {
-    title: 'Enterprise Policy-as-Code',
+    title: 'Request Policies',
     icon: '📜',
     description: (
       <>
-        Request-scoped policy mappings and file polling for supported tenant PII profiles. Validate reload, resolver, concurrency, and unknown-identity behavior.
+        Select PII rules by tenant and request. Test policy reloads, remote resolvers, concurrent requests, and unknown client identities before deployment.
       </>
     ),
     link: '/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading'
@@ -48,17 +48,17 @@ const FeatureList: FeatureItem[] = [
     icon: '🔌',
     description: (
       <>
-        A dedicated JSON-RPC 2.0 gateway for Claude Desktop, Cursor, and agent frameworks - per-role tool allow-lists, AST-aware argument/result redaction, and dynamic tools/list pruning.
+        An experimental JSON-RPC endpoint checks tool allowlists and blocklists and can replace selected values in arguments and results. It supports only a documented MCP subset.
       </>
     ),
     link: '/docs/guides/mcp-tool-governance'
   },
   {
-    title: 'Audit Evidence & OSCAL',
+    title: 'Audit Records and OSCAL',
     icon: '🧾',
     description: (
       <>
-        Signed process-local hash chains, optional durable JSONL delivery, offline verification, and OSCAL 1.2 artifacts that support control evidence. Immutable WORM retention is external.
+        Create signed, ordered audit records, optional confirmed JSONL writes, and OSCAL 1.2 output. Add external immutable storage if your retention policy requires it.
       </>
     ),
     link: '/docs/features/enterprise-auditing-compliance'
@@ -68,17 +68,17 @@ const FeatureList: FeatureItem[] = [
     icon: '🤖',
     description: (
       <>
-        Validate configured JWT and DPoP conditions on supported governed paths. Attribution depends on issuer, key, audience, proxy placement, and replay controls.
+        Check configured JWT and DPoP fields on supported paths. Identity still depends on correct issuer, key, audience, proxy, and replay settings.
       </>
     ),
     link: '/docs/features/agent_identity_enforcer'
   },
   {
-    title: 'Secure Service Mesh',
+    title: 'Deployment Integrations',
     icon: '🌐',
     description: (
       <>
-        Envoy ext_proc, a Kubernetes sidecar-injection webhook, mTLS options, scoped readiness checks, and Helm alert rules with deployment-specific boundaries.
+        Includes experimental Envoy and Kubernetes integrations, mTLS options, health checks, and Helm alert rules. Read each feature's test status before using it.
       </>
     ),
     link: '/docs/features/secure-infrastructure-service-mesh'

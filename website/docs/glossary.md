@@ -9,9 +9,9 @@ Short definitions for terms used across the project. Product and compliance clai
 | **AI gateway / LLM gateway** | Software placed between an application and a model provider to inspect, change, route, or record requests and responses. |
 | **Proxy / reverse proxy** | A service that receives a client's request and sends it to another service on the client's behalf. |
 | **Upstream** | The model service or gateway to which this proxy sends a transformed request. |
-| **Configured upstream boundary** | The exact request bytes handed to the configured upstream network client after the proxy finishes its transformations. |
+| **Configured upstream boundary** | The request bytes the proxy sends to the selected model provider after applying its changes. |
 | **In-VPC** | Running inside the operator-controlled virtual private cloud or equivalent private network. |
-| **Zero egress** | In this project, declared unredacted protected values are absent at the configured upstream boundary. It does not mean the process makes no network request. |
+| **Zero egress** | In this project, the outgoing provider request does not contain the known test values. The proxy still makes a network request with the masked content. |
 | **PII** | Personally identifiable information, such as an email address or government identifier. |
 | **PHI / ePHI** | Health information protected by HIPAA; ePHI is the electronic form. |
 | **PCI data** | Payment-card information governed by PCI DSS controls. |

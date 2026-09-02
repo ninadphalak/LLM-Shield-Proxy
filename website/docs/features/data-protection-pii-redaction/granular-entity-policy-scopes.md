@@ -58,4 +58,4 @@ This feature lets operators assign different configured entity scopes to differe
 For example, HR and Marketing can be assigned different entity rules. The proxy resolves the supplied tenant/key through the configured policy source and applies the resulting profile on supported paths. Unknown-key and resolver-failure behavior must be tested for each resolver; not every path shares the same default.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_policy_scopes.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_scopes.py).
+Tests: [`tests/test_policy_scopes.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_scopes.py).

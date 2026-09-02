@@ -54,4 +54,4 @@ records, or exposes it depends on that provider. Treat it as a correlation hint,
 The proxy assigns or normalizes a tracking identifier that participating services can record. It is a correlation aid, not proof of every hop or event.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).
+Tests: [`tests/test_security_hardening.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_security_hardening.py).

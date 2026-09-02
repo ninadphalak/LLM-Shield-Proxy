@@ -58,7 +58,7 @@ externally: comparing them against an independently held anchor is the only way 
 a deleted suffix.
 
 An empty or all-blank audit file is reported as invalid rather than as a clean zero-event
-chain, and a file carrying more than one `chain_id` is rejected — one file is one worker's
+chain, and a file carrying more than one `chain_id` is rejected - one file is one worker's
 chain, and mixing chains removes every record's predecessor.
 
 ## Security boundaries

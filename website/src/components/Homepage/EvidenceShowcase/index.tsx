@@ -9,10 +9,10 @@ import styles from './styles.module.css';
 // fail under any implementation or input, so it was deleted. Timings are published,
 // not scored.
 const DOMAINS = [
-  'Fragmentation safety',
-  'Raw-PII egress',
+  'Split-event handling',
+  'Unmasked values sent upstream',
   'SSE validity',
-  'Rehydration fidelity',
+  'Original-value restoration',
   'Audit integrity',
   'Memory bounds',
 ];
@@ -22,30 +22,31 @@ export default function EvidenceShowcase(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <div className={styles.header}>
-          <span className={styles.eyebrow}>Evidence, not slogans</span>
+          <span className={styles.eyebrow}>Reports you can inspect</span>
           <Heading as="h2" className={styles.title}>
-            Independently verifiable, in-VPC streaming privacy
+            Check the behavior and the evidence yourself
           </Heading>
           <p className={styles.subtitle}>
-            The defensible story is not “another AI gateway.” It is a testable upstream privacy
-            boundary, bounded streaming behavior, and cryptographically verifiable audit evidence.
+            Run the tests, inspect the JSON reports, and verify signed audit records. The results
+            state what was tested and what remains outside the test.
           </p>
         </div>
 
         <div className={styles.grid}>
           <article className={styles.card}>
-            <span className={styles.cardLabel}>Audit evidence foundation</span>
-            <Heading as="h3">Signed, sequenced, recoverable evidence</Heading>
+            <span className={styles.cardLabel}>Audit records</span>
+            <Heading as="h3">Signed records with ordering checks</Heading>
             <p>
-              SHA-256 predecessor links, Ed25519 receipts, monotonic sequences, offline verification,
-              OSCAL 1.2 export, and opt-in acknowledged JSONL persistence with restart recovery.
+              Each record links to the previous record. Sequence numbers reveal missing or reordered
+              entries. Ed25519 signatures can be checked offline. OSCAL 1.2 export and optional
+              confirmed JSONL writes are also available.
             </p>
             <div className={styles.boundary}>
-              Local evidence is tamper-evident - not storage-level{' '}
+              Local files can reveal later changes, but they are not storage-level{' '}
               <GlossaryTerm definition="Write once, read many storage that prevents protected objects from being changed or deleted during retention.">
                 WORM
-              </GlossaryTerm>. Signed multi-worker checkpoints are built in; immutable retention,
-              external anchoring, and production key custody remain operator controls.
+              </GlossaryTerm>. You must provide immutable storage, external copies, and secure key
+              management if your deployment requires them.
             </div>
             <Link to="/docs/features/enterprise-auditing-compliance/worm-compliant-audit-logging-with-hash-chaining">
               Inspect the audit contract →
@@ -55,8 +56,8 @@ export default function EvidenceShowcase(): ReactNode {
           </article>
 
           <article className={styles.card}>
-            <span className={styles.cardLabel}>Open Conformance Lab · v1.0.0</span>
-            <Heading as="h3">Six scored domains, one machine-readable report</Heading>
+            <span className={styles.cardLabel}>Gateway test suite · v1.0.0</span>
+            <Heading as="h3">Six checks in one JSON report</Heading>
             <div className={styles.chips}>
               {DOMAINS.map((domain) => <span key={domain}>{domain}</span>)}
             </div>

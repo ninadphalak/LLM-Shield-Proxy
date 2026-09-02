@@ -12,7 +12,7 @@ export default function IntegrationStrip(): ReactNode {
   return (
     <section className={styles.section}>
       <div className="container">
-        <p className={styles.caption}>Drops in front of the stack you already run</p>
+        <p className={styles.caption}>Examples of systems you can test with the proxy</p>
         <div className={styles.groups}>
           {GROUPS.map((g) => (
             <div key={g.label} className={styles.group}>

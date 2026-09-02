@@ -54,4 +54,4 @@ A: No. OTel traces are designed for observability and may be sampled or retained
 This feature packages selected decision metadata into OpenTelemetry spans so a configured collector can process it. Treat the resulting traces as sampled observability data, not a complete or durable audit record.
 
 ## Related Tests
-See the following test file for reference implementations and edge-case testing: [`tests/test_audit_remediation.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).
+Tests: [`tests/test_audit_remediation.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_audit_remediation.py).

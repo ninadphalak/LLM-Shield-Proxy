@@ -8,10 +8,10 @@ export default function FinalCTA(): ReactNode {
     <section className={styles.section}>
       <div className="container">
         <Heading as="h2" className={styles.title}>
-          Evaluate your LLM privacy boundary with us.
+          Test the gateway with your own configuration
         </Heading>
         <p className={styles.subtitle}>
-          Apply for a confidential 30-day design-partner pilot or run the same assessment locally.
+          Run the assessment locally, or apply for a private 30-day design-partner pilot.
         </p>
         <div className={styles.buttons}>
           <Link className="button button--secondary button--lg" to="/docs/design-partner-pilot">

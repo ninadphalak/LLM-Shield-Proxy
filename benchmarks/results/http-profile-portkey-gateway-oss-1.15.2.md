@@ -46,7 +46,7 @@ behaviour while keeping the capture on loopback.
 Portkey.** Anyone measuring Portkey OSS must pin the shipped artifact, not the npm package
 name, or they will record a 500 that the vendor's own build does not produce.
 
-## Run 1 — default configuration, no guardrails
+## Run 1 - default configuration, no guardrails
 
 Artifact: `http-profile-portkey-gateway-oss-1.15.2-default.json`
 (SHA-256 `acd79ad14b76ff6f9c2f6aa1d8659abf351394cb88beb9edae46a3e8ef8196e8`)
@@ -60,13 +60,13 @@ Redaction claim recorded: `claimed`, **not** configured for this run, cited to
 
 | Check | Result |
 | :--- | :--- |
-| `configured_upstream_boundary` | fail — `leaked_entity_types: [CREDIT_CARD, EMAIL, SSN]`, all `literal`, `captured=3 correlated=3 uninspectable=0 marker_max=5` |
-| `fragmentation_safety` | **pass** — 138 events, response reconstructed |
-| `sse_validity` | **pass** — `status_codes: [200]` |
+| `configured_upstream_boundary` | fail - `leaked_entity_types: [CREDIT_CARD, EMAIL, SSN]`, all `literal`, `captured=3 correlated=3 uninspectable=0 marker_max=5` |
+| `fragmentation_safety` | **pass** - 138 events, response reconstructed |
+| `sse_validity` | **pass** - `status_codes: [200]` |
 | `response_fidelity` | **pass** |
-| `client_observed_latency` | **pass** — 3 of 3 iterations measured |
+| `client_observed_latency` | **pass** - 3 of 3 iterations measured |
 
-## Run 2 — redaction enabled via `default.regexReplace`
+## Run 2 - redaction enabled via `default.regexReplace`
 
 Artifact: `http-profile-portkey-gateway-oss-1.15.2-regexreplace.json`
 (SHA-256 `b72a949c8fcf3a5f5b858f8c90c16a668c1848bacac8668d48e84bf8c809f19f`)
@@ -98,13 +98,13 @@ Sent as the `x-portkey-config` request header:
 plugin in the OSS gateway that needs no vendor credentials. The patterns above are
 **tester-authored**. This run therefore measures Portkey's gateway and its guardrail transform
 engine; it does **not** measure Portkey's own PII detection quality. The gateway's PII
-guardrail (`portkey.pii`, and every other detector-backed plugin — `azure.pii`,
+guardrail (`portkey.pii`, and every other detector-backed plugin - `azure.pii`,
 `promptfoo.pii`, `patronus.phi`, `pangea.textGuard`, …) calls out to a vendor API and cannot be
 exercised without an account.
 
 Two behaviours were found while configuring this and are recorded so the row reproduces:
 
-- `default.regexMatch` — the check Portkey's hosted "Regex Match" guardrail is built on —
+- `default.regexMatch` - the check Portkey's hosted "Regex Match" guardrail is built on -
   returns only a verdict in this build. It performs no redaction. `default.regexReplace` is the
   transforming plugin.
 - **Multiple `regexReplace` transforms do not compose in one request.** With three checks in one
@@ -122,11 +122,11 @@ one.**
 
 | Check | Result |
 | :--- | :--- |
-| `configured_upstream_boundary` | **pass** — `leaked_entity_types: []`, `leak_evidence: []`, `captured=3 correlated=3 uninspectable=0 marker_max=5` |
-| `sse_validity` | **pass** — `status_codes: [200]` |
-| `client_observed_latency` | **pass** — 3 of 3 iterations measured |
-| `response_fidelity` | fail — `[REDACTED]` is one-way; the original value is never restored |
-| `fragmentation_safety` | fail — gates on the same reconstruction. Streaming itself was fine: `events_observed: 117` |
+| `configured_upstream_boundary` | **pass** - `leaked_entity_types: []`, `leak_evidence: []`, `captured=3 correlated=3 uninspectable=0 marker_max=5` |
+| `sse_validity` | **pass** - `status_codes: [200]` |
+| `client_observed_latency` | **pass** - 3 of 3 iterations measured |
+| `response_fidelity` | fail - `[REDACTED]` is one-way; the original value is never restored |
+| `fragmentation_safety` | fail - gates on the same reconstruction. Streaming itself was fine: `events_observed: 117` |
 
 Publish this as "no leak; does not meet the reversible-masking requirement". Portkey redacted
 everything it was asked to redact and sent nothing protected to the upstream. The profile
@@ -142,17 +142,15 @@ an extrapolated crossover point. **All of it has been removed.**
 The runner that produced those figures and its raw samples were not retained, so nothing in
 them could be re-derived on demand. An independent re-measurement of this proxy's isolated
 rehydration path afterwards found the direction of the improvement correct but its magnitude
-substantially smaller than the withdrawn note claimed — which is exactly the failure mode an
+substantially smaller than the withdrawn note claimed - which is exactly the failure mode an
 unretained runner produces.
 
 The numbers remain withdrawn until there is a versioned runner committed to this repository,
 run end to end against every gateway compared, with its raw output published beside it.
 
-What the investigation genuinely produced is not a number: it found **two real defects in this
-reference implementation** — one OpenTelemetry span opened per SSE delta even with export disabled,
-and the SSE data line and its terminating blank line yielded as two separate ASGI writes. Both
-are fixed and both are pinned by `tests/test_streaming_write_efficiency.py`, which fails if
-either is reverted. That finding stands on the tests, not on a timing sample.
+The investigation found two LLM-Shield-Proxy bugs: it opened one OpenTelemetry span per SSE event
+even when export was disabled, and it sent the SSE data line and blank terminator as two separate
+ASGI writes. Both are fixed. `tests/test_streaming_write_efficiency.py` fails if either bug returns.
 
 `client_observed_latency` in the artifacts above enforces no threshold and gates on sample
 completeness; three iterations is a smoke test. It is not a speed measurement and must not be

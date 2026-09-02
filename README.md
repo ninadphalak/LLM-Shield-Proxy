@@ -7,44 +7,45 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
-This repository is two things, and the first one matters more:
+This repository contains two related packages:
 
-1. **[`pii-leak-benchmark`](pii-leak-benchmark/)** - a neutral harness that measures whether *any*
-   OpenAI-compatible streaming gateway sends raw personal data to its upstream, and whether it gives
-   the values back to the client.
-2. **LLM-Shield-Proxy** - a streaming privacy gateway. It is one of the things the benchmark
-   measures, labelled in the table as the reference implementation, and its row carries the same
-   `unreplicated` caveat as everyone else's.
+1. **[`pii-leak-benchmark`](pii-leak-benchmark/)** tests an OpenAI-compatible streaming gateway. It
+   checks whether the gateway sends the test values to its model provider and whether the client
+   gets the original values back.
+2. **LLM-Shield-Proxy** is a self-hosted streaming privacy gateway. The benchmark tests it by name
+   and applies the same publication rules used for every other gateway.
 
-## The first result exposed a biased fixture
+## What changed after the first benchmark run
 
-All current comparison rows come from the initial project-run measurement set, not independent
-reproductions. Each row is therefore labelled `unreplicated` and published with its configuration
-and raw report for other people to check.
+The six results below were produced by this project on one workstation. No outside contributor has
+repeated them yet, so the table marks every product result as `unreplicated`. Each result links to
+the exact configuration and the report produced by the run.
 
-The prompt used to carry three fixed values, chosen to be safe to publish: `person@example.invalid`,
-`123-45-6789`, `4532-1234-5678-9012`. Every one is a value a **validating** detector is built to
-reject: `.invalid` has no public suffix, that SSN is a blacklisted sequence, and the card fails its
-Luhn checksum (sum 68). Measured against a pinned Presidio at `score_threshold: 0.0`, stock Presidio
-returned no `EMAIL_ADDRESS`, no `US_SSN` and no `CREDIT_CARD` for any of them.
+The first version of the test used invalid examples of an email address, SSN, and credit card:
 
-The reference implementation used regexes without those validation checks, so it caught all three.
-The fixture therefore favored shape matching over validated detection. A run against LiteLLM + Presidio
-reported `leaked: ["SSN"]` on the shipped fixture and `leaked: []` on the same run with valid
-specimens. That row was withheld rather than published, the fixture was replaced, and every row was
-re-run. Full measurement: [fixture threat model](website/docs/conformance/fixture-threat-model.md).
+| Old test value | Why Presidio rejected it |
+| :--- | :--- |
+| `person@example.invalid` | `.invalid` is not a public domain suffix |
+| `123-45-6789` | Presidio blocks this well-known invalid SSN sequence |
+| `4532-1234-5678-9012` | The number fails the Luhn card-number checksum |
 
-The benchmark also exposed two defects in this proxy's streaming hot path: an OpenTelemetry
-span opened per SSE delta even with export disabled, and the data line and its terminating blank
-line yielded as two separate ASGI writes. Both are fixed and pinned by
-[`tests/test_streaming_write_efficiency.py`](tests/test_streaming_write_efficiency.py). No speed
-multiplier is published for that fix: the original runner and its raw samples were not retained, so
-there is no auditable evidence to cite. See [the record](benchmarks/results/http-profile-llm-shield-proxy-working-tree.md).
+LLM-Shield-Proxy matched the text patterns but did not perform those validity checks. This gave it
+an unfair advantage over detectors that validate values. A LiteLLM and Presidio run revealed the
+problem: the old values produced `leaked: ["SSN"]`, while valid test values produced `leaked: []`.
+The project did not publish the affected result. It replaced the three values with valid, reserved
+test values and reran all six configurations. See the
+[fixture threat model](website/docs/conformance/fixture-threat-model.md) for the full record.
 
-**Known limitation:** a roughly 35-line `str.replace` shim with no general detector can pass all
-five checks. The formats remain fixed because broader format randomization produced false leak
-findings in two of six variants against a correctly redacting gateway. Values now vary within those
-formats, and submitted CI reports can carry detached provenance over the finished JSON bytes.
+The benchmark also found two streaming bugs in LLM-Shield-Proxy. It created an OpenTelemetry span
+for every SSE event even when export was off, and it sent each event's blank terminator as a
+separate write. Both bugs are fixed and covered by
+[`tests/test_streaming_write_efficiency.py`](tests/test_streaming_write_efficiency.py). The
+[run record](benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) explains what changed.
+
+**Known limitation:** the test uses three fixed data formats. A small program written specifically
+for those formats can pass without being a general PII detector. The values change on every run,
+but the formats do not. Testing more formats caused two false failures in six trials. See the
+[fixture threat model](website/docs/conformance/fixture-threat-model.md) for the measurements.
 
 ## Run it yourself, in about a minute
 
@@ -64,37 +65,34 @@ pii-leak-benchmark \
 pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1 --target-name your-gateway
 ```
 
-Standard library plus `httpx` - you should not have to install one gateway to measure another. The
-harness stands a capture server in front of the gateway's configured upstream and inspects **every
-channel** it could arrive through: request line, method, headers, chunk extensions, trailers and the
-decoded JSON body. Anything it cannot inspect fails closed. Ten adversarial rounds are recorded in
-[the conformance docs](website/docs/conformance/index.md); the rule that survived them is *enumerate
-the channel, not the encoding*.
+The only third-party Python dependency is `httpx`; you do not need to install one gateway to test
+another. You configure the gateway to use the benchmark's local capture server as its model
+provider. The benchmark then checks the URL, headers, HTTP framing, and JSON body for the test values. If
+it cannot safely parse part of the request, the run ends with an error instead of assuming that no
+value leaked. The [conformance docs](website/docs/conformance/index.md) describe the full method.
 
-A measurement is not a verdict. `fail` means one thing only: protected data reached the capture. A
-gateway that never claimed to redact anything, or that anonymizes one-way and leaks nothing, gets a
-non-verdict outcome instead. This avoids calling a product a privacy failure for a capability it
-never claimed to provide.
+`fail` has one narrow meaning: the gateway sent an unmasked test value to the benchmark's capture
+server. A product that does not offer PII redaction is marked `not-applicable`, not failed. A
+one-way anonymizer that removes the values but does not restore them receives a separate outcome.
 
 ## Results
 
 | Target | Outcome | Runs / distinct submitters |
 | :--- | :--- | :--- |
 | Raw capture endpoint (control) | `fail` - three literal matches | 1 / 1 - control, not a product |
-| **LLM-Shield-Proxy** (reference implementation) | `pass` - 5/5 | **1 / 1 - unreplicated** |
+| **LLM-Shield-Proxy** | `pass` - 5/5 | **1 / 1 - unreplicated** |
 | LiteLLM 1.99.0, default | `redaction-not-enabled` | 1 / 1 - unreplicated |
 | LiteLLM 1.99.0 + Presidio | `no-leak-profile-not-met` (no leak) | 1 / 1 - unreplicated |
 | Portkey OSS 1.15.2, default | `redaction-not-enabled` | 1 / 1 - unreplicated |
 | Portkey OSS 1.15.2 + regexReplace | `no-leak-profile-not-met` (no leak) | 1 / 1 - unreplicated |
 
-**Every row is unreplicated.** A gateway needs 3 runs from 3 distinct submitters before its result
-is treated as replicated. The current rows are project-run measurements, not independent
-reproductions. Each one includes the pinned configuration and raw artifact so others can verify it
-or report a different result.
+Every product result above was run once by this project's maintainer. It has not yet been repeated
+by an independent person. A result becomes `replicated` only after three different people each
+submit a run of the same gateway and configuration. Until then, it remains `unreplicated`.
 [Full table, method and evidence](website/docs/conformance/results.md) ·
 [submit a run](website/docs/conformance/submitting.md).
 
-## The reference implementation
+## Run LLM-Shield-Proxy
 
 ```bash
 pip install llm-shield-proxy
@@ -129,16 +127,17 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="")
 ```
 
-A real completion needs an upstream key and a client-auth configuration. Copy
-[`.env.example`](.env.example) and follow the [deployment guide](website/docs/deployment.md) rather
-than treating the health check as a production validation.
+A successful health check only means the server started. To send a model request, add the API key
+for your model provider and configure a key that clients will use to call the proxy. Start with
+[`.env.example`](.env.example), then follow the [deployment guide](website/docs/deployment.md).
 
-### How the reference implementation works
+### How LLM-Shield-Proxy works
 
-Inbound, the proxy detects configured sensitive values and replaces them before the request crosses
-the upstream boundary. Outbound, a bounded prefix-aware buffer reconstructs placeholders split
-across SSE chunks and restores registered values as the stream continues. Structured JSON payloads
-take a separate syntax-preserving mutation path and still require provider/tool schema testing.
+Before sending a request to the model provider, the proxy finds configured types of sensitive data
+and replaces their values. As the provider streams its response, the proxy joins replacement tokens
+that were split across SSE events and restores values that the client is allowed to receive. For
+structured JSON, it changes string values without changing the JSON syntax. Test this behavior with
+the schemas used by your provider and tools.
 
 <a href="website/docs/assets/diagram-dual-pipeline.svg?v=2">
   <img src="website/docs/assets/diagram-dual-pipeline.svg?v=2" alt="LLM privacy proxy dual-pipeline redaction architecture" width="900" />
@@ -160,15 +159,15 @@ The maintained component map and deployment diagrams live in the
 
 ### Deployment choices
 
-Standard mode keeps detection, masking, policy and rehydration inside the operator-controlled
-gateway, then sends only the transformed request to the selected external provider:
+In standard mode, detection, masking, policy checks, and value restoration run inside your gateway.
+Only the masked request is sent to the external model provider:
 
 <a href="website/docs/assets/diagram-standard.svg?v=3">
   <img src="website/docs/assets/diagram-standard.svg?v=3" alt="Standard LLM privacy gateway deployment" width="900" />
 </a>
 
-Air-gapped mode instead sends transformed traffic to an operator-controlled internal model
-gateway. Network policy must still prevent bypass, telemetry and other unintended egress:
+In air-gapped mode, the masked request goes to an internal model gateway. Network policy must still
+block direct provider access, telemetry, and other unintended outbound traffic:
 
 <a href="website/docs/assets/diagram-airgapped.svg?v=3">
   <img src="website/docs/assets/diagram-airgapped.svg?v=3" alt="Air-gapped LLM egress gateway deployment" width="900" />
@@ -178,8 +177,8 @@ See [deployment topologies](website/docs/features/deployment-topologies.md),
 [air-gapped egress](website/docs/features/air-gapped-egress.md), and the
 [Kubernetes/Helm deployment guide](website/docs/deployment.md).
 
-Every catalogued feature carries a `Supported` / `Beta` / `Experimental` / `Research` badge naming
-its verification boundary: [feature catalog](website/docs/features-overview.md) ·
+Every feature is labelled `Supported`, `Beta`, `Experimental`, or `Research`. The label states how
+the feature was tested and what remains untested: [feature catalog](website/docs/features-overview.md) ·
 [stability policy](STABILITY.md) · [limitations](LIMITATIONS.md).
 
 It supports SOC 2, HIPAA, GDPR, EU AI Act and NIST/ISO evidence programs by supplying technical

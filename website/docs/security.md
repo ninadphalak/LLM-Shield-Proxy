@@ -59,7 +59,7 @@ The repository includes automated unit, integration, conformance, and adversaria
 * **Flags**: [`ENABLE_TIER2_ENTROPY`](deployment.md#core-configuration-flags), [`ENABLE_SYNTHETIC_SWAPPING`](deployment.md#core-configuration-flags)
 
 #### In-band stateless cryptographic masking
-* **Implementation Details**: Avoids an external mapping vault for supported flows by encrypting detected values into in-band tokens with **AES-256-GCM**. Security depends on key generation, custody, rotation, nonce handling, implementation correctness, and the selected threat model. Ciphertext still crosses the configured upstream boundary, and provider echo must be tested.
+* **Implementation Details**: For supported flows, **AES-256-GCM** can encrypt each detected value into text carried in the request, so an external mapping store is not required. Security depends on correct keys, rotation, nonces, and deployment settings. The encrypted text is still sent to the model provider. Test whether the provider returns it in a form the proxy can restore.
 * **Flags**: [`SHIELD_DEFAULT_MASKING_MODE`](deployment.md#advanced-feature-flags-compliance-security-and-engineering), [`SHIELD_ENCRYPTION_KEY`](deployment.md#advanced-feature-flags-compliance-security-and-engineering)
 
 #### Redis TTL mapping store
