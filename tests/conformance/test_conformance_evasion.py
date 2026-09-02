@@ -25,13 +25,12 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-
-from llm_shield_proxy.conformance.http_profile import (
+from pii_leak_benchmark.http_profile import (
     _NONCE_MIN_MATCHES,
-    CaptureUnreachableError,
     _NONCE_WORD_COUNT,
     PROTECTED_ENTITY_TYPES,
     REFERENCE_FIXTURE,
+    CaptureUnreachableError,
     extract_fixture,
     run_http_conformance,
 )
@@ -517,9 +516,6 @@ def test_body_too_deep_to_inspect_fails_closed(capture_port):
           def do_POST(self):  # noqa: N802
               length = int(self.headers.get("content-length", "0"))
               prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
-              # Values vary per run: recover them from the prompt by format.
-              RAW = list(extract_fixture(prompt).values())
-              MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
               node = {"leaf": "nothing to see"}
               for _ in range(400):
                   node = {"n": node}
@@ -563,9 +559,6 @@ def test_uncorrelated_traffic_does_not_satisfy_the_boundary_check(capture_port):
           def do_POST(self):  # noqa: N802
               length = int(self.headers.get("content-length", "0"))
               text = json.loads(self.rfile.read(length))["messages"][-1]["content"]
-              # Values vary per run: recover them from the prompt by format.
-              RAW = list(extract_fixture(text).values())
-              MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
               _post(
                   f"http://127.0.0.1:{port}/v1/chat/completions",
                   json.dumps(
@@ -747,7 +740,7 @@ def test_single_event_response_does_not_satisfy_fragmentation(capture_port):
 
 def test_generated_marker_words_are_distinct(monkeypatch):
     """Duplicate draws can leave fewer distinct words than correlation requires."""
-    from llm_shield_proxy.conformance import http_profile as conformance_http
+    from pii_leak_benchmark import http_profile as conformance_http
 
     monkeypatch.setattr(conformance_http.secrets, "choice", lambda words: words[0])
     monkeypatch.setattr(conformance_http.secrets, "randbelow", lambda _limit: 0, raising=False)
@@ -757,7 +750,7 @@ def test_generated_marker_words_are_distinct(monkeypatch):
 
 
 def test_duplicate_marker_draw_cannot_fail_a_conforming_gateway(capture_port, monkeypatch):
-    from llm_shield_proxy.conformance import http_profile as conformance_http
+    from pii_leak_benchmark import http_profile as conformance_http
 
     # Before draws were made without replacement, this possible run contained only
     # two distinct words and could never meet the three-word correlation threshold.
@@ -1016,7 +1009,7 @@ def test_egress_deferred_until_after_capture_shutdown_is_disclosed(capture_port)
 
 def test_marker_words_are_not_given_names():
     """A marker word a conforming PERSON detector redacts is a false-positive source."""
-    from llm_shield_proxy.conformance.http_profile import _NONCE_WORDS
+    from pii_leak_benchmark.http_profile import _NONCE_WORDS
 
     collisions = sorted(GIVEN_NAMES.intersection(_NONCE_WORDS))
     assert not collisions, f"marker words a name detector would redact: {collisions}"
@@ -1213,9 +1206,6 @@ def test_zero_captured_requests_is_disclosed_as_an_unattributed_outcome(capture_
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("content-length", "0"))
             prompt = json.loads(self.rfile.read(length))["messages"][-1]["content"]
-            # Values vary per run: recover them from the prompt by format.
-            RAW = list(extract_fixture(prompt).values())
-            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.send_header("connection", "close")

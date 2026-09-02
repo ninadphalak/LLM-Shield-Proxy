@@ -21,10 +21,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-
-from llm_shield_proxy.cli import build_benchmark_parser
-from llm_shield_proxy.conformance.http_profile import (
-    REFERENCE_FIXTURE,
+from pii_leak_benchmark.cli import build_parser
+from pii_leak_benchmark.http_profile import (
     extract_fixture,
     run_http_conformance,
 )
@@ -97,7 +95,7 @@ def _gateway(port, token=None):
 
 
 def test_capture_flags_exist():
-    parser = build_benchmark_parser()
+    parser = build_parser(require_target=False)
     options = {action.option_strings[0] for action in parser._actions if action.option_strings}
     assert "--capture-token" in options
     assert "--capture-public-url" in options
@@ -105,7 +103,7 @@ def test_capture_flags_exist():
 
 def test_capture_public_url_reads_its_environment_variable(monkeypatch):
     monkeypatch.setenv("CONFORMANCE_CAPTURE_PUBLIC_URL", "https://tunnel.example/v1")
-    args = build_benchmark_parser().parse_args([])
+    args = build_parser(require_target=False).parse_args([])
     assert args.capture_public_url == "https://tunnel.example/v1"
 
 
@@ -151,7 +149,7 @@ def test_public_mode_is_reachable_from_the_cli(tmp_path, capture_port):
         environment.pop("TELEMETRY_ENDPOINT_URL", None)
         result = subprocess.run(
             [
-                sys.executable, "-m", "llm_shield_proxy.cli", "benchmark",
+                sys.executable, "-m", "pii_leak_benchmark.cli",
                 "--target-base-url", f"http://127.0.0.1:{server.server_address[1]}/v1",
                 "--iterations", "1",
                 "--capture-port", str(capture_port),
@@ -269,7 +267,7 @@ def test_environment_token_wins_over_the_flag(tmp_path, capture_port):
         environment.pop("TELEMETRY_ENDPOINT_URL", None)
         result = subprocess.run(
             [
-                sys.executable, "-m", "llm_shield_proxy.cli", "benchmark",
+                sys.executable, "-m", "pii_leak_benchmark.cli",
                 "--target-base-url", f"http://127.0.0.1:{server.server_address[1]}/v1",
                 "--iterations", "1",
                 "--capture-port", str(capture_port),
@@ -299,7 +297,7 @@ def test_cli_prints_the_outcome_and_explains_a_non_verdict(tmp_path, capture_por
         environment.pop("TELEMETRY_ENDPOINT_URL", None)
         result = subprocess.run(
             [
-                sys.executable, "-m", "llm_shield_proxy.cli", "benchmark",
+                sys.executable, "-m", "pii_leak_benchmark.cli",
                 "--target-base-url", f"http://127.0.0.1:{server.server_address[1]}/v1",
                 "--iterations", "1",
                 "--capture-port", str(capture_port),
@@ -326,7 +324,7 @@ def test_cli_claim_flags_reach_the_report(tmp_path, capture_port):
         environment.pop("TELEMETRY_ENDPOINT_URL", None)
         result = subprocess.run(
             [
-                sys.executable, "-m", "llm_shield_proxy.cli", "benchmark",
+                sys.executable, "-m", "pii_leak_benchmark.cli",
                 "--target-base-url", f"http://127.0.0.1:{server.server_address[1]}/v1",
                 "--iterations", "1",
                 "--capture-port", str(capture_port),
@@ -354,7 +352,7 @@ def test_a_claim_without_a_citation_fails_the_cli_cleanly(tmp_path, capture_port
     environment.pop("TELEMETRY_ENDPOINT_URL", None)
     result = subprocess.run(
         [
-            sys.executable, "-m", "llm_shield_proxy.cli", "benchmark",
+            sys.executable, "-m", "pii_leak_benchmark.cli",
             "--target-base-url", "http://127.0.0.1:1/v1",
             "--iterations", "1",
             "--capture-port", str(capture_port),

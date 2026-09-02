@@ -214,7 +214,7 @@ def test_passing_sse_check_requires_success_status():
 
 
 def test_emitted_http_report_validates():
-    from llm_shield_proxy.conformance.http_profile import run_http_conformance
+    from pii_leak_benchmark.http_profile import run_http_conformance
 
     report = run_http_conformance("capture://self", iterations=1, capture_port=8793)
     assert _errors(HTTP_SCHEMA, report) == []
@@ -222,7 +222,7 @@ def test_emitted_http_report_validates():
 
 
 def test_passing_http_report_requires_per_check_evidence():
-    from llm_shield_proxy.conformance.http_profile import run_http_conformance
+    from pii_leak_benchmark.http_profile import run_http_conformance
 
     hollow = run_http_conformance("capture://self", iterations=1, capture_port=8794)
     hollow["checks"] = {

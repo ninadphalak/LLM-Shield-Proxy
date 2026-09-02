@@ -29,15 +29,14 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-
-from llm_shield_proxy.conformance.http_profile import (
+from pii_leak_benchmark.http_profile import (
     PROTECTED_ENTITY_TYPES,
     REFERENCE_FIXTURE,
     _ipv4_can_produce,
-    make_fixture,
-    extract_fixture,
     _needle_proximity,
     _normalize,
+    extract_fixture,
+    make_fixture,
     run_http_conformance,
 )
 

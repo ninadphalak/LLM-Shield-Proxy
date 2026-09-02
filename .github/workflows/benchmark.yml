@@ -31,6 +31,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # `pip install .` requires the neutral harness distribution, which lives in
+          # this repo and is released separately. Install it from source so this
+          # workflow does not depend on PyPI having caught up with the commit.
+          pip install ./pii-leak-benchmark
           pip install -r requirements.txt
           pip install -e .
 

@@ -8,7 +8,8 @@ must stay installable as stdlib plus ``httpx``: asking an engineer to install a
 competing gateway's full stack to run a neutral benchmark is a blocker on getting
 outside runs at all.
 
-Nothing in this module may import from ``llm_shield_proxy`` outside ``conformance``.
+Nothing in this distribution may import from ``llm_shield_proxy``. The benchmark is the
+neutral measurer; the proxy is one of the things it measures.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from typing import Any, Optional
 
 
 def source_revision() -> str:
-    return os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown"
+    return os.getenv("GITHUB_SHA") or os.getenv("PII_LEAK_BENCHMARK_SOURCE_REVISION") or "unknown"
 
 
 def build_attestation() -> Optional[dict[str, Any]]:
@@ -30,7 +31,7 @@ def build_attestation() -> Optional[dict[str, Any]]:
     not third-party attestation. Only a mechanism a verifier can check without
     trusting the submitter (GitHub OIDC, Sigstore) may set another verification value.
     """
-    commit_sha = os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION")
+    commit_sha = os.getenv("GITHUB_SHA") or os.getenv("PII_LEAK_BENCHMARK_SOURCE_REVISION")
     if not commit_sha:
         return None
     attestation: dict[str, Any] = {

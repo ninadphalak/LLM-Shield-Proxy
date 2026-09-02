@@ -1,21 +1,29 @@
-"""Running the HTTP profile must not require installing the reference proxy.
+"""The benchmark must not carry the gateway -- in its imports, its install, or its name.
 
-``conformance/__init__.py`` used to import ``local`` eagerly, and ``local`` imports the
-proxy's detector, vault and streaming engines -- so ``import
-llm_shield_proxy.conformance.http_profile`` pulled OpenTelemetry, redis, cryptography,
-pydantic, google-re2, faker and the rest behind it. Making the import lazy is not
-enough on its own: ``run_http_conformance`` called ``build_attestation`` from ``local``
-on every run, and that function reads only ``GITHUB_*``/``RUNNER_*`` environment
-variables. It now lives in ``conformance.provenance``, which is standard library only.
+``pii-leak-benchmark`` is a separate distribution from ``llm-shield-proxy`` because a
+benchmark named after one of the products it scores cannot referee them, and because
+asking an engineer at another gateway to install a competing gateway's full stack in
+order to measure their own product is the concrete blocker on third-party runs.
 
-Asking an engineer at another gateway to install a competing gateway's full stack in
-order to run a neutral benchmark is the concrete blocker on third-party runs, which is
-the whole point of publishing the harness.
+The dependency direction is one-way and it is the thing these tests defend:
 
-Each test runs in a SUBPROCESS. The parent pytest process has already imported most of
-the package, so an in-process assertion would pass vacuously.
+    llm-shield-proxy  --may-use-->  pii-leak-benchmark
+    pii-leak-benchmark  --never-->  llm-shield-proxy
+
+History, because each defect here survived the test that was supposed to catch it:
+the harness's ``__init__`` once imported the local profile eagerly, which dragged in
+OpenTelemetry, redis, cryptography, pydantic, google-re2 and faker; making the import
+lazy was not enough because ``run_http_conformance`` still called ``build_attestation``
+from that module on every run; and the import graph was clean for a whole round while
+``pip install`` still pulled 20 packages and the CLI still pulled 26. Import graph,
+declared dependencies and a real installation are three different claims. All three
+are asserted below.
+
+Each subprocess test runs in a SUBPROCESS on purpose. The parent pytest process has
+already imported the proxy, so an in-process assertion would pass vacuously.
 """
 
+import json
 import subprocess
 import sys
 import textwrap
@@ -24,9 +32,24 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_DIST = REPO_ROOT / "pii-leak-benchmark"
+BENCHMARK_PACKAGE = BENCHMARK_DIST / "pii_leak_benchmark"
 
 # The floor: httpx's own dependency tree. The profile itself needs nothing beyond it.
-HTTPX_TREE = {"click", "httpx", "idna", "pygments", "rich"}
+# Listed generously (a venv with httpx[cli] present pulls click/rich/pygments) because
+# the assertion is a subset check -- what matters is that nothing else appears.
+HTTPX_TREE = {
+    "anyio",
+    "certifi",
+    "click",
+    "h11",
+    "httpcore",
+    "httpx",
+    "idna",
+    "pygments",
+    "rich",
+    "sniffio",
+}
 
 _COUNT_THIRD_PARTY = """
 import json, os, sys, sysconfig
@@ -47,7 +70,7 @@ for name, module in list(sys.modules.items()):
     path = os.path.normcase(path)
     if "site-packages" in path or "dist-packages" in path:
         third.add(top)
-third.discard("llm_shield_proxy")
+third.discard("pii_leak_benchmark")
 print(json.dumps(sorted(third)))
 """
 
@@ -60,37 +83,57 @@ def _third_party_for(import_statement):
         text=True,
         check=True,
     )
-    import json
-
     return set(json.loads(result.stdout.strip().splitlines()[-1]))
+
+
+# --------------------------------------------------------------------------
+# The import graph
+# --------------------------------------------------------------------------
 
 
 def test_http_profile_import_needs_nothing_beyond_httpx():
     """stdlib plus httpx. Not the proxy's dependency tree."""
-    observed = _third_party_for("import llm_shield_proxy.conformance.http_profile")
+    observed = _third_party_for("import pii_leak_benchmark.http_profile")
     assert observed <= HTTPX_TREE, sorted(observed - HTTPX_TREE)
 
 
-def test_public_conformance_api_import_needs_nothing_beyond_httpx():
+def test_public_api_import_needs_nothing_beyond_httpx():
     """The documented entry point, not just the private module."""
     observed = _third_party_for(
-        "from llm_shield_proxy.conformance import run_http_conformance, build_attestation"
+        "from pii_leak_benchmark import run_http_conformance, build_attestation, "
+        "write_conformance_report"
     )
     assert observed <= HTTPX_TREE, sorted(observed - HTTPX_TREE)
 
 
-def test_running_the_http_profile_does_not_import_the_proxy_engines():
-    """``build_attestation`` on the run path must not drag ``local`` back in.
+def test_cli_import_needs_nothing_beyond_httpx():
+    observed = _third_party_for("import pii_leak_benchmark.cli")
+    assert observed <= HTTPX_TREE, sorted(observed - HTTPX_TREE)
 
-    This is the half that a lazy ``__init__`` alone would miss: the import graph can be
-    clean while the first actual run re-imports everything.
+
+def test_no_module_in_the_benchmark_mentions_the_proxy_package():
+    """Structural, so it fails on the line that introduces it, not on a heavy run.
+
+    A conditional or lazily-imported reference would still make the neutral measurer
+    depend on one of the things it measures.
     """
+    offenders = []
+    for source in sorted(BENCHMARK_PACKAGE.glob("*.py")):
+        for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#") or '``llm_shield_proxy``' in stripped:
+                continue  # prose in a docstring stating the rule is not a violation
+            if "llm_shield_proxy" in stripped:
+                offenders.append(f"{source.name}:{number}: {stripped}")
+    assert not offenders, offenders
+
+
+def test_running_the_profile_does_not_import_the_proxy_at_all():
+    """The half a lazy import alone would miss: a clean graph, a heavy first run."""
     script = textwrap.dedent(
         """
         import sys
-        from llm_shield_proxy.conformance.http_profile import (
-            CaptureUnreachableError, run_http_conformance,
-        )
+        from pii_leak_benchmark import run_http_conformance
         try:
             # No target and no capture reachable is fine: the attestation and report
             # paths are what matter, and the probe runs before any target traffic.
@@ -100,146 +143,160 @@ def test_running_the_http_profile_does_not_import_the_proxy_engines():
         except Exception:
             pass
         heavy = [name for name in ("redis", "cryptography", "pydantic", "faker", "re2",
-                                   "opentelemetry", "yaml", "orjson", "psutil")
+                                   "opentelemetry", "yaml", "orjson", "psutil",
+                                   "fastapi", "uvicorn")
                  if name in sys.modules]
         print("HEAVY:" + ",".join(heavy))
-        print("LOCAL:" + str("llm_shield_proxy.conformance.local" in sys.modules))
+        print("PROXY:" + str(any(n == "llm_shield_proxy" or n.startswith("llm_shield_proxy.")
+                                 for n in sys.modules)))
         """
     )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, check=True
-    )
-    output = result.stdout
-    heavy_line = next(line for line in output.splitlines() if line.startswith("HEAVY:"))
-    assert heavy_line == "HEAVY:", heavy_line
-    local_line = next(line for line in output.splitlines() if line.startswith("LOCAL:"))
-    assert local_line == "LOCAL:False", local_line
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+    lines = result.stdout.splitlines()
+    assert next(line for line in lines if line.startswith("HEAVY:")) == "HEAVY:"
+    assert next(line for line in lines if line.startswith("PROXY:")) == "PROXY:False"
 
 
-def test_build_attestation_is_available_without_the_proxy_engines():
+def test_console_script_does_not_import_the_proxy():
+    """The documented COMMAND, not just the module."""
     script = textwrap.dedent(
         """
         import os, sys
-        os.environ["LLM_SHIELD_SOURCE_REVISION"] = "abc123"
-        from llm_shield_proxy.conformance.provenance import build_attestation
+        from pii_leak_benchmark.cli import main
+        try:
+            main(["--target-base-url", "http://127.0.0.1:1/v1", "--iterations", "1",
+                  "--capture-port", "0", "--json-out", os.devnull,
+                  "--timeout-seconds", "1"])
+        except SystemExit:
+            pass
+        print("PROXY:" + str(any(n == "llm_shield_proxy" or n.startswith("llm_shield_proxy.")
+                                 for n in sys.modules)))
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+    assert "PROXY:False" in result.stdout
+
+
+def test_build_attestation_is_available_without_the_proxy():
+    script = textwrap.dedent(
+        """
+        import os, sys
+        os.environ["PII_LEAK_BENCHMARK_SOURCE_REVISION"] = "abc123"
+        from pii_leak_benchmark.provenance import build_attestation
         block = build_attestation()
         assert block["commit_sha"] == "abc123", block
         assert block["verification"] == "self-reported", block
-        assert "llm_shield_proxy.conformance.local" not in sys.modules
+        assert "llm_shield_proxy" not in sys.modules
         print("OK")
         """
     )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, check=True
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
     assert result.stdout.strip().endswith("OK")
 
 
-def test_local_profile_still_re_exports_build_attestation():
-    """Backwards compatibility for callers that imported it from ``local``."""
-    from llm_shield_proxy.conformance.local import build_attestation as from_local
-    from llm_shield_proxy.conformance.provenance import build_attestation as canonical
-
-    assert from_local is canonical
-
-
 # --------------------------------------------------------------------------
-# The DECLARED dependency set, not just the import graph
+# The DECLARED dependency sets, not just the import graph
 # --------------------------------------------------------------------------
 
-PROXY_ONLY_PACKAGES = (
-    "fastapi", "uvicorn", "pydantic", "pydantic-settings", "redis", "faker",
-    "cryptography", "google-re2", "opentelemetry-api", "opentelemetry-sdk",
-    "orjson", "watchdog", "prometheus-client", "grpclib", "betterproto", "pyyaml",
-)
 
-
-def test_declared_base_dependencies_are_httpx_only():
-    """pyproject must not put the reference proxy in the default install.
-
-    The import graph was already clean while `pip install llm-shield-proxy` still
-    installed 20 packages, so reading the import graph is not evidence about the
-    install. This reads the declaration; the venv test below reads reality.
-    """
+def _manifest(path):
     try:
         import tomllib
     except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
         pytest.skip("tomllib requires Python 3.11+")
-    manifest = tomllib.loads(
-        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    )
-    base = manifest["project"]["dependencies"]
-    assert [item.split(">")[0].split("[")[0] for item in base] == ["httpx"], base
-    # The proxy set must still be installable, just not by default.
-    proxy_extra = manifest["project"]["optional-dependencies"]["proxy"]
-    names = {item.split(">")[0].split("[")[0] for item in proxy_extra}
-    assert {"fastapi", "uvicorn", "cryptography", "opentelemetry-api"} <= names
-    # `pip install -e .[dev]` must still yield a working proxy for the test suite.
-    dev_extra = manifest["project"]["optional-dependencies"]["dev"]
-    assert any("llm-shield-proxy[proxy]" in item for item in dev_extra), dev_extra
-    # And the harness needs a console script that does not import the ASGI server.
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _names(requirements):
+    return [item.split(">")[0].split("=")[0].split("[")[0].strip() for item in requirements]
+
+
+def test_benchmark_declares_httpx_and_nothing_else():
+    manifest = _manifest(BENCHMARK_DIST / "pyproject.toml")
+    assert manifest["project"]["name"] == "pii-leak-benchmark"
+    assert _names(manifest["project"]["dependencies"]) == ["httpx"]
     scripts = manifest["project"]["scripts"]
-    assert scripts["llm-shield-conformance"] == "llm_shield_proxy.cli:conformance_main"
+    assert scripts == {"pii-leak-benchmark": "pii_leak_benchmark.cli:main"}
 
 
-def test_cli_http_profile_does_not_import_the_proxy():
-    """The documented COMMAND, not just the module.
+def test_the_benchmark_never_depends_on_the_thing_it_measures():
+    """Including through an extra. This is the neutrality claim, in one assertion."""
+    manifest = _manifest(BENCHMARK_DIST / "pyproject.toml")
+    declared = list(manifest["project"]["dependencies"])
+    for extra in manifest["project"].get("optional-dependencies", {}).values():
+        declared.extend(extra)
+    assert not [item for item in declared if "llm-shield" in item.lower()], declared
 
-    `benchmark_main` used to import `core.config.settings` and pull
-    `write_conformance_report` through `conformance/__init__`, which resolved
-    `local` -- so the CLI path imported 26 third-party packages and the whole
-    reference proxy even though the module import graph was clean. That is the
-    defect this test exists to catch.
+
+def test_installing_the_proxy_installs_the_gateway_again():
+    """`pip install llm-shield-proxy` must give you the proxy.
+
+    For one unpublished round the base install was the harness and the gateway sat
+    behind a `[proxy]` extra. That is the packaging this split replaced.
     """
-    script = textwrap.dedent(
-        """
-        import os, sys
-        os.environ["TELEMETRY_ENABLED"] = "false"
-        from llm_shield_proxy.cli import benchmark_main
-        try:
-            benchmark_main([
-                "--target-base-url", "http://127.0.0.1:1/v1", "--iterations", "1",
-                "--capture-port", "0", "--json-out", os.devnull,
-            ])
-        except SystemExit:
-            pass
-        heavy = [n for n in ("redis", "cryptography", "pydantic", "faker", "re2",
-                             "opentelemetry", "yaml", "orjson", "fastapi", "uvicorn",
-                             "psutil")
-                 if n in sys.modules]
-        print("HEAVY:" + ",".join(heavy))
-        print("LOCAL:" + str("llm_shield_proxy.conformance.local" in sys.modules))
-        """
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, check=True
-    )
-    lines = result.stdout.splitlines()
-    assert next(line for line in lines if line.startswith("HEAVY:")) == "HEAVY:"
-    assert next(line for line in lines if line.startswith("LOCAL:")) == "LOCAL:False"
+    manifest = _manifest(REPO_ROOT / "pyproject.toml")
+    base = set(_names(manifest["project"]["dependencies"]))
+    assert {"fastapi", "uvicorn", "cryptography", "opentelemetry-api"} <= base, sorted(base)
+    # The one-way dependency: the proxy may use the benchmark.
+    assert "pii-leak-benchmark" in base
+    assert "proxy" not in manifest["project"].get("optional-dependencies", {})
+    # And no console script of the proxy's may claim to be the neutral harness.
+    assert set(manifest["project"]["scripts"]) == {"llm-shield-proxy"}
 
 
-def test_local_profile_still_re_exports_write_conformance_report():
-    from llm_shield_proxy.conformance.artifact import (
-        write_conformance_report as canonical,
+def test_proxy_benchmark_subcommand_points_at_the_neutral_harness():
+    """The old `--target-base-url` path answers with the new command, not a traceback."""
+    from llm_shield_proxy.cli import benchmark_main
+
+    code = benchmark_main(["--target-base-url", "http://127.0.0.1:1/v1"])
+    assert code == 2
+
+
+def test_local_profile_still_re_exports_the_shared_helpers():
+    """The proxy's local profile writes its report with the benchmark's writer."""
+    from pii_leak_benchmark.artifact import write_conformance_report as canonical_writer
+    from pii_leak_benchmark.provenance import build_attestation as canonical_attestation
+
+    from llm_shield_proxy.conformance import build_attestation, write_conformance_report
+    from llm_shield_proxy.conformance.local import (
+        build_attestation as from_local_attestation,
     )
     from llm_shield_proxy.conformance.local import (
-        write_conformance_report as from_local,
+        write_conformance_report as from_local_writer,
     )
 
-    assert from_local is canonical
+    assert write_conformance_report is canonical_writer
+    assert build_attestation is canonical_attestation
+    assert from_local_writer is canonical_writer
+    assert from_local_attestation is canonical_attestation
 
 
-def test_base_install_runs_the_http_profile_in_a_clean_virtualenv(tmp_path):
-    """Install the base package into a fresh venv and RUN the profile from it.
+# --------------------------------------------------------------------------
+# A real installation, which is the only one of the three that is evidence
+# --------------------------------------------------------------------------
 
-    Reading pyproject is not verification. Last round the import graph was clean while
-    `pip install llm-shield-proxy` still installed 20 packages AND the CLI still pulled
-    26 -- both passed every test in this file at the time.
+PROXY_PACKAGES = (
+    "llm-shield-proxy", "fastapi", "uvicorn", "pydantic", "redis", "faker",
+    "cryptography", "google-re2", "opentelemetry-api", "orjson", "watchdog",
+    "prometheus-client", "grpclib", "betterproto", "pyyaml",
+)
 
-    Opt-in because it builds a wheel and hits the network. Set SHIELD_REQUIRE_VENV=1 to
-    turn a missing prerequisite into a failure, following the repo convention that a
-    green build must never mean "nothing ran".
+
+def _venv_python(target):
+    python = target / "Scripts" / "python.exe"
+    return python if python.exists() else target / "bin" / "python"
+
+
+def test_benchmark_installs_and_runs_in_a_clean_virtualenv(tmp_path):
+    """Install the benchmark into a fresh venv and RUN it from there.
+
+    Reading pyproject is not verification. The import graph was clean for a whole
+    round while `pip install` still pulled 20 packages, and both facts passed every
+    test in this file at the time.
+
+    Opt-in because it builds a wheel and hits the network. Set SHIELD_REQUIRE_VENV=1
+    to turn a missing prerequisite into a failure, following the repo convention that
+    a green build must never mean "nothing ran".
     """
     import os
     import venv
@@ -250,12 +307,10 @@ def test_base_install_runs_the_http_profile_in_a_clean_virtualenv(tmp_path):
 
     target = tmp_path / "venv"
     venv.create(target, with_pip=True)
-    python = target / "Scripts" / "python.exe"
-    if not python.exists():
-        python = target / "bin" / "python"
+    python = _venv_python(target)
 
     install = subprocess.run(
-        [str(python), "-m", "pip", "install", "--quiet", str(REPO_ROOT)],
+        [str(python), "-m", "pip", "install", "--quiet", str(BENCHMARK_DIST)],
         capture_output=True, text=True, timeout=900,
     )
     assert install.returncode == 0, install.stdout + install.stderr
@@ -264,18 +319,21 @@ def test_base_install_runs_the_http_profile_in_a_clean_virtualenv(tmp_path):
         [str(python), "-m", "pip", "list", "--format=freeze"],
         capture_output=True, text=True, timeout=120,
     ).stdout.lower()
-    for package in PROXY_ONLY_PACKAGES:
-        assert f"{package}==" not in listing, f"{package} reached the base install"
+    for package in PROXY_PACKAGES:
+        assert f"{package}==" not in listing, f"{package} reached the benchmark install"
 
-    # And it must actually work, not merely import.
-    check = subprocess.run(
-        [
-            str(python), "-c",
-            "from llm_shield_proxy.conformance import run_http_conformance;"
-            "from llm_shield_proxy.cli import conformance_main;"
-            "print('OK')",
-        ],
-        capture_output=True, text=True, timeout=300,
+    # And it must WORK, not merely import: the negative control, end to end, from a
+    # virtualenv that has never heard of the proxy. capture://self is raw
+    # pass-through, so a correct harness reports a leak and exits 1.
+    report_path = tmp_path / "control.json"
+    script = _venv_python(target).parent / ("pii-leak-benchmark.exe" if os.name == "nt" else "pii-leak-benchmark")
+    control = subprocess.run(
+        [str(script), "--target-base-url", "capture://self", "--iterations", "1",
+         "--capture-port", "0", "--json-out", str(report_path)],
+        capture_output=True, text=True, timeout=600,
     )
-    assert check.returncode == 0, check.stdout + check.stderr
-    assert "OK" in check.stdout
+    assert control.returncode == 1, control.stdout + control.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["checks"]["configured_upstream_boundary"]["passed"] is False
+    assert sorted(report["checks"]["configured_upstream_boundary"]["leaked_entity_types"])

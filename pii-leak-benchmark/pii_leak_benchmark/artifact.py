@@ -5,7 +5,8 @@ streaming engines. The HTTP profile needs to write its report too, so every
 ``benchmark --target-base-url`` run imported the entire proxy in order to call
 ``json.dumps`` and open a file.
 
-Nothing here may import from ``llm_shield_proxy`` outside ``conformance``.
+Nothing in this distribution may import from ``llm_shield_proxy``. The benchmark is the
+neutral measurer; the proxy is one of the things it measures.
 """
 
 from __future__ import annotations

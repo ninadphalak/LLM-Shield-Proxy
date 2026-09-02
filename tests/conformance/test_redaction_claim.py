@@ -24,13 +24,11 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
-
-from llm_shield_proxy.conformance.http_profile import (
-    REFERENCE_FIXTURE,
+from pii_leak_benchmark.http_profile import (
     extract_fixture,
     run_http_conformance,
 )
-from llm_shield_proxy.conformance.redaction_claim import (
+from pii_leak_benchmark.redaction_claim import (
     derive_outcome,
     normalize_claim,
 )
@@ -331,7 +329,6 @@ def _one_way_anonymizer(port):
             prompt = payload["messages"][-1]["content"]
             # Values vary per run: recover them from the prompt by format.
             RAW = list(extract_fixture(prompt).values())
-            MASK = {value: f"[TOK_{index}]" for index, value in enumerate(RAW)}
             anonymized = prompt
             for index, raw in enumerate(RAW):
                 anonymized = anonymized.replace(raw, "{{ENTITY_%d}}" % index)

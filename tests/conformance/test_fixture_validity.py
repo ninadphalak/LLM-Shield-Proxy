@@ -16,18 +16,17 @@ rejects the value, checked directly.
 import re
 
 import pytest
-
-from llm_shield_proxy.conformance.http_profile import (
+from pii_leak_benchmark.http_profile import (
+    _FIXTURE_TEST_CARDS,
+    _SSN_INVALIDATING_PREFIXES,
     PROTECTED_ENTITY_TYPES,
     PROTECTED_VALUE_FORMATS,
     PROTECTED_VALUE_PATTERNS,
     REFERENCE_FIXTURE,
     _build_prompt,
-    _FIXTURE_TEST_CARDS,
     _ipv4_can_produce,
     _make_nonce,
     _normalize,
-    _SSN_INVALIDATING_PREFIXES,
     extract_fixture,
     fixture_value_space,
     make_fixture,

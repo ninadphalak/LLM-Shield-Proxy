@@ -25,11 +25,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-
-from llm_shield_proxy.conformance.http_profile import (
-    REFERENCE_FIXTURE,
-    extract_fixture,
+from pii_leak_benchmark.http_profile import (
     CaptureUnreachableError,
+    extract_fixture,
     run_http_conformance,
 )
 
@@ -172,7 +170,7 @@ def test_reverting_the_self_probe_lets_the_hijack_report_a_gateway_failure(
     accusation.
     """
     monkeypatch.setattr(
-        "llm_shield_proxy.conformance.http_profile._self_probe",
+        "pii_leak_benchmark.http_profile._self_probe",
         lambda *_args, **_kwargs: {
             "performed": True,
             "url": "disabled",
@@ -224,7 +222,7 @@ def test_self_probe_path_carries_no_digits():
     separators stripped. Harness-generated traffic must be incapable of contributing
     to that reassembly, not merely unlikely to.
     """
-    from llm_shield_proxy.conformance.http_profile import (
+    from pii_leak_benchmark.http_profile import (
         _PROBE_PATH_TEMPLATE,
         _make_probe_token,
     )

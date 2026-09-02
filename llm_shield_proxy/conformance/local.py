@@ -20,22 +20,27 @@ import tracemalloc
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from pii_leak_benchmark.artifact import write_conformance_report  # noqa: F401  (re-exported)
+from pii_leak_benchmark.provenance import build_attestation  # noqa: F401  (re-exported)
 
 from llm_shield_proxy.compliance.report import verify_worm_log
-from llm_shield_proxy.conformance.artifact import (  # noqa: F401  (re-exported)
-    write_conformance_report,
-)
-from llm_shield_proxy.conformance.provenance import (  # noqa: F401  (re-exported)
-    build_attestation,
-    source_revision as _source_revision,
-)
 from llm_shield_proxy.engines.pii_engine import PIIEngine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+
+
+def _source_revision() -> str:
+    """The revision THIS profile ran against.
+
+    Deliberately not ``pii_leak_benchmark.provenance.source_revision``: that reads the
+    benchmark distribution's own override variable, and this profile measures the
+    gateway. ``LLM_SHIELD_SOURCE_REVISION`` is what `reproducing.md` documents for it.
+    """
+    return os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown"
 
 
 def _package_version() -> str:

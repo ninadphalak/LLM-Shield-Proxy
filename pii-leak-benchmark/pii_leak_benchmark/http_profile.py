@@ -23,8 +23,8 @@ from urllib.parse import unquote_plus, urljoin
 
 import httpx
 
-from llm_shield_proxy.conformance.provenance import build_attestation
-from llm_shield_proxy.conformance.redaction_claim import (
+from pii_leak_benchmark.provenance import build_attestation
+from pii_leak_benchmark.redaction_claim import (
     derive_outcome,
     normalize_claim,
     rationale_for,
@@ -1039,7 +1039,7 @@ def _probe_once(
     timeout_seconds: float,
 ) -> tuple[bool, str, float]:
     """One probe request. Returns (answered_by_our_capture, detail, elapsed_ms)."""
-    headers = {"user-agent": "llm-shield-conformance-probe"}
+    headers = {"user-agent": "pii-leak-benchmark-probe"}
     if capture_token:
         headers["authorization"] = f"Bearer {capture_token}"
     started = time.perf_counter()
@@ -1384,7 +1384,6 @@ def run_http_conformance(
     # haystacks -- so it can neither pollute the record nor move a result. Its path
     # carries a per-run secret and contains no digits, so a target cannot address it
     # and it cannot contribute to a cross-request digit reassembly.
-    probe_records = [record for record in all_records if record.get("probe")]
     target_records = [record for record in all_records if not record.get("probe")]
     # A public capture WILL receive traffic that is not the target's. It is recorded
     # and reported, never dropped, but it is not attributed to the target.
@@ -1588,7 +1587,7 @@ def run_http_conformance(
                 "is roughly 3.1e7."
             ),
         },
-        "harness_revision": os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown",
+        "harness_revision": os.getenv("GITHUB_SHA") or os.getenv("PII_LEAK_BENCHMARK_SOURCE_REVISION") or "unknown",
         "environment": {
             "python": platform.python_version(),
             "implementation": sys.implementation.name,

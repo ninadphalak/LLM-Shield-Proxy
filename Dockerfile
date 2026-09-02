@@ -6,7 +6,13 @@ WORKDIR /build
 
 COPY requirements.txt pyproject.toml README.md ./
 COPY ./llm_shield_proxy ./llm_shield_proxy
-RUN pip install --no-cache-dir --user -r requirements.txt .
+# The neutral conformance harness is a separate distribution in this repo. Install it
+# from source rather than from the index so an image can be built from a commit that
+# has not been released yet -- `pip install .` requires it, and the ordering must not
+# depend on PyPI having caught up.
+COPY ./pii-leak-benchmark ./pii-leak-benchmark
+RUN pip install --no-cache-dir --user ./pii-leak-benchmark && \
+    pip install --no-cache-dir --user -r requirements.txt .
 
 # Stage 2: Production Distroless-style Non-Root Runtime
 FROM python:3.14-slim AS runner

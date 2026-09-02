@@ -78,7 +78,7 @@ Exercised end-to-end in CI. Each entry names the boundary of what was verified.
 - Component health probes and Prometheus alert rules — *verified in CI: `/readyz`'s Redis component against a live Redis 7, `/healthz` and `/readyz` against the running container image, and both Helm charts rendered with real `helm` 3.16 — the rendered probe paths are compared against the routes the application actually serves, and the rendered alert rules pass real `promtool` 3.1 and reference only metrics the app's Prometheus registry exports. Rendering the charts for the first time found two blocking defects, both now fixed: the deploy chart's `PrometheusRule` did not render at all, and its Deployment probed `/health/ready` and `/health/live`, which the application does not serve. **No pod has been scheduled from either chart and no Prometheus server has evaluated these rules**, so kubelet probe behavior, pod lifecycle and live alert firing remain untested.*
 
 **Conformance and evidence**
-- Streaming privacy conformance harness (`llm-shield-proxy benchmark`)
+- Streaming privacy conformance harness — local in-process profile (`llm-shield-proxy benchmark`) and the endpoint-neutral HTTP profile, which ships as its own distribution, `pii-leak-benchmark`
 - Tamper-evident audit hash chaining
 - Ed25519-signed audit receipts and chain verification
 - FIPS KAT self-tests and RFC 6902 differential audit records
