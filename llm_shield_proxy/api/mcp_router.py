@@ -9,6 +9,7 @@ requests and JSON-RPC 2.0 batch arrays per spec.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -45,28 +46,79 @@ MAX_SANITIZE_DEPTH = 20
 MAX_BATCH_SIZE = 100
 
 
-async def get_mcp_policy_resolver(request: Request) -> BasePolicyResolver:
-    """Dependency injection provider for the active Pluggable RBAC Engine (MCP scope)."""
+def _get_mcp_policy_resolver_for_app(app: Any) -> BasePolicyResolver:
+    """Build the configured MCP resolver against application-scoped state."""
     from llm_shield_proxy.core.config import settings
 
-    if not hasattr(request.app.state, "mcp_rbac_state"):
+    if not hasattr(app.state, "mcp_rbac_state"):
         from collections import OrderedDict
 
         from llm_shield_proxy.security.tool_rbac import BoundedLockMap
 
-        request.app.state.mcp_rbac_state = {
+        app.state.mcp_rbac_state = {
             "cache": OrderedDict(),
             "cache_lock": asyncio.Lock(),
             "inflight_locks": BoundedLockMap(maxsize=1000),
             "background_tasks": set(),
         }
-    shared_state = request.app.state.mcp_rbac_state
+    shared_state = app.state.mcp_rbac_state
 
     if settings.OPA_URL:
-        http_client = getattr(request.app.state, "http_client", None) or httpx.AsyncClient()
+        http_client = getattr(app.state, "http_client", None) or httpx.AsyncClient()
         return OPAPolicyResolver(http_client, settings.OPA_URL, shared_state)
 
     return InMemoryPolicyResolver(shared_state)
+
+
+async def get_mcp_policy_resolver(request: Request) -> BasePolicyResolver:
+    """Dependency injection provider for the active Pluggable RBAC Engine (MCP scope)."""
+    return _get_mcp_policy_resolver_for_app(request.app)
+
+
+def _warn_for_empty_allowlist(policy: Dict[str, Any], mode: str, *, phase: str) -> None:
+    """Make an empty MCP allowlist visible without conflating its two supported semantics."""
+    if policy.get("allowed_tools"):
+        return
+
+    if mode == "BLOCKLIST_ONLY":
+        logger.critical(
+            "SECURITY RISK: the MCP route is enabled and the %s policy has no allowed_tools entries. "
+            "MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY permits every tool not explicitly named in "
+            "blocked_tools. Use DENY_ALL or configure an allowlist unless this permissive policy is intentional.",
+            phase,
+        )
+        return
+
+    logger.warning(
+        "The MCP route is enabled and the %s policy has no allowed_tools entries. "
+        "MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL is fail-closed, so every tools/call request will be denied "
+        "until an allowlist is configured.",
+        phase,
+    )
+
+
+async def warn_if_mcp_policy_is_empty_at_startup(app: Any) -> None:
+    """Resolve one startup policy and loudly report an empty MCP allowlist."""
+    from llm_shield_proxy.core.config import settings
+
+    provider = app.dependency_overrides.get(get_mcp_policy_resolver)
+    try:
+        if provider is None:
+            resolver = _get_mcp_policy_resolver_for_app(app)
+        else:
+            resolver = provider()
+            if inspect.isawaitable(resolver):
+                resolver = await resolver
+        policy = await resolver.resolve_policy("__mcp_startup_probe__")
+    except Exception as exc:
+        logger.warning(
+            "The MCP route is enabled, but its resolver could not be inspected at startup (%s). "
+            "Verify the deployed resolver's empty-policy and failure behavior before routing tool calls.",
+            type(exc).__name__,
+        )
+        return
+
+    _warn_for_empty_allowlist(policy, settings.MCP_EMPTY_ALLOWLIST_MODE, phase="startup resolver")
 
 
 def _extract_virtual_key(
@@ -283,8 +335,14 @@ async def _process_single_call(
 
 
 async def _resolve_role(policy_resolver: BasePolicyResolver, virtual_key: str) -> Tuple[set, set, Dict[str, Any]]:
+    from llm_shield_proxy.core.config import settings
+
     policy = await policy_resolver.resolve_policy(virtual_key)
-    return set(policy.get("allowed_tools", [])), set(policy.get("blocked_tools", [])), policy
+    allowed = set(policy.get("allowed_tools", []))
+    blocked = set(policy.get("blocked_tools", []))
+    if not allowed and settings.MCP_EMPTY_ALLOWLIST_MODE == "DENY_ALL":
+        allowed.add("_FAIL_CLOSED_")
+    return allowed, blocked, policy
 
 
 @mcp_router.post("/v1/mcp")

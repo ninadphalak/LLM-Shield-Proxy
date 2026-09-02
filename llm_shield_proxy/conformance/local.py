@@ -20,15 +20,27 @@ import tracemalloc
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from pii_leak_benchmark.artifact import write_conformance_report  # noqa: F401  (re-exported)
+from pii_leak_benchmark.provenance import build_attestation  # noqa: F401  (re-exported)
 
 from llm_shield_proxy.compliance.report import verify_worm_log
 from llm_shield_proxy.engines.pii_engine import PIIEngine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer, rehydrate_sse_stream
+
+
+def _source_revision() -> str:
+    """The revision THIS profile ran against.
+
+    Deliberately not ``pii_leak_benchmark.provenance.source_revision``: that reads the
+    benchmark distribution's own override variable, and this profile measures the
+    gateway. ``LLM_SHIELD_SOURCE_REVISION`` is what `reproducing.md` documents for it.
+    """
+    return os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown"
 
 
 def _package_version() -> str:
@@ -338,41 +350,6 @@ def _memory_check(iterations: int) -> dict[str, Any]:
     }
 
 
-def _source_revision() -> str:
-    return os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION") or "unknown"
-
-
-def build_attestation() -> Optional[dict[str, Any]]:
-    """Provenance for this run, or None when there is no CI context to report.
-
-    Every value here is read from the run environment, so it is SELF-REPORTED: it
-    records who says they ran the harness, and is forgeable by whoever ran it. It is
-    not third-party attestation. Only a mechanism a verifier can check without
-    trusting the submitter (GitHub OIDC, Sigstore) may set another verification value.
-    """
-    commit_sha = os.getenv("GITHUB_SHA") or os.getenv("LLM_SHIELD_SOURCE_REVISION")
-    if not commit_sha:
-        return None
-    attestation: dict[str, Any] = {
-        "verification": "self-reported",
-        "runner": os.getenv("RUNNER_NAME") or os.getenv("RUNNER_OS") or platform.node() or "unknown",
-        "commit_sha": commit_sha,
-    }
-    repository = os.getenv("GITHUB_REPOSITORY")
-    run_id = os.getenv("GITHUB_RUN_ID")
-    if os.getenv("GITHUB_ACTIONS"):
-        attestation["ci_provider"] = "github-actions"
-    if repository:
-        attestation["repository"] = repository
-        if run_id:
-            server = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
-            attestation["run_url"] = f"{server}/{repository}/actions/runs/{run_id}"
-    workflow_ref = os.getenv("GITHUB_WORKFLOW_REF")
-    if workflow_ref:
-        attestation["workflow_ref"] = workflow_ref
-    return attestation
-
-
 def run_conformance(iterations: int = 2_000) -> dict[str, Any]:
     """Run deterministic correctness checks and labeled local microbenchmarks."""
     if iterations < 10:
@@ -380,23 +357,19 @@ def run_conformance(iterations: int = 2_000) -> dict[str, Any]:
     sse_checks = asyncio.run(_sse_integration_conformance())
     microbenchmarks = _microbenchmarks(iterations)
     memory = _memory_check(iterations)
-    latency_values = [
-        value
-        for operation in ("no_op", "empty_vault_buffer", "protected_token_buffer")
-        for value in microbenchmarks[operation].values()
-    ]
+    # There is no `latency_measurement` check. It gated on `all(value >= 0)` over
+    # percentiles of monotonic-clock deltas, which cannot be negative, so the check
+    # could not fail under any implementation or any input. A check that cannot fail
+    # is a credibility hole in a harness that sells itself as a referee: it inflated
+    # the check count without adding a single bit of evidence. The microbenchmark
+    # numbers themselves are still published, under `microbenchmarks`, where they are
+    # labeled measurements rather than a passed gate. Do not reintroduce it.
     checks = {
         "fragmentation_safety": _fragmentation_conformance(),
         "raw_pii_egress": _egress_conformance(),
         "sse_validity": sse_checks["sse_validity"],
         "rehydration_fidelity": sse_checks["rehydration_fidelity"],
         "audit_integrity": _audit_integrity_conformance(),
-        "latency_measurement": {
-            "passed": all(value >= 0 for value in latency_values),
-            "threshold_enforced": False,
-            "samples_per_operation": iterations,
-            "scope": microbenchmarks["scope"],
-        },
         "memory_bounded": {
             "passed": memory["retained_characters"] <= memory["retention_bound_characters"],
             "rss_threshold_enforced": False,
@@ -430,14 +403,3 @@ def run_conformance(iterations: int = 2_000) -> dict[str, Any]:
             "Results from shared or power-managed hosts should not be compared as controlled measurements.",
         ],
     }
-
-
-def write_conformance_report(report: dict[str, Any], output_path: str) -> str:
-    destination = Path(output_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    # Explicit LF: Path.write_text uses text mode, which rewrites newlines to CRLF
-    # on Windows and makes the published SHA-256 of an artifact platform-dependent.
-    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
-    with destination.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(payload)
-    return str(destination)

@@ -60,3 +60,8 @@ repomix-output.xml
 /AGENTS.md
 /GEMINI.md
 /CLAUDE.md
+
+# sdist staging directories. `python -m build` leaves `<name>-<version>/` at the repo
+# root when it cannot clean up, and one file from it reached a commit that way.
+/llm_shield_proxy-*/
+/pii_leak_benchmark-*/

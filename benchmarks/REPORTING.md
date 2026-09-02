@@ -74,6 +74,12 @@ manually transcribe headline values.
 llm-shield-proxy benchmark --iterations 2000 --json-out conformance.json
 ```
 
+That command runs the LOCAL in-process profile. To measure a gateway over HTTP -- this one or
+any other OpenAI-compatible one -- use the neutral harness, which is a separate distribution
+(stdlib plus httpx, importing no gateway): `pip install pii-leak-benchmark`, then
+`pii-leak-benchmark --target-base-url <url>`. See
+`website/docs/conformance/submitting.md` for what a published row must carry.
+
 The packaged command reports conformance and explicitly scoped in-process component
 observations. A production-shaped service report must add the frozen environment,
 baseline matrix, concurrency runs, raw observations, and process-level resource

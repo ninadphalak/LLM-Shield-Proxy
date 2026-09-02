@@ -103,7 +103,6 @@
         "sse_validity",
         "rehydration_fidelity",
         "audit_integrity",
-        "latency_measurement",
         "memory_bounded"
       ],
       "properties": {
@@ -122,9 +121,6 @@
         "audit_integrity": {
           "$ref": "#/$defs/audit_check"
         },
-        "latency_measurement": {
-          "$ref": "#/$defs/latency_check"
-        },
         "memory_bounded": {
           "$ref": "#/$defs/memory_check"
         }
@@ -133,7 +129,7 @@
     },
     "microbenchmarks": {
       "type": "object",
-      "description": "Measured timings. Required so a report cannot claim latency_measurement passed with no samples behind it.",
+      "description": "Measured timings, published as labeled measurements rather than as a check. There is deliberately no latency_measurement check: it gated on percentiles of monotonic-clock deltas being non-negative, which cannot fail, and a check that cannot fail is not evidence.",
       "required": [
         "iterations",
         "scope",
@@ -234,9 +230,6 @@
       "$ref": "#/$defs/passed_requires_audit_integrity"
     },
     {
-      "$ref": "#/$defs/passed_requires_latency_measurement"
-    },
-    {
       "$ref": "#/$defs/passed_requires_memory_bounded"
     }
   ],
@@ -250,24 +243,69 @@
         "p99"
       ],
       "properties": {
-        "mean": {"type": "number", "minimum": 0},
-        "p50": {"type": "number", "minimum": 0},
-        "p95": {"type": "number", "minimum": 0},
-        "p99": {"type": "number", "minimum": 0}
+        "mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "fragmentation_check": {
       "type": "object",
-      "required": ["passed", "partitions_tested", "failures", "invariant"],
+      "required": [
+        "passed",
+        "partitions_tested",
+        "failures",
+        "invariant"
+      ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "partitions_tested": {"type": "integer", "minimum": 1},
-        "failures": {"type": "array", "items": {"type": "object"}},
-        "invariant": {"type": "string", "minLength": 1}
+        "passed": {
+          "type": "boolean"
+        },
+        "partitions_tested": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "invariant": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
-      "then": {"properties": {"failures": {"maxItems": 0}}},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "failures": {
+            "maxItems": 0
+          }
+        }
+      },
       "additionalProperties": false
     },
     "egress_check": {
@@ -281,28 +319,54 @@
         "payload_content_included"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "boundary": {"const": "serialized payload presented to the configured upstream"},
+        "passed": {
+          "type": "boolean"
+        },
+        "boundary": {
+          "const": "serialized payload presented to the configured upstream"
+        },
         "protected_entity_types": {
           "type": "array",
           "minItems": 3,
           "maxItems": 3,
           "prefixItems": [
-            {"const": "CREDIT_CARD"},
-            {"const": "EMAIL"},
-            {"const": "SSN"}
+            {
+              "const": "CREDIT_CARD"
+            },
+            {
+              "const": "EMAIL"
+            },
+            {
+              "const": "SSN"
+            }
           ],
           "items": false
         },
         "detected_entity_counts": {
           "type": "object",
-          "required": ["EMAIL", "SSN", "CREDIT_CARD"],
+          "required": [
+            "EMAIL",
+            "SSN",
+            "CREDIT_CARD"
+          ],
           "properties": {
-            "EMAIL": {"type": "integer", "minimum": 0},
-            "SSN": {"type": "integer", "minimum": 0},
-            "CREDIT_CARD": {"type": "integer", "minimum": 0}
+            "EMAIL": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "SSN": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "CREDIT_CARD": {
+              "type": "integer",
+              "minimum": 0
+            }
           },
-          "additionalProperties": {"type": "integer", "minimum": 0}
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
         "leaked_entity_types": {
           "type": "array",
@@ -310,7 +374,9 @@
             "type": "string"
           }
         },
-        "payload_content_included": {"const": false}
+        "payload_content_included": {
+          "const": false
+        }
       },
       "allOf": [
         {
@@ -328,9 +394,15 @@
             "properties": {
               "detected_entity_counts": {
                 "properties": {
-                  "EMAIL": {"minimum": 1},
-                  "SSN": {"minimum": 1},
-                  "CREDIT_CARD": {"minimum": 1}
+                  "EMAIL": {
+                    "minimum": 1
+                  },
+                  "SSN": {
+                    "minimum": 1
+                  },
+                  "CREDIT_CARD": {
+                    "minimum": 1
+                  }
                 }
               },
               "leaked_entity_types": {
@@ -346,26 +418,68 @@
     "sse_check": {
       "type": "object",
       "required": [
-        "passed", "provider_shape", "json_events_checked", "invalid_json_events",
-        "done_markers", "stream_terminated_with_blank_line", "utf8_mid_codepoint_split_preserved"
+        "passed",
+        "provider_shape",
+        "json_events_checked",
+        "invalid_json_events",
+        "done_markers",
+        "stream_terminated_with_blank_line",
+        "utf8_mid_codepoint_split_preserved"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "provider_shape": {"type": "string", "minLength": 1},
-        "json_events_checked": {"type": "integer", "minimum": 0},
-        "invalid_json_events": {"type": "integer", "minimum": 0},
-        "done_markers": {"type": "integer", "minimum": 0},
-        "stream_terminated_with_blank_line": {"type": "boolean"},
-        "utf8_mid_codepoint_split_preserved": {"type": "boolean"}
+        "passed": {
+          "type": "boolean"
+        },
+        "provider_shape": {
+          "type": "string",
+          "minLength": 1
+        },
+        "json_events_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_json_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_markers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stream_terminated_with_blank_line": {
+          "type": "boolean"
+        },
+        "utf8_mid_codepoint_split_preserved": {
+          "type": "boolean"
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
       "then": {
         "properties": {
-          "json_events_checked": {"minimum": 1},
-          "invalid_json_events": {"const": 0},
-          "done_markers": {"const": 1},
-          "stream_terminated_with_blank_line": {"const": true},
-          "utf8_mid_codepoint_split_preserved": {"const": true}
+          "json_events_checked": {
+            "minimum": 1
+          },
+          "invalid_json_events": {
+            "const": 0
+          },
+          "done_markers": {
+            "const": 1
+          },
+          "stream_terminated_with_blank_line": {
+            "const": true
+          },
+          "utf8_mid_codepoint_split_preserved": {
+            "const": true
+          }
         }
       },
       "additionalProperties": false
@@ -373,20 +487,43 @@
     "rehydration_check": {
       "type": "object",
       "required": [
-        "passed", "expected_value_reconstructed", "protected_placeholder_present",
+        "passed",
+        "expected_value_reconstructed",
+        "protected_placeholder_present",
         "payload_content_included"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "expected_value_reconstructed": {"type": "boolean"},
-        "protected_placeholder_present": {"type": "boolean"},
-        "payload_content_included": {"const": false}
+        "passed": {
+          "type": "boolean"
+        },
+        "expected_value_reconstructed": {
+          "type": "boolean"
+        },
+        "protected_placeholder_present": {
+          "type": "boolean"
+        },
+        "payload_content_included": {
+          "const": false
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
       "then": {
         "properties": {
-          "expected_value_reconstructed": {"const": true},
-          "protected_placeholder_present": {"const": false}
+          "expected_value_reconstructed": {
+            "const": true
+          },
+          "protected_placeholder_present": {
+            "const": false
+          }
         }
       },
       "additionalProperties": false
@@ -394,55 +531,100 @@
     "audit_check": {
       "type": "object",
       "required": [
-        "passed", "records_verified", "signatures_verified", "sequence_continuity_verified",
-        "tamper_negative_control_detected", "record_content_included"
+        "passed",
+        "records_verified",
+        "signatures_verified",
+        "sequence_continuity_verified",
+        "tamper_negative_control_detected",
+        "record_content_included"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "records_verified": {"type": "integer", "minimum": 1},
-        "signatures_verified": {"type": "integer", "minimum": 0},
-        "sequence_continuity_verified": {"type": "boolean"},
-        "tamper_negative_control_detected": {"type": "boolean"},
-        "record_content_included": {"const": false}
-      },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
-      "then": {
-        "properties": {
-          "signatures_verified": {"minimum": 1},
-          "sequence_continuity_verified": {"const": true},
-          "tamper_negative_control_detected": {"const": true}
+        "passed": {
+          "type": "boolean"
+        },
+        "records_verified": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "signatures_verified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence_continuity_verified": {
+          "type": "boolean"
+        },
+        "tamper_negative_control_detected": {
+          "type": "boolean"
+        },
+        "record_content_included": {
+          "const": false
         }
       },
-      "additionalProperties": false
-    },
-    "latency_check": {
-      "type": "object",
-      "required": ["passed", "threshold_enforced", "samples_per_operation", "scope"],
-      "properties": {
-        "passed": {"type": "boolean"},
-        "threshold_enforced": {"const": false},
-        "samples_per_operation": {"type": "integer", "minimum": 1},
-        "scope": {"type": "string", "minLength": 1}
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "signatures_verified": {
+            "minimum": 1
+          },
+          "sequence_continuity_verified": {
+            "const": true
+          },
+          "tamper_negative_control_detected": {
+            "const": true
+          }
+        }
       },
       "additionalProperties": false
     },
     "memory_check": {
       "type": "object",
       "required": [
-        "passed", "rss_threshold_enforced", "allocation_measurement_recorded",
+        "passed",
+        "rss_threshold_enforced",
+        "allocation_measurement_recorded",
         "retention_bound_verified"
       ],
       "properties": {
-        "passed": {"type": "boolean"},
-        "rss_threshold_enforced": {"const": false},
-        "allocation_measurement_recorded": {"type": "boolean"},
-        "retention_bound_verified": {"type": "boolean"}
+        "passed": {
+          "type": "boolean"
+        },
+        "rss_threshold_enforced": {
+          "const": false
+        },
+        "allocation_measurement_recorded": {
+          "type": "boolean"
+        },
+        "retention_bound_verified": {
+          "type": "boolean"
+        }
       },
-      "if": {"properties": {"passed": {"const": true}}, "required": ["passed"]},
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
       "then": {
         "properties": {
-          "allocation_measurement_recorded": {"const": true},
-          "retention_bound_verified": {"const": true}
+          "allocation_measurement_recorded": {
+            "const": true
+          },
+          "retention_bound_verified": {
+            "const": true
+          }
         }
       },
       "additionalProperties": false
@@ -597,39 +779,6 @@
             },
             "required": [
               "audit_integrity"
-            ]
-          }
-        },
-        "required": [
-          "checks"
-        ]
-      },
-      "then": {
-        "properties": {
-          "passed": {
-            "const": false
-          }
-        }
-      }
-    },
-    "passed_requires_latency_measurement": {
-      "if": {
-        "properties": {
-          "checks": {
-            "properties": {
-              "latency_measurement": {
-                "properties": {
-                  "passed": {
-                    "const": false
-                  }
-                },
-                "required": [
-                  "passed"
-                ]
-              }
-            },
-            "required": [
-              "latency_measurement"
             ]
           }
         },

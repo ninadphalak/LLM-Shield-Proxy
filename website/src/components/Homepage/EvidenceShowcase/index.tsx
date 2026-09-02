@@ -4,13 +4,16 @@ import Heading from '@theme/Heading';
 import GlossaryTerm from '@site/src/components/GlossaryTerm';
 import styles from './styles.module.css';
 
+// Six SCORED domains. 'Latency reporting' used to sit in this list; the check behind
+// it gated on percentiles of monotonic-clock deltas being non-negative, which cannot
+// fail under any implementation or input, so it was deleted. Timings are published,
+// not scored.
 const DOMAINS = [
   'Fragmentation safety',
   'Raw-PII egress',
   'SSE validity',
   'Rehydration fidelity',
   'Audit integrity',
-  'Latency reporting',
   'Memory bounds',
 ];
 
@@ -53,11 +56,11 @@ export default function EvidenceShowcase(): ReactNode {
 
           <article className={styles.card}>
             <span className={styles.cardLabel}>Open Conformance Lab · v1.0.0</span>
-            <Heading as="h3">Seven domains, one machine-readable report</Heading>
+            <Heading as="h3">Six scored domains, one machine-readable report</Heading>
             <div className={styles.chips}>
               {DOMAINS.map((domain) => <span key={domain}>{domain}</span>)}
             </div>
-            <pre className={styles.command}><code>llm-shield-proxy benchmark --iterations 10000</code></pre>
+            <pre className={styles.command}><code>pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1</code></pre>
             <Link to="/docs/conformance/specification-v1">
               Read the public specification →
             </Link>

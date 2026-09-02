@@ -49,6 +49,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # The neutral harness is a separate distribution in this repo and
+          # `pip install .` requires it. Install it from source, so a commit that
+          # has not been released yet still builds.
+          pip install ./pii-leak-benchmark
           pip install -r requirements.txt
           pip install ruff bandit pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
           # hypercorn is the HTTP/2-capable ASGI server used as the upstream in
@@ -62,7 +66,7 @@ jobs:
 
       - name: Run Bandit Security Vulnerability Scanner
         run: |
-          bandit -r llm_shield_proxy/ -s B101,B104,B311
+          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ -s B101,B104,B311
 
       - name: Verify the Redis service is reachable
         # Fails loudly rather than letting the Redis tests skip themselves and
@@ -108,6 +112,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # The neutral harness is a separate distribution in this repo and
+          # `pip install .` requires it. Install it from source, so a commit that
+          # has not been released yet still builds.
+          pip install ./pii-leak-benchmark
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil build
           pip install -e .
@@ -170,6 +178,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # The neutral harness is a separate distribution in this repo and
+          # `pip install .` requires it. Install it from source, so a commit that
+          # has not been released yet still builds.
+          pip install ./pii-leak-benchmark
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
           # onnxruntime, tokenizers and numpy: the `ner` extra Tier 3 needs.
@@ -214,6 +226,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # The neutral harness is a separate distribution in this repo and
+          # `pip install .` requires it. Install it from source, so a commit that
+          # has not been released yet still builds.
+          pip install ./pii-leak-benchmark
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
           pip install -e .
@@ -225,3 +241,100 @@ jobs:
           SHIELD_REQUIRE_HELM: "1"
         run: |
           pytest -v tests/test_helm_render_and_alerts.py
+
+  benchmark-floor:
+    name: pii-leak-benchmark on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    # The harness is the one thing a stranger installs, so its supported Python floor
+    # is a claim that has to be tested rather than declared. Each job installs ONLY the
+    # benchmark -- if anything but httpx's tree appears, the neutral measurer has
+    # started carrying a gateway.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the harness alone
+        run: |
+          python -m pip install --upgrade pip
+          pip install ./pii-leak-benchmark
+
+      - name: Assert nothing but httpx came with it
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+          allowed = {"pii-leak-benchmark", "httpx", "httpcore", "h11", "anyio", "idna",
+                     "certifi", "sniffio", "pip", "setuptools", "wheel", "typing-extensions",
+                     "exceptiongroup", "click", "rich", "pygments", "markdown-it-py", "mdurl"}
+          frozen = subprocess.run([sys.executable, "-m", "pip", "list", "--format=freeze"],
+                                  capture_output=True, text=True, check=True).stdout
+          # Normalise underscores: pip reports `typing_extensions`, the project name is
+          # `typing-extensions`, and the difference failed this job on every Python.
+          installed = {line.split("==")[0].strip().lower().replace("_", "-")
+                       for line in frozen.splitlines() if line.strip()}
+          extra = sorted(installed - allowed)
+          print("installed:", sorted(installed))
+          assert not extra, f"the benchmark install pulled {extra}"
+          PY
+
+      - name: Run the negative control
+        # capture://self is raw pass-through: the fixture reaches the capture by
+        # construction. A harness that reports anything but a leak here is broken, so
+        # this is the one check whose EXPECTED result is a failure.
+        run: |
+          set +e
+          pii-leak-benchmark --target-base-url capture://self --iterations 1 --capture-port 0 --json-out control.json
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "::error::expected exit 1 from the negative control, got $status"
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          report = json.load(open("control.json", encoding="utf-8"))
+          boundary = report["checks"]["configured_upstream_boundary"]
+          assert report["passed"] is False, report["passed"]
+          assert boundary["passed"] is False
+          assert boundary["leaked_entity_types"], "the harness can no longer see a raw leak"
+          print("negative control leaked:", boundary["leaked_entity_types"])
+          PY
+
+  benchmark-action:
+    name: Composite action (third-party entry point)
+    runs-on: ubuntu-latest
+    # The action is what an engineer at another gateway actually runs, in their own CI,
+    # under their own account. It is pointed at the working tree rather than PyPI so
+    # this job tests the commit under review and does not depend on a release.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Run the harness through the composite action
+        id: control
+        uses: ./.github/actions/pii-leak-benchmark
+        with:
+          target-base-url: "capture://self"
+          target-name: "raw-capture-baseline"
+          target-version: "negative-control"
+          iterations: "1"
+          capture-port: "0"
+          source: "./pii-leak-benchmark"
+          artifact-name: "composite-action-negative-control"
+          # A leak is the expected result here.
+          fail-on-non-pass: "false"
+
+      - name: The action must surface the leak it measured
+        run: |
+          echo "outcome=${{ steps.control.outputs.outcome }}"
+          echo "leaked=${{ steps.control.outputs.leaked-entity-types }}"
+          test "${{ steps.control.outputs.passed }}" = "false"
+          test -n "${{ steps.control.outputs.leaked-entity-types }}"

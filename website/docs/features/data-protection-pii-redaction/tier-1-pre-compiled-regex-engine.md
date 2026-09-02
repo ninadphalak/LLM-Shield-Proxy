@@ -47,6 +47,7 @@ custom_patterns:
 ## Critical Logic & Edge Cases
 * **Streaming Fragmentation:** The engine is tightly coupled with the `SSERehydrationBuffer`, ensuring that regexes safely evaluate across split Server-Sent Event (SSE) chunks by maintaining a prefix-overlap window.
 * **Non-Latin Scripts:** For CJK (Chinese, Japanese, Korean) texts where spaces are absent, the Tier 1 engine avoids catastrophic sub-word collisions by isolating ASCII alphanumeric boundaries securely.
+* **Structural validation is a signal, never a gate.** Every native `CREDIT_CARD` and `PHONE` regex match is redacted. Selected issuer prefixes and Luhn affect only an internal, unsurfaced card-confidence value: a finite table cannot exclude private-label or newly assigned cards, and a typo can invalidate Luhn. Phone punctuation carries no rejection authority because a bare 12--15 digit international number can be legitimate. On the documented 22-string business-text corpus, this fail-safe boundary retains 17 matched strings and 18 spans; an apparent 11-of-22 result was rejected because it leaked an unrecognised card shape after a transposition. Custom BYOR patterns are not validated at all. See [Supported PII types](supported-pii-types.md#validation-is-a-signal-not-a-gate).
 
 ## FAQ
 

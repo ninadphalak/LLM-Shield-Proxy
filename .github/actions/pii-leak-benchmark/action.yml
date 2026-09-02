@@ -1,0 +1,250 @@
+name: "PII leak benchmark"
+description: >-
+  Measure whether an OpenAI-compatible streaming gateway sends raw personal data to its
+  configured upstream, and whether it restores the values in the response. Produces a
+  schema-valid report as a build artifact and a summary in the job log.
+author: "Ninad Phalak"
+
+# Why this exists: a run that appears in YOUR repository's CI log, under YOUR account, is
+# stronger evidence than a file sent to a maintainer. The log is public, the commit is
+# yours, and nothing about it requires trusting this project.
+#
+# The report's `attestation` block records GITHUB_SHA, the repository and the run URL. It
+# is `self-reported` and the schema pins it to that value: it records who SAYS they ran
+# the harness. A public CI log is evidence a reader checks, not a claim the harness makes.
+
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  target-base-url:
+    description: "OpenAI-compatible /v1 base URL of the gateway under test. Use capture://self for the raw pass-through control."
+    required: true
+  target-name:
+    description: "Name of the gateway under test, as it should appear in a published row."
+    required: false
+    default: "external-openai-compatible-endpoint"
+  target-version:
+    description: "Exact version or image digest measured. A row without this is unpublishable."
+    required: false
+    default: "unspecified"
+  target-api-key:
+    description: "Credential the target expects. Pass a secret; it is never written to the report."
+    required: false
+    default: "conformance-key"
+  target-model:
+    description: "Model name sent to the target."
+    required: false
+    default: "conformance-model"
+  target-header:
+    description: "Extra request headers for the target, one NAME=VALUE per line. Values are never written to the report."
+    required: false
+    default: ""
+  iterations:
+    description: "Measured iterations. Every iteration issues live requests to the target."
+    required: false
+    default: "3"
+  capture-host:
+    description: "Bind host for the controlled capture upstream."
+    required: false
+    default: "127.0.0.1"
+  capture-port:
+    description: "Bind port for the controlled capture upstream. Your gateway must already be configured to send upstream traffic here."
+    required: false
+    default: "8765"
+  capture-public-url:
+    description: "Externally reachable /v1 URL the target was configured with. Required when capture-host is not loopback."
+    required: false
+    default: ""
+  capture-token:
+    description: "Bearer token the capture requires. Required in public mode. Pass a secret; it is never written to the report."
+    required: false
+    default: ""
+  redaction-claimed:
+    description: "What the vendor CLAIMS about PII redaction: claimed, not-offered, or unknown. 'unknown' produces a non-publishable run."
+    required: false
+    default: "unknown"
+  redaction-claim-citation:
+    description: "URL where the vendor states the claim. Required unless redaction-claimed is unknown."
+    required: false
+    default: ""
+  redaction-claim-quote:
+    description: "Optional short quote from the cited source."
+    required: false
+    default: ""
+  redaction-enabled:
+    description: "true if the target's redaction feature was enabled for this run."
+    required: false
+    default: "false"
+  redaction-config-reference:
+    description: "The exact setting/guardrail/config that enabled redaction. Required when redaction-enabled is true."
+    required: false
+    default: ""
+  python-version:
+    description: "Python used to run the harness."
+    required: false
+    default: "3.12"
+  source:
+    description: >-
+      Where to install the harness from. Default installs `pii-leak-benchmark` from PyPI.
+      Set a path (e.g. ./pii-leak-benchmark) to run a working tree instead.
+    required: false
+    default: "pii-leak-benchmark"
+  json-out:
+    description: "Path for the raw report."
+    required: false
+    default: "pii-leak-benchmark-report.json"
+  artifact-name:
+    description: "Name of the uploaded build artifact. Set to an empty string to skip the upload."
+    required: false
+    default: "pii-leak-benchmark-report"
+  fail-on-non-pass:
+    description: >-
+      Fail the step when the run did not pass all checks. Leave true for a gateway you
+      expect to pass; set false when a non-pass is the expected result (a negative
+      control, or a product that does not claim redaction).
+    required: false
+    default: "true"
+
+outputs:
+  outcome:
+    description: "What a published row may say: pass, fail, no-leak-profile-not-met, not-applicable, redaction-not-enabled, inconclusive, or claim-unstated."
+    value: ${{ steps.run.outputs.outcome }}
+  passed:
+    description: "The raw measurement: did every check pass."
+    value: ${{ steps.run.outputs.passed }}
+  leaked-entity-types:
+    description: "Comma-separated entity types that reached the capture. Empty on a clean run."
+    value: ${{ steps.run.outputs.leaked }}
+  report-path:
+    description: "Path to the raw report."
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install the harness
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        # Standard library plus httpx. Installing this never installs a gateway.
+        python -m pip install "${{ inputs.source }}"
+        python -m pip list --format=freeze
+
+    - name: Run the profile
+      id: run
+      shell: bash
+      env:
+        CONFORMANCE_CAPTURE_TOKEN: ${{ inputs.capture-token }}
+      run: |
+        set -o pipefail
+        args=(
+          --target-base-url "${{ inputs.target-base-url }}"
+          --target-name "${{ inputs.target-name }}"
+          --target-version "${{ inputs.target-version }}"
+          --target-api-key "${{ inputs.target-api-key }}"
+          --target-model "${{ inputs.target-model }}"
+          --iterations "${{ inputs.iterations }}"
+          --capture-host "${{ inputs.capture-host }}"
+          --capture-port "${{ inputs.capture-port }}"
+          --redaction-claimed "${{ inputs.redaction-claimed }}"
+          --json-out "${{ inputs.json-out }}"
+        )
+        # `if`, not `[ ... ] && ...`: the runner runs this with `set -e`, and a false
+        # test as the last command of a line exits the whole step.
+        if [ -n "${{ inputs.capture-public-url }}" ]; then
+          args+=(--capture-public-url "${{ inputs.capture-public-url }}")
+        fi
+        if [ -n "${{ inputs.redaction-claim-citation }}" ]; then
+          args+=(--redaction-claim-citation "${{ inputs.redaction-claim-citation }}")
+        fi
+        if [ -n "${{ inputs.redaction-claim-quote }}" ]; then
+          args+=(--redaction-claim-quote "${{ inputs.redaction-claim-quote }}")
+        fi
+        if [ -n "${{ inputs.redaction-config-reference }}" ]; then
+          args+=(--redaction-config-reference "${{ inputs.redaction-config-reference }}")
+        fi
+        if [ "${{ inputs.redaction-enabled }}" = "true" ]; then
+          args+=(--redaction-enabled)
+        fi
+        while IFS= read -r header; do
+          if [ -n "$header" ]; then
+            args+=(--target-header "$header")
+          fi
+        done <<< "${{ inputs.target-header }}"
+
+        # The token goes through the environment, never argv: process listings are
+        # readable by every other process on the runner.
+        set +e
+        pii-leak-benchmark "${args[@]}"
+        status=$?
+        set -e
+        # Exit 2 means the run itself could not be trusted (capture unreachable, or
+        # something else was listening on its port). That is never a result.
+        if [ "$status" -ge 2 ]; then
+          echo "::error::The harness could not complete a trustworthy run (exit $status)."
+          exit "$status"
+        fi
+
+        python - "${{ inputs.json-out }}" <<'PY' >> "$GITHUB_OUTPUT"
+        import json, sys
+        report = json.load(open(sys.argv[1], encoding="utf-8"))
+        boundary = report["checks"]["configured_upstream_boundary"]
+        print("outcome=" + report["outcome"])
+        print("passed=" + str(report["passed"]).lower())
+        print("leaked=" + ",".join(boundary["leaked_entity_types"]))
+        print("report=" + sys.argv[1])
+        PY
+
+    - name: Summarise
+      shell: bash
+      run: |
+        python - "${{ inputs.json-out }}" <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        import json, sys
+        report = json.load(open(sys.argv[1], encoding="utf-8"))
+        boundary = report["checks"]["configured_upstream_boundary"]
+        print("# PII leak benchmark")
+        print()
+        print(f"**{report['implementation']['name']} {report['implementation']['version']}** - "
+              f"outcome `{report['outcome']}`")
+        print()
+        print("> " + report["outcome_rationale"])
+        print()
+        print("| Check | Result |")
+        print("| :--- | :--- |")
+        for name, check in sorted(report["checks"].items()):
+            print(f"| `{name}` | {'pass' if check['passed'] else 'FAIL'} |")
+        print()
+        print(f"- Leaked entity types: `{boundary['leaked_entity_types'] or '[]'}`")
+        print(f"- Captured / correlated requests: {boundary['captured_requests']} / "
+              f"{boundary['correlated_requests']}")
+        print(f"- Capture mode: `{report['capture']['mode']}`")
+        print(f"- Harness revision: `{report['harness_revision']}`")
+        print()
+        print("A measurement is not a verdict: `fail` means protected data reached the "
+              "capture origin, and nothing else does. Before publishing this as a row, read "
+              "https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md")
+        PY
+
+    - name: Upload the raw report
+      if: ${{ inputs.artifact-name != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.json-out }}
+        retention-days: 90
+
+    - name: Fail on a non-pass
+      if: ${{ inputs.fail-on-non-pass == 'true' }}
+      shell: bash
+      run: |
+        if [ "${{ steps.run.outputs.passed }}" != "true" ]; then
+          echo "::error::Outcome ${{ steps.run.outputs.outcome }} - see the job summary."
+          exit 1
+        fi

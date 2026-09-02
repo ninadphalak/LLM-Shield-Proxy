@@ -184,7 +184,12 @@ class Vault:
                 return False
         return True
 
-    def rehydrate(self, text: str, retention_length: int = 0) -> str:
+    def rehydrate(
+        self,
+        text: str,
+        retention_length: int = 0,
+        max_output_bytes: Optional[int] = None,
+    ) -> str:
         """Replaces all registered tokens in the text with original raw PII.
 
         Respects retention boundary: any token occurrences whose replacement would
@@ -198,12 +203,29 @@ class Vault:
         Args:
             text: Input string containing redacted tokens or synthetic words.
             retention_length: Number of trailing characters at buffer boundary to protect.
+            max_output_bytes: Optional fail-closed UTF-8 byte ceiling. The limit is
+                checked before each replacement allocation so repeated short tokens
+                cannot amplify into an unbounded result.
 
         Returns:
             Rehydrated text with tokens restored to original values.
         """
         if not text or not self.token_to_original:
             return text
+
+        # The byte accounting is a streaming-only safety boundary. Keep the
+        # uncapped Vault API on its prior hot path. A Unicode code point occupies
+        # at most four UTF-8 bytes, so ordinary small deltas need only cheap length
+        # arithmetic; exact encoding is deferred until an expansion approaches the
+        # ceiling. That keeps safety accounting off the normal per-token CPU path.
+        result_bytes: Optional[int] = None
+        if max_output_bytes is not None:
+            if len(text) > max_output_bytes:
+                raise ValueError("Rehydrated output exceeded maximum safe length")
+            if len(text) * 4 > max_output_bytes:
+                result_bytes = len(text.encode("utf-8"))
+                if result_bytes > max_output_bytes:
+                    raise ValueError("Rehydrated output exceeded maximum safe length")
 
         # Sort tokens by length descending to prevent partial token prefix collisions
         with self._lock:
@@ -212,6 +234,8 @@ class Vault:
 
         for token in sorted_tokens:
             original = self.token_to_original[token]
+            token_bytes: Optional[int] = None
+            original_bytes: Optional[int] = None
             pos = 0
             while pos < len(result):
                 idx = result.find(token, pos)
@@ -230,7 +254,24 @@ class Vault:
                     # Defer replacement of this and subsequent overlapping matches
                     break
 
+                projected_bytes: Optional[int] = None
+                if max_output_bytes is not None:
+                    projected_characters = len(result) - len(token) + len(original)
+                    if projected_characters > max_output_bytes:
+                        raise ValueError("Rehydrated output exceeded maximum safe length")
+                    if result_bytes is not None or projected_characters * 4 > max_output_bytes:
+                        if result_bytes is None:
+                            result_bytes = len(result.encode("utf-8"))
+                        if token_bytes is None:
+                            token_bytes = len(token.encode("utf-8"))
+                            original_bytes = len(original.encode("utf-8"))
+                        assert original_bytes is not None
+                        projected_bytes = result_bytes - token_bytes + original_bytes
+                    if projected_bytes is not None and projected_bytes > max_output_bytes:
+                        raise ValueError("Rehydrated output exceeded maximum safe length")
                 result = result[:idx] + original + result[end_idx:]
+                if projected_bytes is not None:
+                    result_bytes = projected_bytes
                 pos = idx + len(original)
 
         # Neutralize Markdown Image Exfiltration payloads

@@ -1,0 +1,203 @@
+{
+  "attestation": {
+    "commit_sha": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+    "runner": "SwiftX",
+    "verification": "self-reported"
+  },
+  "capture": {
+    "authentication_required": false,
+    "bind_host": "127.0.0.1",
+    "mode": "loopback",
+    "port": 8765,
+    "self_probe": {
+      "performed": true,
+      "recorded": true,
+      "round_trip_ms": 150.16380022279918,
+      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/zdqitgjlidhmnufiubltsmuz"
+    },
+    "target_must_be_preconfigured_for": "http://127.0.0.1:8765/v1"
+  },
+  "checks": {
+    "client_observed_latency": {
+      "iterations": 3,
+      "iterations_measured": 3,
+      "mean": 959.7984666470438,
+      "p50": 126.50100002065301,
+      "p95": 126.50100002065301,
+      "p99": 126.50100002065301,
+      "passed": true,
+      "threshold_enforced": false,
+      "unit": "milliseconds"
+    },
+    "configured_upstream_boundary": {
+      "capture_mode": "loopback",
+      "captured_requests": 3,
+      "correlated_requests": 3,
+      "inspection_scope": "every HTTP/1.x request to the capture origin on any path or method: request line, headers, chunk extensions, trailers, and body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, including ordered per-channel joins across captured requests",
+      "leak_evidence": [
+        {
+          "channel": "all",
+          "entity_type": "EMAIL",
+          "match": "literal",
+          "scope": "per-request"
+        },
+        {
+          "channel": "all",
+          "entity_type": "SSN",
+          "match": "literal",
+          "scope": "per-request"
+        },
+        {
+          "channel": "all",
+          "entity_type": "CREDIT_CARD",
+          "match": "literal",
+          "scope": "per-request"
+        }
+      ],
+      "leaked_entity_types": [
+        "CREDIT_CARD",
+        "EMAIL",
+        "SSN"
+      ],
+      "marker_words_observed_max": 5,
+      "marker_words_required": 3,
+      "marker_words_total": 5,
+      "needle_lengths": {
+        "CREDIT_CARD": 16,
+        "EMAIL": 18,
+        "SSN": 9
+      },
+      "needle_proximity": {
+        "CREDIT_CARD": 16,
+        "EMAIL": 18,
+        "SSN": 9
+      },
+      "passed": false,
+      "payload_content_included": false,
+      "unattributed_leak_evidence": [],
+      "unattributed_leaked_entity_types": [],
+      "unattributed_needle_proximity": {
+        "CREDIT_CARD": 0,
+        "EMAIL": 0,
+        "SSN": 0
+      },
+      "unattributed_paths_observed": [],
+      "unattributed_requests": 0,
+      "unattributed_uninspectable_requests": 0,
+      "uninspectable_reasons": [],
+      "uninspectable_requests": 0,
+      "upstream_methods_observed": [
+        "POST"
+      ],
+      "upstream_paths_observed": [
+        "/v1/chat/completions"
+      ]
+    },
+    "fragmentation_safety": {
+      "coalescing_not_distinguished": true,
+      "events_observed": 134,
+      "events_observed_max": 134,
+      "one_character_events_requested": true,
+      "passed": true,
+      "response_reconstructed": true
+    },
+    "response_fidelity": {
+      "expected_value_reconstructed": true,
+      "iterations_completed": 3,
+      "iterations_matching": 3,
+      "iterations_requested": 3,
+      "passed": true,
+      "payload_content_included": false
+    },
+    "sse_validity": {
+      "content_type_valid": true,
+      "done_markers_valid": true,
+      "errors": [],
+      "invalid_events": 0,
+      "passed": true,
+      "status_codes": [
+        200
+      ]
+    }
+  },
+  "environment": {
+    "implementation": "cpython",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "python": "3.14.7"
+  },
+  "fixture": {
+    "formats": {
+      "CREDIT_CARD": "dddd-dddd-dddd-dddd",
+      "EMAIL": "[a-z]{8}@example.com",
+      "SSN": "ddd-dd-dddd"
+    },
+    "specimens_are_non_real": "Reserved space only: example.com (RFC 2606 s3), the SSA never-issued 900-999 SSN area, and published test card numbers.",
+    "specimens_are_valid": "Every value is a valid specimen a validating detector recognises: Luhn-valid 16-digit PAN, SSN with non-zero group and serial outside every ITIN group range, address on a real public suffix.",
+    "ssn_ipv4_collision_rejection": "Generated SSNs whose digits any valid dotted-quad IPv4 address could produce are resampled, because header inspection puts client IPs into the same normalized haystack. A measured 37.3% of the nominal space is rejected on this rule, so the effective SSN space is roughly 3.1e7.",
+    "value_space_nominal": {
+      "CREDIT_CARD": 6,
+      "EMAIL": 208827064576,
+      "SSN": 48995100
+    },
+    "values_published": false,
+    "varies_per_run": true
+  },
+  "generated_at": "2026-09-01T19:53:27.767003Z",
+  "harness_revision": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+  "implementation": {
+    "labels_are_operator_supplied": true,
+    "name": "litellm",
+    "version": "1.99.0"
+  },
+  "limitations": {
+    "method_limits": [
+      "This HTTP profile does not evaluate gateway process RSS, audit evidence, or public-model behavior.",
+      "The synthetic fixture does not establish population-level detector accuracy.",
+      "The fixture VALUES vary per run but the FORMATS are fixed and published, so a target that matches the three shapes and substitutes them passes every check without operating a detector on anything else. Value variation raised the cheapest such shim from three string replacements to a working format matcher; it does not make one impossible. This profile measures the behaviour of the endpoint it was pointed at during the run; it does not establish that the endpoint is the product it is labelled as.",
+      "The card value is drawn from a fixed list of published test PANs rather than generated. A generated Luhn-valid number in an issued BIN could be a live card, so the harness will not emit one -- which means the card carries less value entropy than the SSN and the email.",
+      "Every fixture value is a VALID specimen: Luhn-valid card, an SSN in the never-issued 900-999 area with a non-ITIN group, and an address on the reserved example.com domain. A detector that validates its input therefore recognises all three. This replaced a fixture whose three values were all invalid specimens, which stock Presidio correctly ignored -- that fixture measured carefulness as a fault and favoured this project's own non-validating regex engine.",
+      "Client-observed latency includes local HTTP and capture-server work and has no universal threshold.",
+      "Implementation name and version are operator-supplied labels, not measured identity.",
+      "Fragmentation safety verifies more than one event, which does not distinguish per-token streaming from a fully buffered response emitted as a few chunks.",
+      "Any attestation block is self-reported run metadata, not third-party verification.",
+      "Leak detection covers the configured capture origin only. Egress to any other destination is outside what this profile can observe.",
+      "The observation window ends after the client iterations finish; egress deliberately deferred until after capture shutdown is outside this finite run.",
+      "The profile inspects HTTP application data, not covert encodings in request counts, ordering, timing, connection metadata, packetization, or DNS/TLS metadata.",
+      "Inspection recovers encoded and fragmented values within a request and ordered fragments in the same channel across requests, but does not reassemble arbitrary fragments separated by unrelated values or moved between channel types."
+    ],
+    "run_validity": [
+      "The target must be configured to use the harness capture server as its upstream. This profile does not install or configure the target, and it cannot confirm the configuration took effect.",
+      "Zero captured requests fails the boundary check but does not identify a cause. A target that was never configured to use the capture origin, or that cannot reach it, is indistinguishable here from one that sent the traffic somewhere else. Confirm the target's configured upstream before reading this as leak evidence.",
+      "The capture server speaks plaintext HTTP/1.x, so the target must be able to open a plaintext HTTP connection to the advertised capture address. In loopback mode that address is on the tester's own machine; in public mode the tester supplies a reachable address and is assumed to terminate TLS at their own tunnel. A gateway that only egresses to an operator-fixed upstream it will not let the tester change cannot be measured by this check at all.",
+      "capture.mode records which observation this was. In public mode the capture address is reachable by anyone, so it is a WEAKER observation than a loopback run: attribution rests on the capture token the target was configured with rather than on the address being unreachable from outside. Do not compare a public run and a loopback run as equivalent evidence.",
+      "Requests that do not present the capture token are recorded and reported as unattributed, never dropped. A non-zero unattributed_requests on a public capture is expected background internet traffic and is not evidence about the target; unattributed_uninspectable_requests counts traffic the harness could not parse, which on a public address is ordinary noise. Protected fixture values appearing in unattributed traffic do fail the check and are reported separately, because a public capture address can be reached by a third party who knows the fixture.",
+      "Authentication, rate-limit, blast-radius, and other gateway policy controls must permit the requested evaluation traffic; a policy rejection is a profile non-pass, not evidence that protected data leaked.",
+      "Capture requests exceeding the byte, nesting, node, or decode budgets are failed closed as uninspectable; a non-pass from that condition is not evidence of a leak.",
+      "The capture server observes HTTP/1.x. Unsupported or malformed protocol attempts are failed closed as uninspectable rather than decoded as HTTP/2 or HTTP/3, so a target that speaks only HTTP/2 upstream produces a non-pass that is about the harness, not about the target.",
+      "leaked_entity_types names the entity but not the evidence. Read leak_evidence: a 'literal' match means the fixture value appeared verbatim in something the target sent; a 'normalized' match means it was recovered only after joining channels and stripping separators, which is what catches deliberate obfuscation but can in principle collide. needle_proximity reports how close anything came to each protected value, against needle_lengths -- equal means present. The margin is published per run because the values vary per run.",
+      "In public mode the path between the target and the capture injects headers of its own, and they are inspected as an egress channel because a gateway could hide values there. A measured Cloudflare quick tunnel adds ten (cf-connecting-ip, x-forwarded-for, cf-ray and seven more) and takes a request from 20 digits to 93 without changing needle proximity. Any injected identifier whose digits happen to contain a protected value collides. The IPv4 case is now excluded by construction rather than disclosed: the generator rejects any SSN whose digits some valid dotted-quad address could produce, which is what made 123.45.67.89 normalize onto the previous fixed SSN and report a leak against a gateway that had redacted correctly. A random hex request id still reaches the needle at roughly 1e-10 per request, so leak_evidence records which matcher fired: check whether the match was literal before treating it as egress. The 16-digit card needle is unreachable by any IPv4.",
+      "correlated_requests counts captured requests carrying at least the required number of marker words; marker_words_observed_max reports how much of the marker survived. A gateway that reversibly masks the marker can correlate zero requests while behaving correctly."
+    ]
+  },
+  "outcome": "redaction-not-enabled",
+  "outcome_rationale": "The product offers PII redaction but it was not configured for this run. This is a statement about the configuration, not a verdict about the product. Enable the feature and re-run before publishing any Pass or Fail.",
+  "passed": false,
+  "profile": {
+    "name": "OpenAI-compatible HTTP gateway profile",
+    "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+  },
+  "redaction_claim": {
+    "claim_citation": "https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2",
+    "configured_for_this_run": false,
+    "recorded_by": "operator",
+    "vendor_claims_pii_redaction": "claimed"
+  },
+  "schema": "llm-shield.streaming-privacy-http-profile/v1.0.0",
+  "target": {
+    "base_url": "http://127.0.0.1:4000/v1",
+    "extra_header_names": [],
+    "model": "conformance-model",
+    "raw_pass_through_baseline": false
+  }
+}
