@@ -20,7 +20,24 @@ The lab is Apache-2.0 licensed. The specification, vectors, runner, report schem
 
 Latency remains a **publication** requirement (SPG-LATENCY-1), not a scored check. The former `latency_measurement` check gated on percentiles of monotonic-clock deltas being non-negative, which cannot fail under any implementation or any input; a check that cannot fail is not evidence. The distributions are still published under `microbenchmarks`.
 
-Read the normative [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), review the [published results table](./results), or [reproduce the local and HTTP profiles](./reproducing).
+Read the normative [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), review the [published results table](./results), [reproduce the local and HTTP profiles](./reproducing), or [submit a run](./submitting).
+
+## The harness is a separate distribution, on purpose
+
+The endpoint-neutral HTTP profile ships as **`pii-leak-benchmark`** — standard library plus
+`httpx`, importing no gateway of any kind:
+
+```bash
+pip install pii-leak-benchmark
+pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1
+```
+
+It used to install as part of the reference proxy's own package, which was backwards twice
+over: it put the name of one of the measured products on the neutral measurer, and it asked an
+engineer at another gateway to install a competing gateway's stack in order to measure their
+own. The specification keeps the Streaming Privacy Gateway name; only the tool was renamed. The
+dependency direction is one-way and a regression test enforces it — the proxy may use the
+benchmark, the benchmark never imports the proxy.
 
 ## Cross-implementation HTTP profile
 
@@ -39,5 +56,10 @@ fabricated pass.
 - **Self-tested:** the implementation owner publishes a passing report and exact source revision.
 - **Independently reproduced:** an unaffiliated party publishes the raw report for the same tagged revision.
 - **Production-profiled:** a separately documented service-level experiment includes ASGI, HTTP/TLS, concurrency, networking, upstream behavior, error rate, and process RSS.
+
+**Every published row today is self-tested and none is independently reproduced**, so every one
+of them — including this project's own — reads `unreplicated` in the table. A target does not
+read as a verdict below 3 runs from 3 distinct submitters, and the maintainer's runs never count
+toward anyone's replication. See [submitting a result](./submitting).
 
 Passing the local harness does not establish population-level detector accuracy, a universal latency or memory ceiling, regulatory compliance, or immutable WORM retention.

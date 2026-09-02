@@ -133,49 +133,33 @@ everything it was asked to redact and sent nothing protected to the upstream. Th
 requires *reversible* masking, and one-way replacement is a different design, not a privacy
 failure. This independently reproduces the prediction recorded before any Portkey run existed.
 
-## Latency observations — NOT from this profile
+## Latency: withdrawn, not caveated
 
-`client_observed_latency` in the artifacts above enforces no threshold and three
-iterations is a smoke test. A separate maintainer-local diagnostic recorded 150
-iterations per point, 25 discarded as warmup, every gateway pointed at the same fixed
-upstream, one request at a time to completion of the stream, on one loaded developer
-workstation. Portkey is running here as a local Node process on Windows from the vendor
-image's own tree; this is not a tuned deployment and the numbers should not be read as
-one.
+This record previously carried a head-to-head latency table between Portkey Gateway OSS and
+LLM-Shield-Proxy, per-event costs for both, a before/after speed multiplier for this proxy, and
+an extrapolated crossover point. **All of it has been removed.**
 
-The diagnostic runner and raw samples were not retained, so the exact figures below are
-not independently auditable and must not be cited as benchmark evidence. Re-measure with
-a versioned runner and raw artifact before making a performance claim.
+The runner that produced those figures and its raw samples were not retained, so nothing in
+them could be re-derived on demand. An independent re-measurement of this proxy's isolated
+rehydration path afterwards found the direction of the improvement correct but its magnitude
+substantially smaller than the withdrawn note claimed — which is exactly the failure mode an
+unretained runner produces.
 
-Token-by-token upstream, p50 milliseconds:
+A comparison against a named competitor is not a caveat problem. Publishing a wrong speed claim
+about somebody else's product is the same class of unretractable error as publishing a wrong
+leak finding, and this project's entire credibility argument is that it does not make those. So
+the numbers are gone until there is a versioned runner committed to this repository, run end to
+end against every gateway compared, with its raw output published beside it.
 
-| Target | 200 events | 800 events | per event |
-| :--- | ---: | ---: | ---: |
-| Upstream directly (floor) | 0.77 | 0.77 | ~0 |
-| Minimal Starlette+httpx passthrough | 4.12 | 4.02 | ~0 |
-| LLM-Shield-Proxy | 12.69 | 24.55 | 0.020 ms |
-| Portkey Gateway OSS (no guardrail) | 47.00 | 47.27 | 0.0004 ms |
-| Portkey Gateway OSS + `regexReplace` | 46.95 | 47.47 | 0.0007 ms |
+What the investigation genuinely produced is not a number: it found **two real defects in this
+project's own proxy** — one OpenTelemetry span opened per SSE delta even with export disabled,
+and the SSE data line and its terminating blank line yielded as two separate ASGI writes. Both
+are fixed and both are pinned by `tests/test_streaming_write_efficiency.py`, which fails if
+either is reverted. That finding stands on the tests, not on a timing sample.
 
-The two gateways have opposite shapes. Portkey's cost is almost entirely **fixed** — about
-47 ms per request regardless of response length, and its `regexReplace` transform is free
-within measurement noise. LLM-Shield-Proxy's fixed cost is far lower and its cost grows
-with the number of SSE events.
-
-**An earlier three-iteration measurement showed Portkey at p50 52 ms against this proxy's
-117 ms, and that comparison was published as "not comparable at n=3". Investigating it
-properly found two real defects in this proxy**, both in the SSE response path: one
-OpenTelemetry span per SSE *delta* (11% of request-path CPU, and unusable telemetry — a
-500-token answer emitted 500 spans), and two ASGI writes per SSE event because the
-pipeline yielded each line separately, the second write being one byte. Before the fix the
-proxy cost **0.396 ms per event**; after, **0.020 ms**. The numbers above are post-fix.
-`tests/test_streaming_write_efficiency.py` pins both, and reverting either fails it.
-
-Extrapolating the two fits, they cross at roughly 1,400 SSE events: below that this proxy
-is faster because its fixed cost is far lower, above it Portkey is faster because its
-per-event cost is. A typical chat completion is well under 1,400 tokens, but a long
-document generation is not. Neither result is a general claim about either product, and
-the crossover is an extrapolation, not a measurement.
+`client_observed_latency` in the artifacts above enforces no threshold and gates on sample
+completeness; three iterations is a smoke test. It is not a speed measurement and must not be
+read as one.
 
 Secrets and synthetic fixture values are not written into any report. Extra-header values are
 never recorded; only header names are.

@@ -16,6 +16,7 @@ import ComparisonTable from '@site/src/components/Homepage/ComparisonTable';
 import IntegrationStrip from '@site/src/components/Homepage/IntegrationStrip';
 import FinalCTA from '@site/src/components/Homepage/FinalCTA';
 import EvidenceShowcase from '@site/src/components/Homepage/EvidenceShowcase';
+import BenchmarkLead from '@site/src/components/Homepage/BenchmarkLead';
 import GlossaryTerm from '@site/src/components/GlossaryTerm';
 
 import styles from './index.module.css';
@@ -25,33 +26,34 @@ function HomepageHeader() {
   return (
     <header className={clsx('hero', styles.heroBanner)}>
       <div className="container">
-        <span className={styles.heroEyebrow}>Apache-2.0 · Self-hosted · Independently verifiable</span>
+        <span className={styles.heroEyebrow}>Apache-2.0 · a benchmark, and the gateway it scores</span>
         <Heading as="h1" className="hero__title">
-          Verifiable streaming privacy at the LLM boundary
+          Does your LLM gateway send raw personal data upstream?
         </Heading>
         <p className="hero__subtitle">
-          Inspect and transform protected data inside your VPC, verify the exact{' '}
-          <GlossaryTerm definition="The serialized request handed to the configured upstream client after transformations.">
-            upstream boundary
-          </GlossaryTerm>, preserve incremental{' '}
+          <code>pii-leak-benchmark</code> measures it, against any OpenAI-compatible{' '}
           <GlossaryTerm definition="Server-Sent Events: an HTTP format for delivering model output as a sequence of data events.">
             SSE
           </GlossaryTerm>{' '}
-          delivery, and export audit evidence you can check offline.
+          gateway, in about a minute. Standard library plus <code>httpx</code>: you should not
+          have to install one gateway to measure another.
         </p>
-        <p className={styles.heroSubMeta}>{siteConfig.tagline}</p>
+        <p className={styles.heroSubMeta}>
+          LLM-Shield-Proxy is one of the gateways it scores — the reference implementation, one
+          row among several, and its row is as unreplicated as everyone else’s.
+        </p>
         <div className={styles.buttons}>
-          <Link className="button button--secondary button--lg" to="/docs/design-partner-pilot">
-            Apply for a private pilot
+          <Link className="button button--secondary button--lg" to="/docs/conformance/results">
+            See what it measured
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            to="/docs/guides/pilot-assessment">
-            Run the local assessment
+            to="/docs/conformance/reproducing">
+            Run it against your gateway
           </Link>
         </div>
         <p className={styles.heroMeta}>
-          Apache-2.0 source and the conformance checks are publicly inspectable.
+          {siteConfig.tagline} Nothing above the fold you cannot verify in five minutes.
         </p>
       </div>
     </header>
@@ -61,13 +63,14 @@ function HomepageHeader() {
 export default function Home(): ReactNode {
   return (
     <Layout
-      title="Self-Hosted PII Redaction for LLMs"
-      description="Apache-2.0 streaming privacy gateway with an open conformance specification, a testable pre-upstream privacy boundary, and signed audit evidence for LLM and MCP traffic.">
+      title="Measure whether your LLM gateway leaks PII upstream"
+      description="pii-leak-benchmark is an Apache-2.0 conformance harness that measures whether an OpenAI-compatible streaming gateway sends raw personal data to its upstream. LLM-Shield-Proxy is the reference implementation it scores.">
       <HomepageHeader />
-      <TrustBar />
       <StatsBar />
       <main>
+        <BenchmarkLead />
         <InteractiveShieldDemo />
+        <TrustBar />
         <EvidenceShowcase />
         <DualPipeline />
         <HowItWorks />

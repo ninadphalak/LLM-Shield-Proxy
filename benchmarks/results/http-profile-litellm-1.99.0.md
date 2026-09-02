@@ -124,34 +124,23 @@ assembles the response before re-emitting it.
 entirely by the fixture's SSN being a value Presidio deliberately rejects. The fixture was
 replaced rather than the row published.
 
-## Latency observations — NOT from this profile
+## Latency: withdrawn, not caveated
 
-`client_observed_latency` above enforces no threshold and three iterations is a smoke
-test. A separate maintainer-local diagnostic recorded 150 iterations per point,
-25 discarded as warmup, every gateway pointed at the same fixed upstream, one request at a
-time to completion of the stream, on one loaded developer workstation. They are still a
-single-machine local measurement and not a deployment benchmark.
+This record previously carried a p50 latency table comparing LiteLLM+Presidio, Portkey Gateway
+OSS and LLM-Shield-Proxy, and described LiteLLM+Presidio as the slowest configuration measured.
+**All of it has been removed.**
 
-The diagnostic runner and raw samples were not retained, so the exact figures below are
-not independently auditable and must not be cited as benchmark evidence. Re-measure with
-a versioned runner and raw artifact before making a performance claim.
+The runner that produced those figures and its raw samples were not retained, so none of it can
+be re-derived on demand, and a later independent re-measurement of one component of that work
+found a materially different magnitude. Publishing a wrong speed claim about somebody else's
+product is the same class of unretractable error as publishing a wrong leak finding, and this
+project's entire credibility argument is that it does not make those.
 
-Token-by-token upstream, p50 milliseconds:
-
-| Target | 200 events | 800 events |
-| :--- | ---: | ---: |
-| Upstream directly (floor) | 0.77 | 0.77 |
-| Minimal Starlette+httpx passthrough | 4.12 | 4.02 |
-| LLM-Shield-Proxy | 12.69 | 24.55 |
-| Portkey Gateway OSS (no guardrail) | 47.00 | 47.27 |
-| Portkey Gateway OSS + `regexReplace` | 46.95 | 47.47 |
-| LiteLLM 1.99.0 + Presidio | 183.07 | 590.26 |
-
-LiteLLM + Presidio is the slowest measured configuration by a wide margin and its cost
-grows steeply with response length. That is unsurprising for a design that calls two
-network services per request and assembles the whole response before re-emitting it; it is
-recorded as measured, on one machine, and is not presented as a general claim about
-LiteLLM.
+Nothing here is a speed comparison. `client_observed_latency` in the artifacts above enforces no
+threshold, gates on sample completeness, and runs three iterations; it is a completeness check
+wearing a latency name. A performance claim would need a versioned runner committed to this
+repository, run end to end against every gateway compared, with its raw output published beside
+it — and none exists.
 
 Secrets and synthetic fixture values are not written into any report. The API key, the
 upstream key and extra-header values never appear in an artifact.

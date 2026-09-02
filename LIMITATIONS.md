@@ -32,6 +32,16 @@ reports may add narrower constraints; none should imply a broader assurance than
   eligible for expiry; it does not prove secure erasure from allocator memory, persistence files,
   replicas, backups, or snapshots.
 - The package does not establish “zero data liability” or a universal process-RSS ceiling.
+- **The streaming output ceiling is an anti-amplification bound, not an absolute memory cap, and
+  two questions about it are open.** A single expanded streaming piece is limited to
+  `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH` (11 MiB by default), which fails closed on
+  repeated-token amplification. But (1) that couples the output ceiling to the request-size
+  limit, so raising the request limit raises the amplification ceiling with it, and (2) the
+  rationale — "at most one accepted request's originals plus one accepted line of framing" —
+  assumes every vault original arrived in the accepted request, which is unverified for
+  session-scoped or custom vault population. Both are open policy questions, recorded here
+  because they bound what the conformance profile's `memory_bounded` check means for this
+  implementation. Neither is a known defect; neither has been closed.
 
 ## Cryptography has explicit key and token contracts
 
@@ -89,6 +99,12 @@ reports may add narrower constraints; none should imply a broader assurance than
 
 - Published microbenchmarks exclude components stated in their report, commonly ASGI, HTTP/TLS,
   networks, provider/model time, concurrency, and durable audit I/O.
+- **No timing figure, speed multiplier, or latency comparison against another gateway is
+  published anywhere in this repository.** An earlier internal diagnostic produced some; its
+  runner and raw samples were not retained and an independent re-measurement of one component
+  found a materially different magnitude, so the numbers were withdrawn rather than caveated. A
+  performance claim here requires a versioned runner committed to the repository, run end to end
+  against every gateway compared, with its raw output published beside it.
 - There is no universal latency, throughput, availability, or memory guarantee. Rate limits,
   retries, failover, load shedding, connection pools, and graceful shutdown reduce selected risks
   but can still reject, duplicate, delay, or interrupt work.
@@ -106,6 +122,12 @@ reports may add narrower constraints; none should imply a broader assurance than
 
 - Current published conformance results are maintainer self-tests unless labeled otherwise. No
   unaffiliated reproduction or production deployment should be inferred from a repository test.
+- **Every published conformance row, including this project's own, reads `unreplicated`.** A
+  target does not read as a verdict below 3 runs from 3 distinct submitters, and the maintainer's
+  runs never count toward anyone's replication.
+- Nothing binds a submitted conformance report to the run that produced it, and the shipped
+  fixture is measurably gameable by a format-matching shim with no detector in it. Both are
+  documented rather than hidden.
 - Integration examples demonstrate configuration syntax and tested fixtures, not upstream
   maintainer endorsement or universal compatibility.
 - Pending patent applications are not issued patents and make no representation about validity,

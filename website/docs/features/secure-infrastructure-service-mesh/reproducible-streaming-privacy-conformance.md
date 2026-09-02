@@ -17,11 +17,15 @@ The JSON report records schema version, source revision when available, runtime/
 
 ## Endpoint-neutral gateway profile
 
-The same CLI can exercise an external OpenAI-compatible gateway over HTTP when that gateway is
-configured to forward to the harness-owned capture upstream:
+The endpoint-neutral profile is **not part of this package**. It ships as its own distribution,
+`pii-leak-benchmark` — standard library plus `httpx`, importing no gateway — because a benchmark
+named after one of the products it scores cannot referee them, and because measuring your own
+gateway must never require installing this one. It exercises any OpenAI-compatible gateway over
+HTTP once that gateway is configured to forward to the harness-owned capture upstream:
 
 ```bash
-llm-shield-proxy benchmark \
+pip install pii-leak-benchmark
+pii-leak-benchmark \
   --target-base-url http://127.0.0.1:8000/v1 \
   --target-name gateway-under-test \
   --target-version pinned-version \

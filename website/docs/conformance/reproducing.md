@@ -3,16 +3,23 @@
 ## From a source checkout
 
 ```bash
-python -m pip install -e ".[proxy]"
+python -m pip install -e ./pii-leak-benchmark -e ".[dev]"
 llm-shield-proxy benchmark \
   --iterations 10000 \
   --json-out CONFORMANCE_LATEST.json
 ```
 
-The local profile measures this project's own engines, so it needs them: install the
-`[proxy]` extra. **The HTTP profile does not.** `pip install llm-shield-proxy` installs
-stdlib plus httpx and the `llm-shield-conformance` command, so measuring your own
-gateway never requires installing this one.
+The **local** profile measures this project's own engines in process, so it needs the
+gateway installed. **The HTTP profile does not, and is no longer part of this package at
+all.** It ships as its own distribution, `pii-leak-benchmark` — standard library plus
+`httpx`, no gateway of any kind — because a benchmark named after one of the products it
+scores cannot referee them, and because measuring your gateway must never mean installing
+somebody else's:
+
+```bash
+pip install pii-leak-benchmark
+pii-leak-benchmark --target-base-url http://127.0.0.1:8000/v1
+```
 
 The runner performs no public-model call and writes no test PII into the report. Set the exact revision explicitly when running outside GitHub Actions:
 
@@ -70,7 +77,7 @@ http://127.0.0.1:8765/v1              # gateway runs on the host
 
 ```bash
 CONFORMANCE_TARGET_API_KEY=local-evaluation-key \
-llm-shield-proxy benchmark \
+pii-leak-benchmark \
   --target-base-url http://127.0.0.1:8000/v1 \
   --target-name implementation-under-test \
   --target-version pinned-version \
@@ -103,7 +110,7 @@ hosting burden and a conflict of interest. Instead **you** deploy the capture: o
 VPS, or behind a tunnel you already run (`cloudflared`, `ngrok`, whatever).
 
 ```python
-from llm_shield_proxy.conformance import run_http_conformance
+from pii_leak_benchmark import run_http_conformance
 
 report = run_http_conformance(
     "https://the-gateway-under-test.example/v1",
@@ -167,7 +174,7 @@ Public mode is fully supported from the command line:
 
 ```bash
 export CONFORMANCE_CAPTURE_TOKEN="$(python -c 'import secrets;print(secrets.token_urlsafe(32))')"
-llm-shield-conformance \
+pii-leak-benchmark \
   --target-base-url https://the-gateway-under-test.example/v1 \
   --iterations 10 \
   --capture-port 8765 \
@@ -180,9 +187,9 @@ process listings show argv, so a token passed as a flag is readable by every oth
 on the host. The environment variable takes precedence when both are set. The token is
 never written to the report or to an error message.
 
-`llm-shield-conformance` is the harness command and runs on the base install (stdlib
-plus httpx). `llm-shield-proxy benchmark` is the same runner reached through the ASGI
-entry point, so it additionally needs the `[proxy]` extra.
+`pii-leak-benchmark` is the harness command, and it is the only one. `llm-shield-proxy
+benchmark` runs this project's local in-process profile and nothing else; pass it
+`--target-base-url` and it points you here rather than pretending to be the referee.
 
 ### Can a hosted gateway actually be pointed at your capture?
 

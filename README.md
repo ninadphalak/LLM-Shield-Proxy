@@ -1,255 +1,176 @@
 # LLM-Shield-Proxy
 
 [![Build Status](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green)](https://pypi.org/project/llm-shield-proxy/)
+[![PyPI: llm-shield-proxy](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green&label=llm-shield-proxy)](https://pypi.org/project/llm-shield-proxy/)
+[![PyPI: pii-leak-benchmark](https://img.shields.io/pypi/v/pii-leak-benchmark.svg?color=green&label=pii-leak-benchmark)](https://pypi.org/project/pii-leak-benchmark/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
-[![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
-**10 built-in Tier 1 PII and secret patterns, each held by redaction and rehydration tests.**
-[Try the browser-local playground](https://project-0039f5fd-ac66-4a1c-9e0.web.app) or
-[inspect the focused tests](tests/test_pii_engine.py).
+This repository is two things, and the first one matters more:
 
-LLM-Shield-Proxy is an open-source, self-hosted **LLM firewall and privacy proxy** for
-OpenAI-compatible streaming APIs. It applies configured PII, PHI, PCI, credential, and secret
-transformations before the selected upstream; incrementally rehydrates Server-Sent Events (SSE);
-and exposes policy, egress, and audit controls for AI gateway deployments.
+1. **[`pii-leak-benchmark`](pii-leak-benchmark/)** — a neutral harness that measures whether *any*
+   OpenAI-compatible streaming gateway sends raw personal data to its upstream, and whether it gives
+   the values back to the client.
+2. **LLM-Shield-Proxy** — a streaming privacy gateway. It is one of the things the benchmark
+   measures, labelled in the table as the reference implementation, and its row carries the same
+   `unreplicated` caveat as everyone else's.
 
-It can support Data Loss Prevention (DLP), Zero Trust AI, SOC 2, HIPAA, GDPR, EU AI Act, and
-NIST/ISO evidence programs. It does not certify a deployment, guarantee complete detection, or
-make network policy optional. Start with [Limitations and assurance boundaries](LIMITATIONS.md).
+## The first thing the benchmark found was that it was rigged in its author's favour
 
-## See it in five minutes
+The harness was written by the author of one of the gateways it scores, which is a conflict of
+interest. So the useful evidence is not what it says about that gateway — it is what it has said
+about *him*.
 
-The playground runs in the browser. To verify the native structured detectors from source:
+The prompt used to carry three fixed values, chosen to be safe to publish: `person@example.invalid`,
+`123-45-6789`, `4532-1234-5678-9012`. Every one is a value a **validating** detector is built to
+reject — `.invalid` has no public suffix, that SSN is a blacklisted sequence, and the card fails its
+Luhn checksum (sum 68). Measured against a pinned Presidio at `score_threshold: 0.0`, stock Presidio
+returned no `EMAIL_ADDRESS`, no `US_SSN` and no `CREDIT_CARD` for any of them. Not low confidence —
+nothing at all.
+
+This project's own engine used bare regexes with no checksum and no range check, so it caught all
+three. **The benchmark was scoring a careful detector worse than a careless one, in the direction
+that flattered its author.** It surfaced by running against a real third party: LiteLLM+Presidio
+reported `leaked: ["SSN"]` on the shipped fixture and `leaked: []` on the same run with valid
+specimens. That row was withheld rather than published, the fixture was replaced, and every row was
+re-run. Full measurement: [fixture threat model](website/docs/conformance/fixture-threat-model.md).
+
+The next thing it found was two defects in this proxy's own streaming hot path — an OpenTelemetry
+span opened per SSE delta even with export disabled, and the data line and its terminating blank
+line yielded as two separate ASGI writes. Both are fixed and pinned by
+[`tests/test_streaming_write_efficiency.py`](tests/test_streaming_write_efficiency.py). No speed
+multiplier is published for that fix: the original runner and its raw samples were not retained, so
+there is no auditable evidence to cite. See [the record](benchmarks/results/http-profile-llm-shield-proxy-working-tree.md).
+
+**And the fixture is still gameable.** A ~35-line `str.replace` shim with no detector in it passes
+all five checks. That is measured, published, and deliberately unfixed — randomising the fixture cost
+a one-in-three false-accusation rate against a correctly-redacting gateway, which is worse than the
+defect it removes.
+
+## Run it yourself, in about a minute
 
 ```bash
-git clone https://github.com/ninadphalak/LLM-Shield-Proxy.git
-cd LLM-Shield-Proxy
-python -m pip install -e ".[dev]"
-python -m pytest -q tests/test_pii_engine.py
+pip install pii-leak-benchmark
+
+# The negative control: no gateway at all, raw pass-through. MUST report outcome=fail.
+pii-leak-benchmark --target-base-url capture://self
+
+# Your gateway, already configured to send upstream traffic to http://127.0.0.1:8765/v1
+pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1 --target-name your-gateway
 ```
 
-To start the reference proxy locally:
+Standard library plus `httpx` — you should not have to install one gateway to measure another. The
+harness stands a capture server in front of the gateway's configured upstream and inspects **every
+channel** it could arrive through: request line, method, headers, chunk extensions, trailers and the
+decoded JSON body. Anything it cannot inspect fails closed. Ten adversarial rounds are recorded in
+[the conformance docs](website/docs/conformance/index.md); the rule that survived them is *enumerate
+the channel, not the encoding*.
+
+A measurement is not a verdict. `fail` means one thing only — protected data reached the capture. A
+gateway that never claimed to redact anything, or that anonymizes one-way and leaks nothing, gets a
+non-verdict outcome instead, because printing "Fail" beside this project's own "Pass" is an
+accusation a referee cannot retract.
+
+## Results
+
+| Target | Outcome | Runs / distinct submitters |
+| :--- | :--- | :--- |
+| Raw capture endpoint (control) | `fail` — three literal matches | 1 / 1 — control, not a product |
+| **LLM-Shield-Proxy** (reference implementation) | `pass` — 5/5 | **1 / 1 — unreplicated** |
+| LiteLLM 1.99.0, default | `redaction-not-enabled` | 1 / 1 — unreplicated |
+| LiteLLM 1.99.0 + Presidio | `no-leak-profile-not-met` (no leak) | 1 / 1 — unreplicated |
+| Portkey OSS 1.15.2, default | `redaction-not-enabled` | 1 / 1 — unreplicated |
+| Portkey OSS 1.15.2 + regexReplace | `no-leak-profile-not-met` (no leak) | 1 / 1 — unreplicated |
+
+**Every row is unreplicated.** A gateway needs 3 runs from 3 distinct submitters before it reads as
+a verdict, and every one of these was produced by this project's maintainer against a target he
+installed himself. That is disclosed, not corrected: the pinned configuration and the raw artifact
+are published for each row so somebody else can contradict them.
+[Full table, method and evidence](website/docs/conformance/results.md) ·
+[submit a run](website/docs/conformance/submitting.md).
+
+## The reference implementation
 
 ```bash
-python -m pip install "llm-shield-proxy[proxy]"
-llm-shield-proxy
+pip install llm-shield-proxy
+llm-shield-proxy --host 0.0.0.0 --port 8000
 curl http://localhost:8000/healthz
 ```
 
-Or build the checked-out source with Docker:
-
-```bash
-docker compose up -d --build
-curl http://localhost:8000/healthz
-```
-
-An actual completion requires an upstream key and an accepted client-auth configuration. Copy
-[`.env.example`](.env.example), then follow the [deployment guide](website/docs/deployment.md)
-rather than treating the health check as a production validation.
-
-## Architecture at a glance
-
-The proxy chooses a transformation path based on the payload shape. Text prompts use the
-configured detector and masking mode. Structured JSON-RPC values are parsed and mutated as data,
-which preserves JSON syntax but can still change schema types and requires provider/tool echo
-testing.
-
-<a href="website/docs/assets/diagram-dual-pipeline.svg?v=2">
-  <img src="website/docs/assets/diagram-dual-pipeline.svg?v=2" alt="LLM privacy proxy dual-pipeline redaction architecture" width="900" />
-</a>
-
-### Inbound: detect and transform
-
-1. An OpenAI-compatible client sends a prompt or supported structured payload to the proxy.
-2. The enabled cascade evaluates pre-compiled structured patterns, entropy candidates, and an
-   optional operator-supplied ONNX NER model.
-3. The selected mode substitutes synthetic values, structural tags, one-way scrub markers, or
-   operator-keyed AES-GCM tokens.
-4. The transformed request is sent to the configured upstream. The boundary is testable, but it
-   is not packet capture or proof that unrelated routes cannot egress.
-
-### Outbound: incremental SSE rehydration
-
-1. The upstream response arrives as SSE chunks.
-2. A bounded prefix-aware buffer reconstructs placeholders split across transport boundaries.
-3. Registered substitutions are rehydrated as the stream continues; paraphrased, omitted, or
-   normalized values may not match.
-
-The maintained component map and diagrams live in the
-[architecture guide](website/docs/architecture.md) and
-[architecture whitepaper](website/docs/architecture-whitepaper.md).
-
-## What is implemented—and where the evidence stops
-
-| Area | Current implementation | Evidence and boundary |
-|---|---|---|
-| PII and secret detection | Ten native Tier 1 patterns, Tier 2 Shannon entropy candidates, optional Tier 3 ONNX NER, and BYOR rules | [Supported types](website/docs/features/data-protection-pii-redaction/supported-pii-types.md) · [stability tiers](STABILITY.md) |
-| Streaming privacy | Sliding-window SSE rehydration and a bounded streaming JSON lexer | [Architecture](website/docs/architecture.md) · [conformance method](website/docs/conformance/index.md) |
-| Masking | Synthetic, structural-tag, scrub, and operator-keyed stateless crypto modes | [Masking guide](website/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy.md) · [limitations](LIMITATIONS.md) |
-| LLM security controls | SSRF/DNS-rebinding checks, request policy, rate and blast-radius controls, and canary tripwires | [Security](website/docs/security.md) · [feature catalog](website/docs/features-overview.md) |
-| Evidence plane | Hash-linked audit records, Ed25519 receipts, OSCAL output, and compliance-pack export | [Compliance overview](website/docs/compliance-overview.md) · [immutable retention](website/docs/immutable-retention.md) |
-| MCP tool governance | Scoped JSON-RPC methods with RBAC, PII sanitization, and egress policy | Research-scoped subset; see [MCP guide](website/docs/guides/mcp-tool-governance.md) |
-
-The complete catalog labels every item `Supported`, `Beta`, `Experimental`, or `Research` and
-names the verification boundary: [Feature catalog](website/docs/features-overview.md) ·
-[Stability policy](STABILITY.md).
-
-## Masking and state choices
-
-| Mode | Reversible | Mapping state | Main trade-off |
-|---|---:|---|---|
-| `SYNTHETIC` | Yes | In-memory or Redis vault | Preserves value shape; synthetic output is not a guarantee of semantic equivalence. |
-| `STRUCTURAL_TAG` | Yes | In-memory or Redis vault | Explicit tokens such as `[EMAIL_1]`; model output must preserve them. |
-| `SCRUB` | No | None | One-way removal; original values cannot be restored. |
-| `STATELESS_CRYPTO` | Yes | Ciphertext carried in-band | Requires `SHIELD_ENCRYPTION_KEY`; schema and echo behavior must be validated. |
-
-Plaintext still exists in process memory during transformation. Redis TTL, in-memory expiry, and
-stateless crypto have different crash-dump, persistence, backup, replica, and key-custody risks.
-
-## Deployment topologies
-
-Standard egress sends transformed traffic to the selected provider endpoint:
-
-<a href="website/docs/assets/diagram-standard.svg?v=3">
-  <img src="website/docs/assets/diagram-standard.svg?v=3" alt="Standard LLM privacy gateway deployment" width="900" />
-</a>
-
-Air-gapped egress mode sends it to an operator-controlled internal gateway. Network controls must
-prevent direct bypass and unintended telemetry, update, model-download, or error-path egress.
-
-<a href="website/docs/assets/diagram-airgapped.svg?v=3">
-  <img src="website/docs/assets/diagram-airgapped.svg?v=3" alt="Air-gapped LLM egress gateway deployment" width="900" />
-</a>
-
-See [Deployment topologies](website/docs/features/deployment-topologies.md),
-[Air-gapped egress](website/docs/features/air-gapped-egress.md), and the
-[Kubernetes/Helm deployment guide](website/docs/deployment.md).
-
-## OpenAI-compatible client path
-
-Existing clients can begin evaluation by changing `base_url`; compatibility is not universal.
-Test every request envelope, streaming event, tool schema, error, retry, and provider adapter used
-by the application.
+LLM-Shield-Proxy is a self-hosted privacy gateway for OpenAI-compatible streaming APIs. It applies
+configured PII, PHI, PCI and secret transformations before the upstream, then rehydrates the masked
+values incrementally as SSE events arrive. Point an existing client at it by changing `base_url`:
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(
-    api_key="your-shield-virtual-key",
-    base_url="http://localhost:8000/v1",
-)
-
+client = OpenAI(api_key="your-shield-virtual-key", base_url="http://localhost:8000/v1")
 stream = client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[{"role": "user", "content": "Contact Sarah at sarah@example.com."}],
     stream=True,
 )
-
 for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="")
 ```
 
-Recipes are available for LiteLLM, Open WebUI, LangChain, LlamaIndex, Ollama, and Envoy:
-[Integrations](website/docs/integrations.md).
+A real completion needs an upstream key and a client-auth configuration — copy
+[`.env.example`](.env.example) and follow the [deployment guide](website/docs/deployment.md) rather
+than treating the health check as a production validation.
 
-## MCP security default
+| Area | What is implemented | Where the evidence stops |
+|---|---|---|
+| Detection | 10 native Tier 1 patterns, Tier 2 Shannon entropy, optional Tier 3 ONNX NER, BYOR rules | [Supported types](website/docs/features/data-protection-pii-redaction/supported-pii-types.md) · no recall guarantee on unlabeled traffic |
+| Streaming privacy | Sliding-window SSE rehydration, bounded streaming JSON lexer | [Architecture](website/docs/architecture.md) · [conformance method](website/docs/conformance/index.md) |
+| Masking | Synthetic, structural-tag, scrub, operator-keyed stateless crypto | [Masking guide](website/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy.md) · plaintext still exists in process memory |
+| Security controls | SSRF/DNS-rebinding egress checks, request policy, rate and blast-radius limits, canary tripwires | [Security](website/docs/security.md) · not a substitute for network policy |
+| Evidence plane | Hash-linked audit records, Ed25519 receipts, OSCAL output, compliance packs | [Compliance overview](website/docs/compliance-overview.md) · tamper-evident, **not WORM** without [immutable retention](website/docs/immutable-retention.md) |
+| MCP governance | Scoped JSON-RPC subset with RBAC and egress policy | Research-scoped; [MCP guide](website/docs/guides/mcp-tool-governance.md) · not a complete MCP transport |
 
-`POST /v1/mcp` is a Research-scoped JSON-RPC gateway for `tools/list`, `tools/call`, and
-`resources/read`. It is not a complete MCP Streamable HTTP server and does not implement
-initialization, capability negotiation, sessions, or GET/SSE.
+Every catalogued feature carries a `Supported` / `Beta` / `Experimental` / `Research` badge naming
+its verification boundary: [feature catalog](website/docs/features-overview.md) ·
+[stability policy](STABILITY.md) · [limitations](LIMITATIONS.md).
 
-Empty `allowed_tools` now fails closed by default:
+It supports SOC 2, HIPAA, GDPR, EU AI Act and NIST/ISO evidence programs by supplying technical
+controls and artifacts. It does not certify a deployment, guarantee complete detection, or make
+network policy optional.
 
-```dotenv
-MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL
-```
-
-Blocklist-only deployments must explicitly select `BLOCKLIST_ONLY`. Startup then emits a critical
-warning that every tool not named in `blocked_tools` is permitted. Configure and test the resolver,
-SSRF egress policy, upstream route, and outage behavior using the
-[MCP Tool Governance guide](website/docs/guides/mcp-tool-governance.md).
-
-## Conformance and testing
-
-The base package installs the endpoint-neutral conformance command without the reference proxy's
-full dependency stack:
+## Verifying this repository
 
 ```bash
-python -m pip install llm-shield-proxy
-llm-shield-conformance --help
-```
-
-The HTTP profile uses a controlled capture upstream to inspect the serialized configured-upstream
-request and a one-character SSE return path. It does not remotely measure process RSS or prove all
-network behavior. Read the [reproduction guide](website/docs/conformance/reproducing.md),
-[fixture threat model](website/docs/conformance/fixture-threat-model.md), and
-[reporting protocol](benchmarks/REPORTING.md) before publishing a comparison.
-
-For repository verification:
-
-```bash
-python -m pip install -e ".[dev]"
+git clone https://github.com/ninadphalak/LLM-Shield-Proxy.git
+cd LLM-Shield-Proxy
+python -m pip install -e ./pii-leak-benchmark -e ".[dev]"
 python -m pytest
-cd website
-npm install
-npm run build
 ```
 
-Infrastructure-dependent CI jobs provision Redis, an HTTP/2 ALPN server, a pinned ONNX export,
-Docker, Helm, and promtool. Missing required infrastructure fails those CI jobs instead of silently
-skipping. Exact topology and remaining gaps are listed in [STABILITY.md](STABILITY.md).
-
-## Evaluating alternatives
-
-LLM-Shield-Proxy is a privacy/security layer, not a model router or agent framework. It can sit in
-front of LiteLLM, LangChain, LlamaIndex, vLLM, Ollama, NVIDIA NIM, or another OpenAI-compatible
-path, subject to integration testing.
-
-When comparing LLM gateways, DLP tools, Microsoft Presidio, spaCy pipelines, hosted AI safety
-APIs, or packet-local scanners, measure the same corpus and protocol boundary. Compare:
-
-- detection precision/recall on a labeled, representative dataset;
-- raw protected values observed at the configured upstream;
-- SSE fragmentation behavior and total end-to-end latency;
-- process RSS, concurrency, failure policy, and audit durability;
-- provider/tool schema compatibility and operational key custody.
-
-See [Migration from Presidio](website/docs/migration-from-presidio.md) for a scoped comparison.
-
-## Compliance and security boundaries
-
-The project supplies technical controls and evidence artifacts; it does not establish legal or
-audit conclusions. Start here:
-
-- [Security model](website/docs/security.md)
-- [Limitations and assurance boundaries](LIMITATIONS.md)
-- [SOC 2](website/docs/compliance/soc2.md), [HIPAA](website/docs/compliance/hipaa.md),
-  [GDPR](website/docs/compliance/gdpr.md), and [EU AI Act](website/docs/compliance/eu_ai_act.md)
-- [NIST, ISO, and FIPS boundaries](website/docs/compliance/nist_iso_fips.md)
-- [Security policy and vulnerability reporting](SECURITY.md)
+The benchmark is a separate distribution in this repo, so it installs first; nothing in it imports
+the proxy and a test fails if that ever changes. CI provisions real Redis, an HTTP/2 ALPN server, a
+checksum-pinned ONNX export, Docker, Helm and promtool — a missing dependency fails those jobs
+rather than skipping them, so a green build cannot mean "nothing ran".
 
 ## Documentation
 
 - [Interactive documentation and playground](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
-- [Feature catalog](website/docs/features-overview.md)
-- [Deployment](website/docs/deployment.md) and [operations](website/docs/operations.md)
-- [Policy as code](website/docs/policies.md)
-- [Troubleshooting](website/docs/troubleshooting.md)
-- [Design-partner pilot](website/docs/design-partner-pilot.md)
-- [Research and publications](website/docs/research-publications.md)
+- [Conformance: spec, results, reproduction, submission](website/docs/conformance/index.md)
+- [Feature catalog](website/docs/features-overview.md) · [deployment](website/docs/deployment.md) ·
+  [operations](website/docs/operations.md) · [policy as code](website/docs/policies.md)
+- [Integrations](website/docs/integrations.md) — LiteLLM, Open WebUI, LangChain, LlamaIndex, Ollama, Envoy
+- [Security model](website/docs/security.md) · [limitations](LIMITATIONS.md) ·
+  [troubleshooting](website/docs/troubleshooting.md)
 
 ## Contributing, license, and citation
 
 Contributions are welcome through [issues](https://github.com/ninadphalak/LLM-Shield-Proxy/issues),
-[discussions](https://github.com/ninadphalak/LLM-Shield-Proxy/discussions), and
-[CONTRIBUTING.md](CONTRIBUTING.md). Source code is Apache 2.0; documentation and diagrams may carry
-CC BY 4.0 terms. See [LICENSE](LICENSE).
+[discussions](https://github.com/ninadphalak/LLM-Shield-Proxy/discussions) and
+[CONTRIBUTING.md](CONTRIBUTING.md). The most valuable contribution is a benchmark run against a
+gateway you operate — especially one that contradicts a row above.
 
-The author identifies U.S. application numbers **64/126,730** and **64/139,263** as pending
-filings related to streaming transformation and structured stateless masking. Pending applications
-are not issued patents; verify status with counsel and official records before relying on them.
+Source code is Apache 2.0; documentation and diagrams may carry CC BY 4.0 terms. See
+[LICENSE](LICENSE).
+
+The author identifies U.S. application numbers **64/126,730** and **64/139,263** as pending filings
+related to streaming transformation and structured stateless masking. Pending applications are not
+issued patents; verify status with counsel and official records before relying on them.
 
 If you reference the architecture or benchmark methodology, use [CITATION.cff](CITATION.cff) or:
 

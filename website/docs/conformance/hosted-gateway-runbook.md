@@ -127,7 +127,7 @@ Then send the capture token as the provider credential so the capture can attrib
 traffic, and run:
 
 ```bash
-llm-shield-conformance \
+pii-leak-benchmark \
   --target-base-url "https://gateway.ai.cloudflare.com/v1/$CF_ACCOUNT_ID/$CF_GATEWAY/conformance-capture" \
   --target-api-key "$CONFORMANCE_CAPTURE_TOKEN" \
   --target-name "cloudflare-ai-gateway" \
@@ -191,7 +191,7 @@ default](https://portkey.ai/docs/integrations/llms/byollm) — a tunnel hostname
 loopback never will.
 
 ```bash
-llm-shield-conformance \
+pii-leak-benchmark \
   --target-base-url "https://api.portkey.ai/v1" \
   --target-api-key "$PORTKEY_API_KEY" \
   --target-header "x-portkey-provider=openai" \

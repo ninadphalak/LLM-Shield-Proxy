@@ -51,53 +51,48 @@ the report or this record.
 
 ## Two hot-path defects this benchmark found in this proxy
 
-Both were found by taking a competitor's better number seriously instead of dismissing it,
-and both are in this project's own code.
+Both were found by taking a competitor's better number seriously instead of dismissing it, and
+both are in this project's own code.
 
-> **Evidence limit:** the diagnostic runner and raw timing/profile samples were not
-> retained. The exact figures below are a maintainer-local historical observation, not
-> independently auditable benchmark evidence. The checked-in regression tests verify the
-> write/span/content invariants only. Re-measure with a versioned runner and raw artifact
-> before citing any timing or percentage.
+> **No timing figure is published for this, deliberately.** An earlier version of this record
+> carried per-event millisecond costs, a speed multiplier, and a head-to-head comparison against
+> another gateway. The runner that produced them and its raw samples were **not retained**, and
+> an independent re-measurement of the isolated rehydration path afterwards found the direction
+> correct but the magnitude substantially smaller than the original note claimed. Unreproducible
+> numbers were removed rather than caveated. A wrong performance claim about a named competitor
+> is the same class of unretractable error as a wrong leak finding, and this project's whole
+> credibility argument is that it does not make those. Any future claim needs a versioned runner
+> committed to this repository alongside its raw output, measured end to end for every gateway
+> compared.
 
-A three-iteration measurement had shown Portkey OSS at p50 52 ms against this proxy's
-117 ms. Re-measured properly — 150 iterations per point, 25 warmup discarded, identical
-fixed upstream for every gateway — the gap was real but differently shaped: this proxy's
-**fixed** cost was the lowest of every gateway measured (9.9 ms for a one-event response
-against Portkey's 36.9), and the entire gap was **per SSE event**, at 0.396 ms against
-Portkey's 0.014 ms.
+What survives is structural, and each item is pinned by a regression test that fails if it is
+reverted:
 
-It was not detection. The same prompt with no PII in it, at the same length, was only
-5.7 ms cheaper over 200 events.
+1. **One OpenTelemetry span per SSE delta.** A `TracerProvider` is always installed and only the
+   exporter is gated, so the span was opened even with telemetry disabled. It was also wrong as
+   telemetry: a 500-token answer emitted 500 spans. Now one span per stream, carrying the
+   emitted-chunk count as an attribute.
+2. **Two ASGI writes per SSE event.** The pipeline split the upstream on newlines and yielded
+   every line separately, so each event cost one write for the data line and a second for the
+   bare newline terminating it -- measured 2.02 `http.response.body` messages per event, the
+   second one byte long. Output bytes are unchanged; only framing granularity is. Coalesced
+   writes now target `MAX_SSE_LINE_LENGTH`. One encoded SSE line may exceed that write target so
+   a longer rehydrated value is not truncated; an absolute per-piece ceiling of
+   `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH` fails closed on repeated-token amplification.
 
-| Layer | Cost per SSE event |
-| :--- | ---: |
-| Upstream directly | ~0 |
-| Starlette + httpx forwarding raw chunks | ~0 |
-| Starlette + httpx yielding once per event (framework floor) | 0.027 ms |
-| Rehydration pipeline in isolation | 0.033 ms |
-| **This proxy, end to end, before the fix** | **0.396 ms** |
+`tests/test_streaming_write_efficiency.py` verifies write-count reduction, byte and framing
+equivalence, drip input, long-value pass-through, amplification rejection, reference-count
+bounding, cancellation cleanup, and one span per stream. Those are correctness and resource
+invariants -- **not** a latency threshold, and not evidence of a speed result.
 
-1. **One OpenTelemetry span per SSE delta.** cProfile of the real ASGI app put 11% of all
-   request-path CPU in `start_span`, and it ran even with telemetry disabled, because a
-   `TracerProvider` is always installed and only the exporter is gated. It was also wrong
-   as telemetry: a 500-token answer emitted 500 spans. Now one span per stream, carrying
-   the emitted-chunk count as an attribute.
-2. **Two ASGI writes per SSE event.** The pipeline split the upstream on newlines and
-   yielded every line separately, so each event cost one write for the data line and a
-   second for the bare newline terminating it — measured 2.02 `http.response.body`
-   messages per event, the second one byte long. uvicorn charges per message. Output bytes
-   are unchanged; only framing granularity is. Aggregate coalesced writes now target
-   `MAX_SSE_LINE_LENGTH`. One encoded SSE line may exceed that write target so a longer
-   rehydrated value is not truncated; an absolute per-piece ceiling of
-   `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH` fails closed on repeated-token
-   amplification.
+**Two open policy questions**, recorded here because they bound what the `memory_bounded` check
+means for this implementation and both are the maintainer's call:
 
-**After both fixes: 0.020 ms per event, a 20x reduction.** Verified on a token-by-token
-upstream as well as a buffered one, so the gain is not an artifact of the test upstream.
-`tests/test_streaming_write_efficiency.py` pins both; reverting either fails it and
-nothing else. The 0.020 ms figure above was measured before the subsequent bounded-memory
-guard was added; this record does not claim a new end-to-end timing for that guard.
+1. `max_output_piece_bytes` is `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH`, so raising the
+   request-size limit silently raises the streaming amplification ceiling with it. It is an
+   anti-amplification bound, not an absolute memory cap.
+2. That rationale assumes every vault original arrived in the accepted request. Session-scoped or
+   custom vault population may need its own bound; this is unverified.
 
 ## Over-redaction, and what was done about it
 
@@ -132,7 +127,7 @@ card corruption and bare international phone negative controls through `detect_s
 ## Regenerate
 
 ```text
-llm-shield-conformance
+pii-leak-benchmark
   --target-base-url http://127.0.0.1:8899/v1
   --target-api-key <local-evaluation-key>
   --target-name llm-shield-proxy

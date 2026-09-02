@@ -34,15 +34,51 @@ These are Windows in-process Python operation timings. They exclude ASGI, HTTP, 
 
 ## Independent reproductions
 
-No unaffiliated reproduction has been published yet. This is an explicit evidence gap and the highest-priority community contribution.
+**None. Zero rows in this document have been reproduced by anyone other than the maintainer.**
+That is the largest evidence gap here and the highest-value contribution anyone can make.
 
-[Reproduce the report](./reproducing) and submit the raw artifact. Do not send representative enterprise traffic or confidential prompts.
+[Reproduce a row](./reproducing), then [submit the artifact and its pinned
+configuration](./submitting). Do not send representative enterprise traffic or confidential
+prompts: the harness ships its own synthetic fixture precisely so you never have to.
 
 ## Cross-implementation HTTP results
 
 The table is intentionally public before it is full. “Not run” is not a pass or a failure; it is
-an explicit work item. Results will link the raw report, pinned target revision/image, and
-redacted configuration.
+an explicit work item. Every result links its raw report and its pinned target
+revision/image and redacted configuration — **never one without the other**.
+
+### Replication is counted, not averaged
+
+Every measured row below was produced by this project's maintainer, against a target he
+installed himself, for a benchmark he wrote, beside a gateway he also wrote. Disclosure does not
+repair that. Only other people running it does, so the table counts who ran what:
+
+| Column | Meaning |
+| :--- | :--- |
+| **Runs** | complete artifacts that exist for this target and configuration |
+| **Submitters** | how many **distinct** accounts produced them |
+| **Versions** | the exact target versions or image digests measured |
+| **Dates** | first and most recent run |
+| **Status** | `unreplicated` until the floor is met; `disputed` when runs disagree |
+
+**The floor is 3 runs from 3 distinct submitters.** Below it a target reads `unreplicated`
+rather than a verdict, however clean the measurement was. The maintainer's runs never count
+toward the replication of any row, including a competitor's: three runs from one person is one
+setup measured three times.
+
+That floor is not applied selectively. **LLM-Shield-Proxy's own row is 1 run by 1 submitter and
+reads `unreplicated`** — it is the row with the strongest incentive behind it and the weakest
+evidence under it. The competitor rows are the ones a LiteLLM or Portkey engineer has both the
+means and the motive to re-run, and a run that contradicts one is the most useful thing anyone
+can contribute here.
+
+**Disagreements are published as disagreements.** Two runs of the same target and configuration
+that reach different outcomes both stay in the table, the target is marked `disputed`, and the
+difference is described. A disagreement is usually a finding — an undocumented default, a
+version drift, a platform difference — and averaging it away destroys exactly the information
+that made it worth publishing.
+
+See [submitting a result](./submitting) for what a run must carry and how it is checked.
 
 ### What a row is allowed to say
 
@@ -72,26 +108,39 @@ whether each finding was a `literal` match or one recovered only after normaliza
 
 See the [hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor procedure.
 
-| Target | Redaction claim | Version/configuration | `outcome` | Artifact |
-| :--- | :--- | :--- | :--- | :--- |
-| Raw capture endpoint | Synthetic control, not a product | Harness negative control | `fail` — raw fixtures reach the capture, three `literal` matches | [`http-profile-raw-capture-baseline.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-raw-capture-baseline.json) |
-| LLM-Shield-Proxy | Claimed, enabled | `1.3.4+working-tree`; maintainer self-test | `pass` — 5/5 checks | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) |
-| LiteLLM (self-hosted) | Claims PII masking; [Presidio guardrail](https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2) | `litellm[proxy]==1.99.0` on CPython 3.12.3; **default configuration, no guardrail attached** | `redaction-not-enabled` — a configuration statement, not a verdict. The other four checks pass | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0-default.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0.md) |
-| LiteLLM + Presidio PII masking | as above | `litellm[proxy]==1.99.0`, `guardrail: presidio`, `output_parse_pii: true`, stock Presidio images pinned by digest | `no-leak-profile-not-met` — **no leak** (`leaked_entity_types: []`); `output_parse_pii` did not restore the values, so the client never receives them back | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0-presidio.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0.md) |
-| Portkey Gateway (OSS, self-hosted) | Claims redaction; [does not document rehydration](https://portkey.ai/docs/product/guardrails/pii-redaction) | `portkeyai/gateway@sha256:97f094d9…5200d` (1.15.2); **default configuration, no guardrails** | `redaction-not-enabled` — a configuration statement, not a verdict. The other four checks pass | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2-default.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2.md) |
-| Portkey Gateway (OSS, self-hosted) + redaction | as above | same image; one `default.regexReplace` before-request hook. **Tester-authored patterns** — this measures Portkey's guardrail transform engine, not Portkey's detector | `no-leak-profile-not-met` — **no leak** (`leaked_entity_types: []`); one-way replacement does not meet the reversible-masking requirement | [Report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2-regexreplace.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2.md) |
-| Portkey (hosted platform) | as above | Pending run with `Portkey Pro PII` or `Regex Match` guardrails enabled | Not run — expected `no-leak-profile-not-met` | — |
-| Presidio in front of an OpenAI-compatible mock | Claims anonymization; `replace`/`hash`/`mask` do not rehydrate | Pending adapter/configuration | Not run — expected `no-leak-profile-not-met` | — |
-| Cloudflare AI Gateway | **Does not claim PII redaction.** [DLP flags or blocks; neither redacts](https://developers.cloudflare.com/ai-gateway/features/dlp/) | Pending run | Not run — expected `not-applicable` | — |
+| Target | `outcome` | Runs | Submitters | Versions | Dates | Status | Evidence |
+| :--- | :--- | ---: | ---: | :--- | :--- | :--- | :--- |
+| **Raw capture endpoint** — synthetic control, not a product | `fail` — raw fixtures reach the capture, three `literal` matches | 1 | 1 | harness negative control | 2026-09-01 | control | [report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-raw-capture-baseline.json) |
+| **LLM-Shield-Proxy** — the reference implementation, written by this benchmark's author | `pass` — 5/5 checks | 1 | 1 | `1.3.5` | 2026-09-01 | **`unreplicated`** | [report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-llm-shield-proxy-working-tree.md) |
+| **LiteLLM**, default configuration, no guardrail attached | `redaction-not-enabled` — a configuration statement, not a verdict. The other four checks pass | 1 | 1 | `litellm[proxy]==1.99.0`, CPython 3.12.3 | 2026-09-01 | `unreplicated` | [report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0-default.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0.md) |
+| **LiteLLM + Presidio PII masking** (`guardrail: presidio`, `output_parse_pii: true`) | `no-leak-profile-not-met` — **no leak** (`leaked_entity_types: []`); the values were not restored to the client | 1 | 1 | same, Presidio images pinned by digest | 2026-09-01 | `unreplicated` | [report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0-presidio.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-litellm-1.99.0.md) |
+| **Portkey Gateway (OSS, self-hosted)**, default, no guardrails | `redaction-not-enabled` — a configuration statement, not a verdict. The other four checks pass | 1 | 1 | `portkeyai/gateway@sha256:97f094d9…5200d` (1.15.2) | 2026-09-01 | `unreplicated` | [report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2-default.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2.md) |
+| **Portkey Gateway (OSS) + redaction** — one `default.regexReplace` hook, **tester-authored patterns**: this measures the guardrail transform engine, not Portkey's detector | `no-leak-profile-not-met` — **no leak** (`leaked_entity_types: []`); one-way replacement | 1 | 1 | same image | 2026-09-01 | `unreplicated` | [report](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2-regexreplace.json) · [configuration](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/http-profile-portkey-gateway-oss-1.15.2.md) |
+| **Portkey (hosted platform)** | Not run — expected `no-leak-profile-not-met` | 0 | 0 | — | — | not run | — |
+| **Presidio in front of an OpenAI-compatible mock** | Not run — expected `no-leak-profile-not-met` | 0 | 0 | — | — | not run | — |
+| **Cloudflare AI Gateway** — [does not claim PII redaction](https://developers.cloudflare.com/ai-gateway/features/dlp/); DLP flags or blocks, neither redacts | Not run — expected `not-applicable` | 0 | 0 | — | — | not run | — |
+
+Redaction claims, with citations: LiteLLM claims PII masking via its
+[Presidio guardrail](https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2); Portkey
+claims [PII redaction and documents no rehydration](https://portkey.ai/docs/product/guardrails/pii-redaction);
+Cloudflare AI Gateway does not claim redaction at all, which is why publishing "Fail" for it
+would be a smear rather than a result.
+
+All six measured runs used `loopback` capture mode and 3 iterations. The four third-party runs
+were produced by harness revision `1cef0ff`; the reference-implementation and control rows were
+regenerated at the packaging split, whose diff to the harness is import paths, a probe
+user-agent string and one dead local variable — no inspection or scoring logic changed. See the
+[hosted-gateway runbook](./hosted-gateway-runbook) for the per-vendor procedure.
 
 The "expected" outcomes above are predictions from vendor documentation, not results. They
 are recorded so that a run which contradicts them is treated as a finding about the run
 rather than quietly published.
 
-Every measured row above was produced by this project's maintainer against a target they
-installed themselves. That is a conflict of interest. It is disclosed, the pinned
-configuration and the raw artifact are published for each one, and none of them has been
-independently reproduced. See [governance](./governance).
+Every measured row above was produced by this project's maintainer against a target he
+installed himself. That is a conflict of interest. It is disclosed, the pinned configuration
+and the raw artifact are published for each one, and **not one row has been independently
+reproduced** — which is why every one of them, including this project's own, reads
+`unreplicated`. See [submitting a result](./submitting) and [governance](./governance).
 
 ### The first third-party runs found a defect in the fixture, not in the gateways
 
@@ -115,13 +164,20 @@ published with an honest outcome. Full measurement, including the false-positive
 this removed and a fail-open decoder defect the old fixture had been hiding, is in the
 [fixture threat model](./fixture-threat-model).
 
-### Latency is not published as a comparison
+### Latency is not published at all
 
-`client_observed_latency` enforces no threshold and gates on sample completeness, and
-three iterations is a smoke test. Nothing in this table should be read as a speed
-comparison. The per-target records preserve a separate maintainer-local diagnostic that
-found two hot-path defects in **this** proxy, but its runner and raw samples were not
-retained. Its exact figures are not independently auditable benchmark evidence.
+`client_observed_latency` enforces no threshold and gates on sample completeness, and three
+iterations is a smoke test. **Nothing in this table is a speed comparison, and no timing figure
+or speed multiplier is published anywhere in this repository.**
+
+A maintainer-local diagnostic did find two real hot-path defects in **this** proxy, and those
+are described in the per-target record. Its runner and raw samples were not retained, and an
+independent re-measurement of the isolated rehydration path found the direction correct but the
+magnitude substantially smaller than the original note claimed. So the defects and their fixes
+are published; the numbers are not. A performance claim here needs a versioned runner committed
+to this repository alongside its raw output, measured end to end, for every gateway compared —
+and until that exists, a wrong speed claim about a named competitor would be the same class of
+unretractable error as a wrong leak finding.
 
 Raw OpenAI should not receive synthetic protected fixtures merely to populate a table. The local
 capture endpoint supplies the correct pass-through negative control without transmitting those
