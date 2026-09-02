@@ -79,6 +79,13 @@ Results identify who ran and funded them:
 Payment, equipment, cloud credits, consulting, and pre-publication review rights must be disclosed.
 Failed and partial runs remain valid contributions when their artifacts are reproducible.
 
+**Replication is counted per target, and the floor is 3 runs from 3 distinct submitters.** Below
+it a target reads `unreplicated` in the [results table](./results) rather than as a verdict --
+including this project's own reference implementation, which today is 1 run by 1 submitter. The
+maintainer's runs never count toward the replication of any row, and runs that disagree are
+published as separate rows rather than averaged. The full submission path, including what a run
+must carry and how it is checked, is in [submitting a result](./submitting).
+
 ## No certification program yet
 
 The project does not currently operate a certification body, compliance seal, or paid conformance
