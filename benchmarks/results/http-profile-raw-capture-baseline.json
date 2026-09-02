@@ -1,6 +1,6 @@
 {
   "attestation": {
-    "commit_sha": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+    "commit_sha": "a3d94596917b289c690a6e53d82d4229c9cb86bb",
     "runner": "SwiftX",
     "verification": "self-reported"
   },
@@ -12,8 +12,8 @@
     "self_probe": {
       "performed": true,
       "recorded": true,
-      "round_trip_ms": 140.631299931556,
-      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/pdhilkwwcnnmcybairbeycdr"
+      "round_trip_ms": 162.56409999914467,
+      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/skjwaevrvrlqrkinyqfwccxl"
     },
     "target_must_be_preconfigured_for": "http://127.0.0.1:8765/v1"
   },
@@ -21,10 +21,10 @@
     "client_observed_latency": {
       "iterations": 3,
       "iterations_measured": 3,
-      "mean": 25.079966755583882,
-      "p50": 21.538899978622794,
-      "p95": 21.538899978622794,
-      "p99": 21.538899978622794,
+      "mean": 31.68289999788006,
+      "p50": 29.50760000385344,
+      "p95": 29.50760000385344,
+      "p99": 29.50760000385344,
       "passed": true,
       "threshold_enforced": false,
       "unit": "milliseconds"
@@ -95,8 +95,8 @@
     },
     "fragmentation_safety": {
       "coalescing_not_distinguished": true,
-      "events_observed": 134,
-      "events_observed_max": 134,
+      "events_observed": 136,
+      "events_observed_max": 136,
       "one_character_events_requested": true,
       "passed": true,
       "response_reconstructed": true
@@ -143,8 +143,8 @@
     "values_published": false,
     "varies_per_run": true
   },
-  "generated_at": "2026-09-01T21:01:19.546562Z",
-  "harness_revision": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+  "generated_at": "2026-09-02T02:26:18.332380Z",
+  "harness_revision": "a3d94596917b289c690a6e53d82d4229c9cb86bb",
   "implementation": {
     "labels_are_operator_supplied": true,
     "name": "raw-openai-compatible-pass-through",

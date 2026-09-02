@@ -1,15 +1,23 @@
 # LLM-Shield-Proxy HTTP profile configuration
 
-Maintainer working-tree self-test; not an independent result or a release artifact.
+**Maintainer self-test. One run, one submitter — the published table reads this row
+`unreplicated`, exactly as it reads every competitor row.** It is the row with the strongest
+incentive behind it and the weakest evidence under it, and the floor (3 runs from 3 distinct
+submitters) is not waived for it. The maintainer's own runs never count toward replication.
 
-- Harness/source label: `1cef0ff` plus the working-tree changes described below
-- Package label: `1.3.4+working-tree`
-- Report SHA-256: `1dadfbd6a8f4b8a1ced35ecc5edc6b302941060d4bb431ed1e801190d6741356`
+- Harness/source revision: `a3d9459`, clean tree apart from the artifacts this run wrote
+- Package label: `1.3.5`
+- Harness: `pii-leak-benchmark` 0.1.0 (the neutral distribution; it imports nothing from this
+  project, and a test fails if that changes)
+- Report SHA-256: `47d4d7765d553237c90f7e6d621bdbace6f4d12e9b320b78fd770b9883d82c9b`
+- Run: 2026-09-02, Windows 11, CPython 3.14.7
 - Target: Uvicorn on `127.0.0.1:8899`
-- Controlled upstream: `http://127.0.0.1:8765/v1` (capture mode: `loopback`)
+- Controlled upstream: `http://127.0.0.1:8765/v1` (capture mode: `loopback`, the stronger mode)
 - Request iterations: 3
 - Outcome: `pass` — 5/5 checks, `leaked_entity_types: []`, `captured=3 correlated=3
-  uninspectable=0 marker_max=5`, 133 events, response reconstructed
+  uninspectable=0 marker_max=5`, 138 events, response reconstructed
+- Cross-request needle margin on this run: SSN 2 of 9 digits, CREDIT_CARD 2 of 16 — the
+  documented honest-run margin, reproduced automatically rather than by hand
 
 ## What was actually running
 
@@ -131,7 +139,7 @@ pii-leak-benchmark
   --target-base-url http://127.0.0.1:8899/v1
   --target-api-key <local-evaluation-key>
   --target-name llm-shield-proxy
-  --target-version 1.3.4+working-tree
+  --target-version 1.3.5
   --iterations 3
   --capture-port 8765
   --redaction-claimed claimed

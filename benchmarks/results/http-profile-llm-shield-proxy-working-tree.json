@@ -1,6 +1,6 @@
 {
   "attestation": {
-    "commit_sha": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+    "commit_sha": "a3d94596917b289c690a6e53d82d4229c9cb86bb",
     "runner": "SwiftX",
     "verification": "self-reported"
   },
@@ -12,8 +12,8 @@
     "self_probe": {
       "performed": true,
       "recorded": true,
-      "round_trip_ms": 155.71040008217096,
-      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/uqxkykewqpfwsiauxunpelyf"
+      "round_trip_ms": 173.46620000898838,
+      "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/wtwcazomuwmmybdehsizwbfu"
     },
     "target_must_be_preconfigured_for": "http://127.0.0.1:8765/v1"
   },
@@ -21,10 +21,10 @@
     "client_observed_latency": {
       "iterations": 3,
       "iterations_measured": 3,
-      "mean": 22.607166630526383,
-      "p50": 19.41629988141358,
-      "p95": 19.41629988141358,
-      "p99": 19.41629988141358,
+      "mean": 66.9356999763598,
+      "p50": 19.910200033336878,
+      "p95": 19.910200033336878,
+      "p99": 19.910200033336878,
       "passed": true,
       "threshold_enforced": false,
       "unit": "milliseconds"
@@ -45,7 +45,7 @@
         "SSN": 9
       },
       "needle_proximity": {
-        "CREDIT_CARD": 1,
+        "CREDIT_CARD": 2,
         "EMAIL": 10,
         "SSN": 2
       },
@@ -72,8 +72,8 @@
     },
     "fragmentation_safety": {
       "coalescing_not_distinguished": true,
-      "events_observed": 133,
-      "events_observed_max": 133,
+      "events_observed": 138,
+      "events_observed_max": 138,
       "one_character_events_requested": true,
       "passed": true,
       "response_reconstructed": true
@@ -120,12 +120,12 @@
     "values_published": false,
     "varies_per_run": true
   },
-  "generated_at": "2026-09-01T21:01:17.660739Z",
-  "harness_revision": "1cef0ff8661eb89ec60c94f077332a1c55e44679",
+  "generated_at": "2026-09-02T02:26:10.144430Z",
+  "harness_revision": "a3d94596917b289c690a6e53d82d4229c9cb86bb",
   "implementation": {
     "labels_are_operator_supplied": true,
     "name": "llm-shield-proxy",
-    "version": "1.3.4+working-tree"
+    "version": "1.3.5"
   },
   "limitations": {
     "method_limits": [
