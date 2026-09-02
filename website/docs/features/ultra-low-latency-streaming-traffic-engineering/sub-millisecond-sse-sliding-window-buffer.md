@@ -12,7 +12,7 @@ LLM-Shield-Proxy addresses the tested placeholder case with a sliding window:
 1. **SSE event processing:** As response bytes are received through the HTTP client, the stream parser processes supported SSE `data:` payloads; the application does not directly observe raw TCP frame boundaries.
 2. **Mathematical Overlap Retention:** The buffer evaluates the chunk against the Vault mappings, but *retains* a trailing overlap equal to $LL = max(0, max_token_length - 1).
 3. **Prefix-aware rehydration:** The buffer retains bounded trailing prefixes so the published placeholder fixtures can be reconstructed across tested chunk splits.
-4. **Bounded release:** Content that falls outside the retained lookahead window can be yielded downstream. Network, parser, scheduling, inspection, and buffer delay remain measurable.
+4. **Bounded release and write aggregation:** Content outside the retained lookahead can be yielded downstream. Small encoded lines are coalesced only up to `MAX_SSE_LINE_LENGTH`. A single longer rehydrated line is emitted intact rather than truncated; repeated-token expansion fails closed once one output piece would exceed `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH`.
 
 
 ```mermaid
@@ -38,10 +38,12 @@ View diagram on GitHub mobile 📱 -->
 
 | Environment Variable | Description | Linked Deployment Guide |
 | :--- | :--- | :--- |
-| `MAX_SSE_LINE_LENGTH` | Limits the maximum size of a single SSE frame to prevent buffer overflow attacks. | [View in deployment.md](/docs/deployment) |
+| `MAX_SSE_LINE_LENGTH` | Bounds the unparsed input accumulator and the aggregate output-coalescing target. One rehydrated encoded line may exceed this target. | [View in deployment.md](/docs/deployment) |
+| `MAX_PAYLOAD_SIZE_BYTES` | Bounds accepted request data and contributes to the absolute post-rehydration output-piece ceiling. | [View in deployment.md](/docs/deployment) |
 
 ## Critical Logic & Edge Cases
 * **Slow or stalled streams:** HTTP client and proxy timeouts bound selected waits. Exercise slow headers, slow bodies, long model time-to-first-token, cancellation, pool exhaustion, and Envoy timeouts separately.
+* **Expansion and failure:** A returned protected value may be longer than a synthetic replacement, including longer than the coalescing target, without being split at the SSE protocol layer. Repeating a short replacement enough times to exceed the absolute output-piece ceiling terminates the stream under fail-closed mode; clients must treat an incomplete stream as failed.
 * **Non-Latin streaming:** The implementation includes specific ASCII/CJK boundary handling and multilingual fixtures. It is not a complete Unicode word-segmentation engine; add corpus-specific tests for scripts, normalization forms, combining marks, and token collisions.
 
 ## FAQ

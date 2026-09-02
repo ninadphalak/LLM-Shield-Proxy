@@ -5,12 +5,18 @@ Normative changes and result labeling follow the
 
 The normative human-readable specification is published in `website/docs/conformance/specification-v1.md` and rendered on the project documentation site.
 
-Two machine-readable envelopes are published here:
+Two machine-readable envelopes are published here. The specification keeps the Streaming
+Privacy Gateway (SPG) name and the `llm-shield.` schema identifier, which is a format
+namespace pinned into already-published raw artifacts from runs that cannot be re-executed;
+the endpoint-neutral **tool** carries a neutral name and remains independent of any gateway
+it measures.
+
+
 
 | File | Covers | Emitted by |
 |---|---|---|
 | `report.schema.json` | local implementation profile | `llm-shield-proxy benchmark` |
-| `http-profile.schema.json` | OpenAI-compatible HTTP gateway profile | `llm-shield-proxy benchmark --target-base-url …` |
+| `http-profile.schema.json` | OpenAI-compatible HTTP gateway profile | `pii-leak-benchmark` ([its own distribution](https://pypi.org/project/pii-leak-benchmark/)) |
 
 Both reject a report whose top-level `passed` is `true` while any individual check failed, and
 the egress/boundary checks reject a `passed` alongside leaked entities, an uninspected capture,

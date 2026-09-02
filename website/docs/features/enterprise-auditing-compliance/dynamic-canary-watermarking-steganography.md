@@ -8,7 +8,7 @@
 ## How It Works
 Copied text often loses provenance. A zero-width marker can provide one investigation signal, subject to false attribution, removal, normalization, and chain-of-custody limits.
 
-1. **Fingerprint generation:** For a supported response, the proxy derives a truncated HMAC-SHA256 fingerprint from the resolved identity, session ID, current epoch minute, and `SHIELD_WATERMARK_SECRET`.
+1. **Fingerprint generation:** For a supported response, the proxy derives identity and watermark fingerprints with the operator-supplied `SHIELD_WATERMARK_SECRET`, then binds the marker to the session ID and current epoch minute. The same credential produces a different identity fingerprint under a different deployment secret.
 2. **Binary Encoding:** This fingerprint is converted into a binary sequence (1s and 0s).
 3. **Zero-width injection:** On the supported SSE path, the proxy appends or inserts encoded zero-width Unicode characters. Rendering, normalization, copying, sanitization, and model/client behavior can alter or remove them.
 4. **Extraction:** The included decoder recovers the embedded hexadecimal fingerprint. It does not reverse the HMAC to an identity; correlation requires separately retained candidate metadata and time context.

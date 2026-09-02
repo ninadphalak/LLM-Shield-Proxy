@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pii-leak-benchmark"
+version = "0.1.0"
+description = "Measure whether an LLM gateway sends raw personal data to its upstream, and whether it restores it in the response."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [
+    {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
+]
+maintainers = [
+    {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
+]
+keywords = [
+    "pii",
+    "benchmark",
+    "conformance",
+    "llm",
+    "gateway",
+    "privacy",
+    "redaction",
+    "streaming",
+    "openai",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
+# Standard library plus httpx. Nothing else, ever.
+#
+# This is the measurer, not one of the things measured. An engineer at another
+# gateway must be able to run it against their own product without installing a
+# competing gateway's stack -- and a benchmark that carries the name and the
+# dependency tree of one of its subjects cannot referee the others.
+#
+# A regression test installs this distribution into a clean virtualenv, asserts the
+# installed set is httpx's own tree and nothing more, and asserts that no module here
+# imports `llm_shield_proxy`.
+dependencies = [
+    "httpx>=0.24.0"
+]
+
+[project.optional-dependencies]
+# Validating an emitted report against the published SPG schemas before submitting a
+# row. Optional because the harness does not need it to produce a report, only to
+# check one.
+validate = [
+    "jsonschema>=4.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy"
+Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
+Specification = "https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/spec/v1.0.0"
+"Submit a result" = "https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md"
+"Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
+
+[project.scripts]
+pii-leak-benchmark = "pii_leak_benchmark.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pii_leak_benchmark*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]

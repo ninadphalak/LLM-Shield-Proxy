@@ -260,6 +260,13 @@ class Settings(BaseSettings):
     POLICIES_RELOAD_INTERVAL_SECONDS: int = Field(default=5, description="Interval to check policies file")
     OPA_URL: Optional[str] = Field(default=None, description="Enterprise OPA server URL for RBAC")
     RBAC_CACHE_TTL_SECONDS: int = Field(default=300, description="TTL for stale-while-revalidate RBAC cache")
+    MCP_EMPTY_ALLOWLIST_MODE: Literal["DENY_ALL", "BLOCKLIST_ONLY"] = Field(
+        default="DENY_ALL",
+        description=(
+            "MCP tool policy when allowed_tools is empty. DENY_ALL fails closed; "
+            "BLOCKLIST_ONLY explicitly permits tools not named in blocked_tools."
+        ),
+    )
 
     # Internal dynamic cache
     _valid_virtual_keys_set: frozenset[str] = frozenset()
@@ -267,7 +274,16 @@ class Settings(BaseSettings):
     _policies_mtime: float = 0.0
     _policies_path: str = ""  # Track last-seen path to invalidate mtime cache on path change
 
-    model_config = SettingsConfigDict(env_file=(_ENV_FILE_PATH, ".env"), env_file_encoding="utf-8", extra="ignore")
+    # Assignment validation is intentionally disabled. Configuration-file values
+    # are validated as one complete candidate in reload() before the live state is
+    # replaced. Validating each setattr independently makes cross-field settings
+    # order-dependent and Pydantic leaves a rejected assignment on the model.
+    # Direct assignment is an internal/testing mechanism, not an input boundary.
+    model_config = SettingsConfigDict(
+        env_file=(_ENV_FILE_PATH, ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @model_validator(mode="after")
     def validate_watermark_secret(self) -> "Settings":
@@ -339,8 +355,10 @@ class Settings(BaseSettings):
         self._valid_virtual_keys_set = frozenset(keys)
 
     def reload(self) -> None:
-        """Reload configuration from disk (config.yaml or .env) safely."""
+        """Reload configuration from disk as one validated, all-or-nothing overlay."""
         with _config_reload_lock:
+            overrides: dict[str, Any] = {}
+            field_names = type(self).model_fields
             config_path = "config.yaml"
             if os.path.exists(config_path):
                 try:
@@ -348,13 +366,16 @@ class Settings(BaseSettings):
 
                     with open(config_path, "r", encoding="utf-8") as f:
                         yaml_config = yaml.safe_load(f)
-                        if isinstance(yaml_config, dict):
-                            for k, v in yaml_config.items():
-                                attr_name = k.upper()
-                                if hasattr(self, attr_name) and v is not None:
-                                    setattr(self, attr_name, v)
+                        if not isinstance(yaml_config, dict):
+                            return
+                        for k, v in yaml_config.items():
+                            attr_name = k.upper()
+                            if attr_name in field_names and v is not None:
+                                overrides[attr_name] = v
                 except Exception as exc:
-                    logger.debug("Failed loading YAML configuration: %s", exc)
+                    # Validation errors may contain raw operator-supplied values.
+                    logger.debug("Failed loading YAML configuration (%s)", type(exc).__name__)
+                    return
             else:
                 try:
                     from dotenv import dotenv_values, find_dotenv
@@ -366,10 +387,27 @@ class Settings(BaseSettings):
                             attr_name = k.upper()
                             # Process environment is authoritative over dotenv,
                             # matching BaseSettings source precedence.
-                            if k not in os.environ and hasattr(self, attr_name) and v is not None:
-                                setattr(self, attr_name, v)
+                            if k not in os.environ and attr_name in field_names and v is not None:
+                                overrides[attr_name] = v
                 except Exception as exc:
-                    logger.debug("Failed loading .env configuration: %s", exc)
+                    # Validation errors may contain raw operator-supplied values.
+                    logger.debug("Failed loading .env configuration (%s)", type(exc).__name__)
+                    return
+
+            try:
+                candidate_data = self.model_dump(mode="python")
+                candidate_data.update(overrides)
+                candidate = type(self).model_validate(candidate_data)
+            except Exception as exc:
+                # Do not expose the rejected input in logs, and do not mutate the
+                # last-known-good live state when any field or cross-field rule fails.
+                logger.debug("Rejected configuration reload (%s)", type(exc).__name__)
+                return
+
+            # Every operation that can reject input happened above. Replacing the
+            # field dictionary prevents requests from observing a partially applied
+            # overlay and preserves the Settings object's identity for importers.
+            object.__setattr__(self, "__dict__", candidate.__dict__)
 
             if self.VALID_VIRTUAL_KEYS:
                 keys = [k.strip() for k in self.VALID_VIRTUAL_KEYS.split(",") if k.strip()]
@@ -390,8 +428,15 @@ class Settings(BaseSettings):
         if not os.path.exists(path):
             return
 
+        # Read once, before the branch. `current_mtime` used to be assigned only on the
+        # non-forced path while the success branch below assigns it unconditionally, so
+        # every FORCED reload raised UnboundLocalError -- swallowed by the broad handler
+        # and logged as "Failed loading policies YAML configuration". The policies were
+        # in fact applied, but the mtime bookkeeping and the success log were lost, and
+        # the error text said the opposite of what had happened.
+        current_mtime = os.path.getmtime(path)
+
         if not force:
-            current_mtime = os.path.getmtime(path)
             # Invalidate mtime cache if the file path itself has changed (e.g., new temp file in tests)
             if path != self._policies_path:
                 self._policies_mtime = 0.0

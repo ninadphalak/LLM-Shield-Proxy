@@ -1,12 +1,16 @@
 """Tests for the MCP JSON-RPC 2.0 gateway router: RBAC gating, sanitization, and discovery pruning."""
 
 import json
+import logging
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from llm_shield_proxy.api.main import app
-from llm_shield_proxy.api.mcp_router import get_mcp_policy_resolver
+from llm_shield_proxy.api.mcp_router import get_mcp_policy_resolver, warn_if_mcp_policy_is_empty_at_startup
+from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver
 
 client = TestClient(app)
@@ -102,6 +106,66 @@ def test_tools_call_blocked_returns_dash_32003_and_does_not_route_upstream(httpx
 
     # No upstream request registered in httpx_mock: if the router had routed upstream, this would raise.
     assert len(httpx_mock.get_requests()) == 0
+
+
+def test_empty_allowlist_denies_by_default(httpx_mock, monkeypatch):
+    """The shipped empty policy is fail-closed unless blocklist semantics are explicit."""
+    assert settings.model_fields["MCP_EMPTY_ALLOWLIST_MODE"].default == "DENY_ALL"
+    monkeypatch.setattr(settings, "MCP_EMPTY_ALLOWLIST_MODE", "DENY_ALL")
+    _override_policy({"allowed_tools": [], "blocked_tools": []})
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {"name": "unlisted_tool", "arguments": {}},
+        },
+    )
+
+    assert response.json()["error"]["code"] == -32003
+    assert len(httpx_mock.get_requests()) == 0
+
+
+def test_empty_allowlist_allows_unblocked_tool_only_in_explicit_blocklist_mode(httpx_mock, monkeypatch):
+    """Blocklist-only deployments retain their intentional empty-allowlist behavior."""
+    monkeypatch.setattr(settings, "MCP_EMPTY_ALLOWLIST_MODE", "BLOCKLIST_ONLY")
+    _override_policy({"allowed_tools": [], "blocked_tools": ["blocked_tool"]})
+    httpx_mock.add_response(
+        method="POST",
+        url=UPSTREAM_URL,
+        json={"jsonrpc": "2.0", "id": 21, "result": {"ok": True}},
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {"name": "unlisted_tool", "arguments": {}},
+        },
+    )
+
+    assert response.json()["result"] == {"ok": True}
+    assert len(httpx_mock.get_requests()) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_warning_names_empty_blocklist_policy_risk(caplog, monkeypatch):
+    monkeypatch.setattr(settings, "MCP_EMPTY_ALLOWLIST_MODE", "BLOCKLIST_ONLY")
+    test_app = SimpleNamespace(
+        dependency_overrides={get_mcp_policy_resolver: lambda: MockPolicyResolver({"allowed_tools": [], "blocked_tools": []})}
+    )
+
+    with caplog.at_level(logging.WARNING, logger="llm_shield_proxy.api.mcp_router"):
+        await warn_if_mcp_policy_is_empty_at_startup(test_app)
+
+    assert "SECURITY RISK" in caplog.text
+    assert "permits every tool not explicitly named" in caplog.text
 
 
 def test_tools_list_dynamic_pruning(httpx_mock):

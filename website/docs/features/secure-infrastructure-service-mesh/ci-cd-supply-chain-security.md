@@ -22,6 +22,12 @@ manual dispatch. The workflow:
 3. Adds scoped observations to the GitHub Actions job summary and uploads the JSON as
    a 90-day workflow artifact.
 
+Third-party repositories can run the endpoint-neutral profile through
+`.github/actions/pii-leak-benchmark` with `attest-report: true`. The action uses GitHub OIDC and
+Sigstore to create detached provenance over the finished JSON report, which reviewers verify with
+`gh attestation verify`. This binds the bytes to the named repository, workflow and commit; target
+process identity still depends on the pinned package/image and configuration submitted with them.
+
 The timing values are in-process component observations. They are not total proxy
 latency, network latency, RSS, capacity guarantees, or universal performance targets.
 

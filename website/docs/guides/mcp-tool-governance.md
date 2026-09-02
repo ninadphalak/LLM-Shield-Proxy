@@ -125,14 +125,14 @@ minimum that's `{"allowed_tools": [...], "blocked_tools": [...]}`; the
 reads three more optional keys off the same dict - `egress_mode`, `allowed_domains`, and
 `additional_denied_cidrs` - so one resolver call drives both tool RBAC and network egress.
 
-> ⚠️ **Fail-open gotcha, read this first.** The bundled `InMemoryPolicyResolver` (the default
-> when `OPA_URL` is unset) returns `{"allowed_tools": [], "blocked_tools": []}` for the current implementation. Per the
-> gate's semantics (`_is_tool_forbidden`), **an empty `allowed_tools` list means "allow every
-> tool except what's explicitly blocked,"** not "deny everything." An empty allow-list is *not*
-> a safe default for an MCP gateway sitting in front of tools that can mutate data or execute
-> code. Before exposing `/v1/mcp` in production, either point `OPA_URL` at a real Open Policy
-> Agent deployment, or wire the `YamlPolicyResolver` recipe below so `policies.yaml` actually
-> drives the gate. Don't ship the in-memory default as-is.
+> ⚠️ **Empty allowlist semantics, read this first.** The bundled `InMemoryPolicyResolver` (the
+> default when `OPA_URL` is unset) returns `{"allowed_tools": [], "blocked_tools": []}`. The
+> shipped `MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL` interprets that state as deny every tool call.
+> Blocklist-only deployments can explicitly set `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY`, which
+> permits every tool not named in `blocked_tools`. That permissive mode emits a critical startup
+> warning naming the risk. The application also warns when the startup policy probe has no
+> allowlist, even in `DENY_ALL`, so an unintentionally unusable policy is visible. Wire the
+> `YamlPolicyResolver` recipe below or OPA before exposing the route.
 
 Below is a complete, production-ready `policies.yaml` defining three enterprise roles with
 granular tool allow-lists, PII entity scopes, and per-role rate limits - using the same
@@ -188,7 +188,8 @@ roles:
   # Platform Admin: broad tool access, explicit denies only
   # ---------------------------------------------------------
   platform_admin:
-    # Empty allowed_tools = allow-all except blocked_tools (see gotcha above).
+    # Empty allowed_tools allows all except blocked_tools ONLY when the process is
+    # explicitly started with MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY (see above).
     # This is the ONE role where that semantic is intentional: admins need broad
     # access, so we curate a deny-list of the most dangerous operations instead.
     allowed_tools: []

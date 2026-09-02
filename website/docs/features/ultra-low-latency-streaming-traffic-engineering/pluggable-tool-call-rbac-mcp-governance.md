@@ -33,11 +33,13 @@ The `/v1/mcp` route is registered by the application. Policy resolver selection 
 | :--- | :--- | :--- |
 | `OPA_URL` | Selects the OPA resolver in the default dependency factory when configured. | [View in deployment.md](/docs/deployment) |
 | `REDIS_URL` | Enables the Redis-backed resolver/store paths where the application selects them. | [View in deployment.md](/docs/deployment) |
+| `MCP_EMPTY_ALLOWLIST_MODE` | Defaults to `DENY_ALL`. `BLOCKLIST_ONLY` explicitly allows every tool not named in `blocked_tools`. | [View in deployment.md](/docs/deployment) |
 | `X-Shield-Upstream-URL` / `UPSTREAM_MCP_BASE_URL` | Selects the upstream for the scoped MCP gateway; the environment fallback is read directly by the router. | [View in the governance guide](/docs/guides/mcp-tool-governance) |
 
 ## Critical Logic & Edge Cases
 * **Streaming boundary tests:** Exercises supported split-token fixtures with the configured lookahead; other encodings, envelopes, and tokens require additional cases.
-* **Default-policy warning:** Without OPA, Vault, Redis policy data, or an application override, the current in-memory resolver is permissive except for explicit blocks. Do not describe the route as fail-closed until the deployed resolver and outage behavior demonstrate it.
+* **Empty-policy default:** Without OPA policy data or an application override, the in-memory resolver returns an empty allowlist. The shipped `DENY_ALL` mode rejects every tool call in that state. A blocklist-only deployment must explicitly set `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY`; startup then emits a critical warning that every tool not explicitly blocked is permitted.
+* **Startup probe:** The application resolves a sentinel policy at startup and warns whenever it has no allowlist. A custom dependency that cannot be constructed without request context cannot be fully inspected by that probe, so deployment tests must still exercise the real resolver and outage path.
 
 ## FAQ
 **Q: Is `/v1/mcp` a complete MCP Streamable HTTP implementation?**

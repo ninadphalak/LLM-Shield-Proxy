@@ -17,6 +17,9 @@ env:
 jobs:
   build-sign-attest:
     name: Build, Sign & Attach SBOM Attestation
+    # Release events for independently versioned companion packages are not
+    # LLM-Shield-Proxy container releases. Manual dispatches remain supported.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
 
     steps:

@@ -19,7 +19,7 @@ features and deployment defaults remain under the reference implementation's nor
 - **Contributor:** anyone who opens an issue, supplies a counterexample, submits a result, or
   proposes text.
 - **Reviewer:** a contributor with demonstrated subject-matter work who has reviewed at least two
-  proposals or reproductions. Reviewers are listed publicly with affiliations and conflicts.
+  proposals or reproductions. Reviewers are listed publicly with their relevant affiliations.
 - **Specification maintainer:** a reviewer responsible for releases, repository hygiene, and
   recording decisions. Ninad Phalak is the initial maintainer.
 
@@ -35,7 +35,7 @@ Open an **SPG specification proposal** using the repository issue template. A pr
 3. at least one positive fixture and one negative or counterexample fixture;
 4. report-schema impact;
 5. compatibility and migration impact; and
-6. the author's affiliation and relevant conflicts.
+6. the proposer's relationship to any implementation directly affected by the change.
 
 Editorial fixes that do not change observable conformance behavior may use a normal pull request.
 
@@ -70,7 +70,7 @@ or image digest, configuration, environment, and report checksum.
 
 Results identify who ran and funded them:
 
-- **Maintainer-run:** produced by a maintainer of the evaluated implementation.
+- **Implementation-affiliated:** produced by a contributor to the evaluated implementation.
 - **Vendor-run:** produced or controlled by an organization responsible for the evaluated product.
 - **Sponsored independent run:** produced by an unaffiliated evaluator whose compensation was not
   conditioned on a positive result.
@@ -78,6 +78,13 @@ Results identify who ran and funded them:
 
 Payment, equipment, cloud credits, consulting, and pre-publication review rights must be disclosed.
 Failed and partial runs remain valid contributions when their artifacts are reproducible.
+
+**Replication is counted per target, and the floor is 3 runs from 3 distinct submitters.** Below
+it a target reads `unreplicated` in the [results table](./results) rather than as a verdict --
+including this project's own reference implementation, which today is 1 run by 1 submitter. The
+maintainer's runs never count toward the replication of any row, and runs that disagree are
+published as separate rows rather than averaged. The full submission path, including what a run
+must carry and how it is checked, is in [submitting a result](./submitting).
 
 ## No certification program yet
 

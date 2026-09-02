@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import tempfile
 from unittest.mock import AsyncMock, patch
@@ -103,6 +104,13 @@ async def test_policy_role_overrides(temp_policies_file):
     settings.UPSTREAM_API_KEY = "test"
     settings.ENABLE_FINOPS_METERING = False
     settings.CANARY_TOKEN = "TEST_CANARY"
+    # The strict role enables the canary tripwire, and the watermark is derived from
+    # SHIELD_WATERMARK_SECRET. Without one the request path fails CLOSED with a 503 --
+    # correct behaviour, but it meant this test only passed on a machine with an
+    # untracked `.env`, and it has been red in CI since 2026-08-30. Startup validation
+    # covers ENABLE_CANARY_TRIPWIRE; a role that turns the canary on per-request is not
+    # covered by it.
+    settings.SHIELD_WATERMARK_SECRET = "test-watermark-secret-not-a-real-secret"
     settings.reload_policies(force=True)
 
     mock_client = AsyncMock(spec=httpx.AsyncClient)
@@ -189,3 +197,24 @@ async def test_audit_log_applied_role_name(temp_policies_file):
                         found = True
                         break
                 assert found, "AuditLogger should be called with applied_role_name='strict-tenant-id'"
+
+
+def test_forced_reload_records_the_file_mtime(temp_policies_file, caplog):
+    """A forced reload must not raise inside its own try block.
+
+    `current_mtime` was read only on the non-forced path while the success branch
+    assigned it unconditionally, so EVERY `reload_policies(force=True)` raised
+    UnboundLocalError. The broad handler swallowed it and logged "Failed loading
+    policies YAML configuration", which said the opposite of what had happened: the
+    policies were applied, but the mtime bookkeeping and the success log were lost.
+    Nothing caught it because the error was only ever a log line.
+    """
+    settings.POLICIES_FILE_PATH = temp_policies_file
+    settings._policies_mtime = 0.0
+
+    with caplog.at_level(logging.ERROR):
+        settings.reload_policies(force=True)
+
+    assert "Failed loading policies YAML configuration" not in caplog.text
+    assert settings._policies_mtime == os.path.getmtime(temp_policies_file)
+    assert settings._flattened_policies["strict-tenant-id"]["ENABLE_CANARY_TRIPWIRE"] is True

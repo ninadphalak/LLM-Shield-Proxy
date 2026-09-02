@@ -116,7 +116,7 @@ virtual_keys:
 
 ## Enterprise Recommendations & Best Practices
 
-* **Unknown-key behavior:** Omit `default_role` when unknown or unmapped virtual keys should be denied. Verify this behavior on every router and resolver; the MCP gateway has a separately documented permissive in-memory resolver unless a policy-backed resolver is wired in.
+* **Unknown-key behavior:** Omit `default_role` when unknown or unmapped virtual keys should be denied. Verify this behavior on every router and resolver. The MCP gateway separately defaults empty allowlists to `DENY_ALL`; setting `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY` explicitly permits every tool not listed in `blocked_tools` and emits a critical startup warning.
 * **Latency Optimization:** For internal tools or trusted developer sandboxes, disable `ENABLE_TIER3_ONNX_NER` to bypass neural inference. Measure end-to-end overhead in your deployment.
 * **Canary tripwire:** Consider `ENABLE_CANARY_TRIPWIRE` only after testing false positives, marker survival, output handling, and privacy impact. A marker match is a correlation signal, not definitive attribution.
 

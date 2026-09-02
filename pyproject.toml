@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.3.4"
+version = "1.3.5"
 description = "Streaming privacy gateway for configurable PII transformation and OpenAI-compatible proxy traffic."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -37,7 +37,23 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+# `pip install llm-shield-proxy` installs the GATEWAY. It did, then for one
+# unpublished round it did not: the base install was reduced to the conformance
+# harness and the gateway moved to a `[proxy]` extra, so that measuring somebody
+# else's gateway did not mean installing this one.
+#
+# That solved the right problem the wrong way round. The harness is the neutral
+# measurer and this proxy is one of the things it measures, so the harness is now its
+# own distribution with its own name -- `pii-leak-benchmark` -- and this one is the
+# gateway again. A benchmark named after one of the products it scores cannot referee
+# them, and no third party should have to install a competing gateway to run it.
+#
+# The dependency below runs one way only. This package may use the benchmark (the
+# local profile writes its report and attestation block with it, and it is what
+# `llm-shield-proxy benchmark` self-tests against). The benchmark never imports this
+# package, and `tests/conformance/test_harness_install_weight.py` fails if it does.
 dependencies = [
+    "pii-leak-benchmark>=0.1.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
     "jsonschema>=4.0.0",
@@ -53,6 +69,13 @@ dependencies = [
     "cryptography>=41.0.0",
     "google-re2>=1.1.20231101",
     "cachetools>=5.3.0",
+    # Not optional in practice: security/tool_rbac.py imports redis.asyncio at module
+    # scope and api/main.py imports tool_rbac, so `pip install llm-shield-proxy`
+    # followed by `llm-shield-proxy --host ...` died with ModuleNotFoundError on a
+    # stock install. requirements.txt has always had it, which is why the container
+    # and CI never saw this; tests/ootb/test_pypi_cli.py now imports the ASGI app from
+    # a wheel-only virtualenv so the gap cannot reopen.
+    "redis>=5.0.0",
     "grpclib>=0.4.3",
     "betterproto>=2.0.0b6",
     "opentelemetry-api>=1.20.0",
@@ -94,7 +117,12 @@ Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
 "Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
 
 [project.scripts]
-llm-shield-proxy = "llm_shield_proxy.api.cli:main"
+# Dispatches operator subcommands (and --help) before importing the ASGI server,
+# then delegates to api/cli.py for serving.
+#
+# There is deliberately no conformance entry point here. The harness ships as
+# `pii-leak-benchmark`, whose console script is `pii-leak-benchmark`.
+llm-shield-proxy = "llm_shield_proxy.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["llm_shield_proxy*"]
@@ -114,8 +142,11 @@ ignore = [
     "E501", # line length handled by formatter
 ]
 
+# Note: the `pii-leak-benchmark` distribution in ./pii-leak-benchmark versions
+# independently of the gateway. It is not listed here on purpose -- the measurer and
+# the measured must not be forced to move together.
 [tool.bumpversion]
-current_version = "1.3.4"
+current_version = "1.3.5"
 commit = true
 tag = true
 
@@ -128,16 +159,6 @@ replace = 'version = "{new_version}"'
 filename = "llm_shield_proxy/api/main.py"
 search = 'APP_VERSION = "{current_version}"'
 replace = 'APP_VERSION = "{new_version}"'
-
-[[tool.bumpversion.files]]
-filename = "README.md"
-search = 'version":"{current_version}"'
-replace = 'version":"{new_version}"'
-
-[[tool.bumpversion.files]]
-filename = "README.md"
-search = "v{current_version}.zip"
-replace = "v{new_version}.zip"
 
 [[tool.bumpversion.files]]
 filename = "deploy/helm/llm-shield-proxy/Chart.yaml"

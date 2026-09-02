@@ -8,15 +8,16 @@ assessment artifacts.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from llm_shield_proxy.compliance.report import SUPPORTED_FRAMEWORKS
-
 
 def build_compliance_report_parser() -> argparse.ArgumentParser:
+    # Deferred: compliance.report pulls the proxy's crypto stack, and the HTTP
+    # conformance profile in this same module must stay installable without it.
+    from llm_shield_proxy.compliance.report import SUPPORTED_FRAMEWORKS
+
     parser = argparse.ArgumentParser(
         prog="llm-shield-proxy compliance-report",
         description="Generate a compliance evidence pack (OSCAL + audit verification + checksums).",
@@ -300,49 +301,44 @@ def checkpoint_verify_main(argv: Optional[Sequence[str]] = None) -> int:
 def build_benchmark_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llm-shield-proxy benchmark",
-        description="Run the local implementation profile or an OpenAI-compatible HTTP gateway profile.",
+        description=(
+            "Run this proxy's LOCAL in-process conformance profile and microbenchmarks. "
+            "To measure a gateway over HTTP -- this one or any other -- use the neutral "
+            "harness: pip install pii-leak-benchmark."
+        ),
     )
     parser.add_argument(
         "--iterations",
         type=int,
-        default=None,
-        help="Measured iterations (default: 2000 local profile, 3 HTTP profile). The HTTP "
-        "profile issues live requests to the target; raise it deliberately.",
+        default=2_000,
+        help="Measured iterations (default: %(default)s).",
     )
     parser.add_argument(
         "--json-out",
-        default=None,
-        help="Machine-readable result path (default: CONFORMANCE_LATEST.json for the local "
-        "profile, CONFORMANCE_HTTP_LATEST.json for the HTTP profile).",
+        default="./CONFORMANCE_LATEST.json",
+        help="Machine-readable result path (default: %(default)s).",
     )
-    parser.add_argument(
-        "--target-base-url",
-        default=None,
-        help="OpenAI-compatible /v1 base URL. Omit for the local implementation profile; use capture://self for a raw baseline.",
-    )
-    parser.add_argument(
-        "--target-api-key",
-        default=os.getenv("CONFORMANCE_TARGET_API_KEY", "conformance-key"),
-        help="Target credential (default: CONFORMANCE_TARGET_API_KEY or a synthetic local value).",
-    )
-    parser.add_argument("--target-model", default="conformance-model", help="Model name sent to the target gateway.")
-    parser.add_argument("--target-name", default="external-openai-compatible-endpoint")
-    parser.add_argument("--target-version", default="unspecified")
-    parser.add_argument(
-        "--target-header",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="Additional target request header; repeat as needed. Values are not written to the report.",
-    )
-    parser.add_argument("--capture-host", default="127.0.0.1", help="Controlled upstream bind host.")
-    parser.add_argument("--capture-port", type=int, default=8765, help="Controlled upstream bind port.")
-    parser.add_argument("--timeout-seconds", type=float, default=30.0)
+    # Kept only to answer the person who types the old command. The HTTP profile is a
+    # separate, gateway-independent distribution.
+    parser.add_argument("--target-base-url", default=None, help=argparse.SUPPRESS)
     return parser
+
+
+_HTTP_PROFILE_MOVED = """The endpoint-neutral HTTP profile is now its own distribution, so that measuring a
+gateway never means installing one:
+
+    pip install pii-leak-benchmark
+    pii-leak-benchmark --target-base-url {url}
+
+`llm-shield-proxy benchmark` runs this proxy's local in-process profile only."""
 
 
 def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_benchmark_parser().parse_args(argv)
+
+    if args.target_base_url:
+        print(_HTTP_PROFILE_MOVED.format(url=args.target_base_url), file=sys.stderr)
+        return 2
 
     # The conformance harness is an offline test tool. Disable only configured
     # OpenTelemetry export before importing PIIEngine/tracing; do not alter the
@@ -352,42 +348,33 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     settings.TELEMETRY_ENABLED = False
     settings.TELEMETRY_ENDPOINT_URL = None
 
+    # The stream-digest receipt HMACs with SHIELD_ENCRYPTION_KEY and fails closed when it
+    # is unset -- correct for a serving process, and it made this command unrunnable on a
+    # fresh install. `llm-shield-proxy benchmark` has been exiting 2 with "SHIELD_ENCRYPTION_KEY
+    # is required for the stream digest receipt" since 2026-08-30, including in this
+    # repository's own public benchmark workflow, and the documented reproduction steps did
+    # not work for anyone who had not already configured a key.
+    #
+    # This process serves no traffic: it measures the engines in memory and exits. So it
+    # supplies an ephemeral evaluation-only key and says so, exactly as the audit signing key
+    # already does. A configured key is still used when one is present, and nothing here
+    # relaxes the requirement on any serving path.
+    if not getattr(settings, "SHIELD_ENCRYPTION_KEY", None):
+        import secrets
+
+        settings.SHIELD_ENCRYPTION_KEY = secrets.token_urlsafe(32)
+        print(
+            "SHIELD_ENCRYPTION_KEY is unset; generated an ephemeral evaluation-only key for "
+            "this offline profile. Receipts from this run are not verifiable against a stable "
+            "key, and no serving path accepts a generated key.",
+            file=sys.stderr,
+        )
+
     from llm_shield_proxy.conformance import run_conformance, write_conformance_report
 
-    http_profile = bool(args.target_base_url)
-    iterations = args.iterations if args.iterations is not None else (3 if http_profile else 2_000)
-    json_out = args.json_out or (
-        "./CONFORMANCE_HTTP_LATEST.json" if http_profile else "./CONFORMANCE_LATEST.json"
-    )
-
     try:
-        if http_profile:
-            headers = {}
-            for item in args.target_header:
-                if "=" not in item:
-                    raise ValueError("--target-header must use NAME=VALUE")
-                name, value = item.split("=", 1)
-                if not name.strip():
-                    raise ValueError("--target-header name must not be empty")
-                headers[name.strip()] = value
-
-            from llm_shield_proxy.conformance.http_profile import run_http_conformance
-
-            report = run_http_conformance(
-                args.target_base_url,
-                api_key=args.target_api_key,
-                model=args.target_model,
-                implementation_name=args.target_name,
-                implementation_version=args.target_version,
-                iterations=iterations,
-                timeout_seconds=args.timeout_seconds,
-                capture_host=args.capture_host,
-                capture_port=args.capture_port,
-                extra_headers=headers,
-            )
-        else:
-            report = run_conformance(iterations)
-        destination = write_conformance_report(report, json_out)
+        report = run_conformance(args.iterations)
+        destination = write_conformance_report(report, args.json_out)
     except (OSError, ValueError) as exc:
         print(f"Benchmark failed: {exc}", file=sys.stderr)
         return 2
@@ -395,13 +382,70 @@ def benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Conformance report written to {destination}")
     print(f"  Passed:       {report['passed']}")
     print(f"  Checks:       {len(report['checks'])}")
-    if args.target_base_url:
-        print(f"  Iterations:   {report['checks']['client_observed_latency']['iterations']}")
-        print("  Timing scope: client -> target -> controlled capture upstream -> target -> client")
-    else:
-        print(f"  Iterations:   {report['microbenchmarks']['iterations']}")
-        print("  Timing scope: local in-process operations only")
+    print(f"  Iterations:   {report['microbenchmarks']['iterations']}")
+    print("  Timing scope: local in-process operations only")
     return 0 if report["passed"] else 1
+
+
+OPERATOR_COMMANDS = (
+    "assess",
+    "audit-verify",
+    "audit-checkpoint",
+    "audit-checkpoint-verify",
+    "compliance-report",
+    "benchmark",
+)
+
+_OPERATOR_HELP = """llm-shield-proxy: streaming privacy gateway
+
+Operator subcommands:
+  benchmark                 run the local in-process conformance profile
+  assess                    offline aggregate-only pilot assessment
+  audit-verify              verify a WORM audit log
+  audit-checkpoint          checkpoint and sign closed audit chains
+  audit-checkpoint-verify   verify a signed checkpoint
+  compliance-report         build a compliance evidence pack
+
+Run `llm-shield-proxy <subcommand> --help` for a subcommand's options.
+Anything else is passed to the server entry point: `llm-shield-proxy --host 0.0.0.0
+--port 8000`.
+
+To measure a streaming gateway -- this one or any other OpenAI-compatible one -- for
+raw personal data reaching its upstream, use the neutral harness. It is a separate
+distribution so that measuring a gateway never means installing one:
+
+    pip install pii-leak-benchmark
+    pii-leak-benchmark --target-base-url http://127.0.0.1:8000/v1
+"""
+
+
+def main() -> int:
+    """Console entry for `llm-shield-proxy`.
+
+    Dispatches operator subcommands BEFORE importing the ASGI entry point, because
+    `api/cli.py` imports uvicorn and the settings model at module scope. The gateway
+    stack is part of the default install again, so that import normally succeeds; the
+    fallback below exists for a partial environment, not for a supported one.
+    """
+    argv = sys.argv[1:]
+    if argv and argv[0] in OPERATOR_COMMANDS:
+        return operator_main(argv)
+    try:
+        from llm_shield_proxy.api.cli import main as serve_main
+    except ImportError:
+        # Explain rather than emit a traceback; `--help` still answers, which is what
+        # a broken environment is most likely to be asked.
+        if not argv or argv[0] in ("-h", "--help"):
+            print(_OPERATOR_HELP)
+            return 0
+        print(
+            "This command needs the gateway stack, which is missing from this "
+            "environment.\nReinstall it with:  pip install llm-shield-proxy",
+            file=sys.stderr,
+        )
+        return 2
+    serve_main()
+    return 0
 
 
 def operator_main(argv: Optional[Sequence[str]] = None) -> int:
@@ -430,9 +474,7 @@ def operator_main(argv: Optional[Sequence[str]] = None) -> int:
     return 2
 
 
-def main() -> None:
-    sys.exit(operator_main())
-
-
 if __name__ == "__main__":
-    main()
+    # `python -m llm_shield_proxy.cli <subcommand>` goes through the same dispatcher as
+    # the console script, so the two cannot drift.
+    sys.exit(main())

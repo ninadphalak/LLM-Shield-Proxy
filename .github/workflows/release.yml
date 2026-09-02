@@ -10,6 +10,9 @@ permissions:
 jobs:
   build-release-artifacts:
     name: Build & Sign Release Artifacts
+    # This repository now has an independently versioned benchmark distribution.
+    # Publishing a benchmark release must not build proxy artifacts under that tag.
+    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     env:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}

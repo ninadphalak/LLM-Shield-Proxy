@@ -61,6 +61,79 @@ INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
 _ASCII_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
 _ASCII_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
 
+# ---------------------------------------------------------------------------
+# Structural validation of Tier 1 matches.
+#
+# Issuer and checksum checks are confidence SIGNALS, never card-redaction gates.
+# A finite IIN table cannot prove that a number is not a private-label, gift, or newly
+# assigned card, and a typo can make a genuine card fail Luhn. Therefore every value
+# matching the native CREDIT_CARD shape is kept. See docs/features
+# .../supported-pii-types.
+# ---------------------------------------------------------------------------
+
+# Selected public payment-network identifiers. This table is deliberately incomplete
+# and must never be used to reject a match.
+_CARD_IIN_PREFIXES = (
+    "4",                                     # Visa
+    "34", "37",                              # American Express
+    "30", "36", "38", "39",                  # Diners Club
+    "35",                                    # JCB
+    "51", "52", "53", "54", "55",            # Mastercard
+    "6011", "62", "64", "65",                # Discover / UnionPay / Maestro
+)
+_CARD_MASTERCARD_2_SERIES = (222100, 272099)
+_CARD_MIN_DIGITS = 13
+_CARD_MAX_DIGITS = 16
+
+
+def _luhn_ok(digits: str) -> bool:
+    total = 0
+    for index, character in enumerate(reversed(digits)):
+        value = ord(character) - 48
+        if index % 2:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
+def _is_payment_iin(digits: str) -> bool:
+    if digits.startswith(_CARD_IIN_PREFIXES):
+        return True
+    if len(digits) >= 6:
+        head = int(digits[:6])
+        if _CARD_MASTERCARD_2_SERIES[0] <= head <= _CARD_MASTERCARD_2_SERIES[1]:
+            return True
+    return False
+
+
+def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
+    """Return (keep_the_span, confidence).
+
+    ``keep_the_span`` is the only value the detection path consumes. Confidence is
+    computed and returned so it can be asserted and, later, surfaced -- it is NOT
+    currently attached to the span tuple or to an audit record, and the documentation
+    says so rather than implying a feature that does not exist.
+
+    Anything not covered by an explicit rule is kept with unchanged behaviour.
+    """
+    if entity_type == "CREDIT_CARD":
+        digits = "".join(character for character in matched if character.isdigit())
+        if not _CARD_MIN_DIGITS <= len(digits) <= _CARD_MAX_DIGITS:
+            return True, "medium"
+        issuer = _is_payment_iin(digits)
+        checksum = _luhn_ok(digits)
+        if issuer and checksum:
+            return True, "high"
+        # Every regex-shaped card is redacted. An unrecognised IIN may be private-label,
+        # gift-card, or newly assigned; a bad checksum may be a one-digit error or
+        # transposition. Neither observation can safely prove the value is non-PII.
+        return True, "medium"
+
+    return True, "medium"
+
+
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     (
@@ -335,8 +408,16 @@ class PIIEngine:
             for entity_type, pattern in active_profile.tier1_patterns:
                 for offset, segment in scan_segments:
                     for match in pattern.finditer(segment):
+                        matched_text = match.group(0)
+                        # Structural validation. Fail-closed: any error keeps the span.
+                        try:
+                            keep, _confidence = classify_tier1_match(entity_type, matched_text)
+                        except Exception:  # noqa: BLE001
+                            keep = True
+                        if not keep:
+                            continue
                         raw_spans.append(
-                            (offset + match.start(), offset + match.end(), entity_type, match.group(0))
+                            (offset + match.start(), offset + match.end(), entity_type, matched_text)
                         )
 
         # Tier 2: Shannon Entropy Analysis (Detects unformatted API keys, hashes, secret tokens)

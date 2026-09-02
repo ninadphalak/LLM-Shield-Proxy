@@ -1,33 +1,48 @@
-"""Streaming Privacy Gateway conformance harness.
+"""The reference implementation's own local conformance profile.
 
 This subpackage is **evaluation tooling, not proxy runtime code**. Nothing here is
-imported on a request path. It exists to measure whether a streaming LLM gateway --
-this one or any other OpenAI-compatible implementation -- redacts personal data
-before forwarding a request upstream, and to emit a report against the published
-schema in ``spec/v1.0.0/``.
+imported on a request path. It runs the in-process profile: correctness checks over
+this proxy's detector, vault and streaming engines, plus labeled microbenchmarks.
 
-It ships inside the installed package on purpose: a third party must be able to
-``pip install llm-shield-proxy`` and run the harness against their own gateway, in
-their own CI, without vendoring this repository.
+**The neutral, endpoint-agnostic harness is no longer here.** It is a separate
+distribution, ``pii-leak-benchmark`` (import package ``pii_leak_benchmark``), and it
+has a gateway-neutral name. The direction of dependency is one-way and enforced by
+test: this package may import the benchmark, but the benchmark never imports this one.
 
-- ``local`` - in-process profile: correctness checks plus labeled microbenchmarks.
-- ``http_profile`` - endpoint-neutral profile driving any OpenAI-compatible ``/v1``
-  gateway over HTTP through a controlled capture upstream.
+To measure a gateway over HTTP, including this one::
 
-The audit-chain verifier the harness calls (``compliance.report.verify_worm_log``)
-is product code and deliberately lives outside this package.
+    pip install pii-leak-benchmark
+    pii-leak-benchmark --target-base-url http://127.0.0.1:8899/v1
+
+``run_conformance`` stays lazy: it imports the proxy's engines, and callers that only
+want the report writer or the attestation block should not pay for that import.
 """
 
-from llm_shield_proxy.conformance.http_profile import run_http_conformance
-from llm_shield_proxy.conformance.local import (
-    build_attestation,
-    run_conformance,
-    write_conformance_report,
-)
+from typing import Any
+
+from pii_leak_benchmark.artifact import write_conformance_report
+from pii_leak_benchmark.provenance import build_attestation
+
+_LAZY = {
+    "run_conformance": "llm_shield_proxy.conformance.local",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _LAZY.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    return getattr(importlib.import_module(module_name), name)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY))
+
 
 __all__ = [
     "build_attestation",
     "run_conformance",
-    "run_http_conformance",
     "write_conformance_report",
 ]
