@@ -29,6 +29,17 @@ def get_identity(
     if authorization_header:
         auth = authorization_header.replace("Bearer ", "").strip()
         if auth:
+            # CodeQL raises `py/weak-sensitive-data-hashing` here. It does not apply, and
+            # the reasoning was already settled once in b5ca3b3 -- restated because the
+            # comment was lost in a later refactor and the alert is being re-litigated.
+            #
+            # This is a linkability fingerprint over a HIGH-ENTROPY API credential, not a
+            # password verifier: there is no low-entropy guess space for a KDF's work
+            # factor to defend. The keyed HMAC (62ae0ee) is what stops the digest being
+            # reproducible across deployments, which is the property that actually
+            # matters here. PBKDF2 was tried and REVERTED: 100k synchronous iterations ran
+            # inside the async request path and risked blocking the event loop, which
+            # 1.5's non-blocking constraint forbids, in exchange for no real resistance.
             return hmac.new(secret.encode("utf-8"), auth.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
 
     if client_ip:
