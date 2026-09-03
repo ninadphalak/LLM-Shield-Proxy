@@ -39,6 +39,7 @@ from watchdog.observers import Observer
 
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
 from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.api.guard_router import guard_router
 from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.api.mcp_router import mcp_router, warn_if_mcp_policy_is_empty_at_startup
 from llm_shield_proxy.api.webhook import webhook_router
@@ -403,6 +404,9 @@ app.include_router(health_router)
 app.include_router(webhook_router)
 app.include_router(audit_router)
 app.include_router(mcp_router)
+# Must precede the /{path:path} passthrough below; FastAPI resolves in
+# registration order and the catch-all would otherwise swallow /v1/guard/*.
+app.include_router(guard_router)
 
 
 SECURITY_HEADERS = {
