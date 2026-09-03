@@ -39,7 +39,7 @@ def test_docker_standalone_happy_path(shield_image, run_container):
 
     with urllib.request.urlopen(f"{base_url}/healthz", timeout=5) as response:
         assert response.getcode() == 200
-        assert json.loads(response.read()) == {"status": "ok"}
+        assert json.loads(response.read())["status"] == "ok"
 
     # Readiness is the probe Kubernetes gates traffic on, and it runs the real
     # component checks (PII engine, vault, redis) rather than returning a

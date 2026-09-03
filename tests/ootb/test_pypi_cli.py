@@ -1,5 +1,6 @@
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -34,9 +35,13 @@ def test_pypi_cli_happy_path():
     on a released one it would silently test the published benchmark instead of this
     working tree.
     """
+    def remove_readonly(func, path, _):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
     # Ensure dist directory is clean before building
     if os.path.exists("dist"):
-        shutil.rmtree("dist")
+        shutil.rmtree("dist", onerror=remove_readonly)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         benchmark_out = Path(tmpdir) / "benchmark-dist"

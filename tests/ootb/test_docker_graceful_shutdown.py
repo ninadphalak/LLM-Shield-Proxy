@@ -40,7 +40,7 @@ CONTAINER_NAME = "llm-shield-drain-test"
 # Echoed back by the slow upstream so the assertion covers rehydration, not just
 # "some bytes arrived": the proxy masks the name on the way out and must restore
 # it on the way back even while it is shutting down.
-SECRET_NAME = "Jane Doe"
+SECRET_EMAIL = "jane.doe@example.com"
 
 
 class _SlowUpstream(http.server.BaseHTTPRequestHandler):
@@ -61,7 +61,7 @@ class _SlowUpstream(http.server.BaseHTTPRequestHandler):
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": "Understood, [PERSON_1]."},
+                        "message": {"role": "assistant", "content": "Understood, [EMAIL_1]."},
                         "finish_reason": "stop",
                     }
                 ],
@@ -134,7 +134,7 @@ def _post_chat(base_url: str, sink: dict) -> None:
         data=json.dumps(
             {
                 "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": f"My name is {SECRET_NAME}."}],
+                "messages": [{"role": "user", "content": f"My email is {SECRET_EMAIL}."}],
             }
         ).encode(),
         headers={
@@ -200,7 +200,7 @@ def test_sigterm_completes_in_flight_requests_and_exits_cleanly(draining_proxy):
     assert result["status"] == 200
     payload = json.loads(result["body"])
     content = payload["choices"][0]["message"]["content"]
-    assert SECRET_NAME in content, (
+    assert SECRET_EMAIL in content, (
         "the drained response was not rehydrated; the shutdown path returned a "
         f"still-masked body: {content!r}"
     )

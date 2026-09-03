@@ -10,7 +10,7 @@ LLM-Shield-Proxy uses a three-tier detection cascade. Tiers 1 and 2 rely on buil
 Tier 1 uses highly optimized `google-re2` regular expressions to detect deterministic, structured data formats. These patterns flag structural shapes; they do not validate if an identifier (like a credit card or SSN) was actually issued or is active.
 
 **Native Tier 1 Catalog:**
-1. **`CREDIT_CARD`**: 13-19 digits with optional spaces or hyphens. Every matching run is redacted. While Luhn checksums and issuer prefixes are evaluated, they are only used for internal confidence scoring—a typo in a real card could fail Luhn, so we redact the shape regardless to prevent leaks. Note: a redaction span is never allowed to stop mid-way through a run of digits; it grows to cover the whole identifier.
+1. **`CREDIT_CARD`**: 13-19 digits with optional spaces or hyphens. Every matching run is redacted. While Luhn checksums and issuer prefixes are evaluated, they are only used for internal confidence scoring-a typo in a real card could fail Luhn, so we redact the shape regardless to prevent leaks. Note: a redaction span is never allowed to stop mid-way through a run of digits; it grows to cover the whole identifier.
 2. **`SSN`**: US Social Security Number shapes (e.g., `XXX-XX-XXXX`).
 3. **`EMAIL`**: Standard email addresses. Domains are not validated against public-suffix lists, so non-routable domains will still match.
 4. **`PHONE`**: Standard 7- or 10-digit domestic shapes with optional country codes.

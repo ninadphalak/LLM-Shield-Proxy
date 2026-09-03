@@ -2,7 +2,7 @@
 
 [⬅️ Back to Policy-as-Code](/docs/policies) · [Feature Catalog](/docs/features-overview)
 
-Autonomous agents (such as Claude Desktop, Cursor, LangChain, and CrewAI) execute tool calls via the Model Context Protocol (MCP). This translates into JSON-RPC 2.0 requests that carry potentially sensitive arguments—such as customer records, SSNs, or API keys—to internal tool servers. LLM-Shield-Proxy must govern this traffic and determine which agent is allowed to execute specific tools.
+Autonomous agents (such as Claude Desktop, Cursor, LangChain, and CrewAI) execute tool calls via the Model Context Protocol (MCP). This translates into JSON-RPC 2.0 requests that carry potentially sensitive arguments-such as customer records, SSNs, or API keys-to internal tool servers. LLM-Shield-Proxy must govern this traffic and determine which agent is allowed to execute specific tools.
 
 LLM-Shield-Proxy handles this traffic at a dedicated gateway: `POST /v1/mcp` ([`llm_shield_proxy/api/mcp_router.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/llm_shield_proxy/api/mcp_router.py)). Before forwarding any request upstream, it applies four checks:
 

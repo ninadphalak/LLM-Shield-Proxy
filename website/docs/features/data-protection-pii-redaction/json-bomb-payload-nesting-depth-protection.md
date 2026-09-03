@@ -3,7 +3,7 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **JSON Depth Limit** protects the proxy from deeply nested JSON payloads ("JSON bombs"). By strictly capping recursive traversal depth, it reduces the risk of stack overflow and CPU exhaustion attacks. Note that this feature specifically limits *nesting depth*—it does not limit total payload size, string length, or concurrency.
+The **JSON Depth Limit** protects the proxy from deeply nested JSON payloads ("JSON bombs"). By strictly capping recursive traversal depth, it reduces the risk of stack overflow and CPU exhaustion attacks. Note that this feature specifically limits *nesting depth*-it does not limit total payload size, string length, or concurrency.
 
 ## How It Works
 The proxy inspects JSON payloads to locate strings that require redaction (e.g., within `messages` arrays or `tool_calls`). 

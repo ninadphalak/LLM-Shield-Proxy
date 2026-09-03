@@ -42,8 +42,8 @@ def test_submission_instructions_require_verifiable_detached_provenance():
 
     assert "attest-report: \"true\"" in instructions
     assert "gh attestation verify pii-leak-benchmark-report.json -R submitter/repository" in instructions
-    assert "counts toward the independent-replication floor only" in instructions
-    assert "does not prove that the remotely measured process" in instructions
+    assert "A result only achieves \"replicated\" status when three separate individuals" in instructions
+    assert "does not definitively prove the remote gateway process used the exact version stated" in instructions
 
 
 def test_companion_package_releases_cannot_publish_proxy_images_or_assets():

@@ -37,7 +37,7 @@ The adapter engages automatically when the proxy detects an Anthropic target URL
 ## FAQ
 
 **Q: Can I use Claude 3.5 Sonnet directly from my existing OpenAI SDK?**
-A: Yes, for the supported text-focused subset. However, you must thoroughly test all edge cases—especially tool calling and streaming behaviors—because the proxy adapter is not a flawless 1:1 compatibility layer.
+A: Yes, for the supported text-focused subset. However, you must thoroughly test all edge cases-especially tool calling and streaming behaviors-because the proxy adapter is not a flawless 1:1 compatibility layer.
 
 **Q: Does Anthropic's SSE stream break the sliding-window buffer?**
 A: No. The adapter normalizes the incoming Anthropic events into a standard structure *before* they hit the rehydration buffer, ensuring PII redaction rules still apply correctly.

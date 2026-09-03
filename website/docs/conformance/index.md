@@ -4,7 +4,7 @@ The [specification governance process](/docs/conformance/governance) defines nor
 
 These tests verify how a streaming privacy gateway handles known test values. They report functional results separately from timing, memory, and deployment-specific security claims.
 
-The lab is Apache-2.0 licensed. The specification, vectors, runner, report schema, and reference implementations are fully inspectable and reusable without a license fee, account, hosted service, or paid edition.
+The lab is Apache-2.0 licensed. The specification, vectors, runner, report schema, and LLM-Shield-Proxy tools are fully inspectable and reusable without a license fee, account, hosted service, or paid edition.
 
 ## Six Scored Domains
 

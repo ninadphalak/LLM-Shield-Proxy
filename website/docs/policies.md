@@ -2,7 +2,7 @@
 
 The `policies.yaml` file defines security roles and maps incoming request identifiers (e.g., `virtual_key_id` or `x-tenant-id`) to those roles. 
 
-This allows you to apply different security profiles—such as strict data protection for external users, and relaxed boundaries for internal developers—within the same proxy instance.
+This allows you to apply different security profiles-such as strict data protection for external users, and relaxed boundaries for internal developers-within the same proxy instance.
 
 By default, the proxy operates under a strict **Zero-Trust (`FAIL_CLOSED`)** model. Requests using an unknown identifier that is not mapped to a role (and lacks a `default_role`) are rejected with `HTTP 403 Forbidden`.
 
