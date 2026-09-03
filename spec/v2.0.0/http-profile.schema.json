@@ -1,0 +1,2484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-0039f5fd-ac66-4a1c-9e0.web.app/spec/streaming-privacy-gateway/v2.0.0/http-profile.schema.json",
+  "title": "Streaming Privacy Gateway HTTP Profile Report v2.0.0",
+  "type": "object",
+  "required": [
+    "capture",
+    "cases_digest",
+    "checks",
+    "corpus",
+    "entity_scope",
+    "environment",
+    "fixture",
+    "generated_at",
+    "harness_revision",
+    "implementation",
+    "limitations",
+    "metrics",
+    "outcome",
+    "outcome_rationale",
+    "passed",
+    "profile",
+    "redaction_claim",
+    "schema",
+    "target"
+  ],
+  "properties": {
+    "schema": {
+      "const": "llm-shield.streaming-privacy-http-profile/v2.0.0"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "name",
+        "scope"
+      ],
+      "properties": {
+        "name": {
+          "const": "OpenAI-compatible HTTP gateway profile"
+        },
+        "scope": {
+          "const": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+        }
+      },
+      "additionalProperties": false
+    },
+    "implementation": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "labels_are_operator_supplied"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels_are_operator_supplied": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "base_url",
+        "model",
+        "raw_pass_through_baseline"
+      ],
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extra_header_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "raw_pass_through_baseline": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "harness_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attestation": {
+      "$ref": "#/$defs/attestation"
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "python",
+        "implementation",
+        "platform"
+      ],
+      "properties": {
+        "python": {
+          "type": "string",
+          "minLength": 1
+        },
+        "implementation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "processor": {
+          "type": "string"
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "required": [
+        "mode",
+        "bind_host",
+        "port",
+        "authentication_required",
+        "target_must_be_preconfigured_for",
+        "self_probe"
+      ],
+      "properties": {
+        "bind_host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer"
+        },
+        "target_must_be_preconfigured_for": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "loopback",
+            "public"
+          ]
+        },
+        "authentication_required": {
+          "type": "boolean"
+        },
+        "self_probe": {
+          "type": "object",
+          "description": "The harness's own request to the advertised capture URL, sent before any target traffic. It is the fail-closed check that the capture was reachable and recording at the address the target was configured with; a run that could not confirm it aborts and produces no report, so both fields are const true here.",
+          "required": [
+            "performed",
+            "url",
+            "recorded",
+            "round_trip_ms"
+          ],
+          "properties": {
+            "performed": {
+              "const": true
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "recorded": {
+              "const": true
+            },
+            "round_trip_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "advertised_url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "advertised_url_reachable": {
+              "type": "boolean",
+              "description": "Whether the URL the target is configured with also answered the probe from the harness. False is not on its own a defect: a legitimate address can be reachable from the target and not from the harness (host.docker.internal resolves inside a container, often not on the host). It is recorded so that a run which then captures nothing can be read as a reachability problem rather than as leak evidence. An advertised URL answered by a DIFFERENT server aborts the run instead."
+            },
+            "advertised_url_detail": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "object",
+      "required": [
+        "client_observed_latency",
+        "configured_upstream_boundary",
+        "fragmentation_safety",
+        "response_fidelity",
+        "response_injection_containment",
+        "segment_separation",
+        "sse_validity"
+      ],
+      "properties": {
+        "configured_upstream_boundary": {
+          "$ref": "#/$defs/boundary_check"
+        },
+        "fragmentation_safety": {
+          "$ref": "#/$defs/fragmentation_check"
+        },
+        "sse_validity": {
+          "$ref": "#/$defs/sse_check"
+        },
+        "response_fidelity": {
+          "$ref": "#/$defs/response_check"
+        },
+        "client_observed_latency": {
+          "$ref": "#/$defs/latency_check"
+        },
+        "response_injection_containment": {
+          "$ref": "#/$defs/injection_check"
+        },
+        "segment_separation": {
+          "$ref": "#/$defs/separation_check"
+        }
+      },
+      "additionalProperties": false
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "limitations": {
+      "type": "object",
+      "description": "Split deliberately. run_validity is what a reader must check before treating this artifact as a result; method_limits is what the method can never see in any run. One mixed list made a reader wade through the permanent statements to reach the ones that decide whether this particular run means anything.",
+      "required": [
+        "run_validity",
+        "method_limits"
+      ],
+      "properties": {
+        "run_validity": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "method_limits": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "redaction_claim": {
+      "$ref": "#/$defs/redaction_claim"
+    },
+    "outcome": {
+      "enum": [
+        "pass",
+        "fail",
+        "no-leak-profile-not-met",
+        "not-applicable",
+        "redaction-not-enabled",
+        "inconclusive",
+        "claim-unstated"
+      ],
+      "description": "What a published table cell is allowed to say. DERIVED from redaction_claim plus the measurement -- never typed by the submitter, and re-derived by the rules below so a hand-edited report fails validation. `passed` remains the raw measurement and is not overwritten. 'fail' means one thing only: protected data reached the capture origin. 'no-leak-profile-not-met' is a non-pass with NO leak -- typically a one-way anonymizer that never restores the value, so response_fidelity fails while nothing egressed; publish it as such and never as a privacy failure. The rest are not verdicts at all: 'not-applicable' means the product offers no redaction feature and this profile measured it against something it never offered; 'redaction-not-enabled' is a statement about configuration; 'inconclusive' means the run could not be attributed; 'claim-unstated' means no claim was recorded and the artifact is not publishable as a row."
+    },
+    "outcome_rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixture": {
+      "type": "object",
+      "description": "Dimensions of the protected fixture used by this run. Values are never published -- printing them would hand a shape-matching shim the answer -- but a reader must be able to tell a varied, VALID fixture from the fixed one this replaced, whose three values were all invalid specimens (a blacklisted SSN, a Luhn-invalid card, an address with no public suffix) that a validating detector correctly ignored.",
+      "required": [
+        "varies_per_run",
+        "values_published",
+        "formats",
+        "value_space_nominal",
+        "specimens_are_valid",
+        "specimens_are_non_real"
+      ],
+      "properties": {
+        "varies_per_run": {
+          "type": "boolean"
+        },
+        "values_published": {
+          "const": false,
+          "description": "The harness never writes fixture values into a report."
+        },
+        "formats": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The shape of each protected value. Fixed across runs, so a format-matching target is unaffected by value variation."
+        },
+        "value_space_nominal": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Distinct values each entity draws from, before rejection sampling. A value of 1 means that entity does not vary."
+        },
+        "specimens_are_valid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "specimens_are_non_real": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ssn_ipv4_collision_rejection": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "corpus": {
+      "$ref": "#/$defs/corpus_block"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics_block"
+    },
+    "entity_scope": {
+      "$ref": "#/$defs/entity_scope_block"
+    },
+    "cases_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Digest of the per-case result sidecar. Per-case results do NOT go in the report body: 500 cases inline makes the report unreadable and therefore unreviewable, and an unreviewable artifact is not a citable one. The report carries aggregates plus this digest; the sidecar carries the cases."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "fragmentation_safety": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "fragmentation_safety"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "sse_validity": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "sse_validity"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "response_fidelity": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "response_fidelity"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "client_observed_latency": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "client_observed_latency"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "$ref": "#/$defs/outcome_unknown_claim_is_unstated"
+    },
+    {
+      "$ref": "#/$defs/outcome_no_claim_is_not_applicable"
+    },
+    {
+      "$ref": "#/$defs/outcome_unconfigured_is_not_a_verdict"
+    },
+    {
+      "$ref": "#/$defs/outcome_pass_requires_verdict_conditions"
+    },
+    {
+      "$ref": "#/$defs/outcome_fail_requires_verdict_conditions"
+    },
+    {
+      "$ref": "#/$defs/outcome_inconclusive_requires_no_correlation"
+    },
+    {
+      "$ref": "#/$defs/not_applicable_requires_no_claim"
+    },
+    {
+      "$ref": "#/$defs/not_enabled_requires_claim_and_off"
+    },
+    {
+      "$ref": "#/$defs/claim_unstated_requires_unknown"
+    },
+    {
+      "$ref": "#/$defs/inconclusive_requires_claim_and_on"
+    },
+    {
+      "$ref": "#/$defs/fail_requires_leak_evidence"
+    },
+    {
+      "$ref": "#/$defs/no_leak_outcome_requires_no_leak"
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "response_injection_containment": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "response_injection_containment"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "segment_separation": {
+                "properties": {
+                  "passed": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "passed"
+                ]
+              }
+            },
+            "required": [
+              "segment_separation"
+            ]
+          }
+        },
+        "required": [
+          "checks"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      }
+    },
+    {
+      "$ref": "#/$defs/any_measured_leak_forbids_pass"
+    },
+    {
+      "$ref": "#/$defs/incomplete_fidelity_forbids_pass"
+    },
+    {
+      "$ref": "#/$defs/incomplete_coverage_forbids_pass"
+    },
+    {
+      "$ref": "#/$defs/inconclusive_cases_forbid_pass"
+    }
+  ],
+  "$defs": {
+    "fragmentation_check": {
+      "type": "object",
+      "required": [
+        "passed",
+        "one_character_events_requested",
+        "events_observed",
+        "events_observed_max",
+        "coalescing_not_distinguished",
+        "response_reconstructed"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "one_character_events_requested": {
+          "const": true
+        },
+        "events_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events_observed_max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "response_reconstructed": {
+          "type": "boolean"
+        },
+        "coalescing_not_distinguished": {
+          "const": true
+        }
+      },
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "events_observed": {
+            "minimum": 2
+          },
+          "response_reconstructed": {
+            "const": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sse_check": {
+      "type": "object",
+      "required": [
+        "passed",
+        "invalid_events",
+        "done_markers_valid",
+        "status_codes",
+        "errors"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "invalid_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_markers_valid": {
+          "type": "boolean"
+        },
+        "content_type_valid": {
+          "type": "boolean"
+        },
+        "status_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "invalid_events": {
+            "const": 0
+          },
+          "done_markers_valid": {
+            "const": true
+          },
+          "content_type_valid": {
+            "const": true
+          },
+          "status_codes": {
+            "minItems": 1,
+            "items": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 299
+            }
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "response_check": {
+      "type": "object",
+      "required": [
+        "expected_value_reconstructed",
+        "iterations_completed",
+        "iterations_matching",
+        "passed",
+        "payload_content_included",
+        "segment"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "expected_value_reconstructed": {
+          "type": "boolean"
+        },
+        "iterations_matching": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "iterations_completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "iterations_requested": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload_content_included": {
+          "const": false
+        },
+        "segment": {
+          "const": "echo"
+        }
+      },
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "expected_value_reconstructed": {
+            "const": true
+          },
+          "iterations_matching": {
+            "minimum": 1
+          },
+          "iterations_completed": {
+            "minimum": 1
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Did the client get the ORIGINAL values back from the echo segment?\n\nThis is the fidelity half of the response split. A gateway that masks on the way out must rehydrate on the way back, and a one-way anonymizer fails here while leaking nothing -- which is why its outcome is 'no-leak-profile-not-met' and never 'fail'."
+    },
+    "latency_check": {
+      "type": "object",
+      "required": [
+        "passed",
+        "threshold_enforced",
+        "unit",
+        "iterations",
+        "mean",
+        "p50",
+        "p95",
+        "p99",
+        "iterations_measured"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "threshold_enforced": {
+          "const": false
+        },
+        "unit": {
+          "const": "milliseconds"
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "iterations_measured": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "passed": {
+                "const": true
+              }
+            },
+            "required": [
+              "passed"
+            ]
+          },
+          "then": {
+            "properties": {
+              "iterations_measured": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "boundary_check": {
+      "type": "object",
+      "required": [
+        "capture_mode",
+        "captured_requests",
+        "correlated_requests",
+        "inspection_scope",
+        "leak_evidence",
+        "leaked_entity_types",
+        "marker_words_observed_max",
+        "marker_words_required",
+        "marker_words_total",
+        "needle_lengths",
+        "needle_proximity",
+        "passed",
+        "payload_content_included",
+        "unattributed_leaked_entity_types",
+        "unattributed_requests",
+        "unattributed_uninspectable_requests",
+        "uninspectable_reasons",
+        "uninspectable_requests",
+        "upstream_paths_observed"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "captured_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "correlated_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uninspectable_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uninspectable_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "leaked_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "upstream_paths_observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "upstream_methods_observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "marker_words_required": {
+          "const": 3
+        },
+        "marker_words_total": {
+          "const": 5
+        },
+        "marker_words_observed_max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "inspection_scope": {
+          "enum": [
+            "every HTTP/1.x request to the capture origin on any path or method: request line, headers, chunk extensions, trailers, and body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39, including ordered per-channel joins across captured requests with decoded material held out of the ordered stream"
+          ]
+        },
+        "payload_content_included": {
+          "const": false
+        },
+        "capture_mode": {
+          "enum": [
+            "loopback",
+            "public"
+          ],
+          "description": "loopback: only a target on the tester's own machine or network could reach the capture, so every request that arrived is the target's. public: the capture was reachable beyond loopback and attribution rests on the capture token instead. A public run is a weaker observation and must not be compared as equivalent to a loopback run."
+        },
+        "unattributed_requests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requests recorded by the capture that did not present the capture token. Reported, never dropped. Expected to be non-zero on a public capture (background internet scan traffic) and not on its own a failure."
+        },
+        "unattributed_uninspectable_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unattributed_leaked_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Protected fixture values found in unattributed traffic. Fails the check, because the fixture is synthetic and no honest third party sends it, but is reported separately so the artifact does not assert the target sent them."
+        },
+        "unattributed_paths_observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "leak_evidence": {
+          "type": "array",
+          "description": "Provenance for every entry in leaked_entity_types. A bare entity name is an accusation with no way for the accused to check it.",
+          "items": {
+            "type": "object",
+            "required": [
+              "entity_type",
+              "channel",
+              "scope",
+              "match"
+            ],
+            "properties": {
+              "entity_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "channel": {
+                "enum": [
+                  "all",
+                  "request",
+                  "headers",
+                  "framing",
+                  "body"
+                ]
+              },
+              "scope": {
+                "enum": [
+                  "per-request",
+                  "cross-request"
+                ]
+              },
+              "match": {
+                "enum": [
+                  "literal",
+                  "normalized"
+                ],
+                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide with an injected identifier's digits. The IPv4 case that produced a false SSN finding in round 7 is now excluded by construction: the generator resamples any SSN some valid dotted quad could produce. Check this field before describing a finding as egress."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "unattributed_leak_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "entity_type",
+              "channel",
+              "scope",
+              "match"
+            ],
+            "properties": {
+              "entity_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "channel": {
+                "enum": [
+                  "all",
+                  "request",
+                  "headers",
+                  "framing",
+                  "body"
+                ]
+              },
+              "scope": {
+                "enum": [
+                  "per-request",
+                  "cross-request"
+                ]
+              },
+              "match": {
+                "enum": [
+                  "literal",
+                  "normalized"
+                ],
+                "description": "literal: the fixture value appeared verbatim in something the target sent. normalized: recovered only after joining channels and stripping separators. The normalized matcher is what catches deliberate obfuscation, and it is also the one that can collide with an injected identifier's digits. The IPv4 case that produced a false SSN finding in round 7 is now excluded by construction: the generator resamples any SSN some valid dotted quad could produce. Check this field before describing a finding as egress."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "needle_proximity": {
+          "type": "object",
+          "description": "Longest contiguous run OF EACH NEEDLE found in any haystack, against needle_lengths. Equal means the value is present; less is the margin. Published per run because the fixture values vary per run. Deliberately not a digit count: a correctly redacting gateway emits substitute values shaped like the fixture, so a raw digit-run count is dominated by them and says nothing about headroom.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "unattributed_needle_proximity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "needle_lengths": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "passed": {
+                "const": true
+              }
+            },
+            "required": [
+              "passed"
+            ]
+          },
+          "then": {
+            "properties": {
+              "leaked_entity_types": {
+                "maxItems": 0
+              },
+              "marker_words_observed_max": {
+                "minimum": 3
+              },
+              "uninspectable_requests": {
+                "const": 0
+              },
+              "correlated_requests": {
+                "minimum": 1
+              },
+              "captured_requests": {
+                "minimum": 1
+              },
+              "unattributed_leaked_entity_types": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "attestation": {
+      "type": "object",
+      "description": "Self-reported provenance for this run; absent when the harness had no CI context. Independently verified provenance requires a future schema with proof fields.",
+      "required": [
+        "verification",
+        "runner",
+        "commit_sha"
+      ],
+      "properties": {
+        "verification": {
+          "description": "Values are copied from the run environment and are forgeable by whoever ran the harness. Independently verified mechanisms require a future schema with proof fields.",
+          "const": "self-reported"
+        },
+        "runner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ci_provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{7,64}(\\+[A-Za-z0-9._-]+)?$"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workflow_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "redaction_claim": {
+      "type": "object",
+      "description": "What the product CLAIMS about PII redaction, with a citation, and what was configured for this run. Operator-supplied, like implementation.name -- the harness cannot measure a vendor's marketing. It exists because a product that never offered PII redaction must never be published as a privacy 'Fail': that is a smear and it is not retractable. It governs the derived `outcome`.",
+      "required": [
+        "vendor_claims_pii_redaction",
+        "configured_for_this_run",
+        "recorded_by"
+      ],
+      "properties": {
+        "vendor_claims_pii_redaction": {
+          "enum": [
+            "claimed",
+            "not-offered",
+            "unknown"
+          ],
+          "description": "claimed: the vendor documents a PII redaction/anonymization feature. not-offered: the product does not claim one (e.g. a gateway that is caching, routing, rate limiting and observability). unknown: not recorded - the run is then not publishable in either direction."
+        },
+        "claim_citation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the vendor states it. Required unless the claim is 'unknown', so a reader can check the claim instead of trusting the submitter."
+        },
+        "claim_quote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configured_for_this_run": {
+          "type": "boolean",
+          "description": "Whether that redaction feature was actually enabled for this run. A run with it off is a configuration statement, not a verdict."
+        },
+        "configuration_reference": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The exact setting, guardrail or config file that enabled redaction. Required when configured_for_this_run is true, so the row reproduces."
+        },
+        "recorded_by": {
+          "const": "operator"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "enum": [
+                  "claimed",
+                  "not-offered"
+                ]
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          },
+          "then": {
+            "required": [
+              "claim_citation"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "configured_for_this_run"
+            ]
+          },
+          "then": {
+            "required": [
+              "configuration_reference"
+            ],
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "outcome_unknown_claim_is_unstated": {
+      "if": {
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        },
+        "required": [
+          "redaction_claim"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "claim-unstated"
+          }
+        }
+      }
+    },
+    "outcome_no_claim_is_not_applicable": {
+      "if": {
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "not-offered"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        },
+        "required": [
+          "redaction_claim"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "not-applicable"
+          }
+        }
+      }
+    },
+    "outcome_unconfigured_is_not_a_verdict": {
+      "if": {
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": false
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          }
+        },
+        "required": [
+          "redaction_claim"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "redaction-not-enabled"
+          }
+        }
+      }
+    },
+    "outcome_pass_requires_verdict_conditions": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "pass"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": true
+          },
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          },
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "correlated_requests": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "outcome_fail_requires_verdict_conditions": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "fail"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          },
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          },
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "correlated_requests": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "outcome_inconclusive_requires_no_correlation": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "correlated_requests": {
+                    "const": 0
+                  }
+                },
+                "required": [
+                  "correlated_requests"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "not_applicable_requires_no_claim": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "not-applicable"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "not-offered"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        }
+      }
+    },
+    "not_enabled_requires_claim_and_off": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "redaction-not-enabled"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": false
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          }
+        }
+      }
+    },
+    "claim_unstated_requires_unknown": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "claim-unstated"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction"
+            ]
+          }
+        }
+      }
+    },
+    "inconclusive_requires_claim_and_on": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          }
+        }
+      }
+    },
+    "fail_requires_leak_evidence": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "fail"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checks": {
+            "anyOf": [
+              {
+                "properties": {
+                  "configured_upstream_boundary": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "leaked_entity_types": {
+                            "minItems": 1
+                          }
+                        },
+                        "required": [
+                          "leaked_entity_types"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "unattributed_leaked_entity_types": {
+                            "minItems": 1
+                          }
+                        },
+                        "required": [
+                          "unattributed_leaked_entity_types"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "configured_upstream_boundary"
+                ]
+              },
+              {
+                "properties": {
+                  "response_injection_containment": {
+                    "properties": {
+                      "leaked_entity_types": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "leaked_entity_types"
+                    ]
+                  }
+                },
+                "required": [
+                  "response_injection_containment"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "description": "'fail' is still reserved for a MEASURED leak of a protected value, and now has two places that leak can be measured: the request path at the configured-upstream capture, and the response path at the client when the injection segment reaches it. A non-pass from fidelity, coverage or inconclusive cases is not a fail."
+    },
+    "no_leak_outcome_requires_no_leak": {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "no-leak-profile-not-met"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "redaction_claim"
+        ],
+        "properties": {
+          "passed": {
+            "const": false
+          },
+          "redaction_claim": {
+            "properties": {
+              "vendor_claims_pii_redaction": {
+                "const": "claimed"
+              },
+              "configured_for_this_run": {
+                "const": true
+              }
+            },
+            "required": [
+              "vendor_claims_pii_redaction",
+              "configured_for_this_run"
+            ]
+          },
+          "checks": {
+            "properties": {
+              "configured_upstream_boundary": {
+                "properties": {
+                  "leaked_entity_types": {
+                    "maxItems": 0
+                  },
+                  "unattributed_leaked_entity_types": {
+                    "maxItems": 0
+                  },
+                  "correlated_requests": {
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "leaked_entity_types",
+                  "correlated_requests"
+                ]
+              },
+              "response_injection_containment": {
+                "properties": {
+                  "leaked_entity_types": {
+                    "maxItems": 0
+                  }
+                },
+                "required": [
+                  "leaked_entity_types"
+                ]
+              }
+            },
+            "required": [
+              "configured_upstream_boundary"
+            ]
+          }
+        }
+      }
+    },
+    "injection_check": {
+      "type": "object",
+      "description": "Did values the capture INJECTED into the response reach the client?\n\nTHE RESPONSE SPLIT. v1 measured leakage in one direction only: values the CLIENT sent, recovered at the configured-upstream capture. Fragmentation cannot be measured there. The harness does not control where a gateway chunks its own upstream request, and a gateway that buffers and parses a JSON body -- which is nearly all of them -- has no chunk boundaries to place. Everything the harness CAN fragment is on the response path, because the capture server is the gateway's configured upstream and is the harness's own code. So v2 measures leakage where the control is.\n\nThe response therefore carries two segments, in separate bytes:\n\n  ECHO -- replays the prompt the gateway sent upstream. A gateway that masks on the way out and rehydrates on the way back must return the ORIGINAL values here. This is FidelityRate, and it is what stops a one-way anonymizer from scoring a perfect leak rate by destroying everything.\n\n  INJECTION -- fixture values that were NEVER in the prompt, emitted by the capture as a model would emit them, fragmented per the Axis C strategy under test. A gateway must REDACT these before they reach the client. This is LeakRate, and the delta between its single-chunk control and its adversarially fragmented conditions is DeltaFrag.\n\nA correct gateway must behave DIFFERENTLY on the two segments -- restore one, redact the other -- and that is what makes the profile hard to satisfy by policy alone. Passing everything through fails injection containment. Redacting everything fails echo fidelity. No single global rule passes both, which is exactly the property v1's three-format fixture lacked.\n\nThe two segments must draw DISJOINT values, asserted by the segment_separation check. If a value appeared in both, a correct rehydration of the echo would be indistinguishable from a leak of the injection, and the profile would report a failure against a gateway that did the right thing.",
+      "required": [
+        "passed",
+        "segment",
+        "fragmentation_strategy",
+        "injected_entity_types",
+        "leaked_entity_types",
+        "leak_evidence",
+        "needle_proximity",
+        "needle_lengths",
+        "delivery_confirmed",
+        "client_capture_inspectable",
+        "inspection_scope",
+        "payload_content_included"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "segment": {
+          "const": "injection"
+        },
+        "fragmentation_strategy": {
+          "enum": [
+            "single-chunk",
+            "byte-at-a-time",
+            "exhaustive-2-part",
+            "placeholder-boundary",
+            "mid-utf8-codepoint",
+            "mid-sse-field",
+            "across-sse-events",
+            "interleaved-noise"
+          ],
+          "description": "Where the capture placed chunk boundaries inside the injected value. 'single-chunk' is the CONTROL condition and is not adversarial: it establishes the static-detection baseline that DeltaFrag subtracts."
+        },
+        "injected_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "What the capture actually emitted. A run that injected nothing has measured nothing, so this may not be empty -- an empty injection with an empty leak list is not a pass, it is a run that did not happen."
+        },
+        "leaked_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "uniqueItems": true
+        },
+        "leak_evidence": {
+          "type": "array"
+        },
+        "needle_proximity": {
+          "type": "object"
+        },
+        "needle_lengths": {
+          "type": "object"
+        },
+        "chunk_boundaries_requested": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chunk_boundaries_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delivery_confirmed": {
+          "type": "boolean",
+          "description": "The capture emitted the injection AND the client's stream terminated normally. Without it, a gateway that dropped the connection early scores an empty leak list, which reads identically to a gateway that redacted correctly. Fail closed: not confirmed is not a pass."
+        },
+        "client_capture_inspectable": {
+          "type": "boolean",
+          "description": "The client-side inspection walked the whole response within budget. Carried forward verbatim from v1's rule that an uninspectable capture ends the run with an error and never an assumed no-leak."
+        },
+        "inspection_scope": {
+          "enum": [
+            "every SSE event the client received: event data parsed as JSON and walked recursively over all types, reassembled delta content concatenated in arrival order, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39"
+          ]
+        },
+        "payload_content_included": {
+          "const": false
+        }
+      },
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "leaked_entity_types": {
+            "maxItems": 0
+          },
+          "delivery_confirmed": {
+            "const": true
+          },
+          "client_capture_inspectable": {
+            "const": true
+          }
+        },
+        "required": [
+          "leaked_entity_types",
+          "delivery_confirmed",
+          "client_capture_inspectable"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "separation_check": {
+      "type": "object",
+      "description": "Proof that the echo segment and the injection segment cannot be confused.\n\nThis check exists because the two measurements have opposite correct answers. If a value appeared in both segments, a gateway that correctly rehydrated the echo would be indistinguishable from one that leaked the injection, and the profile would publish a failure against a gateway that did the right thing. That is the same class of error as the invalid-fixture incident: the harness penalising correct behaviour.\n\nDisjointness is asserted on the NORMALIZED forms, not the raw strings. The leak matcher strips separators and folds look-alikes, so two values that differ only in punctuation are the same needle to it and must not be split across the segments.",
+      "required": [
+        "passed",
+        "echo_entity_types",
+        "injection_entity_types",
+        "values_disjoint",
+        "normalized_forms_disjoint",
+        "injection_absent_from_request",
+        "shared_substring_max",
+        "shortest_needle_length"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "echo_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "uniqueItems": true
+        },
+        "injection_entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "uniqueItems": true
+        },
+        "values_disjoint": {
+          "type": "boolean"
+        },
+        "normalized_forms_disjoint": {
+          "type": "boolean"
+        },
+        "injection_absent_from_request": {
+          "type": "boolean",
+          "description": "The injected values were never sent upstream by the harness, verified against the capture record. This is what makes an injected value at the client a LEAK rather than a rehydration: there is no masked original for the gateway to have restored."
+        },
+        "shared_substring_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Longest run shared by any echo needle and any injection needle, normalized. The margin, reported the way needle_proximity is: a reader can see how close the two segments came to colliding rather than taking disjointness on trust."
+        },
+        "shortest_needle_length": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "if": {
+        "properties": {
+          "passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "values_disjoint": {
+            "const": true
+          },
+          "normalized_forms_disjoint": {
+            "const": true
+          },
+          "injection_absent_from_request": {
+            "const": true
+          }
+        },
+        "required": [
+          "values_disjoint",
+          "normalized_forms_disjoint",
+          "injection_absent_from_request"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "corpus_block": {
+      "type": "object",
+      "description": "Which corpus this run measured, and how to reproduce the exact values it drew.\n\nCase DEFINITIONS are frozen and pinned by sha256; concrete VALUES are drawn per run from a declared value space and reproduced by the seed. A static corpus of strings gets memorized and trained on and has a shelf life; a generative one with a published value-space cardinality is the argument that a guess cannot pass.",
+      "required": [
+        "id",
+        "version",
+        "sha256",
+        "case_count",
+        "seed",
+        "coverage",
+        "values_published"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Digest of the case-definition manifest -- definitions, not drawn values. A digest absent from the published manifest registry is a silently edited corpus and the row is not comparable to any other."
+        },
+        "case_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8,}$"
+        },
+        "coverage": {
+          "type": "object",
+          "required": [
+            "strategy",
+            "axes",
+            "pairs_required",
+            "pairs_covered",
+            "proof_complete"
+          ],
+          "properties": {
+            "strategy": {
+              "enum": [
+                "pairwise",
+                "pairwise-plus-adversarial",
+                "exhaustive"
+              ]
+            },
+            "axes": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "entity",
+                  "encoding",
+                  "fragmentation",
+                  "carrier"
+                ]
+              },
+              "minItems": 4,
+              "uniqueItems": true
+            },
+            "pairs_required": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "pairs_covered": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "proof_complete": {
+              "type": "boolean",
+              "description": "Every pair of axis values appears in at least one case. 'We ran 500 cases with full pairwise coverage' is a methodology sentence; 'we ran 500 cases we picked' is not."
+            }
+          },
+          "additionalProperties": false
+        },
+        "values_published": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "metrics_block": {
+      "type": "object",
+      "description": "Three quantities, one headline.\n\n  LeakRate(condition) = leaked cases / applicable cases\n  FidelityRate        = cases where the client got the original value back\n  DeltaFrag           = LeakRate(adversarial) - LeakRate(single-chunk)\n\nDeltaFrag is the citable number. It isolates how much of a detector's apparent correctness is an artifact of being tested on whole strings: a gateway with a perfect static score and DeltaFrag = 0.34 has a streaming bug its own test suite cannot see.\n\nFidelityRate is reported alongside, always. A gateway that redacts everything and restores nothing scores a perfect LeakRate and is useless -- v1's 'no-leak-profile-not-met' outcome already encoded that and the metric must not lose it.",
+      "required": [
+        "leak_rate",
+        "fidelity_rate",
+        "delta_frag",
+        "cases_by_condition",
+        "cases_scored",
+        "cases_applicable",
+        "cases_inconclusive",
+        "derivation_recomputed",
+        "sidecar_case_count_matches",
+        "by_axis"
+      ],
+      "properties": {
+        "leak_rate": {
+          "type": "object",
+          "required": [
+            "single_chunk",
+            "adversarial",
+            "overall"
+          ],
+          "properties": {
+            "single_chunk": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "adversarial": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "overall": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "fidelity_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "delta_frag": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "cases_by_condition": {
+          "type": "object",
+          "required": [
+            "single_chunk",
+            "adversarial"
+          ],
+          "description": "Both arms must be non-empty. A DeltaFrag computed without a control condition is not a delta, and the minimums here are what stop a run from publishing one.",
+          "properties": {
+            "single_chunk": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "adversarial": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "cases_scored": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cases_applicable": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cases_inconclusive": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cases whose capture could not be inspected. Counted and published, never folded into the denominator as a no-leak."
+        },
+        "derivation_recomputed": {
+          "const": true,
+          "description": "The harness recomputed delta_frag from the two leak rates it published and refused to emit on a mismatch. JSON Schema cannot do arithmetic, so this is a harness assertion the schema makes impossible to omit -- not a proof against a hand-forged report. Same trust model as v1's payload_content_included."
+        },
+        "sidecar_case_count_matches": {
+          "const": true,
+          "description": "cases_scored equals the number of case records in the sidecar named by cases_digest. Same trust model as above."
+        },
+        "by_axis": {
+          "type": "object",
+          "required": [
+            "entity",
+            "encoding",
+            "fragmentation",
+            "carrier"
+          ],
+          "properties": {
+            "entity": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "leak_rate",
+                  "applicable"
+                ],
+                "properties": {
+                  "leak_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fidelity_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "applicable": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "leaked": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "encoding": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "leak_rate",
+                  "applicable"
+                ],
+                "properties": {
+                  "leak_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fidelity_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "applicable": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "leaked": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "fragmentation": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "leak_rate",
+                  "applicable"
+                ],
+                "properties": {
+                  "leak_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fidelity_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "applicable": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "leaked": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "carrier": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "leak_rate",
+                  "applicable"
+                ],
+                "properties": {
+                  "leak_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fidelity_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "applicable": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "leaked": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "entity_scope_block": {
+      "type": "object",
+      "description": "Which entity classes the gateway actually had switched on for this run.\n\nREQUIRED, not optional, and that is the point. Gateways select what they recognise -- by region profile, by recognizer registry, by their own configuration -- and a gateway that never had an entity class enabled has not PASSED that class; it was not tested. v1 already carries 'redaction-not-enabled' for 'offers redaction, was not turned on'. This is the same condition at entity-class granularity, and without it a published row can claim a pass it never earned.\n\nEvery entity in the corpus registry must appear in exactly one of enabled, not_enabled or unknown. 'unknown' is an honest answer and is not a pass: cases for those entities are scored inconclusive, never clean.",
+      "required": [
+        "mechanism",
+        "enabled",
+        "not_enabled",
+        "unknown",
+        "partitions_corpus",
+        "recorded_by",
+        "source"
+      ],
+      "properties": {
+        "mechanism": {
+          "type": "string",
+          "minLength": 1,
+          "description": "How scope is selected on this product -- 'region-profile', 'recognizer-registry', 'policy-file', and so on. Named so a reader can reproduce the configuration rather than guess at it."
+        },
+        "enabled": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "uniqueItems": true
+        },
+        "not_enabled": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "uniqueItems": true
+        },
+        "unknown": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "uniqueItems": true
+        },
+        "partitions_corpus": {
+          "const": true,
+          "description": "The three lists together cover the corpus registry exactly once. Harness-asserted; JSON Schema cannot see the registry."
+        },
+        "recorded_by": {
+          "const": "operator"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the operator read the scope from -- a config file path, an admin screen, a documented default. Operator-supplied and unverifiable by the harness, which is why it is labelled rather than trusted."
+        }
+      },
+      "additionalProperties": false
+    },
+    "any_measured_leak_forbids_pass": {
+      "description": "Rule 1, now per-case. A single leaked case anywhere in the corpus forbids passed: true, whatever the aggregate rounds to.",
+      "if": {
+        "properties": {
+          "metrics": {
+            "properties": {
+              "leak_rate": {
+                "properties": {
+                  "overall": {
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "overall"
+                ]
+              }
+            },
+            "required": [
+              "leak_rate"
+            ]
+          }
+        },
+        "required": [
+          "metrics"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      }
+    },
+    "incomplete_fidelity_forbids_pass": {
+      "description": "A gateway that failed to return the original value on any case has not passed, even though it leaked nothing. The outcome for that is 'no-leak-profile-not-met'; it is never 'fail'.",
+      "if": {
+        "properties": {
+          "metrics": {
+            "properties": {
+              "fidelity_rate": {
+                "exclusiveMaximum": 1
+              }
+            },
+            "required": [
+              "fidelity_rate"
+            ]
+          }
+        },
+        "required": [
+          "metrics"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      }
+    },
+    "incomplete_coverage_forbids_pass": {
+      "description": "A corpus whose pairwise coverage proof did not close has not been run in full, so its aggregate is not the number the methodology claims.",
+      "if": {
+        "properties": {
+          "corpus": {
+            "properties": {
+              "coverage": {
+                "properties": {
+                  "proof_complete": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "proof_complete"
+                ]
+              }
+            },
+            "required": [
+              "coverage"
+            ]
+          }
+        },
+        "required": [
+          "corpus"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      }
+    },
+    "inconclusive_cases_forbid_pass": {
+      "description": "v1's fail-closed rule, aggregated: an uninspectable capture is never an assumed no-leak, so a run carrying inconclusive cases cannot pass.",
+      "if": {
+        "properties": {
+          "metrics": {
+            "properties": {
+              "cases_inconclusive": {
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "cases_inconclusive"
+            ]
+          }
+        },
+        "required": [
+          "metrics"
+        ]
+      },
+      "then": {
+        "properties": {
+          "passed": {
+            "const": false
+          }
+        },
+        "required": [
+          "passed"
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}
