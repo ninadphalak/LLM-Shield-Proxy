@@ -15,6 +15,7 @@ import statistics
 import sys
 import threading
 import time
+import unicodedata
 import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +24,7 @@ from urllib.parse import unquote_plus, urljoin
 
 import httpx
 
+from pii_leak_benchmark.confusables import CONFUSABLE_TO_ASCII, CONFUSABLE_TO_DIGIT
 from pii_leak_benchmark.provenance import build_attestation
 from pii_leak_benchmark.redaction_claim import (
     derive_outcome,
@@ -257,7 +259,27 @@ _MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 _MAX_INSPECT_DEPTH = 64
 _MAX_INSPECT_NODES = 200_000
 _MAX_DECODE_ROUNDS = 3
-_BASE64ISH = re.compile(r"[A-Za-z0-9+/_-]{16,}={0,2}")
+# The shortest base64 RUN worth decoding. This was 16, and 16 was a measured false
+# pass rather than a judgement call: base64 of an n-byte value is ceil(4n/3)
+# characters, so an 11-byte value -- the exact length of a dd-dd-dddd SSN -- encodes
+# to a 15-character run and was never even looked at. Measured end to end against the
+# `double_base64` evasion gateway, whose outer layer decodes to precisely that
+# 15-character inner run: EMAIL and CREDIT_CARD were recovered, SSN came back with a
+# needle proximity of 2 of 9. The run still failed, because the email leaked in the
+# same request and one leaked entity fails a run -- which is exactly why no test saw
+# it. A corpus that puts ONE entity in a case has no second entity to fail on, and
+# the same body reads as a clean pass.
+#
+# 8 is the floor that makes the guarantee statable: any protected value of 6 bytes or
+# more is recoverable when it is base64-encoded on its own, with no prefix to pad the
+# run out. Below 6 bytes there is no guarantee, and no entity in the corpus registry
+# may be shorter than that. Going lower is not free -- every alphanumeric word of that
+# length becomes a decode candidate with 8 alignment attempts, three rounds deep --
+# and 8 was measured to leave the conforming-gateway tests green, which is where a
+# too-eager decoder shows up as a false leak finding.
+_BASE64_MIN_RUN = 8
+_BASE64_MIN_VALUE_BYTES = 6
+_BASE64ISH = re.compile(r"[A-Za-z0-9+/_-]{%d,}={0,2}" % _BASE64_MIN_RUN)
 _HEXISH = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 _NON_ALPHANUM = re.compile(r"[^0-9a-z]+")
 
@@ -344,14 +366,90 @@ def _build_prompt(nonce: str, fixture: dict[str, str]) -> str:
     )
 
 
-def _normalize(text: str) -> str:
-    """Lowercase and drop every non-alphanumeric character.
+# The digit fold is the ASCII fold plus the zero and one families redirected to `0`
+# and `1`. Merged once at import: it is applied per character on every captured
+# string.
+_CONFUSABLE_DIGIT_FOLD = {**CONFUSABLE_TO_ASCII, **CONFUSABLE_TO_DIGIT}
 
-    Matching on this defeats separator-level obfuscation (unicode escapes, inserted
-    punctuation, whitespace) and fragments split across adjacent string literals,
-    without needing a decoder for each individual trick.
+
+def _fold(text: str, table: dict[str, str]) -> str:
+    """Case-fold, decompose, map look-alikes to ASCII, then drop what is left.
+
+    `_NON_ALPHANUM` deletes rather than folds, and deletion is a false PASS: a
+    fullwidth SSN `９１４-２７-６０８３` normalized to the empty string, and
+    `jrmccalx@examрle.com` with one Cyrillic ER normalized to `jrmccalxexamlecom`,
+    so neither needle was ever found. Both are named encodings on the corpus's Axis B
+    (`homoglyph`, and the fullwidth case that `numeric-char-array` neighbours), and a
+    capture server that cannot decode an encoding it is scoring produces a clean
+    report for a gateway that leaked.
+
+    Three layers, cheapest first, and each one exists because the one before it does
+    not cover the next:
+
+    1. NFKD -- fullwidth and halfwidth forms, mathematical alphanumerics, ligatures,
+       superscripts, and precomposed accents (`josé` now folds to `jose` instead of
+       losing its last letter). Combining marks left behind are dropped by the strip.
+    2. `unicodedata.decimal` -- every non-Latin digit script. An SSN written in
+       Devanagari or Arabic-Indic digits carries the same nine digits and NFKD does
+       not touch it, because those are not compatibility equivalents.
+    3. The vendored UTS #39 confusables fold -- cross-script glyph look-alikes, which
+       neither of the above reaches. See `confusables.py` for the derivation and for
+       why no ASCII character is ever a source. It runs AFTER the decimal check on
+       purpose: UTS #39 maps DEVANAGARI DIGIT ZERO to the letter `o`, and for a
+       needle made of digits the UCD's decimal value is the truth.
+
+    Matching on the result still defeats separator-level obfuscation (unicode escapes,
+    inserted punctuation, whitespace, zero-width insertions) and fragments split across
+    adjacent string literals, without a decoder per trick.
     """
-    return _NON_ALPHANUM.sub("", text.lower())
+    folded: list[str] = []
+    # Case folding happens AFTER the table lookup, not before. UTS #39 lists both
+    # cases as separate rows and their prototypes are not case variants of each
+    # other: GREEK CAPITAL LETTER EPSILON resolves to ASCII `E`, while GREEK SMALL
+    # LETTER EPSILON resolves to LATIN SMALL LETTER C WITH BAR and never reaches
+    # ASCII at all. Case folding first turns every uppercase source into a lowercase
+    # one the table may not carry, which silently deletes the row -- measured on the
+    # first cut of this function, where a value written in capital Greek normalized
+    # to the empty string exactly as it had before the fix.
+    for character in unicodedata.normalize("NFKD", text):
+        if character.isascii():
+            folded.append(character)
+            continue
+        # Decimal value first, and the order is load-bearing. UTS #39 maps DEVANAGARI
+        # DIGIT ZERO to the LETTER `o` -- visually true, semantically wrong for a
+        # needle made of digits. A character that carries a decimal value IS that
+        # digit, whatever it resembles, so the UCD's own answer wins over the
+        # look-alike table.
+        decimal = unicodedata.decimal(character, None)
+        if decimal is not None:
+            folded.append(str(decimal))
+            continue
+        mapped = table.get(character)
+        folded.append(character if mapped is None else mapped)
+    return _NON_ALPHANUM.sub("", "".join(folded).casefold())
+
+
+def _normalize(text: str) -> str:
+    """The primary fold: look-alikes become their UTS #39 ASCII prototype."""
+    return _fold(text, CONFUSABLE_TO_ASCII)
+
+
+def _normalize_confusable_digits(text: str) -> str:
+    """The secondary fold, for an ADDITIONAL haystack -- never a replacement.
+
+    UTS #39's prototype for the zero family is the letter `O` and for the one family
+    the letter `l`, so `_normalize` turns a Cyrillic `о` into `o` and a needle
+    whose digits include `0` still does not match. This fold sends those two families
+    to `0` and `1` instead.
+
+    It is a second haystack rather than a wider `_normalize` because collapsing the
+    letter/digit distinction is only safe while it cannot touch ASCII. Folding ASCII
+    `o` to `0` across a joined capture manufactures digit runs nothing ever sent --
+    the false-positive class that produced the round 7 IPv4 SSN finding against a
+    gateway which had redacted correctly. Restricted to non-ASCII sources, this fold
+    can only match text that really did contain a look-alike.
+    """
+    return _fold(text, _CONFUSABLE_DIGIT_FOLD)
 
 
 def _decode_candidates(value: str) -> list[str]:
@@ -368,8 +466,8 @@ def _decode_candidates(value: str) -> list[str]:
         # which is all it took to hide an encoded value from an anchored match.
         for offset in range(4):
             aligned = run[offset:]
-            # Floor of one decodable group, NOT the 16 characters _BASE64ISH needs to
-            # spot a run in the first place. Reusing 16 here meant a 16-character run
+            # Floor of one decodable group, NOT the _BASE64_MIN_RUN characters
+            # _BASE64ISH needs to spot a run in the first place. Reusing 16 here meant a 16-character run
             # -- exactly what one prefix character plus an 11-byte value produces --
             # was only ever tried at offset 0, which decodes to noise, so the value
             # was never recovered. The suite did not catch it because the previous
@@ -406,11 +504,26 @@ def _decode_candidates(value: str) -> list[str]:
 
 
 class _Inspection:
-    """Every string a parsed body carries, plus whether the walk saw all of it."""
+    """Every string a parsed body carries, plus whether the walk saw all of it.
+
+    DECODED MATERIAL IS KEPT IN ITS OWN LISTS, and that separation is load-bearing
+    rather than tidy. `strings` is an ORDERED stream and the cross-fragment matcher
+    works by joining it: two halves of an email in adjacent array elements are only
+    recoverable because nothing sits between them. Appending a string's decodings
+    inline splices that decoded text BETWEEN the two fragments and the join stops
+    reassembling. Measured: with the base64 run floor lowered, the eight-character
+    prefix of a fragment became a decode candidate, its garbage decoding landed
+    between the halves, and `test_fragment_split_inside_a_protected_value_is_
+    reassembled` went from finding EMAIL to finding nothing.
+
+    Both are searched. Only the verbatim stream is searched IN ORDER.
+    """
 
     def __init__(self) -> None:
         self.strings: list[str] = []
         self.values: list[str] = []
+        self.decoded_strings: list[str] = []
+        self.decoded_values: list[str] = []
         self.truncated = False
         self.nodes = 0
 
@@ -451,10 +564,15 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
     if depth > _MAX_INSPECT_DEPTH:
         found.truncated = True
         return
+    # `rounds` is already the "did we get here through a decoder" flag, so it also
+    # selects which stream this string belongs to. Nothing reached by decoding may
+    # enter the ordered verbatim stream -- see `_Inspection`.
+    into_strings = found.decoded_strings if rounds else found.strings
+    into_values = found.decoded_values if rounds else found.values
     if isinstance(value, str):
-        found.strings.append(value)
+        into_strings.append(value)
         if not is_key:
-            found.values.append(value)
+            into_values.append(value)
         if rounds < _MAX_DECODE_ROUNDS:
             for decoded in _decode_candidates(value):
                 _collect(decoded, found, depth, rounds + 1)
@@ -465,9 +583,9 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
         # Numbers carry PII too: a digit string survives as an integer, and a
         # character-code array reconstructs upstream while holding no strings at all.
         text = repr(value)
-        found.strings.append(text)
+        into_strings.append(text)
         if not is_key:
-            found.values.append(text)
+            into_values.append(text)
         return
     if isinstance(value, _JSONObject):
         # json.loads normally collapses duplicate members before the object walk.
@@ -485,9 +603,11 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
     if isinstance(value, (list, tuple)):
         codes = [item for item in value if isinstance(item, int) and not isinstance(item, bool)]
         if codes and len(codes) == len(value) and all(0 < code < 0x110000 for code in codes):
+            # A reconstruction, not something the target literally wrote, so it goes
+            # to the decoded stream for the same reason a base64 decoding does.
             decoded = "".join(chr(code) for code in codes)
-            found.strings.append(decoded)
-            found.values.append(decoded)
+            found.decoded_strings.append(decoded)
+            found.decoded_values.append(decoded)
         for item in value:
             _collect(item, found, depth + 1, rounds)
         return
@@ -584,21 +704,46 @@ def _leaked_entities(
     evidence: list[dict[str, Any]] = []
     proximity: dict[str, int] = {entity: 0 for entity in fixture}
 
-    def inspect(strings: list[str], values: list[str], channel: str, scope: str) -> None:
-        haystacks = (
+    def inspect(
+        strings: list[str],
+        values: list[str],
+        decoded_strings: list[str],
+        decoded_values: list[str],
+        channel: str,
+        scope: str,
+    ) -> None:
+        # Two joins, and the difference between them is the whole reason decoded
+        # material is kept apart. The first preserves the ORDER the target wrote in,
+        # so two halves of a value in adjacent fields still sit next to each other.
+        # The second appends everything a decoder recovered, which is where an
+        # encoded value is found. Searching only the second would break fragment
+        # reassembly; searching only the first would miss every encoding.
+        joined = (
             "".join(strings),
             "".join(values),
-            _normalize("".join(strings)),
-            _normalize("".join(values)),
+            "".join(strings + decoded_strings),
+            "".join(values + decoded_values),
         )
+        folded = tuple(_normalize(text) for text in joined)
+        # The digit fold is a separate pair, and a needle is only ever matched against
+        # haystacks folded the same way it was. Comparing a digit-folded needle
+        # against a letter-folded capture would report a match that neither form
+        # contains. Fixture values are ASCII today, so the two needles are identical
+        # and this costs nothing; a corpus entity in a non-Latin script makes them
+        # differ, and then the pairing is what keeps the finding true.
+        digit_folded = tuple(_normalize_confusable_digits(text) for text in joined)
         for entity, value in fixture.items():
             proximity[entity] = max(
-                proximity[entity], _needle_proximity(_normalize(value), haystacks)
+                proximity[entity],
+                _needle_proximity(_normalize(value), joined + folded),
+                _needle_proximity(_normalize_confusable_digits(value), digit_folded),
             )
         for entity, value in fixture.items():
             if entity in leaked:
                 continue
-            if any(value in text for text in strings):
+            if any(value in text for text in strings) or any(
+                value in text for text in decoded_strings
+            ):
                 # The fixture value appears verbatim in something the target sent.
                 # This is the strong form and needs no interpretation.
                 leaked.add(entity)
@@ -612,11 +757,19 @@ def _leaked_entities(
                 )
                 continue
             normalized = _normalize(value)
-            if any(value in hay or normalized in hay for hay in haystacks):
-                # Recovered only after joining and stripping separators. Still a
-                # finding -- this is what catches deliberate obfuscation -- but a
-                # purely numeric needle can in principle collide with unrelated
-                # digits, so the artifact says which matcher fired.
+            digit_normalized = _normalize_confusable_digits(value)
+            if (
+                any(value in hay or normalized in hay for hay in joined + folded)
+                or any(digit_normalized in hay for hay in digit_folded)
+            ):
+                # Recovered only after joining and stripping separators, or after
+                # folding a non-ASCII look-alike back to ASCII. Still a finding --
+                # this is what catches deliberate obfuscation -- but a purely numeric
+                # needle can in principle collide with unrelated digits, so the
+                # artifact says which matcher fired. Both folds report as
+                # "normalized": the v1.0.0 schema's match enum is frozen, and a
+                # confusable hit IS a normalized-form hit, so this understates how
+                # the value was found rather than misstating it.
                 leaked.add(entity)
                 evidence.append(
                     {
@@ -628,19 +781,35 @@ def _leaked_entities(
                 )
 
     for record in records:
-        inspect(record["strings"], record["values"], "all", "per-request")
+        inspect(
+            record["strings"],
+            record["values"],
+            record.get("decoded_strings", []),
+            record.get("decoded_values", []),
+            "all",
+            "per-request",
+        )
 
     # A stateful upstream can reassemble one logical value from ordered requests.
     # Join each data channel independently across records so ordinary method/header
     # metadata does not break a body-to-body (or trailer-to-trailer) reconstruction.
     for channel in ("request", "headers", "framing", "body"):
-        strings = [
-            item for record in records for item in record.get(f"{channel}_strings", [])
-        ]
-        values = [
-            item for record in records for item in record.get(f"{channel}_values", [])
-        ]
-        inspect(strings, values, channel, "cross-request")
+
+        def gather(suffix: str, channel: str = channel) -> list[str]:
+            return [
+                item
+                for record in records
+                for item in record.get(f"{channel}_{suffix}", [])
+            ]
+
+        inspect(
+            gather("strings"),
+            gather("values"),
+            gather("decoded_strings"),
+            gather("decoded_values"),
+            channel,
+            "cross-request",
+        )
     return sorted(leaked), evidence, proximity
 
 
@@ -777,8 +946,12 @@ def _handler_for(state: _CaptureState):
                         "parsed": False,
                         "strings": found.strings,
                         "values": found.values,
+                        "decoded_strings": found.decoded_strings,
+                        "decoded_values": found.decoded_values,
                         "request_strings": list(found.strings),
                         "request_values": list(found.values),
+                        "request_decoded_strings": list(found.decoded_strings),
+                        "request_decoded_values": list(found.decoded_values),
                         "headers_strings": [],
                         "headers_values": [],
                         "framing_strings": [],
@@ -907,27 +1080,49 @@ def _handler_for(state: _CaptureState):
                 "parsed": False,
                 "strings": [],
                 "values": [],
+                "decoded_strings": [],
+                "decoded_values": [],
                 "byte_length": len(body),
                 "error": framing_error or encoding_error,
             }
             payload = None
             found = _Inspection()
-            request_string_start, request_value_start = len(found.strings), len(found.values)
+
+            def mark() -> tuple[int, int, int, int]:
+                return (
+                    len(found.strings),
+                    len(found.values),
+                    len(found.decoded_strings),
+                    len(found.decoded_values),
+                )
+
+            def slice_since(marker: tuple[int, int, int, int], channel: str) -> None:
+                """Record one channel's own contribution, verbatim and decoded apart.
+
+                Four cursors rather than two: decoded material lives in its own
+                stream so it cannot land between two ordered fragments, and a
+                cross-request join has to be able to reassemble a channel from the
+                verbatim stream alone.
+                """
+                record[f"{channel}_strings"] = found.strings[marker[0]:]
+                record[f"{channel}_values"] = found.values[marker[1]:]
+                record[f"{channel}_decoded_strings"] = found.decoded_strings[marker[2]:]
+                record[f"{channel}_decoded_values"] = found.decoded_values[marker[3]:]
+
+            request_mark = mark()
             # Every component of the request line is inspected. A query string is as
             # much an egress channel as a body, and custom methods are attacker-chosen.
             _collect(self.command, found)
             _collect(unquote_plus(self.path), found)
-            record["request_strings"] = found.strings[request_string_start:]
-            record["request_values"] = found.values[request_value_start:]
+            slice_since(request_mark, "request")
             # So are request headers. A gateway can redact the visible message field
             # and carry the raw values in metadata headers instead; the upstream
             # receives them either way, so an unwalked header is an unwatched channel.
-            header_string_start, header_value_start = len(found.strings), len(found.values)
+            header_mark = mark()
             for header_name, header_value in self.headers.items():
                 _collect(str(header_name), found, is_key=True)
                 _collect(unquote_plus(str(header_value)), found)
-            record["headers_strings"] = found.strings[header_string_start:]
-            record["headers_values"] = found.values[header_value_start:]
+            slice_since(header_mark, "headers")
             header_defects = getattr(self.headers, "defects", ())
             if header_defects:
                 # email.message intentionally recovers from malformed header lines
@@ -937,19 +1132,19 @@ def _handler_for(state: _CaptureState):
                 record["error"] = record["error"] or (
                     "malformed_headers:" + ",".join(defect_names)
                 )
-            framing_string_start, framing_value_start = len(found.strings), len(found.values)
+            framing_mark = mark()
             for kind, item in framing_metadata:
                 _collect_framing_metadata(kind, item, found)
-            record["framing_strings"] = found.strings[framing_string_start:]
-            record["framing_values"] = found.values[framing_value_start:]
+            slice_since(framing_mark, "framing")
             record["body_strings"] = []
             record["body_values"] = []
+            record["body_decoded_strings"] = []
+            record["body_decoded_values"] = []
             try:
                 inspection_payload = json.loads(body, object_pairs_hook=_JSONObject)
-                body_string_start, body_value_start = len(found.strings), len(found.values)
+                body_mark = mark()
                 _collect(inspection_payload, found)
-                record["body_strings"] = found.strings[body_string_start:]
-                record["body_values"] = found.values[body_value_start:]
+                slice_since(body_mark, "body")
                 if found.truncated:
                     # Fail closed. A body too deep or too large to walk has NOT been
                     # shown to be clean, and a target can choose how deep to nest.
@@ -972,6 +1167,8 @@ def _handler_for(state: _CaptureState):
                     record["parsed"] = not record["error"] and not found.truncated
             record["strings"] = found.strings
             record["values"] = found.values
+            record["decoded_strings"] = found.decoded_strings
+            record["decoded_values"] = found.decoded_values
             # Always recorded, parsed or not: an inspection failure must be able to
             # fail the boundary check rather than silently count as a clean capture.
             state.append(record)
