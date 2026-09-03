@@ -51,34 +51,36 @@ def test_tenant_isolation_and_ssrf(httpx_mock):
         assert res_ssrf.status_code == 403, f"Expected 403 for SSRF, got {res_ssrf.status_code}"
 
         # 2. Tenant isolation
-        # Team A sends PII
+        # Team A sends PII. The carrier is EMAIL rather than PERSON: Tier 3 is
+        # model-backed only, so without a model no PERSON placeholder is ever minted and
+        # there would be nothing in either vault to isolate.
         httpx_mock.add_response(
             method="POST",
             url="https://api.openai.com/v1/chat/completions",
-            json={"choices": [{"message": {"content": "Received [PERSON_1]"}}]},
+            json={"choices": [{"message": {"content": "Received [EMAIL_1]"}}]},
         )
         res_a = client.post(
             "/v1/chat/completions",
             headers={"authorization": "Bearer sk-proxy-team-a", "x-session-id": "sess_prod"},
-            json={"model": "gpt-4", "messages": [{"role": "user", "content": "My name is John Doe"}]},
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "My email is alice@example.com"}]},
         )
         assert res_a.status_code == 200
-        assert "John Doe" in res_a.text
+        assert "alice@example.com" in res_a.text
 
         # Team B tries to access Team A's vault
         httpx_mock.add_response(
             method="POST",
             url="https://api.openai.com/v1/chat/completions",
-            json={"choices": [{"message": {"content": "Received [PERSON_1]"}}]},
+            json={"choices": [{"message": {"content": "Received [EMAIL_1]"}}]},
         )
         res_b = client.post(
             "/v1/chat/completions",
             headers={"authorization": "Bearer sk-proxy-team-b", "x-session-id": "sess_prod"},
-            json={"model": "gpt-4", "messages": [{"role": "user", "content": "What is the name?"}]},
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "What is the address?"}]},
         )
         assert res_b.status_code == 200
-        assert "John Doe" not in res_b.text
-        assert "[PERSON_1]" in res_b.text
+        assert "alice@example.com" not in res_b.text
+        assert "[EMAIL_1]" in res_b.text
 
 
 def test_end_to_end_streaming_rehydration(httpx_mock):
@@ -92,7 +94,7 @@ def test_end_to_end_streaming_rehydration(httpx_mock):
         client.post(
             "/v1/chat/completions",
             headers={"authorization": "Bearer sk-proxy-team-a", "x-session-id": "sess_stream"},
-            json={"model": "gpt-4", "messages": [{"role": "user", "content": "My name is Alice Smith"}]},
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "My email is alice.smith@example.com"}]},
         )
 
         # Now do the streaming request
@@ -101,8 +103,8 @@ def test_end_to_end_streaming_rehydration(httpx_mock):
             url="https://api.openai.com/v1/chat/completions",
             content=(
                 b'data: {"choices":[{"delta":{"content":"Contact "}}]}\n'
-                b'data: {"choices":[{"delta":{"content":"[PER"}}]}\n'
-                b'data: {"choices":[{"delta":{"content":"SON_1] at 555-0199."}}]}\n'
+                b'data: {"choices":[{"delta":{"content":"[EMA"}}]}\n'
+                b'data: {"choices":[{"delta":{"content":"IL_1] at 555-0199."}}]}\n'
                 b"data: [DONE]\n"
             ),
             headers={"content-type": "text/event-stream"},
@@ -121,9 +123,9 @@ def test_end_to_end_streaming_rehydration(httpx_mock):
                 content += data["choices"][0]["delta"]["content"]
 
         # We should see the fully rehydrated text
-        assert "Contact Alice Smith at 555-0199." in content
-        assert "[PER" not in content
-        assert "SON_1]" not in content
+        assert "Contact alice.smith@example.com at 555-0199." in content
+        assert "[EMA" not in content
+        assert "IL_1]" not in content
 
 
 def test_memory_rss_footprint(httpx_mock):

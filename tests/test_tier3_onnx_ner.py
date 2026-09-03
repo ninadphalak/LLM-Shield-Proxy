@@ -10,12 +10,13 @@ CI now caches a pinned quantized BERT-family NER export and points
 ``SHIELD_REQUIRE_ONNX=1`` (set by CI) turns the skip into a failure so the job
 cannot pass without having run the model.
 
-The load-bearing design decision here: every assertion is written so the regex
-fallback **cannot** satisfy it. `_init_onnx_model` swallows load errors and the
-inference block swallows runtime errors, both falling back to
-``TIER3_NER_PATTERNS`` -- so a test that merely checks "a PERSON was found"
-would pass with the model absent, broken, or silently erroring. The cases below
-are ones where the two detectors disagree, in both directions.
+The load-bearing design decision here: every assertion is written so a model-less
+engine **cannot** satisfy it. `_init_onnx_model` swallows load errors, so a test
+that merely checks "a PERSON was found" could once pass with the model absent or
+broken -- the regex heuristic stood in for it. That heuristic was deleted on
+2026-09-02 (see the comment above ``TIER3_NER_ENTITIES``), so ``fallback_engine``
+now produces no PERSON span at all and is used here as a strict negative control:
+if a case passes on it, the case proves nothing about inference.
 """
 
 from __future__ import annotations
@@ -83,7 +84,11 @@ def onnx_engine():
 
 @pytest.fixture(scope="module")
 def fallback_engine():
-    """The same engine with Tier 3 on but no model: the regex PERSON heuristic."""
+    """The same engine with Tier 3 on but no model loaded.
+
+    Since the regex heuristic was removed this engine emits NO PERSON span whatsoever.
+    It is kept as the negative control: every assertion about the model must fail on it.
+    """
     from llm_shield_proxy.engines.pii_engine import PIIEngine
 
     previous = (settings.ENABLE_TIER3_ONNX_NER, settings.ONNX_MODEL_PATH)
@@ -106,9 +111,10 @@ def test_model_metadata_matches_what_the_engine_feeds_it(onnx_engine):
 
     ``detect_spans`` builds ``ort_inputs`` from ``get_inputs()[0]`` and
     ``get_inputs()[1]`` only. A BERT export that also requires
-    ``token_type_ids`` raises inside ``session.run`` and is silently downgraded
-    to the regex fallback -- which is why the model choice is a compatibility
-    constraint, not a preference, and why it is asserted rather than assumed.
+    ``token_type_ids`` raises inside ``session.run``, and with the heuristic gone that
+    means no PERSON span is produced at all -- which is why the model choice is a
+    compatibility constraint, not a preference, and why it is asserted rather than
+    assumed.
     """
     inputs = [i.name for i in onnx_engine._onnx_session.get_inputs()]
     assert inputs[:2] == ["input_ids", "attention_mask"]
@@ -129,10 +135,10 @@ def test_model_metadata_matches_what_the_engine_feeds_it(onnx_engine):
 def test_single_token_names_are_detected_only_by_real_inference(
     onnx_engine, fallback_engine, text, name
 ):
-    """The regex needs two consecutive capitalised words; the model does not.
+    """A single-token surname the model must find, and the model-less engine cannot.
 
-    A single-token surname is therefore a clean discriminator: a pass here
-    cannot come from `TIER3_NER_PATTERNS`.
+    Kept as written: with no NER model there is nothing to produce a PERSON span, so a
+    pass here can only come from real inference.
     """
     assert _entities(fallback_engine, text) == [], (
         "the regex fallback matched this text, so it no longer discriminates"
@@ -149,27 +155,35 @@ def test_non_ascii_names_are_detected_by_the_model(onnx_engine, fallback_engine)
     assert any(entity == "PERSON" and "Guðmundsdóttir" in value for entity, value in detected), detected
 
 
-def test_the_model_rejects_title_case_phrases_the_regex_flags(onnx_engine, fallback_engine):
-    """Discrimination in the other direction: fewer false positives.
+def test_the_model_does_not_flag_title_case_phrases(onnx_engine, fallback_engine):
+    """Discrimination in the other direction: no false positive on a document title.
 
-    `TIER3_NER_PATTERNS` treats any run of capitalised words as a PERSON, so it
-    redacts ordinary document titles. Real inference does not.
+    The deleted regex heuristic matched "Deep Learning Conference" as a PERSON and
+    replaced it with a fabricated first name; that class of corruption is why it was
+    removed. Real inference must not reintroduce it, and the model-less engine must stay
+    silent rather than approximating.
     """
     text = "Deep Learning Conference registration is now open."
 
-    assert ("PERSON", "Deep Learning Conference") in _entities(fallback_engine, text)
+    assert _entities(fallback_engine, text) == [], (
+        "the model-less engine produced a span; a heuristic fallback has been reintroduced"
+    )
     assert _entities(onnx_engine, text) == []
 
 
-def test_inference_runs_without_falling_back(onnx_engine, caplog):
-    """Nothing may reach the `except` branch that quietly re-runs the regex."""
+def test_inference_runs_without_error(onnx_engine, caplog):
+    """Nothing may reach the `except` branch.
+
+    That branch no longer substitutes anything: it logs a WARNING and yields no spans, so
+    reaching it means names silently went unredacted for the request.
+    """
     caplog.set_level("DEBUG", logger="llm_shield_proxy.engines.pii_engine")
 
     detected = _entities(onnx_engine, "Forward the summary to Nakamura today.")
 
     assert ("PERSON", "Nakamura") in detected
     assert not any("ONNX inference failed" in record.getMessage() for record in caplog.records), (
-        "inference raised and was downgraded to the regex fallback"
+        "inference raised, so no PERSON span was produced for this request"
     )
 
 

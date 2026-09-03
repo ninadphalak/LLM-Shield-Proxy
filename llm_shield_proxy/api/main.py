@@ -242,15 +242,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from llm_shield_proxy.engines.pii_engine import pii_engine
 
-    if pii_engine.enable_tier3:
-        tier3_status = "Active (Production ONNX Model)" if settings.ONNX_MODEL_PATH else "Mock Session (Keyword fallback only - no ONNX model path configured)"
-    else:
+    # Derived from the loaded session, not from whether a path is configured. The old
+    # form claimed "Active (Production ONNX Model)" whenever ONNX_MODEL_PATH was set,
+    # even when the model had failed to load and no PERSON span could be produced -- and
+    # its other branch still advertised a "Keyword fallback" that no longer exists.
+    # Both wordings contradicted the warning the engine logs. This echoes the status word
+    # from the same coverage snapshot; the actionable prose is the engine's warning.
+    ner_coverage = pii_engine.describe_ner_coverage()
+    if not ner_coverage["tier3_enabled"]:
         tier3_status = "Disabled"
+    elif ner_coverage["name_redaction_active"]:
+        tier3_status = f"Active (ONNX model loaded from {settings.ONNX_MODEL_PATH})"
+    else:
+        tier3_status = "OFF - no model loaded, names are NOT redacted"
 
     print(
         f"--- LLM-Shield Proxy Startup Diagnostics ---\n"
         f"  PII Engine (Tier 1, 2): Active\n"
-        f"  Tier 3 NER: {tier3_status}\n"
+        f"  Tier 3 NER (name redaction): {tier3_status}\n"
         f"  FIPS 140-3 Self-Test: {'Enforced (Passed)' if settings.FIPS_STRICT_MODE else 'Permissive'}\n"
         f"  Vault Provider: {'Enabled' if settings.ENABLE_VAULT_SECRETS else 'Disabled'}\n"
         f"  Rate Limiter: {'Redis' if settings.REDIS_URL else 'In-Memory'}\n"

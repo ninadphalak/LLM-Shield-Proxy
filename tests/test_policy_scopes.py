@@ -46,11 +46,18 @@ def test_granular_policy_scopes():
 
         sample_text = "Patient John Doe (SSN 123-45-6789) is on project PRJ-9021."
 
-        # Tenant A (hipaa_strict) should redact Person and SSN, but ignore INTERNAL_PROJECT
+        # Tenant A (hipaa_strict) should redact SSN, but ignore INTERNAL_PROJECT.
+        #
+        # hipaa_strict also declares PERSON, and that declaration is INERT: Tier 3 is
+        # model-backed only and no ONNX model is loaded here, so no PERSON span is
+        # produced for any profile. The name survives. That is the behaviour a HIPAA
+        # tenant would actually get from this configuration, so it is what is asserted --
+        # and the engine is required to say so, which is checked below.
         redacted_hipaa = engine.redact_text(sample_text, vault_hipaa, hipaa_profile)
-        assert "[PERSON_1]" in redacted_hipaa
         assert "[SSN_1]" in redacted_hipaa
         assert "PRJ-9021" in redacted_hipaa
+        assert "John Doe" in redacted_hipaa
+        assert "[PERSON" not in redacted_hipaa
 
         # Tenant B (dev_general) should redact INTERNAL_PROJECT, but ignore Person and SSN
         redacted_dev = engine.redact_text(sample_text, vault_dev, dev_profile)
@@ -58,11 +65,18 @@ def test_granular_policy_scopes():
         assert "John Doe" in redacted_dev
         assert "123-45-6789" in redacted_dev
 
-        # Unmapped Tenant (Global Strict Fallback) should redact everything configured (SSN, Person, Internal Project)
+        # Unmapped Tenant (Global Strict Fallback) redacts every Tier 1 entity configured.
         redacted_global = engine.redact_text(sample_text, vault_global, unmapped_profile)
-        assert "[PERSON" in redacted_global
         assert "[SSN_1]" in redacted_global
         assert "[INTERNAL_PROJECT_1]" in redacted_global
+
+        # The inert PERSON declaration must be reported per profile, by name. A tenant
+        # whose policy says "redact names" and whose deployment cannot must not have to
+        # infer that from an absence of PERSON events.
+        coverage = engine.describe_ner_coverage()
+        assert coverage["name_redaction_active"] is False
+        assert "hipaa_strict" in coverage["unbacked_profiles"]
+        assert "dev_general" not in coverage["profiles_expecting_ner"]
 
     finally:
         settings.CUSTOM_REGEX_PATH = original_path

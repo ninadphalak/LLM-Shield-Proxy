@@ -96,7 +96,10 @@ def test_air_gapped_mode_forwards_auth(override_settings, httpx_mock):
 
 def test_air_gapped_mode_streaming_de_redaction(override_settings, monkeypatch, httpx_mock):
     monkeypatch.setattr(settings, "ENABLE_SYNTHETIC_SWAPPING", False)
-    test_prompt = "My name is John Doe, and my phone number is 555-0199."
+    # EMAIL, not PERSON: Tier 3 is model-backed only, so no PERSON placeholder is minted
+    # without a model. What this test covers -- rehydration across the gateway hop -- is
+    # unchanged.
+    test_prompt = "My email is john.doe@example.com, and my phone number is 555-0199."
 
     # Mock chunked streaming response coming from the air-gapped egress gateway
     httpx_mock.add_response(
@@ -104,8 +107,8 @@ def test_air_gapped_mode_streaming_de_redaction(override_settings, monkeypatch, 
         url="http://10.0.0.5:8080/v1/chat/completions",
         content=(
             b'data: {"choices":[{"delta":{"content":"Welcome "}}]}\n'
-            b'data: {"choices":[{"delta":{"content":"[PER"}}]}\n'
-            b'data: {"choices":[{"delta":{"content":"SON_1]! Your phone is [PHO"}}]}\n'
+            b'data: {"choices":[{"delta":{"content":"[EMA"}}]}\n'
+            b'data: {"choices":[{"delta":{"content":"IL_1]! Your phone is [PHO"}}]}\n'
             b'data: {"choices":[{"delta":{"content":"NE_1]."}}]}\n'
             b"data: [DONE]\n"
         ),
@@ -133,7 +136,7 @@ def test_air_gapped_mode_streaming_de_redaction(override_settings, monkeypatch, 
             content += data["choices"][0]["delta"].get("content", "")
 
     # Assert proper rehydration occurred despite gateway hop
-    assert "John Doe" in content
+    assert "john.doe@example.com" in content
     assert "555-0199" in content
-    assert "[PERSON_1]" not in content
+    assert "[EMAIL_1]" not in content
     assert "[PHONE_1]" not in content

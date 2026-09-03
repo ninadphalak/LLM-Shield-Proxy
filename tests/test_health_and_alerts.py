@@ -13,11 +13,80 @@ client = TestClient(app)
 
 @pytest.mark.asyncio
 async def test_livez_endpoint():
-    """Verify the /livez alias group returns instantly."""
+    """Verify the /livez alias group returns instantly.
+
+    ``name_redaction`` rides along on the liveness response because ``/health`` is what an
+    operator curls by hand, and Tier 3 has no heuristic fallback: without a loaded NER
+    model no PERSON span is produced at all. Liveness itself is unaffected -- a proxy with
+    no NER model is running correctly, it just is not redacting names.
+    """
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+
+    expected_ner = "ok" if pii_engine.name_redaction_active else "unavailable"
     for path in ["/livez", "/health", "/healthz"]:
         response = client.get(path)
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        assert response.json() == {"status": "ok", "name_redaction": expected_ner}
+
+
+@pytest.mark.asyncio
+async def test_health_reports_name_redaction_unavailable_without_a_model():
+    """The conftest suite runs with ENABLE_TIER3_ONNX_NER off, so this is the real default.
+
+    The assertion is the point of the whole change: an operator must not be able to read
+    a healthy response and conclude that names are being redacted.
+    """
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+
+    assert pii_engine.name_redaction_active is False
+    assert client.get("/health").json()["name_redaction"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_readyz_names_the_profiles_that_expect_ner_and_get_none():
+    """/readyz carries a warning naming each profile whose PERSON declaration is inert."""
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+
+    assert pii_engine.name_redaction_active is False
+    body = client.get("/readyz").json()
+
+    assert body["components"]["name_redaction"] == "unavailable"
+    warnings = body.get("warnings", [])
+    assert warnings, "an unbacked PERSON declaration must be surfaced on /readyz"
+    warning = next(w for w in warnings if w["component"] == "name_redaction")
+    assert "global_strict" in warning["profiles_declaring_it"]
+
+
+@pytest.mark.asyncio
+async def test_name_redaction_is_not_part_of_the_readiness_gate():
+    """Reported, not enforced.
+
+    Most deployments run without a NER model. Returning 503 for all of them would make
+    the signal useless, so the gate stays on pii_engine/vault/redis.
+    """
+
+    async def mock_healthy():
+        return True
+
+    import llm_shield_proxy.api.health as health_module
+
+    original = (health_module._check_pii_engine, health_module._check_vault, health_module._check_redis)
+    health_module._check_pii_engine = mock_healthy
+    health_module._check_vault = mock_healthy
+    health_module._check_redis = mock_healthy
+    health_module._readyz_cache.clear()
+    try:
+        response = client.get("/readyz")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready"
+        assert response.json()["components"]["name_redaction"] == "unavailable"
+    finally:
+        (
+            health_module._check_pii_engine,
+            health_module._check_vault,
+            health_module._check_redis,
+        ) = original
+        health_module._readyz_cache.clear()
 
 
 @pytest.mark.asyncio

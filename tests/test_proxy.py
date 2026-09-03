@@ -13,7 +13,13 @@ client = TestClient(app)
 def test_proxy_chat_completion_with_pii(monkeypatch, httpx_mock):
     """Verifies that a standard chat completion request redacts input PII and rehydrates response."""
     monkeypatch.setattr(settings, "ENABLE_SYNTHETIC_SWAPPING", False)
-    test_prompt = "My name is John Doe, and my phone number is 555-0199. What can you tell me about data privacy?"
+    # Carrier entity is EMAIL, not PERSON: Tier 3 is model-backed only and the suite runs
+    # without a model, so no PERSON placeholder is ever minted. The pipeline under test
+    # (redact outbound, rehydrate inbound) is unchanged.
+    test_prompt = (
+        "My email is john.doe@example.com, and my phone number is 555-0199. "
+        "What can you tell me about data privacy?"
+    )
 
     httpx_mock.add_response(
         method="POST",
@@ -21,7 +27,7 @@ def test_proxy_chat_completion_with_pii(monkeypatch, httpx_mock):
         json={
             "id": "chatcmpl-test",
             "choices": [
-                {"message": {"role": "assistant", "content": "Hello [PERSON_1], I have noted your contact [PHONE_1]."}}
+                {"message": {"role": "assistant", "content": "Hello [EMAIL_1], I have noted your contact [PHONE_1]."}}
             ],
         },
     )
@@ -35,8 +41,8 @@ def test_proxy_chat_completion_with_pii(monkeypatch, httpx_mock):
     assert response.status_code == 200
     res_data = response.json()
     content = res_data["choices"][0]["message"]["content"]
-    assert "Hello John Doe, I have noted your contact 555-0199." == content
-    assert "[PERSON_1]" not in content
+    assert "Hello john.doe@example.com, I have noted your contact 555-0199." == content
+    assert "[EMAIL_1]" not in content
     assert "[PHONE_1]" not in content
 
 
@@ -76,17 +82,22 @@ def test_proxy_synthetic_swapping_e2e(monkeypatch, httpx_mock):
 
 
 def test_proxy_streaming_realtime_rehydration(monkeypatch, httpx_mock):
-    """Verifies real-time streaming rehydration of fragmented SSE chunks."""
+    """Verifies real-time streaming rehydration of fragmented SSE chunks.
+
+    The placeholder is split mid-token across chunk boundaries on purpose; that is the
+    sliding-window case this test exists for. EMAIL carries it because Tier 3 is
+    model-backed only and no PERSON placeholder exists without a model.
+    """
     monkeypatch.setattr(settings, "ENABLE_SYNTHETIC_SWAPPING", False)
-    test_prompt = "My name is John Doe, and my phone number is 555-0199."
+    test_prompt = "My email is john.doe@example.com, and my phone number is 555-0199."
 
     httpx_mock.add_response(
         method="POST",
         url="https://api.openai.com/v1/chat/completions",
         content=(
             b'data: {"choices":[{"delta":{"content":"Welcome "}}]}\n'
-            b'data: {"choices":[{"delta":{"content":"[PER"}}]}\n'
-            b'data: {"choices":[{"delta":{"content":"SON_1]! Your phone is [PHO"}}]}\n'
+            b'data: {"choices":[{"delta":{"content":"[EMA"}}]}\n'
+            b'data: {"choices":[{"delta":{"content":"IL_1]! Your phone is [PHO"}}]}\n'
             b'data: {"choices":[{"delta":{"content":"NE_1]."}}]}\n'
             b"data: [DONE]\n"
         ),
@@ -107,8 +118,8 @@ def test_proxy_streaming_realtime_rehydration(monkeypatch, httpx_mock):
             data = json.loads(line[6:])
             content += data["choices"][0]["delta"]["content"]
 
-    assert content == "Welcome John Doe! Your phone is 555-0199."
-    assert "[PERSON_1]" not in content
+    assert content == "Welcome john.doe@example.com! Your phone is 555-0199."
+    assert "[EMAIL_1]" not in content
     assert "[PHONE_1]" not in content
-    assert "[PER" not in content
+    assert "[EMA" not in content
     assert "[PHO" not in content

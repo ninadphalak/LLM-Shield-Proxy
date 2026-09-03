@@ -11,10 +11,13 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 _FRAMEWORK_NARRATIVES: Dict[str, Dict[str, str]] = {
     "hipaa": {
@@ -427,12 +430,31 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def summarize_redaction_coverage() -> Dict[str, Any]:
+    """Snapshot which detector tiers are actually in force at report time.
+
+    An auditor reading a compliance pack has no way to tell a configured control from an
+    active one. Tier 3 name redaction is the case that matters: it requires a loaded ONNX
+    model and there is no heuristic fallback, so a deployment can declare PERSON in its
+    policy and redact no names at all. The pack states that rather than leaving it to be
+    inferred from the absence of PERSON events.
+    """
+    try:
+        from llm_shield_proxy.engines.pii_engine import pii_engine
+
+        return pii_engine.describe_ner_coverage()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read PII engine NER coverage for the report: %s", exc)
+        return {"name_redaction_active": None, "error": str(exc)}
+
+
 def _render_markdown_summary(
     framework: str,
     audit_summary: Dict[str, Any],
     oscal_summary: Dict[str, Any],
     checksums: Dict[str, str],
     generated_at: str,
+    redaction_coverage: Optional[Dict[str, Any]] = None,
 ) -> str:
     meta = _FRAMEWORK_NARRATIVES[framework]
     chain_status = audit_summary["chain_valid"]
@@ -482,6 +504,35 @@ def _render_markdown_summary(
         for event, count in sorted(audit_summary["event_counts"].items()):
             lines.append(f"| {event} | {count} |")
 
+    coverage = redaction_coverage or {}
+    if coverage:
+        lines += ["", "## Redaction Coverage In Force", ""]
+        if coverage.get("name_redaction_active") is None:
+            lines.append(
+                "- Name (PERSON) redaction: **UNKNOWN** "
+                f"(engine state unavailable: `{coverage.get('error', 'unspecified')}`)"
+            )
+        elif coverage["name_redaction_active"]:
+            lines.append(
+                "- Name (PERSON) redaction: **ACTIVE** (Tier 3 ONNX NER model loaded from "
+                f"`{coverage.get('model_path')}`)"
+            )
+        else:
+            lines.append("- Name (PERSON) redaction: **NOT ACTIVE**")
+            lines.append(
+                "  - No Tier 3 ONNX NER model is loaded, and this build has no heuristic "
+                "name fallback. No PERSON span is produced for any request."
+            )
+            if coverage.get("profiles_expecting_ner"):
+                lines.append(
+                    "  - Policy profile(s) declaring Tier 3 entities and receiving none: "
+                    + ", ".join(f"`{name}`" for name in coverage["profiles_expecting_ner"])
+                )
+            lines.append(
+                "  - Structured identifiers (Tier 1) and high-entropy secrets (Tier 2) are "
+                "unaffected. Personal names in free text are not redacted."
+            )
+
     oscal_source_label = oscal_summary.get("source_path") or "generated fresh (no persisted OSCAL artifact provided)"
     lines += [
         "",
@@ -523,6 +574,7 @@ def generate_compliance_pack(
 
     audit_summary = verify_worm_log(audit_log_path, pubkey_pem)
     oscal_summary = summarize_oscal(oscal_file_path)
+    redaction_coverage = summarize_redaction_coverage()
 
     generated_at = datetime.now(timezone.utc).isoformat()
     oscal_bytes = oscal_summary.pop("raw_artifact", None) or b"{}"
@@ -539,7 +591,9 @@ def generate_compliance_pack(
     if audit_log_file and audit_log_file.exists():
         checksums["source_audit_log.jsonl"] = _sha256_file(audit_log_file)
 
-    markdown = _render_markdown_summary(framework, audit_summary, oscal_summary, checksums, generated_at)
+    markdown = _render_markdown_summary(
+        framework, audit_summary, oscal_summary, checksums, generated_at, redaction_coverage
+    )
 
     out = Path(out_path)
     if out.parent != Path(""):
@@ -550,6 +604,9 @@ def generate_compliance_pack(
         zf.writestr("oscal_assessment_results.json", oscal_bytes)
         zf.writestr("audit_summary.json", audit_summary_bytes)
         zf.writestr("audit_chain_breaks.json", audit_chain_breaks_bytes)
+        zf.writestr(
+            "redaction_coverage.json", json.dumps(redaction_coverage, indent=2, sort_keys=True, default=str)
+        )
         zf.writestr("checksums.sha256.json", json.dumps(checksums, indent=2, sort_keys=True))
         if audit_log_file and audit_log_file.exists():
             zf.write(audit_log_file, arcname="source_audit_log.jsonl")
@@ -558,5 +615,6 @@ def generate_compliance_pack(
         "out_path": str(out),
         "audit_summary": audit_summary,
         "oscal_summary": oscal_summary,
+        "redaction_coverage": redaction_coverage,
         "checksums": checksums,
     }

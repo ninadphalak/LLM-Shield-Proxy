@@ -3,7 +3,7 @@
 Implements a high-throughput multi-tier detection cascade:
 - Tier 1: Microsecond pre-compiled DFA regular expressions for structured secrets & numbers.
 - Tier 2: Shannon Entropy filter (tau_H >= 4.5 bits/symbol) for unformatted raw cryptographic keys.
-- Tier 3: Contextual Named Entity Recognition (NER) via rule heuristics or optional ONNX runtime.
+- Tier 3: Contextual Named Entity Recognition (NER) via a loaded ONNX model, or nothing at all.
 """
 
 from __future__ import annotations
@@ -82,8 +82,12 @@ _CARD_IIN_PREFIXES = (
     "6011", "62", "64", "65",                # Discover / UnionPay / Maestro
 )
 _CARD_MASTERCARD_2_SERIES = (222100, 272099)
+# ISO/IEC 7812-1 permits a PAN of up to 19 digits. The previous ceiling of 16 meant a
+# Luhn-valid 19-digit Visa (`4111111111111111110`) matched NOTHING: the ASCII boundary
+# assertions stop a 16-digit prefix from matching when a digit follows, so the value was
+# not partially redacted, it passed through untouched. That is a direct PCI DSS leak.
 _CARD_MIN_DIGITS = 13
-_CARD_MAX_DIGITS = 16
+_CARD_MAX_DIGITS = 19
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -151,7 +155,7 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
             + _ASCII_RIGHT_BOUNDARY
         ),
     ),
-    ("CREDIT_CARD", re.compile(_ASCII_LEFT_BOUNDARY + r"(?:\d[ -]?){13,16}" + _ASCII_RIGHT_BOUNDARY)),
+    ("CREDIT_CARD", re.compile(_ASCII_LEFT_BOUNDARY + r"(?:\d[ -]?){13,19}" + _ASCII_RIGHT_BOUNDARY)),
     (
         "IP_ADDRESS",
         re.compile(
@@ -189,20 +193,89 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     ("MRN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{2}[A-Za-z0-9]" + _ASCII_RIGHT_BOUNDARY)),
 ]
 
-# Tier 3 Contextual NER Rules (Rule-based fallback for Person/Org names)
-TIER3_NER_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
-    (
-        "PERSON",
-        re.compile(
-            r"\b(?:(?:Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})|"
-            r"\b(?!(?:Patient|Check|The|A|An|In|On|At|And|Or|But|If|Hey|Can|You|Help|Please|Identify)\b)"
-            r"(?:[A-Z][a-z]+\s+){1,3}[A-Z][a-z]+\b"
-        ),
-    ),
-]
+# ---------------------------------------------------------------------------
+# Tier 3: Contextual Named Entity Recognition.
+#
+# There is no regex fallback here, deliberately. Until 2026-09-02 this module shipped a
+# TIER3_NER_PATTERNS heuristic that matched any run of capitalized words as a PERSON. It
+# was measured over a 60-string prose corpus: it fired on 25 of 25 ordinary business
+# sentences containing a capitalized bigram, producing 26 fabricated names, and it could
+# not match a CJK, Hangul, Cyrillic or Arabic name at all.
+#
+# The failure mode is what removed it. A Tier 1 false positive over-redacts, which is
+# safe. A PERSON false positive REPLACES real text: under synthetic swapping "My Aadhaar
+# is on the enrolment slip." became "Elizabeth is on the enrolment slip." -- grammatical
+# English that no downstream consumer can tell was altered. The heuristic corrupted more
+# text than it protected, and it made name redaction look enabled when it was not.
+#
+# Name redaction therefore requires a loaded ONNX NER model. With no model the engine
+# emits NO PERSON spans and says so loudly rather than quietly approximating:
+# describe_ner_coverage() reports it, the constructor logs a warning naming every profile
+# that expects PERSON, /readyz and /health surface it, and the compliance report records
+# it. A stated gap is safer than a silent approximation.
+# ---------------------------------------------------------------------------
+
+# Entity types the Tier 3 model path can emit. Used to populate the built-in
+# ``global_strict`` profile; a profile may still list a subset via CUSTOM_REGEX_PATH.
+TIER3_NER_ENTITIES: Set[str] = {"PERSON"}
+
+# The single wording for "names are not being redacted", used by the startup warning and
+# echoed in the startup banner. Written for an operator reading a log at 3am, not for a
+# developer: it says what is off, what is still on, and the exact two settings that turn
+# it on. Structured detail (which profiles declare PERSON) lives in
+# describe_ner_coverage() and on /readyz, where it is data rather than prose.
+NER_DISABLED_WARNING = (
+    "Name redaction is off. The Tier 3 NER model is not loaded, so people's names will "
+    "not be redacted. Email addresses, card numbers, SSNs and other structured "
+    "identifiers are still redacted normally. To redact names, set "
+    "ENABLE_TIER3_ONNX_NER=true and point ONNX_MODEL_PATH at the model file."
+)
 
 # Candidate pattern for Shannon Entropy evaluation
 CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9_\-+=]{16,}\b")
+
+
+# ---------------------------------------------------------------------------
+# No span may stop in the middle of a digit run.
+#
+# Measured on 2026-09-02: `Aadhaar 3333 3333 3333` redacted to
+# `Aadhaar [PHONE_1] 3333`. The PHONE expression consumed `3333 3333`, stopped at its
+# own grouping limit, and the final four digits went upstream verbatim. A partial match
+# is strictly worse than a miss, because the output looks redacted.
+#
+# The fix is applied to resolved spans rather than to any one expression, because the
+# defect is a class: every numeric pattern has some grouping limit, and the next one
+# added will have a different one. Growing the span cannot change which detector won or
+# what it was typed as; it can only make the redaction cover the whole identifier. Where
+# it over-reaches it over-redacts, which is the safe direction.
+#
+# Verified not to move the documented 22-string false-positive corpus in
+# tests/test_tier1_validation_signal.py (17 strings / 18 spans before and after).
+# ---------------------------------------------------------------------------
+
+# Separators that may appear inside a single printed identifier.
+_DIGIT_RUN_SEPARATORS = "-. "
+
+
+def _extend_span_over_digit_run(text: str, end: int, limit: int) -> int:
+    """Grow a span rightwards while the digit run it ended in continues.
+
+    ``limit`` is the start of the next accepted span (or the end of the text), so growth
+    can never create an overlap or steal a neighbouring identifier.
+    """
+    while end < limit:
+        character = text[end]
+        if character.isdigit():
+            end += 1
+        elif (
+            character in _DIGIT_RUN_SEPARATORS
+            and end + 1 < limit
+            and text[end + 1].isdigit()
+        ):
+            end += 2
+        else:
+            break
+    return end
 
 
 def normalize_and_desmuggle(text: str) -> str:
@@ -245,7 +318,9 @@ class PIIEngine:
 
     - Tier 1: Microsecond regex for structured identifiers.
     - Tier 2: Shannon Entropy filter for high-entropy secrets and keys.
-    - Tier 3: Contextual Named Entity Recognition via heuristics or optional ONNX model.
+    - Tier 3: Contextual Named Entity Recognition via a loaded ONNX model. There is no
+      heuristic fallback: with no model, no PERSON span is produced. See
+      describe_ner_coverage().
     """
 
     def __init__(
@@ -302,7 +377,7 @@ class PIIEngine:
         self._tenant_mappings.clear()
 
         all_tier1 = list(TIER1_PATTERNS)
-        all_tier3 = {entity_type for entity_type, _ in TIER3_NER_PATTERNS}
+        all_tier3 = set(TIER3_NER_ENTITIES)
 
         if settings.CUSTOM_REGEX_PATH and os.path.exists(settings.CUSTOM_REGEX_PATH):
             if re2 is None:
@@ -344,6 +419,69 @@ class PIIEngine:
         self._global_strict_profile = CompiledProfile(
             name="global_strict", tier1_patterns=all_tier1, tier3_ner_entities=all_tier3
         )
+
+        # Fires at construction and on every policy hot-reload, so a profile edit that
+        # newly declares PERSON is reported even on a long-running process.
+        self._warn_if_ner_is_declared_but_unbacked()
+
+    @property
+    def name_redaction_active(self) -> bool:
+        """True only when a Tier 3 NER model is actually loaded and usable.
+
+        There is no heuristic fallback, so this is the whole answer to "are names being
+        redacted": if it is False, no PERSON span can be produced by any profile.
+        """
+        return bool(self.enable_tier3 and self._onnx_session and self._tokenizer)
+
+    def describe_ner_coverage(self) -> Dict[str, Any]:
+        """Report whether name (PERSON) redaction is actually in force, and for whom.
+
+        This exists so an operator cannot believe name redaction is on when it is not.
+        The same structure is surfaced by ``/readyz``, ``/health`` and the compliance
+        report, and the constructor logs a warning built from it at startup.
+
+        ``profiles_expecting_ner`` names every compiled profile that declares a Tier 3
+        entity. When ``model_loaded`` is False, every one of those declarations is
+        inert: the profile asks for name redaction and does not get it.
+        """
+        expecting = sorted(
+            profile.name
+            for profile in (
+                list(self._compiled_profiles.values()) + [self._global_strict_profile]
+            )
+            if profile.tier3_ner_entities
+        )
+        active = self.name_redaction_active
+        return {
+            "name_redaction_active": active,
+            "model_loaded": bool(self._onnx_session and self._tokenizer),
+            "tier3_enabled": bool(self.enable_tier3),
+            "model_path": settings.ONNX_MODEL_PATH or None,
+            "declared_entities": sorted(TIER3_NER_ENTITIES),
+            "profiles_expecting_ner": expecting,
+            "unbacked_profiles": [] if active else expecting,
+            "reason": None
+            if active
+            else (
+                "no ONNX NER model is loaded; there is no heuristic fallback, so no "
+                "PERSON spans are produced for any profile"
+            ),
+        }
+
+    def _warn_if_ner_is_declared_but_unbacked(self) -> None:
+        """Log once per (re)compile if a profile expects PERSON and no model can supply it.
+
+        Deliberately at WARNING. The previous behaviour -- a regex heuristic standing in
+        silently -- is what made this gap invisible in the first place.
+
+        This is the ONLY place the fact is stated in prose. The startup banner in
+        ``api/main.py`` shows the status word from the same coverage snapshot and does not
+        restate it, so an operator sees one message, not two competing ones.
+        """
+        coverage = self.describe_ner_coverage()
+        if coverage["name_redaction_active"] or not coverage["unbacked_profiles"]:
+            return
+        logger.warning(NER_DISABLED_WARNING)
 
     def get_profile(self, virtual_key_id: str) -> CompiledProfile:
         """Retrieves active profile for the given tenant virtual_key_id in O(1) time."""
@@ -454,55 +592,58 @@ class PIIEngine:
             except Exception as exc:
                 logger.debug("Base64 candidate decode failed: %s", exc)
 
-        # Tier 3: Contextual Named Entity Recognition (Person, Location, Org)
-        if self.enable_tier3:
+        # Tier 3: Contextual Named Entity Recognition (Person, Location, Org).
+        # Model-backed only. With no session loaded this block does nothing and no PERSON
+        # span is produced; see the comment block above TIER3_NER_ENTITIES for why there
+        # is no regex fallback, and describe_ner_coverage() for how the gap is surfaced.
+        if self.enable_tier3 and self._onnx_session and self._tokenizer:
             with tracer.start_as_current_span("onnx_tier"):
-                if self._onnx_session and self._tokenizer:
-                    try:
-                        import numpy as np  # type: ignore
+                try:
+                    import numpy as np  # type: ignore
 
-                        encoded = self._tokenizer.encode(text)
-                        input_ids = np.array([encoded.ids], dtype=np.int64)
-                        attention_mask = np.array([encoded.attention_mask], dtype=np.int64)
+                    encoded = self._tokenizer.encode(text)
+                    input_ids = np.array([encoded.ids], dtype=np.int64)
+                    attention_mask = np.array([encoded.attention_mask], dtype=np.int64)
 
-                        ort_inputs = {
-                            self._onnx_session.get_inputs()[0].name: input_ids,
-                            self._onnx_session.get_inputs()[1].name: attention_mask,
-                        }
-                        logits = self._onnx_session.run(None, ort_inputs)[0]
-                        predictions = np.argmax(logits, axis=2)[0]
+                    ort_inputs = {
+                        self._onnx_session.get_inputs()[0].name: input_ids,
+                        self._onnx_session.get_inputs()[1].name: attention_mask,
+                    }
+                    logits = self._onnx_session.run(None, ort_inputs)[0]
+                    predictions = np.argmax(logits, axis=2)[0]
 
-                        current_entity = None
-                        current_start = -1
+                    current_entity = None
+                    current_start = -1
 
-                        for idx, pred_id in enumerate(predictions):
-                            # Simplified label parsing (assuming id > 0 means a named entity for now)
-                            if pred_id > 0:
-                                if current_entity is None:
-                                    current_entity = "PERSON"
-                                    current_start = idx
-                            else:
-                                if current_entity is not None:
-                                    offsets = encoded.offsets
-                                    if current_start < len(offsets) and idx - 1 < len(offsets):
-                                        start_char = offsets[current_start][0]
-                                        end_char = offsets[idx - 1][1]
-                                        if start_char < end_char:
-                                            match_text = text[start_char:end_char]
-                                            if current_entity in active_profile.tier3_ner_entities:
-                                                raw_spans.append((start_char, end_char, current_entity, match_text))
-                                    current_entity = None
-                    except Exception as exc:
-                        logger.debug("ONNX inference failed, falling back to regex: %s", exc)
-                        for entity_type, pattern in TIER3_NER_PATTERNS:
-                            if entity_type in active_profile.tier3_ner_entities:
-                                for match in pattern.finditer(text):
-                                    raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
-                else:
-                    for entity_type, pattern in TIER3_NER_PATTERNS:
-                        if entity_type in active_profile.tier3_ner_entities:
-                            for match in pattern.finditer(text):
-                                raw_spans.append((match.start(), match.end(), entity_type, match.group(0)))
+                    for idx, pred_id in enumerate(predictions):
+                        # Simplified label parsing (assuming id > 0 means a named entity for now)
+                        if pred_id > 0:
+                            if current_entity is None:
+                                current_entity = "PERSON"
+                                current_start = idx
+                        else:
+                            if current_entity is not None:
+                                offsets = encoded.offsets
+                                if current_start < len(offsets) and idx - 1 < len(offsets):
+                                    start_char = offsets[current_start][0]
+                                    end_char = offsets[idx - 1][1]
+                                    if start_char < end_char:
+                                        match_text = text[start_char:end_char]
+                                        if current_entity in active_profile.tier3_ner_entities:
+                                            raw_spans.append(
+                                                (start_char, end_char, current_entity, match_text)
+                                            )
+                                current_entity = None
+                except Exception as exc:
+                    # There is nothing to fall back to, and that is the point. A failed
+                    # inference means name redaction did not happen for this request; say
+                    # so at warning level rather than substituting a heuristic that would
+                    # make the gap invisible.
+                    logger.warning(
+                        "Tier 3 ONNX inference failed; NO name (PERSON) spans were produced "
+                        "for this request and none were approximated: %s",
+                        exc,
+                    )
 
         # Deduplicate and resolve overlapping spans (prioritize earliest start, then longest span)
         raw_spans.sort(key=lambda s: (s[0], -(s[1] - s[0])))
@@ -515,7 +656,19 @@ class PIIEngine:
                 non_overlapping.append(span)
                 last_end = end
 
-        return non_overlapping
+        # A span that ends on a digit while the run continues is a partial match, and a
+        # partial match on a structured identifier leaks its tail. Grow it to cover the
+        # whole run, clamped by the next accepted span. See _extend_span_over_digit_run.
+        completed: List[Tuple[int, int, str, str]] = []
+        for index, (start, end, entity_type, matched_text) in enumerate(non_overlapping):
+            if end > start and text[end - 1].isdigit():
+                limit = non_overlapping[index + 1][0] if index + 1 < len(non_overlapping) else len(text)
+                grown = _extend_span_over_digit_run(text, end, limit)
+                if grown != end:
+                    end, matched_text = grown, text[start:grown]
+            completed.append((start, end, entity_type, matched_text))
+
+        return completed
 
     def redact_text(self, text: str, vault: Vault, active_profile: Optional[CompiledProfile] = None) -> str:
         """Redacts PII spans in text and registers deterministic mappings in the Vault.

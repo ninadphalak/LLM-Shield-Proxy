@@ -157,19 +157,31 @@ def test_pii_tier2_shannon_entropy_redaction():
     assert rehydrated == sample_text
 
 
-def test_pii_tier3_ner_redaction():
-    """Tests Tier 3 contextual Named Entity Recognition for person names."""
+def test_tier3_without_a_model_redacts_no_names_and_says_so():
+    """Tier 3 is model-backed only; there is no regex heuristic behind it.
+
+    This test previously asserted that "Dr. Sarah Connor" was redacted by the regex
+    fallback. That fallback was deleted on 2026-09-02: measured over a 60-string prose
+    corpus it fabricated a name in 25 of 25 ordinary business sentences, and under
+    synthetic swapping the corrupted output was grammatical English no consumer could
+    detect. The name genuinely is not redacted now, so that is what is asserted, together
+    with the fact that the engine reports the gap instead of hiding it.
+
+    See tests/test_person_precision_corpus.py for the full contract and its cost, and
+    tests/test_tier3_onnx_ner.py for the model-backed path that does detect this name.
+    """
     engine = PIIEngine(enable_tier2=False, enable_tier3=True)
     vault = Vault(synthetic=False)
 
     sample_text = "Please reach out to Dr. Sarah Connor for further details."
     redacted = engine.redact_text(sample_text, vault)
 
-    assert "[PERSON_1]" in redacted
-    assert "Dr. Sarah Connor" not in redacted
+    assert redacted == sample_text, "no NER model is loaded, so nothing may be invented"
+    assert engine.name_redaction_active is False
 
-    rehydrated = vault.rehydrate(redacted)
-    assert rehydrated == sample_text
+    coverage = engine.describe_ner_coverage()
+    assert coverage["name_redaction_active"] is False
+    assert "no heuristic fallback" in coverage["reason"]
 
 
 def test_pii_payload_redaction():
@@ -199,8 +211,14 @@ def test_pii_synthetic_swapping():
 
     # Asserts no bracket placeholders are present
     assert "[" not in redacted and "]" not in redacted
-    assert "John Doe" not in redacted
     assert "john.doe@example.com" not in redacted
+
+    # "John Doe" survives: Tier 3 is model-backed only and no model is loaded here. The
+    # deleted regex heuristic would have swapped it for a fabricated first name, which is
+    # exactly the silent corruption this build refuses to produce. Structured identifiers
+    # are unaffected, which is what this test is actually about.
+    assert "John Doe" in redacted
+    assert engine.name_redaction_active is False
 
     rehydrated = vault.rehydrate(redacted)
     assert rehydrated == sample_text

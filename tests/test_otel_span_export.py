@@ -48,7 +48,10 @@ UPSTREAM = "https://api.openai.com/v1/chat/completions"
 
 # A PII-bearing prompt, so the "no PII on the telemetry path" invariant is
 # checked against spans produced by a request that really did carry PII.
-PII_PROMPT = "My name is John Doe and my phone number is 555-0199."
+# EMAIL rather than PERSON: Tier 3 is model-backed only and this suite runs without a
+# model, so a PERSON placeholder would never be minted and the rehydration span under
+# test would never be exercised.
+PII_PROMPT = "My email is john.doe@example.com and my phone number is 555-0199."
 
 
 class _Collector:
@@ -169,7 +172,7 @@ def test_streaming_requests_export_the_buffer_flush_span(spans, httpx_mock, monk
         url=UPSTREAM,
         content=(
             b'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n'
-            b'data: {"choices":[{"delta":{"content":"[PERSON_1]"}}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"[EMAIL_1]"}}]}\n\n'
             b"data: [DONE]\n\n"
         ),
         headers={"content-type": "text/event-stream"},
@@ -188,7 +191,7 @@ def test_streaming_requests_export_the_buffer_flush_span(spans, httpx_mock, monk
         assert response.status_code == 200
         body = "".join(response.iter_text())
 
-    assert "John Doe" in body, "stream did not rehydrate; the wrong path was measured"
+    assert "john.doe@example.com" in body, "stream did not rehydrate; the wrong path was measured"
     assert "buffer_flush" in spans.names()
 
 

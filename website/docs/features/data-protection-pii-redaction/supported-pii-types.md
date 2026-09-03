@@ -72,6 +72,46 @@ text to classify configured entity types.
 
 Tiers 1 and 2 target configured structured formats and high-entropy candidates; both can produce false positives and false negatives. Tier 3 can add contextual entity detection, with quality depending on the selected model, thresholds, language, and evaluation corpus.
 
+### Name redaction requires a loaded model
+
+There is no regex fallback for Tier 3. If no ONNX NER model is loaded, **no `PERSON` span
+is produced at all**, and the proxy says so rather than approximating.
+
+Until 2026-09-02 a regular expression stood in when no model was present. It matched any
+run of capitalized words. Measured over a 60-string prose corpus, it fired on 25 of 25
+ordinary business sentences that contained a capitalized bigram, producing 26 fabricated
+names, and it detected 0 of 5 CJK, Hangul, Cyrillic or Arabic names.
+
+The reason it was removed rather than tuned is the direction of the failure. A Tier 1 false
+positive over-redacts, which is safe. A `PERSON` false positive replaces real text: with
+synthetic swapping enabled, `My Aadhaar is on the enrolment slip.` was rewritten to
+`Elizabeth is on the enrolment slip.` That output is grammatical English, so no consumer
+downstream could tell the text had been altered. Tightening the pattern was measured too: a
+grammatical rule that ignored capitalized phrases introduced by a determiner cut false
+positives to 4 of 25, but lost 4 of 4 genuine names introduced the same way, such as
+`the Jane Doe account`. Both directions were unacceptable.
+
+**What this costs.** 15 Latin-script names in that corpus were detected by the old
+heuristic and are not detected without a model. That is a real reduction in coverage. It was
+accepted because the same detector corrupted 25 of 25 non-name strings to achieve it.
+
+**How the gap is surfaced.** An operator cannot be left believing name redaction is on when
+it is not:
+
+- The engine logs a warning at startup, and on every policy hot-reload, naming each profile
+  that declares a Tier 3 entity and receives nothing.
+- `/health` and `/livez` include `"name_redaction": "ok" | "unavailable"`.
+- `/readyz` reports the same under `components`, plus a `warnings` entry naming the affected
+  profiles. It is deliberately **not** part of the readiness gate: a proxy without a NER
+  model is running correctly, it is simply not redacting names, and failing readiness for
+  every such deployment would make the signal useless.
+- The compliance pack contains a **Redaction Coverage In Force** section and a
+  `redaction_coverage.json` artifact, so an auditor can tell a configured control from an
+  active one.
+- A failed inference logs at warning level and produces no spans. It does not fall back.
+
+Tier 1 structured identifiers and Tier 2 high-entropy secrets are unaffected by all of this.
+
 ### Standard PII (General NER)
 - **`PERSON`**: Full names, patient names, employee names.
 - **`ORGANIZATION`**: Company names, hospitals, government agencies.

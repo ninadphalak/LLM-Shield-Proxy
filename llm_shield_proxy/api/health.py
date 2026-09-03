@@ -25,8 +25,18 @@ _CACHE_TTL_SECONDS = 2.0
 @health_router.get("/health")
 @health_router.get("/healthz")
 async def liveness_probe() -> Dict[str, str]:
-    """Return the application's lightweight liveness response."""
-    return {"status": "ok"}
+    """Return the application's lightweight liveness response.
+
+    ``name_redaction`` is reported here as well as on ``/readyz`` because ``/health`` is
+    what an operator curls by hand. There is no heuristic fallback for Tier 3, so
+    ``unavailable`` means literally no PERSON span is produced for any request. It does
+    NOT affect liveness: a proxy without a NER model is running correctly, it is just
+    not redacting names, and an operator has to be able to see the difference.
+    """
+    return {
+        "status": "ok",
+        "name_redaction": "ok" if pii_engine.name_redaction_active else "unavailable",
+    }
 
 
 async def _check_pii_engine() -> bool:
@@ -89,11 +99,31 @@ async def readiness_probe() -> JSONResponse:
     vault_healthy = vault_healthy is True
     redis_healthy = redis_healthy is True
 
+    # Name redaction is reported but deliberately NOT part of the readiness gate. Most
+    # deployments run without a NER model, and failing readiness for all of them would
+    # make the signal useless. The point is that the operator can see it, not that the
+    # pod is evicted for it.
+    ner_coverage = pii_engine.describe_ner_coverage()
+
     components = {
         "pii_engine": "ok" if pii_healthy else "degraded",
         "vault": "ok" if vault_healthy else "degraded",
         "redis": "ok" if redis_healthy else "degraded",
+        "name_redaction": "ok" if ner_coverage["name_redaction_active"] else "unavailable",
     }
+
+    warnings = []
+    if not ner_coverage["name_redaction_active"] and ner_coverage["unbacked_profiles"]:
+        warnings.append(
+            {
+                "component": "name_redaction",
+                "detail": (
+                    "no ONNX NER model is loaded and there is no heuristic fallback, so no "
+                    "PERSON spans are produced"
+                ),
+                "profiles_declaring_it": ner_coverage["unbacked_profiles"],
+            }
+        )
 
     try:
         from llm_shield_proxy.api.main import APP_VERSION
@@ -108,6 +138,9 @@ async def readiness_probe() -> JSONResponse:
     else:
         content = {"status": "ready", "service": "llm-shield-proxy", "version": version, "components": components}
         status_code = 200
+
+    if warnings:
+        content["warnings"] = warnings
 
     # Populate cache
     result = {"status_code": status_code, "content": content}
