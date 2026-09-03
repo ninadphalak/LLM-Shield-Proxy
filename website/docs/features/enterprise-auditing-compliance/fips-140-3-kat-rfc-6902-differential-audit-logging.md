@@ -3,59 +3,46 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-This feature provides cryptographic implementation self-tests and structured mutation metadata that can support federal control evidence. A Known Answer Test is not FIPS 140-3 validation, FedRAMP authorization, or DoD IL5 approval; those depend on the validated module, platform, configuration, and assessment boundary.
+This feature provides cryptographic self-tests at startup and structured metadata for payload mutations. While useful for federal control evidence, it does not magically grant FIPS 140-3 validation or FedRAMP authorization to your deployment.
 
 ## How It Works
-Some assurance programs require evidence that cryptographic primitives pass known-answer self-tests and that application transformations are recorded. These artifacts are narrower than cryptographic-module validation or proof of complete runtime behavior.
 
-1. **Cryptographic KAT:** At application startup, the proxy runs fixed SHA-256 and AES-256-GCM test vectors. With `FIPS_STRICT_MODE=true`, a failure aborts startup. Passing these application-level tests is not a FIPS 140-3 module validation or deployment certification.
-2. **RFC 6902 mutation metadata:** On supported paths, the proxy can record caller-supplied JSON
-   Patch operations such as
-   `[{"op": "replace", "path": "/messages/0/content", "value": "***"}]`. The audit setting does
-   not independently prove that the patch is a complete diff of every payload change.
-
+1. **Cryptographic KAT:** At startup, the proxy runs Known Answer Tests (KAT) for SHA-256 and AES-256-GCM. If `FIPS_STRICT_MODE=true`, a failure immediately aborts startup.
+2. **RFC 6902 Mutation Metadata:** The proxy can optionally record JSON Patch operations (e.g., `[{"op": "replace", "path": "/messages/0/content", "value": "***"}]`) in the audit log instead of logging the full original and redacted payloads.
 
 ```mermaid
 flowchart TD
-    A[Proxy Startup] --> B(Execute FIPS KAT)
+    A[Proxy Startup] --> B{Execute FIPS KAT}
     B -->|Fail| C[Crash Process]
     B -->|Pass| D[Accept Traffic]
     E[Payload Redacted] --> F(Generate RFC 6902 Diff)
     F --> G[Emit Differential Audit Log]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** The KAT runs at startup; RFC 6902 output adds serialization and evidence volume when supplied. Measure both in the deployment profile.
+- **Overhead:** The KAT runs only at startup. Emitting RFC 6902 diffs adds minor serialization overhead during payload redaction.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
-| `FIPS_STRICT_MODE` | Aborts startup when the application-level KAT fails. It does not itself disable every non-FIPS algorithm in the process. | [View in deployment.md](/docs/deployment) |
-| `AUDIT_LOG_FORMAT` | Set to `RFC6902_DIFF` to include caller-supplied patch operations in supported audit events. | [View in deployment.md](/docs/deployment) |
+| `FIPS_STRICT_MODE` | Aborts startup if the application-level KAT fails. | [View in deployment.md](/docs/deployment) |
+| `AUDIT_LOG_FORMAT` | Set to `RFC6902_DIFF` to emit JSON Patch operations for redactions. | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Host OS dependency:** A FIPS claim requires an appropriately validated cryptographic module operated within its security policy. The proxy's self-test does not confer that status on Python, OpenSSL, the host, or the deployment.
-* **Data minimization intent:** Differential events are designed to record replacement metadata rather than the original matched value. Verify exception, serialization, debug, exporter, and downstream log paths with adversarial fixtures before relying on that boundary.
+## Implementation Details & Edge Cases
+* **Host OS Dependency:** A true FIPS claim requires a validated cryptographic module operated within its security policy. The proxy's application-level KAT does not confer this status on the host OS, OpenSSL, or Python environment.
+* **Data Minimization:** RFC 6902 diffs are designed to record *that* a mutation occurred without retaining the sensitive data that was replaced.
 
 ## FAQ
 
 **Q: Does enabling `FIPS_STRICT_MODE` slow down the proxy?**
-A: The KAT checks fixed primitive operations at startup. Cipher availability and TLS policy depend on the linked cryptographic module and runtime configuration, and the startup test has measurable cost.
+A: No, it only executes a fixed set of checks during startup. It does not slow down active request processing.
 
 **Q: Why is RFC 6902 better than standard logging?**
-A: RFC 6902 is machine-readable, so a reviewer can reproduce documented patch operations on supplied artifacts. That does not prove that no omitted operation, alternate path, or logging event occurred.
+A: It is machine-readable and explicitly documents patch operations, satisfying specific compliance requirements for audit trails without leaking the original sensitive data into the log.
 
-
-## Practical effect
-This feature provides a narrow, reproducible startup self-test and optional structured mutation metadata for reviewers.
-
-With strict mode enabled, startup runs fixed cryptographic test vectors and aborts on a failed self-test. A passing application-level known-answer test detects some implementation or environment faults; it does not establish FIPS validation, key safety, or correct operation for every later request.
+## Practical Effect
+This feature enforces a narrow cryptographic self-test at startup and optionally provides structured, data-minimized audit logs for payload mutations. It supports compliance evidence but does not replace formal module validation.
 
 ## Related Tests
 Tests: [`tests/test_fips_and_audit_diff.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_fips_and_audit_diff.py).

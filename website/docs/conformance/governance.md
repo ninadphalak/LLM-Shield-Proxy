@@ -28,7 +28,7 @@ testimonial, and reviewers do not need to support LLM-Shield-Proxy.
 
 ## Proposing a change
 
-Open an **SPG specification proposal** using the repository issue template. A proposal must state:
+Open an **SPG specification proposal** using the repository issue template. A proposal should state:
 
 1. the failure mode or ambiguity being addressed;
 2. the proposed normative behavior;
@@ -47,8 +47,8 @@ Editorial fixes that do not change observable conformance behavior may use a nor
 - A normative change should receive two approvals, including one person who did not author the
   related implementation change.
 - While fewer than two independent reviewers exist, the initial maintainer may merge a necessary
-  change after the review window, but the decision record must be labeled **maintainer-only**. It
-  must not be described as community consensus.
+  change after the review window, but the decision record should be labeled **maintainer-only**. It
+  should not be described as community consensus.
 - Unresolved objections and rejected alternatives remain linked from the decision record.
 
 Security fixes may use private disclosure before publication. The eventual public record should
@@ -76,7 +76,7 @@ Results identify who ran and funded them:
   conditioned on a positive result.
 - **Independent run:** produced by an unaffiliated evaluator without implementation-owner control.
 
-Payment, equipment, cloud credits, consulting, and pre-publication review rights must be disclosed.
+Payment, equipment, cloud credits, consulting, and pre-publication review rights should be disclosed.
 Failed and partial runs remain valid contributions when their artifacts are reproducible.
 
 A result becomes `replicated` only after three different people each submit a run of the same

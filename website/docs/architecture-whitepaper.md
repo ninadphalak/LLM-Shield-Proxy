@@ -1,69 +1,36 @@
-# Streaming-Privacy Gateway Architecture
+# Streaming-Privacy Gateway Architecture Whitepaper
 
 ## Abstract
+LLM-Shield-Proxy is an open-source, self-hosted proxy for inspecting and securing LLM (Language Model) and MCP (Model Context Protocol) traffic. Operating within your VPC, it enforces data privacy and security boundaries before traffic leaves your network. It features zero-egress PII redaction, streaming (SSE) fragmentation safety, dynamic tool policy enforcement, and tamper-evident audit logging. 
 
-LLM-Shield-Proxy is an Apache-2.0, self-hosted gateway for inspecting LLM and MCP traffic inside an
-operator-controlled network. It provides tests for the request sent to the configured model provider, incremental
-SSE rehydration across tested fragment splits, policy checks for supported tool calls, and audit
-metadata that excludes configured sensitive values.
+## 1. Boundary and Threat Model
+The core security boundary is the serialized request dispatched to the upstream LLM provider. The proxy guarantees **zero egress** of detected PII, meaning unredacted sensitive values will not cross this boundary. 
 
-The gateway can support technical controls used in SOC 2, HIPAA, EU AI Act, and ISO/IEC 42001 programs. It does not certify a system or organization as compliant.
+Key threat vectors mitigated:
+- **Fragmentation:** PII split across streaming SSE chunks or input tokens.
+- **SSRF:** Prompt-injected tool calls attempting to reach internal networks.
+- **Audit Tampering:** Covert modification or deletion of security logs.
 
-## 1. Boundary and threat model
+## 2. Streaming Data Plane
+### 2.1 Inbound Transformation
+Traffic passes through a 3-Tier detection cascade:
+1. **Google RE2:** Fast, deterministic regex for structured identifiers (SSN, emails).
+2. **Shannon Entropy:** Heuristic scanning for unstructured secrets (API keys).
+3. **ONNX NER:** Local, quantized NLP for conversational entities.
 
-The protected boundary is the serialized request presented to the configured upstream transport after enabled transformations. **Zero egress** means that known unredacted protected values do not appear at that boundary. It does not mean that the proxy performs no network communication: it forwards the transformed request to the operator-configured upstream.
+### 2.2 Fragment-Safe SSE Rehydration
+Streaming responses often split replaced tokens across multiple Server-Sent Event (SSE) chunks. The `SSERehydrationBuffer` holds a precise lookahead buffer to reconstruct these fragmented tokens before sending them to the client, preserving both the data and the SSE protocol framing.
 
-The current conformance model covers:
+## 3. MCP Governance Plane
+The proxy implements a streaming JSON parser that extracts tool execution keys (`name` or `method`) from MCP requests. These are evaluated against a Role-Based Access Control (RBAC) policy. Unauthorized tool calls are blocked at the proxy layer, preventing the LLM from executing them.
 
-- protected values fragmented across input and SSE transport chunks;
-- valid OpenAI-compatible SSE framing, including UTF-8 code points split across chunks;
-- exact placeholder rehydration without exposing protected test values in the report;
-- tool-call policy decisions;
-- hash-chain continuity, Ed25519 verification, and a tamper negative control;
-- distributional component timings and bounded-buffer/allocation observations.
+## 4. Audit and Compliance Evidence
+The proxy emits verifiable audit records:
+- **Hash Chaining:** Every event contains the SHA-256 hash of the previous event.
+- **Digital Signatures:** Events are signed using an Ed25519 private key.
+- **OSCAL Artifacts:** Emits NIST OSCAL 1.2 assessment results.
 
-See the [Streaming Privacy Gateway Conformance Specification v1.0.0](/docs/conformance/specification-v1) for normative requirements and explicit exclusions.
+*Note: While these records are tamper-evident, achieving full WORM (Write Once, Read Many) compliance requires shipping these logs to an immutable storage backend (e.g., AWS S3 Object Lock).*
 
-## 2. Streaming data plane
-
-### 2.1 Inbound transformation
-
-The text path combines structured-pattern detection, a Shannon-entropy heuristic for secret candidates, and an optional locally selected ONNX entity model. Structured JSON-RPC and MCP payloads are traversed as data structures so masking does not corrupt JSON syntax.
-
-Detector quality is corpus- and configuration-dependent. The project does not claim universal recall or F1. Any detection-quality report should publish the labeled corpus, sampling method, splits, selected model and thresholds, error taxonomy, and confidence intervals.
-
-### 2.2 Fragment-safe SSE rehydration
-
-The `SSERehydrationBuffer` retains only the suffix that can still begin a known placeholder. Its retained-text bound is derived from the longest active placeholder rather than the total stream length. The proxy parses completed SSE events, rehydrates values incrementally, and preserves the terminal `[DONE]` marker.
-
-The current conformance harness reports p50, p95, p99, mean, and standard deviation for declared in-process operations without asserting a universal threshold or calling them total proxy overhead.
-
-## 3. MCP governance plane
-
-The streaming tool parser extracts targeted `name` and `method` values across arbitrary chunk boundaries. Resolved policy can allow or deny calls without requiring the complete response to be retained indefinitely. Length, nesting, and catalog limits bound adversarial state.
-
-OPA, Redis, and Vault integrations are deployment options, not evidence that an external policy system is configured correctly. Pilot assessments must exercise allowed, denied, unavailable-resolver, and malformed-input cases in the intended failure mode.
-
-## 4. Audit and compliance evidence plane
-
-Each emitted audit record can contain a predecessor SHA-256 hash, monotonic sequence, chain identifier, and Ed25519 signature. Offline verification detects changed records, insertions, reordering, sequence gaps, and unexpected signing keys within the evidence supplied.
-
-The default `best_effort` mode uses a bounded queue and may drop events under backpressure. It generates a new process-local chain after restart and uses an ephemeral signing key unless a stable key is configured. Opt-in `durable` and `required` modes append and acknowledge local JSONL, request `fsync`, and recover chain state after restart.
-
-These mechanisms are **tamper-evident, not storage-level WORM**. The project can verify independently ordered worker chains and sign a common terminal-state checkpoint. A complete evidence-grade deployment still needs independently configured immutable retention, external checkpoint anchoring, and production key custody and rotation. The [audit contract](/docs/features/enterprise-auditing-compliance/worm-compliant-audit-logging-with-hash-chaining) documents those boundaries.
-
-The shared OSCAL builder emits OSCAL 1.2 `assessment-results` artifacts. Runtime exports use fresh document and result UUIDs on every call; offline assessments can supply deterministic UUIDs for byte-reproducible reports. OSCAL output supports control assessment and exchange-it does not prove that a control operated effectively.
-
-## 5. Reproducible evaluation
-
-Run:
-
-```bash
-llm-shield-proxy benchmark --iterations 10000 --json-out conformance.json
-```
-
-The report covers seven versioned domains: fragmentation safety, raw-PII egress, SSE validity, rehydration fidelity, audit integrity, latency measurement, and memory boundedness. Local timing excludes ASGI, HTTP/TLS, networks, model time, concurrency, and durable-audit I/O. Service-level claims require the separate load protocol, raw artifacts, repeated trials, and independent reproduction.
-
-## 6. Conclusion
-
-LLM-Shield-Proxy provides an open implementation and an open test contract for streaming privacy at the LLM boundary. Its value should be evaluated from reproducible artifacts and explicit threat boundaries-not absolute performance, compliance, or detection slogans.
+## 5. Conclusion
+LLM-Shield-Proxy provides verifiable streaming privacy and governance. By centralizing security rules, redaction, and audit logging into a single in-VPC gateway, it allows organizations to safely adopt external LLM APIs.

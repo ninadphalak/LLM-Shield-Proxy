@@ -3,22 +3,20 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **SSE Sliding-Window Buffer** retains bounded trailing overlap so supported protected tokens can be reassembled when SSE event boundaries split them. The repository reports environment-scoped component timings; it does not guarantee sub-millisecond end-to-end service latency.
+The **SSE Sliding-Window Buffer** prevents sensitive data leakage when streaming chunks split a PII token (e.g., `[EMAIL_1]`) across two separate network events. 
 
 ## How It Works
-Streaming transports can split a placeholder such as `[PERSON_1]` across events or byte chunks. A transformation that examines each chunk independently can miss the token, while whole-response buffering removes incremental delivery. Exact behavior and delay depend on framing, buffering, and the complete service path.
+If a streaming payload is evaluated chunk-by-chunk without context, a split token like `[PER` and `SON_1]` will evade detection. Conversely, buffering the entire response defeats the purpose of streaming. The sliding window bridges this gap.
 
-LLM-Shield-Proxy addresses the tested placeholder case with a sliding window:
-1. **SSE event processing:** As response bytes are received through the HTTP client, the stream parser processes supported SSE `data:` payloads; the application does not directly observe raw TCP frame boundaries.
-2. **Mathematical Overlap Retention:** The buffer evaluates the chunk against the Vault mappings, but *retains* a trailing overlap equal to $LL = max(0, max_token_length - 1).
-3. **Split-token handling:** The buffer keeps the end of one event when it might be the start of a replacement token completed by the next event. The retained text has a fixed limit.
-4. **Bounded release and write aggregation:** Content outside the retained lookahead can be yielded downstream. Small encoded lines are coalesced only up to `MAX_SSE_LINE_LENGTH`. A single longer rehydrated line is emitted intact rather than truncated; repeated-token expansion fails closed once one output piece would exceed `MAX_PAYLOAD_SIZE_BYTES + MAX_SSE_LINE_LENGTH`.
-
+1. **Event Processing:** The proxy processes supported `data:` payloads as they arrive via Server-Sent Events (SSE).
+2. **Mathematical Overlap Retention:** The buffer evaluates the current chunk, but holds back a trailing overlap equal to `max_token_length - 1`. 
+3. **Split-Token Handling:** By holding the end of one chunk, the buffer can successfully identify and de-mask a token that is completed by the arrival of the next chunk.
+4. **Bounded Release:** Content outside the lookahead window is yielded downstream. The buffer coalesces small chunks up to `MAX_SSE_LINE_LENGTH` before emitting them, ensuring the downstream client receives well-formed data without memory ballooning.
 
 ```mermaid
 flowchart LR
     A[Upstream SSE Chunk: 'Mich'] --> B(Sliding Window Buffer)
-    B --> C(Partial Vault Match?)
+    B --> C{Partial Match?}
     C -->|Yes| D[Hold Chunk in Memory]
     E[Next Chunk: 'ael'] --> B
     D --> F[Concatenate: 'Michael']
@@ -26,42 +24,30 @@ flowchart LR
     G --> H[Egress to Client]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Operates as a Python asynchronous generator without intentional synchronous network I/O in the loop. Parsing, allocation, scheduling, and replacement work remain measurable.
+- **Overhead:** The buffer operates as an asynchronous Python generator. Parsing, allocating strings, and managing the window introduces measurable latency, though it avoids synchronous network I/O blocking.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
-| `MAX_SSE_LINE_LENGTH` | Bounds the unparsed input accumulator and the aggregate output-coalescing target. One rehydrated encoded line may exceed this target. | [View in deployment.md](/docs/deployment) |
-| `MAX_PAYLOAD_SIZE_BYTES` | Bounds accepted request data and contributes to the absolute post-rehydration output-piece ceiling. | [View in deployment.md](/docs/deployment) |
+| `MAX_SSE_LINE_LENGTH` | Bounds the unparsed input accumulator and output-coalescing target. | [View in deployment.md](/docs/deployment) |
+| `MAX_PAYLOAD_SIZE_BYTES` | Bounds the total accepted request data and absolute output limits. | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Slow or stalled streams:** HTTP client and proxy timeouts bound selected waits. Exercise slow headers, slow bodies, long model time-to-first-token, cancellation, pool exhaustion, and Envoy timeouts separately.
-* **Expansion and failure:** A returned protected value may be longer than a synthetic replacement, including longer than the coalescing target, without being split at the SSE protocol layer. Repeating a short replacement enough times to exceed the absolute output-piece ceiling terminates the stream under fail-closed mode; clients must treat an incomplete stream as failed.
-* **Non-Latin streaming:** The implementation includes specific ASCII/CJK boundary handling and multilingual fixtures. It is not a complete Unicode word-segmentation engine; add corpus-specific tests for scripts, normalization forms, combining marks, and token collisions.
+## Implementation Details & Edge Cases
+* **Expansion and Failure:** If a de-masked value is significantly longer than its synthetic replacement, the rehydrated line might exceed the `MAX_SSE_LINE_LENGTH`. If it exceeds the absolute `MAX_PAYLOAD_SIZE_BYTES` limit, the proxy will forcefully terminate the stream to prevent memory exhaustion.
+* **Non-Latin Streaming:** The implementation handles ASCII/CJK boundaries, but it is not a complete Unicode word-segmentation engine. You must test corpus-specific scripts and combining marks.
 
 ## FAQ
 
 **Q: Do I need to change my frontend code to support this streaming?**
-A: The conformance fixtures validate OpenAI-style SSE framing for the tested paths. Client libraries, provider extensions, malformed events, cancellation, and custom protocols require integration tests.
+A: No, the proxy emits standard OpenAI-style SSE framing. However, custom protocols, client library quirks, or malformed events require integration testing.
 
 **Q: What happens if the upstream provider sends malformed SSE JSON?**
-A: Invalid JSON is handled according to the stream parser's tested error path. The conformance suite separately checks SSE syntax and reconstruction; the buffer must not be described as a general JSON repair mechanism.
+A: The buffer will fail and propagate the parsing error. It is not designed to repair invalid JSON syntax.
 
-**Q: Does this work for Anthropic responses?**
-A: The adapter handles a documented subset of Anthropic event shapes. Test the selected model, tools, content blocks, errors, stop events, fragmentation, and provider-version changes before relying on rehydration.
-
-
-## Practical effect
-This feature bounds placeholder lookahead while preserving incremental delivery in the tested fixtures. User-visible pacing and end-to-end latency depend on the complete service path.
-
-An SSE response can split a sensitive token across chunks. The sliding window retains a configured suffix so supported matches can span boundaries, then yields older content. Coverage depends on window size, detector behavior, encoding, and provider framing; measure the added delay.
+## Practical Effect
+This feature safely rehydrates masked PII on streaming responses without waiting for the entire generation to finish. It preserves incremental streaming delivery while ensuring split tokens do not bypass redaction rules.
 
 ## Related Tests
 Tests: [`tests/test_streaming.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_streaming.py).

@@ -1,9 +1,13 @@
-# Limitations and assurance boundaries
+# Limitations and Assurance Boundaries
 
-The canonical, version-controlled boundary statement is
-[`LIMITATIONS.md`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/LIMITATIONS.md).
+The canonical source of truth for the proxy's limitations and assurance boundaries is the root [`LIMITATIONS.md`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/LIMITATIONS.md) file.
 
-It covers detector error, configured-upstream scope, storage and memory, cryptographic key/token
-contracts, rehydration, provider and MCP compatibility, audit and attestation evidence, canary
-signals, performance, compliance, and evidence maturity. Feature pages must not imply a broader
-assurance than that statement.
+It details the project's limits regarding:
+- Detector accuracy (false positives / false negatives)
+- Storage, memory, and performance overhead
+- Cryptographic key custody boundaries
+- Streaming rehydration edge cases
+- Compatibility with upstream providers and MCP
+- Audit evidence maturity
+
+No feature documentation page should be interpreted as superseding or broadening the assurance boundaries defined in the root `LIMITATIONS.md` file.

@@ -3,20 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The meter reads supported provider usage fields and records Prometheus
-metrics with configured tenant metadata. These metrics can support internal cost allocation. They
-are not an invoice and do not calculate exact cost on their own.
+The **Chargeback Meter** extracts token usage data directly from supported provider responses and emits Prometheus metrics enriched with tenant metadata (e.g., the virtual key ID and role). These metrics assist with internal cost allocation (chargeback), though they do not calculate exact financial costs and are not a replacement for official provider invoices.
 
 ## How It Works
-When several teams share one provider account, provider totals may not show which internal team
-made each request. The proxy adds configured identity and routing labels to the usage it observes.
+When multiple internal teams share a single corporate LLM provider account, the provider's billing dashboard cannot distinguish which internal team consumed the tokens. The proxy bridges this gap.
 
-1. **Usage extraction:** The proxy checks the final SSE event or non-streaming response for a
-   supported `usage` object, such as `prompt_tokens` and `completion_tokens`.
-2. **Metadata labels:** It records the usage with `virtual_key_id`, `applied_role_name`, `model`,
-   and `upstream_provider` labels when available.
-3. **Asynchronous Emission:** Enriched metrics use a bounded background path to reduce request-path work. Queueing, serialization, synchronization, CPU use, and drops still require measurement.
-
+1. **Usage Extraction:** The proxy inspects the final SSE event or non-streaming response for the standard `usage` object (containing `prompt_tokens` and `completion_tokens`).
+2. **Metadata Enrichment:** It attaches contextual labels to the usage metric, including `virtual_key_id`, `applied_role_name`, `model`, and `upstream_provider`.
+3. **Asynchronous Emission:** The enriched metrics are placed in a bounded background queue to decouple metric generation from the latency-sensitive request path.
 
 ```mermaid
 flowchart TD
@@ -27,37 +21,31 @@ flowchart TD
     E -.-> F[Grafana Chargeback Dashboard]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Uses a bounded background queue to reduce request-path work. Queue operations and metric creation still consume resources, and pressure can cause metric drops.
+- **Overhead:** The background queue minimizes impact on request latency. However, extremely high concurrency can cause queue pressure, resulting in dropped metrics rather than slowed requests.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
-| `ENABLE_FINOPS_METERING` | Enables supported token-usage extraction and metric recording. The FastAPI `/metrics` route remains part of the application and can be protected with `METRICS_BEARER_TOKEN`. | [View in deployment.md](/docs/deployment) |
+| `ENABLE_FINOPS_METERING` | Enables token-usage extraction and metric recording. | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **FinOps stream options:** On supported OpenAI-style requests, the proxy can request usage in the stream. Providers may omit or define usage differently; reconcile retries, cached/reasoning tokens, missing chunks, prices, and invoices before chargeback.
-* **Anthropic Normalization:** Anthropic Claude uses different terminology (`input_tokens`, `output_tokens`) in its streaming events. The proxy automatically normalizes these into the standard `prompt_tokens` and `completion_tokens` metric labels.
+*Note: The FastAPI `/metrics` route can be secured using the `METRICS_BEARER_TOKEN` environment variable.*
+
+## Implementation Details & Edge Cases
+* **FinOps Stream Options:** On supported OpenAI-style endpoints, the proxy automatically injects `stream_options: {"include_usage": true}` to ensure the provider includes the usage object in the final chunk.
+* **Anthropic Normalization:** Anthropic Claude streams use different terminology (`input_tokens`, `output_tokens`). The proxy automatically normalizes these into the standard `prompt_tokens` and `completion_tokens` format for consistent querying.
 
 ## FAQ
 
 **Q: Do I need a separate database to store these metrics?**
-A: No. The proxy acts as a Prometheus exporter. You configure your existing Prometheus/Datadog agent to scrape the proxy's `/metrics` endpoint. The data is stored and queried inside your existing TSDB (Time Series Database).
+A: No. The proxy acts as a standard Prometheus exporter. You configure your existing observability agent (Prometheus, Datadog, etc.) to scrape the proxy's `/metrics` endpoint. 
 
 **Q: Does this meter track the tokens saved by the PII redaction engine?**
-A: It exposes `shield_proxy_tokens_saved_total`, which records a difference between selected
-replacement representations. This is not a provider token bill, cost saving, or ROI calculation.
-Validate it against the tokenizer and pricing used by the selected provider before using it.
+A: The proxy exposes a `shield_proxy_tokens_saved_total` metric, which calculates the raw character difference between original PII and the injected synthetic substitutes. This is a rough estimation of payload size reduction, not an exact financial ROI calculation.
 
-
-## Practical effect
-This feature associates observed provider usage events with configured tenant metadata. Use it for allocation estimates only after reconciling retries, cached or reasoning tokens, missing usage chunks, pricing changes, and the provider invoice.
+## Practical Effect
+This feature associates raw provider token counts with specific internal identities, enabling organizations to build granular chargeback dashboards in Grafana. It provides an estimation for internal accounting, not a perfect financial audit trail.
 
 ## Related Tests
 Tests: [`tests/test_finops_meter.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).

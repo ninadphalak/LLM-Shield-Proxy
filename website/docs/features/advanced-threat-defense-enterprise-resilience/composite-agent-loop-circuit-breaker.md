@@ -3,60 +3,47 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The circuit breaker tracks configured request and tool-call signals. When a threshold is reached,
-it terminates the affected flow. It is a bounded heuristic, not a complete detector for every
-looping or high-cost agent behavior.
+The **Circuit Breaker** tracks autonomous agent tool calls to detect when an agent is stuck in a hallucination loop (e.g., repeatedly submitting the exact same failed SQL query). When a loop is detected, it severs the connection to stop the agent from burning through token budgets and tool capacity.
 
 ## How It Works
-When autonomous agents are given tools, they can repeat failed actions until another limit intervenes. For example, an agent may resubmit the same SQL query and consume additional tokens and tool capacity.
+When given tools, autonomous agents will sometimes repeat failed actions indefinitely until they hit a hard limit.
 
-1. **Stateful trajectory tracking:** The proxy uses the
-   [Redis TTL Vault](/docs/features/data-protection-pii-redaction/stateless-redis-ttl-vault) to
-   track a hash of the `tool_calls` array for a `session_id`.
-2. **Loop Detection:** If the proxy observes the exact same tool payload being executed more than `N` times consecutively within the same short-lived session, it flags a hallucination loop.
-3. **Circuit Breaking:** On the catch-all HTTP path, the proxy returns HTTP 429 with `X-Shield-Circuit-Breaker: TRIPPED` after the configured duplicate threshold. It does not inject a replacement system message.
-
+1. **Stateful Trajectory Tracking:** The proxy uses the [Redis TTL Vault](/docs/features/data-protection-pii-redaction/stateless-redis-ttl-vault) to track a cryptographic hash of the `tool_calls` array for a given `session_id`.
+2. **Loop Detection:** If the proxy observes the exact same tool payload being executed consecutively more than `N` times within a short-lived session, it flags the behavior as a hallucination loop.
+3. **Circuit Breaking:** The proxy immediately terminates the request and returns an HTTP `429 Too Many Requests` with the header `X-Shield-Circuit-Breaker: TRIPPED`.
 
 ```mermaid
 flowchart TD
     A[Agent Calls 'fetch_data'] --> B(Proxy Tracker)
-    B --> C(Same payload seen > 3 times?)
-    C -->|No| D[Forward to MCP]
-    C -->|Yes| E[Inject System Override / Sever Connection]
+    B --> C{Same payload > 3 times?}
+    C -->|No| D[Forward to Upstream]
+    C -->|Yes| E[Sever Connection & HTTP 429]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Storage:** Reuses the configured session TTL store and does not introduce a relational-table migration. It still adds keys, reads, writes, memory, and network work to that store.
+- **Storage Overhead:** This feature reuses the existing Redis session TTL store. It introduces minor read/write and memory overhead, but avoids the need for heavy relational database migrations.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
 | `ENABLE_AGENT_BREAKER` | Toggles the loop detection engine. | [View in deployment.md](/docs/deployment) |
 | `AGENT_BREAKER_THRESHOLD` | Consecutive duplicate threshold (default 3). | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Payload comparison:** The implementation computes bounded serialized-request signals and tool-call hashes. Semantically equivalent payloads with different serialization or content can be treated as different attempts, and distinct short requests can produce heuristic false positives.
-* **Intervention:** The implemented intervention is an HTTP 429 response. Client or agent code decides whether to retry, alter the tool call, or stop.
+## Implementation Details & Edge Cases
+* **Payload Comparison:** The tracker compares the exact serialized tool-call arguments. Semantically identical payloads with different JSON formatting or slight variations will not trigger the breaker.
+* **Intervention Limits:** The proxy simply returns a 429 error; it does not attempt to inject a synthetic system message to "coach" the agent out of the loop. It is up to the client application to handle the 429 appropriately.
 
 ## FAQ
 
 **Q: Will this break LangChain agents that intentionally call a tool multiple times?**
-A: The configured identical-payload rule does not count calls whose normalized arguments differ. Repeated identical arguments are a heuristic signal, not definitive proof of a hallucination; legitimate polling or idempotent retries may need an exception or different threshold.
+A: It depends. If the agent calls the same tool with *different* arguments (e.g., paginating through results), the circuit breaker will not trip. It only triggers on consecutive, identical arguments. If your agent relies on identical idempotent polling, you may need to increase the threshold or disable the breaker.
 
-**Q: How does the proxy know what "session" an agent is in?**
-A: Client applications must pass a consistent `X-Session-ID` header. The proxy uses this header to isolate loop tracking.
+**Q: How does the proxy know which "session" an agent is in?**
+A: Client applications must provide a consistent `X-Session-ID` header. The proxy uses this header to isolate loop tracking per agent trajectory.
 
-
-## Practical effect
-This feature provides a threshold-based stop for one class of repeated agent action.
-
-Sometimes an agent repeats the same action without making progress. The circuit breaker compares the signals it is configured to track and intervenes after a threshold; it can miss changing loops and can flag legitimate repetition, so pair it with time, token, and tool budgets.
+## Practical Effect
+This feature acts as a financial and operational safeguard, terminating runaway agents before they consume excessive tokens or overload internal APIs with identical, useless requests.
 
 ## Related Tests
 Tests: [`tests/test_circuit_breaker.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_circuit_breaker.py).

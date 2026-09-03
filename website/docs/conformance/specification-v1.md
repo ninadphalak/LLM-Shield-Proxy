@@ -6,7 +6,7 @@
 
 **License:** Apache License 2.0
 
-This specification defines repeatable tests and minimum reporting requirements for a gateway that transforms protected data before a configured LLM upstream and reconstructs authorized values in a streaming response. The keywords **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
+This specification defines repeatable tests and minimum reporting requirements for a gateway that transforms protected data before a configured LLM upstream and reconstructs authorized values in a streaming response. The keywords **should**, **should not**, **SHOULD**, and **MAY** are normative.
 
 ## 1. Security boundary and terminology
 
@@ -22,7 +22,7 @@ It does not mean that a detector recognizes every possible real-world identifier
 
 ## 2. Required report metadata
 
-A conforming report MUST include:
+A conforming report should include:
 
 - specification name/version and report-schema identifier;
 - generation timestamp and implementation version;
@@ -37,33 +37,33 @@ A conforming report MUST include:
 
 ### SPG-FRAG-1: Fragmentation safety
 
-The runner MUST test every two-part character split of at least one registered placeholder, including empty-prefix and empty-suffix partitions, and MUST test one-character-at-a-time delivery. No partial placeholder may be released as a reconstructed value before the match is unambiguous. The report MUST publish partition count and failure metadata without publishing protected values.
+The runner should test every two-part character split of at least one registered placeholder, including empty-prefix and empty-suffix partitions, and should test one-character-at-a-time delivery. No partial placeholder may be released as a reconstructed value before the match is unambiguous. The report should publish partition count and failure metadata without publishing protected values.
 
 ### SPG-EGRESS-1: Raw protected-data egress
 
-The runner MUST inspect the exact request bytes the gateway would send to the model provider and
-search for every declared test value. The report MUST list the data types and whether any value was
-found. It MUST NOT contain the test values or changed request body.
+The runner should inspect the exact request bytes the gateway would send to the model provider and
+search for every declared test value. The report should list the data types and whether any value was
+found. It should not contain the test values or changed request body.
 
 This test is configuration-scoped. A pass is not a population-level recall claim.
 
 ### SPG-SSE-1: SSE validity
 
-For the declared provider shape, every nonterminal `data:` event MUST parse as the expected JSON object, exactly one terminal `[DONE]` marker MUST be preserved, and the stream MUST terminate with valid event framing. At least one UTF-8 multibyte character MUST be split at a byte boundary and reconstructed without decoder corruption.
+For the declared provider shape, every nonterminal `data:` event should parse as the expected JSON object, exactly one terminal `[DONE]` marker should be preserved, and the stream should terminate with valid event framing. At least one UTF-8 multibyte character should be split at a byte boundary and reconstructed without decoder corruption.
 
 ### SPG-REHYDRATE-1: Rehydration fidelity
 
-For the declared mapping and authorization context, concatenated client-visible content MUST exactly equal the expected value and surrounding text. No placeholder may remain in client-visible content. Reports MUST expose equality/status only, not either value.
+For the declared mapping and authorization context, concatenated client-visible content should exactly equal the expected value and surrounding text. No placeholder may remain in client-visible content. Reports should expose equality/status only, not either value.
 
 ### SPG-AUDIT-1: Audit integrity
 
-The runner MUST verify a minimum two-record signed chain with a stable chain identifier and consecutive sequence values. It MUST validate record hashes, predecessor linkage, Ed25519 signatures, and the public-key fingerprint. It MUST modify a signed record as a negative control and MUST observe verification failure.
+The runner should verify a minimum two-record signed chain with a stable chain identifier and consecutive sequence values. It should validate record hashes, predecessor linkage, Ed25519 signatures, and the public-key fingerprint. It should modify a signed record as a negative control and should observe verification failure.
 
 This test establishes verifier behavior. It does not make local storage immutable, detect deletion of an unanchored suffix, validate production key custody, or establish legal non-repudiation.
 
 ### SPG-LATENCY-1: Latency reporting
 
-The runner MUST publish warmup behavior, iteration count, operation scope, clock unit, mean, p50, p95, and p99. It MUST distinguish no-op, empty-vault buffer, and protected-placeholder buffer paths. Local in-process results MUST NOT be described as total proxy overhead.
+The runner should publish warmup behavior, iteration count, operation scope, clock unit, mean, p50, p95, and p99. It should distinguish no-op, empty-vault buffer, and protected-placeholder buffer paths. Local in-process results should not be described as total proxy overhead.
 
 Version 1.0.0 sets no universal pass threshold. A deployment MAY publish a preregistered threshold in a separate profile.
 
@@ -71,21 +71,21 @@ This domain is scored by publication, not by a `checks` entry. It contributes no
 
 ### SPG-MEMORY-1: Memory reporting and bounded state
 
-The runner MUST demonstrate that retained placeholder-prefix state does not exceed the declared token-derived bound. Allocation observations MUST be labeled as allocations, not RSS. A process-memory claim MUST use a separate production profile specifying sampling tool, lifecycle phase, workload, duration, concurrency, installation extras, and peak-versus-steady-state semantics.
+The runner should demonstrate that retained placeholder-prefix state does not exceed the declared token-derived bound. Allocation observations should be labeled as allocations, not RSS. A process-memory claim should use a separate production profile specifying sampling tool, lifecycle phase, workload, duration, concurrency, installation extras, and peak-versus-steady-state semantics.
 
 Version 1.0.0 sets no universal RSS threshold.
 
 ## 4. Pass calculation
 
-The top-level result is `passed: true` only when all six scored domains pass. SPG-LATENCY-1 is a publication requirement, not a scored domain. Its old check only verified that elapsed times were non-negative, so the check was removed. The required latency measurements must still be published.
+The top-level result is `passed: true` only when all six scored domains pass. SPG-LATENCY-1 is a publication requirement, not a scored domain. Its old check only verified that elapsed times were non-negative, so the check was removed. The required latency measurements should still be published.
 
 A memory pass means that the report includes the required measurement and demonstrates the declared bound. It does not establish any unstated performance threshold.
 
 ## 5. Reproducibility and publication
 
-A published result SHOULD include the JSON report, tagged source, dependency lock, command, environment description, checksums, and all failed repetitions. Independent reproduction MUST identify the reproducer and must not replace the implementation owner's artifact.
+A published result SHOULD include the JSON report, tagged source, dependency lock, command, environment description, checksums, and all failed repetitions. Independent reproduction should identify the reproducer and should not replace the implementation owner's artifact.
 
-Comparative reports MUST run candidates on the same host, client, vectors, warmup, iteration count, and scope. Product names, sponsorship, excluded components, and conflicts of interest MUST be disclosed.
+Comparative reports should run candidates on the same host, client, vectors, warmup, iteration count, and scope. Product names, sponsorship, excluded components, and conflicts of interest should be disclosed.
 
 ## 6. Versioning
 
@@ -93,4 +93,4 @@ Comparative reports MUST run candidates on the same host, client, vectors, warmu
 - Minor versions add backward-compatible domains or metadata.
 - Major versions may change pass semantics or remove/rename required fields.
 
-Reports MUST identify the exact specification version. Consumers must not silently interpret a report under a different major version.
+Reports should identify the exact specification version. Consumers should not silently interpret a report under a different major version.

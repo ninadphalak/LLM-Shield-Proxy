@@ -3,191 +3,53 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-
-MCP `tools/call` arguments can contain URLs for webhooks, callbacks, or page retrieval. An
-untrusted prompt or tool definition can direct a permitted fetch tool toward an internal service.
-This is server-side request forgery (SSRF). Examples include cloud metadata endpoints, local
-services, and private-network addresses.
-
-On the supported `POST /v1/mcp` path, the egress check scans `tools/call` arguments for HTTP and
-HTTPS URLs. It resolves every address returned for each hostname and applies the configured
-domain and CIDR policy before forwarding the call. Unresolved, timed-out, or ambiguous hostnames
-are rejected.
+The **SSRF & DNS-Rebinding Egress Firewall** scans `tools/call` arguments on the `/v1/mcp` route for HTTP/HTTPS URLs. It protects internal networks by resolving the hostnames and blocking the tool execution if any resolved IP address belongs to a restricted internal subnet.
 
 ## How It Works
+If a language model hallucinates or is prompted to use a "fetch" tool against an internal IP (like `169.254.169.254` or `10.0.0.1`), this constitutes Server-Side Request Forgery (SSRF). The egress firewall blocks this.
 
-1. **AST-walk argument discovery.** `find_urls()` recursively walks `params.arguments`
-   (nested dicts/lists included) collecting every `http(s)://` substring - the same
-   AST-walk shape the [3-Tier PII cascade](/docs/guides/mcp-tool-governance) already uses
-   for redaction, run on the *raw* pre-sanitization arguments so the host actually being
-   evaluated is the one an upstream tool would receive.
-2. **Every DNS record is checked, not just the first.** For each URL, `evaluate_url()`
-   resolves the hostname to *every* A/AAAA record it has (`socket.getaddrinfo` via the
-   asyncio executor, under a `wait_for` timeout) and checks **all of them**. An attacker
-   who answers with one public IP and one `169.254.169.254` record is caught on the second
-   record alone.
-3. **The checked IP is the IP that gets dialed.** Checking records is only half of
-   rebinding safety. If the guard approved a hostname and then handed that hostname to the
-   HTTP client, the client would look it up a *second* time when it opened the connection -
-   and an attacker running the domain with a very short TTL can answer with a public address
-   for the check and `169.254.169.254` for the connection. So the guard does not hand back a
-   hostname. `resolve_pinned_target()` returns the approved IP already substituted into the
-   URL, and the proxy connects to that. The real hostname still travels in the `Host` header
-   and in the TLS handshake (`sni_hostname`), so virtual-host routing and certificate
-   verification work exactly as before - pinning does not weaken TLS. There is no second
-   lookup to poison.
-4. **Baseline denylist.** The current guard applies RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`,
-   `192.168.0.0/16`), loopback (`127.0.0.0/8`, `::1`), link-local/cloud metadata
-   (`169.254.0.0/16` - where `169.254.169.254` lives), CGNAT, and the IETF
-   documentation/reserved ranges (plus IPv6 equivalents) are blocked unconditionally. There
-   is no policy override that re-opens them - only `additional_denied_cidrs` to add more.
-5. **Per-virtual-key policy.** `evaluate_url(url, policy)` takes the exact same `dict`
-   `BasePolicyResolver.resolve_policy()` already returns for `allowed_tools`/`blocked_tools`
-   (see [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine)), extended with
-   three optional keys:
-
-   ```python
-   {
-       "egress_mode": "DEFAULT_BLOCK",       # or "ALLOWLIST_ONLY"
-       "allowed_domains": ["*.internal.corp", "api.github.com"],
-       "additional_denied_cidrs": ["10.50.0.0/16"],
-   }
-   ```
-
-   `DEFAULT_BLOCK` (the default when a resolver supplies none of these keys) permits any
-   host whose resolved IP isn't in a denied CIDR. `ALLOWLIST_ONLY` additionally requires the
-   hostname to match a glob in `allowed_domains` (`fnmatch`-style - `*.internal.corp` matches
-   `tools.internal.corp` but not the bare `internal.corp`) before its IP is even checked.
-6. **Literal IPs skip DNS entirely.** `http://169.254.169.254/...` is checked directly
-   against the CIDR set - an attacker doesn't need a rebinding hostname if the literal IP
-   already gets through, so literal and resolved paths share the same check.
+1. **AST-Walk Discovery:** The proxy recursively scans the raw `tools/call` arguments for `http(s)://` strings *before* any other sanitization occurs.
+2. **Comprehensive DNS Resolution:** The proxy resolves the hostname to *all* associated A/AAAA records. If an attacker's DNS server returns one public IP and one private IP (a rebinding attack technique), the firewall evaluates all of them and blocks the request if *any* record is in a denied CIDR block.
+3. **Pinning the IP:** To prevent Time-To-Live (TTL) DNS rebinding attacks, the proxy connects directly to the validated IP address rather than re-resolving the hostname. The original hostname is passed in the `Host` header and TLS SNI extension to maintain virtual-host routing.
+4. **Baseline Denylist:** By default, RFC 1918 (10.x, 172.16.x, 192.168.x), loopback (127.x), and cloud metadata (169.254.x) ranges are unconditionally blocked.
 
 ```mermaid
 sequenceDiagram
     participant Agent as AI Agent
-    participant Shield as LLM-Shield-Proxy (/v1/mcp)
+    participant Shield as Proxy (/v1/mcp)
     participant DNS as Resolver
-    participant Audit as AuditLogger (hash chain + Ed25519)
-    participant Tool as Internal Tool Server
-
-    Agent->>Shield: tools/call "fetch_url"<br/>{url: "http://rebind.example.com/"}
-    Note over Shield: RBAC gate passes (tool allowed)
-    Shield->>DNS: resolve ALL A/AAAA records
+    
+    Agent->>Shield: tools/call {url: "http://rebind.example.com/"}
+    Shield->>DNS: resolve ALL records
     DNS-->>Shield: [93.184.216.34, 169.254.169.254]
-    Note over Shield: Any record in a denied CIDR trips the gate
-    Shield->>Audit: log_security_event(mcp_egress_policy_violation, CRITICAL)
-    Shield--xTool: router returns before an upstream call
-    Shield-->>Agent: JSON-RPC error -32003<br/>"SSRF Policy Violation: Target IP/Host forbidden by egress policy"
+    Note over Shield: One record is in a denied CIDR
+    Shield-->>Agent: JSON-RPC error -32003 (SSRF Violation)
 ```
 
-## Fail-Closed Semantics
+## Performance Profile
+- **Overhead:** DNS resolution happens asynchronously. A slow DNS server will add latency to the request. The firewall uses a strict `wait_for` timeout to prevent hanging the event loop.
 
-| Condition | Outcome |
-|---|---|
-| Hostname resolves, all IPs public | **Allowed** |
-| Hostname resolves, any IP in a denied CIDR (incl. only one of several records) | **Blocked** |
-| DNS resolution times out | **Blocked** |
-| DNS resolution errors (NXDOMAIN, etc.) | **Blocked** |
-| DNS answers with zero records | **Blocked** |
-| `ALLOWLIST_ONLY` mode, host not in `allowed_domains` | **Blocked** (checked before DNS) |
-| URL scheme isn't `http`/`https`, or has no host | **Blocked** |
-
-There is no path in `evaluate_url()` where a resolver error or empty answer results in the
-request being allowed through - every `except` branch raises `EgressPolicyViolationError`
-rather than falling through to "assume safe."
-
-## Wiring `policies.yaml` into the egress gate
-
-Per-virtual-key egress policy flows through the same `YamlPolicyResolver` recipe documented
-in [MCP Tool Governance](/docs/guides/mcp-tool-governance) - just surface the extra keys
-alongside `allowed_tools`/`blocked_tools`:
-
-```python
-class YamlPolicyResolver(BasePolicyResolver):
-    async def resolve_policy(self, virtual_key: str) -> dict:
-        policies = settings._flattened_policies
-        role = policies.get(virtual_key) or policies.get("default_role") or {}
-        return {
-            "allowed_tools": role.get("allowed_tools", []),
-            "blocked_tools": role.get("blocked_tools", []),
-            "egress_mode": role.get("egress_mode", "DEFAULT_BLOCK"),
-            "allowed_domains": role.get("allowed_domains", []),
-            "additional_denied_cidrs": role.get("additional_denied_cidrs", []),
-        }
-```
+## Configuration Flags
+Per-tenant tuning is managed via `policies.yaml`, not environment variables.
 
 ```yaml
 roles:
   data_analyst:
-    allowed_tools: [query_warehouse, export_csv_report]
-    # This tenant's tools only ever need to reach the internal data mesh + GitHub API.
+    allowed_tools: [fetch_url]
     egress_mode: ALLOWLIST_ONLY
     allowed_domains: ["*.internal.corp", "api.github.com"]
-    additional_denied_cidrs: ["10.50.0.0/16"]  # deny this subnet on the governed path
+    additional_denied_cidrs: ["10.50.0.0/16"] 
 ```
+* `egress_mode`: `DEFAULT_BLOCK` (blocks internal CIDRs) or `ALLOWLIST_ONLY` (requires domain match first).
 
-## Error Response & Audit Receipt
+## Implementation Details & Edge Cases
+* **Fail-Closed Semantics:** If DNS resolution times out, errors (NXDOMAIN), or returns zero records, the proxy blocks the request.
+* **IPv4-Mapped IPv6 Bypass:** The firewall automatically unwraps addresses like `::ffff:169.254.169.254` to their IPv4 equivalent before checking the CIDR ranges, closing a common bypass technique.
 
-On a violation, the router short-circuits before sanitization or any upstream I/O and
-returns:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 42,
-  "error": {
-    "code": -32003,
-    "message": "SSRF Policy Violation: Target IP/Host forbidden by egress policy"
-  }
-}
-```
-
-and emits a CRITICAL, hash-chained, Ed25519-signed audit event (see
-[Ed25519-Signed Audit Receipts](/docs/features/enterprise-auditing-compliance/ed25519-signed-audit-receipts.md)):
-
-```jsonc
-{
-  "event": "mcp_egress_policy_violation",
-  "severity": "CRITICAL",
-  "virtual_key_id": "vk-prod-analytics-007",
-  "details": {
-    "reason": "ip_in_denied_cidr",
-    "tool_name": "fetch_url",
-    "blocked_url": "http://rebind.example.com/",
-    "blocked_host": "rebind.example.com",
-    "resolved_ip": "169.254.169.254",
-    "matched_rule": "169.254.0.0/16",
-    "applied_role_name": "vk-prod-analytics-007"
-  }
-}
-```
-
-## Configuration Flags
-
-No standalone `.env` flags - the gate runs unconditionally on every `tools/call` (baseline
-denylist applies in the current guard implementation), and per-tenant tuning is policy-driven via the
-`egress_mode` / `allowed_domains` / `additional_denied_cidrs` keys above.
-
-## Critical Logic & Edge Cases
-
-* **Sanitization order:** the scan runs on raw arguments, *before* the PII sanitization
-  cascade - a redacted/synthetic copy of a URL isn't necessarily the host that would
-  actually be requested, so the check has to see the real value.
-* **IPv4-mapped IPv6 bypass:** an address like `::ffff:169.254.169.254` is unwrapped to its
-  embedded IPv4 form before CIDR matching, closing the classic mapped-address bypass.
-* **`-32003` is shared** with the tool-RBAC forbidden error (`JSONRPC_TOOL_FORBIDDEN`) - both
-  are policy denials in the JSON-RPC 2.0 reserved server-error range; the `message` field
-  distinguishes them for client-side handling.
-* **`resources/read` is out of scope for this gate** - it targets `tools/call` arguments
-  specifically, matching where MCP tool schemas typically carry attacker-influenced URLs.
-
-## Related Docs
-
-- [MCP Tool Governance](/docs/guides/mcp-tool-governance) - the `/v1/mcp` gateway this gate runs inside.
-- [Pluggable Policy Resolution Engine](/docs/pluggable-rbac-engine) - the `BasePolicyResolver` contract this gate's policy dict extends.
-- [Role-Based Policy-as-Code & Hot-Reloading](/docs/features/secure-infrastructure-service-mesh/role-based-policy-as-code-hot-reloading.md) - `policies.yaml` mechanics.
+## Practical Effect
+This firewall ensures that tools executed via the proxy cannot be weaponized by the LLM to scan or exfiltrate data from your internal, private networks or cloud metadata endpoints.
 
 ## Related Tests
-
-- [`tests/test_egress_guard.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_egress_guard.py) - CIDR matching, wildcard domains, DNS-rebinding simulation, allowlist-only mode, fail-closed DNS failure paths.
-- [`tests/test_mcp_routing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_mcp_routing.py) - end-to-end `-32003` short-circuit and audit wiring through `/v1/mcp`.
+Tests: 
+- `tests/test_egress_guard.py`
+- `tests/test_mcp_routing.py`

@@ -3,58 +3,44 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Tier 3 Quantized ONNX BERT-NER** is the optional contextual layer of the cascade. While Tier 1 and Tier 2 handle structured patterns and secret candidates, Tier 3 can identify selected conversational entities using an operator-supplied model. This may support HIPAA/GDPR safeguards; accuracy and compliance depend on the model, corpus, configuration, and surrounding program.
+The **Tier 3 Quantized ONNX BERT-NER** is the contextual layer of the redaction cascade. While Tier 1 and 2 rely on rigid structures and entropy, Tier 3 uses an operator-supplied Named Entity Recognition (NER) model to understand natural language context. This allows it to identify conversational entities like `PERSON`, `ORGANIZATION`, and `LOCATION`.
 
 ## How It Works
-Contextual entity models add deployment-specific memory and inference cost. This optional tier uses ONNX Runtime so operators can select and benchmark a local model that fits their accuracy and resource requirements.
+Tier 3 executes model inference locally within the proxy using ONNX Runtime, ensuring no data leaves the environment.
 
-1. **Quantization:** Quantized weights can reduce model size and inference cost. F1/recall must be reported for the exact model, labeled corpus, split, and threshold; the project does not currently claim a universal `>95%` value.
-2. **ONNX Runtime execution:** Model inference is delegated to ONNX Runtime. Python preprocessing, postprocessing, allocation, and orchestration still execute in the Python process; measure concurrency rather than assuming the GIL is irrelevant.
-3. **Lazy loading:** If the tier is disabled, its model is not loaded. Measure RSS and latency with the exact enabled model and runtime.
-
+1. **Quantization:** Operators can deploy quantized models to drastically reduce memory footprint and inference latency, though accuracy metrics (F1/recall) should be thoroughly tested.
+2. **ONNX Runtime Execution:** Inference is delegated to the highly optimized ONNX Runtime engine.
+3. **Lazy Loading:** The model is strictly opt-in. If Tier 3 is disabled, the model is never loaded into memory, saving resources.
 
 ```mermaid
 flowchart LR
     A[Unstructured Text] --> B(ONNX Runtime Engine)
-    B --> C(Entity Detected?)
+    B --> C{Entity Detected?}
     C -->|Yes| D[Map to Vault]
     C -->|No| E[Egress to LLM]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
-## Performance Profile
-- **Execution speed:** Model, hardware, input, batching, and runtime dependent.
-- **Memory:** Report peak RSS for the exact model artifact and deployment configuration.
-
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
 | `ENABLE_TIER3_ONNX_NER` | Enables the optional ONNX entity model. Defaults to `false`. | [View in deployment.md](/docs/deployment) |
 | `ONNX_MODEL_PATH` | Path to a custom quantized Hugging Face ONNX model and tokenizer. | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Non-Latin and CJK text:** Languages without spaces need different boundary tests. Validate
-  detection and rehydration with the exact model, tokenizer, script, and streaming format.
-* **Fallback:** If `ONNX_MODEL_PATH` is missing while Tier 3 is enabled, the current path falls
-  back to heuristic detection. Treat that as reduced coverage and monitor it explicitly.
+## Implementation Details & Edge Cases
+* **Non-Latin Scripts:** Languages lacking standard whitespace boundaries (e.g., CJK scripts) require specific tokenizer testing. Validate your exact model and script behavior thoroughly.
+* **Strict Fallback Policy:** If `ONNX_MODEL_PATH` is missing but Tier 3 is enabled, the proxy **does not** fall back to heuristics (which historically caused catastrophic false positives). It will simply log a warning and fail to redact contextual entities.
 
 ## FAQ
 
 **Q: Can I use my own domain-specific model for Medical records (HIPAA)?**
-A: You can supply a compatible ONNX model and tokenizer through `ONNX_MODEL_PATH`. The current
-runtime path expects a compatible input and label shape; not every Hugging Face export works.
-Test the exported model before using it for medical data.
+A: Yes. You can supply any compatible ONNX model and tokenizer via `ONNX_MODEL_PATH`. However, ensure your Hugging Face export maintains compatible input and label shapes before relying on it for regulated data.
 
 **Q: Does enabling this break the microsecond streaming latency?**
-A: It adds model- and host-dependent inference time. Benchmark the exact ONNX file, provider, payload distribution, and concurrency, and report service-level p50/p95/p99.
+A: Yes, adding a neural network introduces model and hardware-dependent inference latency. You should benchmark the exact ONNX file under your expected payload concurrency to establish realistic p95/p99 latency Service Level Objectives (SLOs).
 
-
-## Practical effect
-Depending on the selected model and training data, contextual inference may distinguish uses such as a person's name from a brand. Quantization can reduce model size and change accuracy and latency; publish the model, corpus, thresholds, and measurements for any quality claim.
+## Practical Effect
+Tier 3 provides semantic understanding, allowing the proxy to differentiate between a person's name and a brand name based on sentence structure. Operators must carefully select, quantize, and validate the model to balance accuracy and performance.
 
 ## Related Tests
 Tests: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

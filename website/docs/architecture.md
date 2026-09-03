@@ -2,204 +2,75 @@
 
 # Architecture and Data Flow
 
-## Summary
+This document details the technical data flow of the LLM-Shield-Proxy.
 
-This document describes the proxy's technical mechanics and evidence boundaries. The features can support regulatory controls; they do not establish compliance by themselves.
+## Request Path
 
-## Request path
-
-LLM-Shield-Proxy is a reverse proxy that can run inside an operator-controlled network. The
-diagram shows the main request and response path. Optional features and alternate routes do not
-all use every stage.
+The proxy operates inside an operator-controlled network (e.g., a VPC). It acts as a transparent reverse proxy between client applications and external LLM providers.
 
 ```text
 +-------------+         +-----------------------------------------------------------+          +---------------+
 |             | (HTTPS) |                      IN-VPC PROXY                         | (HTTPS)  |               |
 |   Client    |=======> |  +-----------------------------------------------------+  |=======>  | External LLM  |
 | Application |         |  | 1. Ingress Scanning & 3-Tier Cascade Redaction      |  |          | (OpenAI,      |
-|             | <=======|  |    - C++ google-re2 DFA Regex (O(N) linear time)  |  | <======= |  Anthropic,   |
-+-------------+  (SSE)  |  |    - Local Shannon Entropy Scanner                 |  |  (SSE)   |  Gemini,      |
+|             | <=======|  |    - C++ google-re2 DFA Regex                       |  | <======= |  Anthropic,   |
++-------------+  (SSE)  |  |    - Local Shannon Entropy Scanner                  |  |  (SSE)   |  Gemini,      |
                         |  |    - Quantized ONNX BERT-NER (in-memory)            |  |          |  vLLM)        |
                         |  +-------------------------+---------------------------+  |          +---------------+
                         |                            |                              |
                         |  +-------------------------v---------------------------+  |
-                        |  | 2. Configured Masking                              |  |
-                        |  |    - Optional AES-256-GCM Envelope Encryption       |  |
-                        |  |    - 4-Mode Masking (SYNTHETIC, STRUCTURAL, SCRUB)  |  |
+                        |  | 2. Configured Masking                               |  |
+                        |  |    - SYNTHETIC, STRUCTURAL, SCRUB, STATELESS_CRYPTO |  |
                         |  +-------------------------+---------------------------+  |
                         |                            |                              |
                         |  +-------------------------v---------------------------+  |
                         |  | 3. Audit Metadata and Export                        |  |
-                        |  |    - SHA-256 Predecessor Hash Chaining              |  |
-                        |  |    - RFC 6902 JSON Patch Differential Logs          |  |
-                        |  |    - Decision Trace Exporter (NIST OSCAL)           |=============> To configured systems
-                        |  +-------------------------+---------------------------+  |            Datadog
+                        |  |    - SHA-256 Predecessor Hash Chaining              |=============> To Datadog/Splunk
+                        |  |    - Ed25519 Signatures                             |  |
+                        |  +-------------------------+---------------------------+  |
                         |                            |                              |
                         |  +-------------------------v---------------------------+  |
                         |  | 4. Streaming Traffic Engineering & Rehydration      |  |
                         |  |    - Bounded SSE Sliding-Window Buffer              |  |
-                        |  |    - Bounded JSON Recursion Parser (Rust orjson)    |  |
-                        |  +-------------------------+---------------------------+  |
-                        |                            |                              |
-                        |  +-------------------------v---------------------------+  |
-                        |  | 5. Mapping expiry and eviction                     |  |
-                        |  |    - Ephemeral In-Memory Vaults                     |  |
-                        |  |    - Configured in-memory or Redis mapping state     |  |
+                        |  |    - Bounded JSON Recursion Parser                  |  |
                         |  +-----------------------------------------------------+  |
                         +-----------------------------------------------------------+
 ```
 
-## Five processing stages
+## Five Processing Stages
 
-### Stage 1: Ingress Scanning & 3-Tier Cascade Redaction
-On supported ingress paths, the proxy applies the configured detector tiers:
-1. **Tier 1 (Structured Identifiers):** Pre-compiled `google-re2` patterns avoid catastrophic backtracking for supported constructs. The tier handles configured SSNs, emails, IPs, and custom identifiers (`BYOR` - Bring Your Own Regex); unsupported constructs must be rejected or use a documented fallback.
-2. **Tier 2 (Unstructured Secrets):** The Shannon entropy scanner identifies secret-like high-entropy candidates. Measure it on the exact payload distribution and do not treat entropy alone as proof of a secret.
-3. **Tier 3 (Conversational Entities):** An optional compatible ONNX NER model runs locally for
-   contextual entity extraction. Model inputs, labels, accuracy, latency, and memory must be
-   validated for the exact export.
+### Stage 1: Ingress Scanning
+The proxy applies enabled detectors sequentially to outbound text payloads:
+1. **Tier 1:** Pre-compiled `google-re2` regular expressions for structured identifiers.
+2. **Tier 2:** Shannon entropy calculation for detecting unstructured secrets.
+3. **Tier 3:** (Optional) Local ONNX BERT-NER model for conversational entity extraction.
 
 ### Stage 2: Masking
-To reduce disclosure of detected PII to a configured upstream while retaining useful payload structure:
-- **Stateless crypto mode:** Detected values are replaced with AES-256-GCM ciphertext carried in
-  the payload. The operator controls the key.
-- **4-Mode Pipeline:** Dynamic per-request masking via headers supports:
-  - `SYNTHETIC`: Replaces selected entities with generated values that attempt to preserve useful
-    format. Token counts and model behavior can change.
-  - `STRUCTURAL_TAG`: Replacements like `[PERSON_1]`.
-  - `SCRUB`: Hard deletion of offending tokens.
-  - `STATELESS_CRYPTO`: Encrypted envelopes that can be decrypted when the token, key, algorithm context, and associated data remain valid.
+Detected PII is replaced before egress to the LLM. Available modes:
+- **SYNTHETIC:** Generates fake, structurally similar data (e.g., a fake SSN).
+- **STRUCTURAL_TAG:** Inserts a clear tag (e.g., `[EMAIL_1]`).
+- **SCRUB:** Deletes the text entirely.
+- **STATELESS_CRYPTO:** Replaces the text with AES-256-GCM ciphertext.
 
-### Stage 3: Tamper-Evident Chaining & Traceability
-To support integrity and traceability without retaining prompt data:
-- **Audit evidence:** SHA-256 predecessor links and Ed25519 signatures let offline verification detect changes within the supplied chain. Local storage is not WORM; immutable retention and external anchoring are deployment controls.
-- **Differential Logging:** Supported audit events can include RFC 6902 operations supplied by the redaction path. Validate exception, debug, custom-rule, exporter, and downstream logging paths for raw-value leakage.
-- **Signed Egress Transformation Receipt:** Calculates a digest over configured transformation metadata and emits a signed receipt. It attests to application-generated evidence, not to every packet on the network.
+### Stage 3: Tamper-Evident Auditing
+The proxy generates an audit trail for security events:
+- Events are linked via SHA-256 hashes to detect deletion or reordering.
+- Events are signed via Ed25519 to verify origin authenticity.
+- This layer logs security decisions (e.g., blocked tools) but does not record the raw PII itself.
 
-### Stage 4: Sliding-Window SSE Rehydration
-For incremental streaming and bounded retained state:
-- **SSE Sliding Buffers:** The lookahead buffer retains prefix overlap so placeholders fragmented across SSE events can be rehydrated. Historical component timings are not total proxy overhead; use the conformance and service-level protocols.
-- **Bounded Parsers:** Uses `orjson` plus explicit depth/bracket checks on documented paths. These bounds reduce specific recursion/resource risks but are not a complete denial-of-service defense.
+### Stage 4: Streaming Rehydration
+When the LLM streams the response back, the proxy must undo the masking.
+- **Sliding-Window Buffer:** Rehydrates placeholders even if they are split across multiple Server-Sent Event (SSE) chunks.
+- **Parser Bounds:** Protects against JSON recursion bombs (`max_depth = 20`) to prevent Denial of Service.
 
 ### Stage 5: Ephemeral Memory Eviction
-To reduce retained masking state:
-- **Stateless crypto:** Avoids a mapping database but still handles plaintext in process memory during transformation.
-- **In-memory mode:** Keeps mappings in process memory until request/session cleanup, expiry, or process termination.
-- **Redis TTL mode:** Makes mappings eligible for expiry in Redis; persistence files, replicas, backups, swap, crash dumps, and snapshots require separate controls.
-- **Verification:** Inspect logging, telemetry, audit, exception, container-runtime, and infrastructure paths before making a storage claim for a deployment.
+For stateful masking (SYNTHETIC, STRUCTURAL), the proxy must remember the original text to rehydrate the response.
+- State is kept in memory or Redis.
+- Mappings expire automatically based on a configured TTL to ensure sensitive data is not retained indefinitely. 
+- Stateless crypto masking bypasses this requirement entirely.
 
-
----
-
-## Implementation details
-
-LLM-Shield-Proxy is an asynchronous middleware data plane between enterprise applications and upstream models. Component and service-level overhead are reported separately.
-
-The sections below identify the bounded algorithms and native components that should be evaluated in a reproducible deployment benchmark.
-
-## 1. Data path and streaming
-
-The data path combines Python orchestration with selected native libraries. Throughput, event-loop lag, GIL effects, and process RSS must be measured under the intended payload and concurrency profile.
-
-### Bounded Streaming JSON Lexer (`orjson` / Rust)
-* **Implementation Mechanics:** The streaming engine uses `orjson` and processes fragmented SSE events incrementally. The conformance report checks retained-buffer bounds and measured allocation; no universal RSS ceiling is claimed.
-* **Flags:** [`MAX_SSE_LINE_LENGTH`](/docs/deployment)
-
-### Resilient SSE Sliding-Window Buffer
-* **Implementation Mechanics:** Server-Sent Events can split a placeholder across chunks. `SSERehydrationBuffer` retains trailing characters with the declared bound $LL = max(0, max_token_length - 1)$. The conformance fixtures exercise fragmentation; cancellation, malformed events, scheduling, and backpressure remain separate failure modes.
-
-### MCP tool catalog policy filter
-* **Implementation mechanics:** `MCPDiscoveryPrunerMiddleware` removes policy-denied tools from
-  supported `tools/list` results and can cache the filtered catalog. It does not rank tools or
-  infer task relevance. Measure memory with the expected catalog size and concurrency.
-
-### Dual-Pipeline Routing & Dynamic Schema Rewriting (Machine-to-Machine)
-* **Implementation Mechanics:** In `main.py`, a top-level object with `jsonrpc == "2.0"` takes the AST-aware stateless mutation path. The separate `/v1/mcp` route has a different scoped contract.
-* **Detection & substitution:** Supported structured string leaves are inspected with the stateless visitor and protected with AES-GCM context using `SHIELD_ENCRYPTION_KEY`. Dictionary values remain strings with sibling context fields; array values use wrapper objects and can change schema shape.
-* **Dynamic schema injection:** The proxy can add cryptographic context fields to supported tool
-  schemas and mark them required. A schema cannot force a model or provider to return those
-  fields. Test echo and rehydration for each model, provider, and parser.
-## 2. Three detector tiers
-
-The engine runs enabled detector tiers in order. Each tier has different accuracy and cost.
-
-### Tier 1: DFA Pre-compiled Regex (`google-re2`)
-* **Implementation Mechanics:** When available, the `re2` engine compiles supported patterns to avoid catastrophic backtracking. Unsupported constructs and fallback-engine behavior must be checked at startup. Throughput is workload-specific.
-
-### Tier 2: Shannon Entropy
-
-### Step 2: Format-Preserving Synthetic Masking
-* **Implementation Mechanics:** Regular expressions fail on unstructured data (e.g., 64-character raw cryptographic keys). The Tier 2 engine computes Shannon entropy `H(S) = -\sum p(c) \log_2 p(c)` across a sliding window. It targets base64 strings with entropy `\ge 4.5` bits/char and hex strings `\ge 3.4` bits/char.
-* **Format-aware masking:** Synthetic mode attempts to retain useful syntax for selected entity types. Token counts, model attention, downstream quality, and false-positive effects are workload- and tokenizer-dependent.
-* **Flags:** [`ENABLE_TIER2_ENTROPY`](/docs/deployment), [`ENABLE_SYNTHETIC_SWAPPING`](/docs/deployment)
-
-### Step 3: Script-Aware Non-Latin & CJK Rehydration Engine
-* **Implementation mechanics:** Word-boundary behavior differs across scripts and token shapes. The proxy uses `_is_ascii_word_char` for one supported boundary check; run the multilingual and fragmentation fixtures for the exact masking mode and corpus because this does not cover every Unicode segmentation case.
-
-## 3. Mapping state and stateless encryption
-
-Stateful masking modes keep original-to-token mappings in process memory or Redis. Stateless crypto avoids that mapping database for supported flows but still processes plaintext in memory and sends ciphertext-derived values upstream.
-
-### Redis TTL mapping store
-* **Implementation mechanics:** In Redis-backed mode, replicas can share mappings addressed with HMAC-derived keys and configured TTLs. Expiry is not secure erasure, and stream disconnect, persistence, replicas, backups, eviction timing, and cleanup failures need explicit tests.
-* **Flags:** [`REDIS_URL`](/docs/deployment), [`SESSION_TTL_SECONDS`](/docs/deployment)
-
-### In-band stateless cryptographic masking
-* **Implementation Mechanics:** For organizations without Redis, protected values can be encrypted into the payload using AES-256-GCM. Successful rehydration depends on the upstream returning the protected envelope intact and must be integration-tested with the configured provider.
-* **Flags:** [`SHIELD_DEFAULT_MASKING_MODE`](/docs/deployment)
-
-## 4. Service mesh and provider translation
-
-### Multi-Provider Translators & Anthropic Adapter
-* **Implementation mechanics:** The Anthropic adapter translates a supported subset of OpenAI-style `messages` requests after configured transformation. Validate tools, multimodal content, errors, streaming, and unsupported fields before relying on it.
-* **SSE normalization:** The adapter maps a documented subset of Anthropic `content_block_delta` events into an OpenAI-style delta shape. This does not establish compatibility with every LangChain, LiteLLM, model, tool, or error path.
-
-### Service Mesh Native gRPC `ext_proc` Integration
-* **Implementation mechanics:** The Envoy `ext_proc` option sends configured headers and bodies to the processor over gRPC, with a Unix Domain Socket available for same-pod IPC. UDS removes an IP routing hop but still incurs copying, serialization, scheduling, parsing, and transformation work. Validate body modes, buffer limits, timeout/failure policy, and UDS permissions with the selected Envoy version.
-
-## 5. Traffic controls and resilience
-
-LLM-Shield includes optional quota, retry, drain, and heuristic breaker controls. They reduce selected risks but do not prevent every resource-exhaustion condition.
-
-### Agent loop circuit breaker
-* **Implementation mechanics:** The circuit breaker tracks documented request/tool-call signals and can return `HTTP 429` when a configured threshold is crossed. It is a heuristic that can miss changing loops or flag legitimate repetition; pair it with provider and application budgets.
-* **Flags:** [`ENABLE_AGENT_BREAKER`](/docs/deployment)
-
-### Rate Limiting & Deep Component Health
-* **Token-bucket rate limiter:** When enabled, a Redis Lua operation applies the configured RPM and
-  burst limits atomically on one Redis server. Cross-replica behavior depends on shared Redis,
-  identity keys, topology, and outage policy.
-* **Connection draining:** On `SIGTERM`, the process marks itself unready and gives active
-  requests up to the configured drain timeout. The timeout and platform grace period can still
-  interrupt a stream.
-* **Health probes:** Exposes `/healthz`, `/livez`, and `/readyz` signals for documented dependencies. Probe freshness, thresholds, and failure coverage depend on configuration and do not replace service-level monitoring.
-
-## 6. Input normalization and resource limits
-
-The proxy normalizes selected Unicode and encoded forms before supported detector paths. These
-checks cover documented cases, not every possible encoding or evasion.
-
-### Normalization pipeline
-* **Zero-Width Character Stripping:** Filters zero-width spaces (`\u200B`), joiners (`\u200D`), byte order marks, and soft hyphens.
-* **BiDi / RTL Override Neutralization:** Strips Right-to-Left Overrides that visually flip character orders to humans while evading byte scanners.
-* **NFKC Unicode Normalization:** Converts full-width, circled, and decomposed glyphs to canonical equivalents prior to pattern matching.
-* **Base64 Candidate Inspection:** Recursively extracts and inspects Base64 candidate strings
-  with at least 20 characters. Other encodings and fragmentation patterns can remain undetected.
-
-### Structured Content and Tool-Call Scanner
-Modern LLMs operate over multi-turn agentic workflows, embeddings, and vision inputs.
-* **Multi-part message content:** Traverses supported JSON text fields in mixed content arrays. It does not inspect pixels, arbitrary encoded attachments, or every provider-specific envelope; validate preservation of non-text blocks.
-* **Recursive Tool Calls & Arguments:** Inspects and redacts JSON strings inside
-  `tool_calls[*].function.arguments` on supported paths.
-* **JSON Recursion Bomb Defense:** Enforces a hard `max_depth = 20` traversal limit and rejects over-depth payloads with `400 Bad Request`.
-
-## 7. Policy and audit exports
-
-The proxy decouples policy resolution from the execution plane so policy backends can be selected without embedding them in the streaming parser. Measure the latency and failure behavior of the chosen resolver in the deployment environment.
-
-### Pluggable tool-call policy resolver
-* **Implementation Mechanics:** A bounded streaming parser extracts tool execution keys (`name` or `method`) across SSE chunks. The keys are validated against a `BasePolicyResolver`; denied calls produce a rejection event. Latency and bypass resistance require deployment-specific tests.
-* **Further Details:** Read the full implementation reference in [docs/pluggable-rbac-engine.md](/docs/pluggable-rbac-engine.md).
-
-### Audit and trace exports
-* **Implementation Mechanics:** RBAC and **Data Loss Prevention (DLP)** events are deterministically serialized and linked in a tamper-evident SHA-256 chain. Durable modes append signed records to local JSONL; immutable WORM retention, if required, is supplied by the deployment's evidence store. Events can also be exported as OpenTelemetry spans and NIST OSCAL machine-readable artifacts to support control assessment.
+## Input Normalization
+To prevent LLMs or attackers from bypassing detection using alternate text encodings:
+* **Zero-Width Stripping:** Removes invisible characters (`\u200B`, `\u200D`).
+* **BiDi Neutralization:** Strips Right-to-Left Overrides used for visual obfuscation.
+* **Unicode Normalization:** Converts full-width and composed glyphs into canonical forms before scanning.

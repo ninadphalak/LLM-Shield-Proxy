@@ -1,39 +1,38 @@
 # Bounded Asynchronous OpenTelemetry Tracing
 
-[Back to Features Catalog](/docs/features-overview)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
-## Purpose
+## What It Does
+The proxy integrates with OpenTelemetry (OTel) to propagate W3C trace context and export traces asynchronously. It uses a bounded batch processor to minimize the impact of telemetry I/O on the primary request path.
 
-The tracing integration propagates supported W3C trace context and uses OpenTelemetry's
-`BatchSpanProcessor` to move exporter network I/O away from the ASGI request task. This reduces
-request-path exporter work; it does not create zero-overhead or lossless tracing.
+## How It Works
+The proxy delegates trace export to the standard OTel Python SDK.
 
-## Execution model
+1. **Context Extraction:** The proxy reads incoming W3C `traceparent` headers to join existing distributed traces.
+2. **Span Creation:** The application creates spans and adds attributes during the request lifecycle.
+3. **Batching:** Completed spans are pushed into the OTel SDK's bounded `BatchSpanProcessor`.
+4. **Asynchronous Export:** A background worker flushes batches to the configured OTLP endpoint over the network.
 
-1. Supported request paths extract W3C `traceparent` context.
-2. The application creates and updates spans on the request path.
-3. Completed spans enter the SDK's bounded batch processor.
-4. A background worker exports batches to the configured OTLP endpoint.
+## Performance Profile
+- **Overhead:** Using a background batch processor removes network latency from the proxy's critical path. However, span creation, attribute serialization, and memory allocation still consume CPU and RAM. It is not "zero overhead."
 
-Span creation, attribute processing, context propagation, queue operations, serialization, memory,
-and synchronization still consume resources. When the exporter or collector is slow, the queue can
-fill and spans can be delayed or dropped according to SDK configuration.
+## Configuration Flags
+The proxy uses standard OpenTelemetry environment variables (e.g., `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_TRACES_SAMPLER`).
 
-## Configuration and validation
+## Implementation Details & Edge Cases
+* **Queue Limits:** If your OTLP collector goes down or becomes slow, the proxy's internal span queue will fill up. Once full, the SDK will drop new spans to protect proxy memory and latency.
+* **Data Privacy:** Spans should never contain protected PII or raw prompt text. They are meant for system observability, not data recording.
 
-Configure sampling, queue size, batch size, exporter timeout, endpoint, and credentials using the
-documented OpenTelemetry settings. Include the exact configuration in load tests and confirm:
+## FAQ
 
-- request latency with tracing disabled and enabled;
-- queue and drop behavior when the collector is unavailable;
-- shutdown flushing behavior;
-- memory under the intended span rate; and
-- that attributes, events, exceptions, and resource metadata contain no protected values.
+**Q: Will tracing slow down my proxy requests?**
+A: Generating spans has a small CPU cost. However, because the actual network export is handled asynchronously by the `BatchSpanProcessor`, network delays to the OTLP collector will not block proxy requests.
 
-Async or background export does not mean the instrumentation is outside the Python process or
-unaffected by CPU and memory contention.
+**Q: What happens if the proxy crashes before flushing the batch?**
+A: The OTel SDK attempts a graceful shutdown flush, but in an abrupt termination (e.g., `SIGKILL` or OOM), any spans waiting in the memory queue will be lost.
 
-## Related implementation and tests
+## Practical Effect
+This integration allows operators to observe proxy latency, errors, and security decisions in standard APM tools without tightly coupling proxy latency to telemetry collector performance.
 
-- `llm_shield_proxy/observability/tracing.py`
-- `tests/test_tracing.py`
+## Related Tests
+Tests: [`tests/test_tracing.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_tracing.py).

@@ -1,19 +1,23 @@
-# LiteLLM and Ollama recipe
+# LiteLLM and Ollama Recipe
 
-Use the tested [LiteLLM integration example](/docs/integrations) to route an
-OpenAI-compatible client through LLM-Shield-Proxy to LiteLLM. LiteLLM can then route the model
-alias to a configured cloud or Ollama backend.
+You can route an OpenAI-compatible client through LLM-Shield-Proxy to [LiteLLM](https://github.com/BerriAI/litellm). LiteLLM can then route the request to a cloud provider or a local Ollama backend based on the model alias.
 
+**Data Flow:**
 ```text
-client -> LLM-Shield-Proxy :8000 -> LiteLLM :4000 -> configured model backend
+client -> LLM-Shield-Proxy (:8000) -> LiteLLM (:4000) -> configured model backend
 ```
 
-The example includes a Compose file and LiteLLM `config.yaml`. Set the real provider key only on
-the LiteLLM service, keep the shield-to-LiteLLM credential separate from the client credential,
-and replace evaluation-only `OVERRIDE_CLIENT_AUTH` with the deployment's authentication policy.
+## Integration Steps
 
-Before describing the stack as supported, test the model alias, `/v1/models`, chat streaming,
-tool calls, structured output, cancellation, retries, and the selected Ollama/provider adapter.
-Use synthetic values and assert what the controlled upstream actually receives.
+1. Review the tested [LiteLLM integration example](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/examples/integrations/litellm) in the repository. It includes a working Docker Compose file and a LiteLLM `config.yaml`.
+2. Configure your upstream API keys *only* on the LiteLLM service.
+3. Configure the client to authenticate with LLM-Shield-Proxy using a distinct client credential, separating client authentication from upstream provider authentication.
+4. Replace the evaluation-only `OVERRIDE_CLIENT_AUTH` proxy setting with your production authentication policy.
 
-[Review the 30-day pilot acceptance criteria](/docs/design-partner-pilot).
+## Validation Checklist
+Before moving to production, verify the following using synthetic test data:
+- Model alias routing (`/v1/models`)
+- Chat streaming and tool calls
+- Structured output
+- Retry and cancellation behavior
+- Confirm the final Ollama/provider endpoint receives redacted data.

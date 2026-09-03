@@ -2,7 +2,7 @@
 
 LLM-Shield-Proxy can sit between an application and an LLM provider. It transforms detected values
 before the configured upstream request and can restore mapped values on supported response paths.
-Detection is not complete, so network policy and deployment tests must enforce the intended egress
+Detection is not complete, so network policy and deployment tests should enforce the intended egress
 boundary.
 
 The diagrams below show two common deployment topologies.

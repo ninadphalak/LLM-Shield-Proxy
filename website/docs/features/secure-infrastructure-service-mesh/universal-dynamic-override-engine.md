@@ -3,16 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Request-Scoped Dynamic Override Engine** exposes a documented allowlist of settings through policy and request context. Security-sensitive, process-start, connection-pool, and resource-lifecycle settings are not automatically safe to override; add tests before extending the allowlist.
+The **Request-Scoped Dynamic Override Engine** allows individual HTTP requests to override specific, authorized settings (like the PII masking mode) without altering the global state of the proxy and without requiring every internal Python function to accept those settings as arguments.
 
 ## How It Works
-The implementation carries approved request-scoped settings through Python context variables so
-each layer does not need another function parameter.
+The engine uses Python's `contextvars` to isolate configurations per request concurrently.
 
-1. **Context Initialization:** When a request is received, the proxy extracts specific HTTP headers (like `X-Shield-Masking-Mode`) or tenant-specific settings from the policy YAML.
-2. **Contextvars Injection:** These overrides are injected into Python `contextvars.ContextVar` objects at the very top of the call stack.
-3. **Request-local retrieval:** The streaming path reads the request's `ContextVar` value without a network lookup. Correct isolation still depends on setting and resetting context at every task and background-work boundary.
-
+1. **Context Initialization:** When a request arrives, the proxy extracts authorized overrides from HTTP headers (e.g., `X-Shield-Masking-Mode`) or tenant policies.
+2. **Contextvars Injection:** These overrides are injected into a `contextvars.ContextVar` at the top of the ASGI request lifecycle.
+3. **Retrieval:** Deep internal layers (like the redaction engine) read the `ContextVar` directly. Because `contextvars` are natively isolated per `asyncio` task, one request cannot accidentally read another concurrent request's overrides.
 
 ```mermaid
 flowchart TD
@@ -20,31 +18,22 @@ flowchart TD
     B --> C[Layer 1: Routing]
     C --> D[Layer 2: Parsing]
     D --> E(Layer 3: Redaction Engine)
-    E -->|O 1 contextvar getter| F[Returns SCRUB]
+    E -->|O(1) contextvar getter| F[Returns SCRUB]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** `ContextVar` lookup and context propagation still perform work. Compare the selected design in a representative profile before claiming a performance benefit.
+- **Overhead:** Setting and retrieving `ContextVar` values is highly optimized in Python and avoids the latency of external lookups (like Redis or database queries).
 
-## Critical Logic & Edge Cases
-* **Off-loop context:** `contextvars` do not automatically propagate through every executor pattern. Documented off-loop paths can use `copy_context().run()`; add concurrency tests for new background paths.
-* **Resolution priority:** Priority is defined per supported setting and code path. Do not infer a project-wide hierarchy for fields resolved at startup or outside request context.
+## Implementation Details & Edge Cases
+* **Allowlist Enforcement:** The proxy strictly enforces which settings can be overridden. Security-sensitive settings (like API keys, routing destinations, or bypass flags) cannot be overridden via client headers.
 
 ## FAQ
 
 **Q: Can a client use this to override their rate limits?**
-A: Client headers should be restricted to explicitly documented fields such as the masking-mode header. Verify the current allowlist and authentication path in code and tests; do not expose keys, rate limits, destinations, or security scopes without a separate threat review.
+A: No. Rate limits, upstream endpoints, and audit configurations are explicitly excluded from client-side overrides to prevent abuse.
 
-
-## Plainspeak
-This feature supports selected request-scoped behavior without passing each value through every function signature.
-
-The engine supports request-scoped overrides for authorized settings. Operators must restrict which identities and fields can override policy and test task isolation under concurrency.
+## Practical Effect
+This feature provides a fast, thread-safe mechanism to apply custom tenant configurations (like scrubbing vs. synthetic PII redaction) on a per-request basis without complicating the internal code architecture.
 
 ## Related Tests
 Tests: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

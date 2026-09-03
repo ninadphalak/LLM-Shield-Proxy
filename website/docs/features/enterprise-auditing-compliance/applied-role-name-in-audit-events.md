@@ -3,16 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Applied Role Name in Audit Events** feature records the role name returned by the supported policy-resolution path for an event. It is useful correlation metadata; its accuracy depends on identity mapping, resolver behavior, event delivery, and audit integrity.
+The **Applied Role Name in Audit Events** feature records the specific RBAC role (e.g., `role_data_scientist`) that was used to authorize a request. This provides correlation metadata in the audit log to connect a proxy decision back to the specific policy that governed it.
 
 ## How It Works
-When a user authenticates, their `virtual_key_id` maps to a specific role (e.g., `role_data_scientist`).
+When a user authenticates, their `virtual_key_id` is mapped to a specific role.
 
-1. **Context Propagation:** During the authentication phase, the resolved role name is injected into Python's `contextvars`.
-2. **Event enrichment:** Supported audit and OSCAL paths read the role name from request context.
-3. **Structured output:** The emitted event can include
-   `"applied_role_name": "role_data_scientist"`. Retention depends on the configured sink.
-
+1. **Context Propagation:** During authentication, the resolved role name is injected into Python's `contextvars`, making it available throughout the request lifecycle.
+2. **Event Enrichment:** Supported audit and OSCAL telemetry paths read this role name from the request context.
+3. **Structured Output:** The emitted audit event includes an `"applied_role_name"` field.
 
 ```mermaid
 flowchart TD
@@ -23,30 +21,23 @@ flowchart TD
     C --> E
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Adds a role-name field to supported events. Measure serialization, queue, signing, and retention cost in the chosen audit mode.
+- **Overhead:** Extracting context and appending a string field to audit events introduces negligible overhead.
 
 ## Configuration Flags
-No separate flag enables this field. It appears only on the instrumented event paths that supply
-the resolved role.
+No separate flag enables this field. It appears automatically on instrumented event paths whenever a role is successfully resolved.
 
-## Critical Logic & Edge Cases
-* **Fallback role:** Main-route behavior depends on whether a `default_role` exists and on `SHIELD_FAILURE_MODE`; the MCP resolver has separate defaults. Test the actual event field for mapped, fallback, and denied callers.
-* **Identity evidence:** Where both authenticated identity and applied role are emitted, retain and verify both fields. Their presence does not prevent impersonation or privilege escalation.
+## Implementation Details & Edge Cases
+* **Fallback Roles:** If a `virtual_key_id` is not explicitly mapped, the proxy may fall back to a `default_role`, depending on configuration. Always inspect the audit event to see which role actually applied.
+* **Identity Evidence:** This field only records the *applied* role. It does not prove the true identity of the caller or prevent impersonation if the `virtual_key_id` was compromised.
 
 ## FAQ
 
 **Q: Why is this important for SOC 2?**
-A: Recording `applied_role_name` can help connect an observed decision to the policy name selected at that boundary. Auditors still need evidence for identity mapping, policy contents and approvals, configuration history, completeness, and control operation.
+A: Recording the `applied_role_name` connects an observed system action to the specific policy version active at that time. Auditors still require separate evidence that the policy itself was approved, configured correctly, and mapped to the right users.
 
-
-## Practical effect
-The supported audit events can include the role name resolved at the decision boundary. This helps an auditor join an event to policy evidence, but does not by itself prove identity mapping, policy contents, approval history, completeness, or control effectiveness.
+## Practical Effect
+Supported audit events include the role name resolved at the decision boundary. This helps trace an event to a policy, but does not independently establish non-repudiation or identity mapping.
 
 ## Related Tests
 Tests: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

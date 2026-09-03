@@ -8,7 +8,7 @@ evaluate. It does not make a service SOC 2 compliant.
 
 The proxy can map a virtual key to a configured role and apply that role on supported request
 paths. OPA, Vault, and local policy resolvers have different cache and failure behavior. Operators
-must test unknown identities, resolver outages, stale policy, revocation, and routing bypasses.
+should test unknown identities, resolver outages, stale policy, revocation, and routing bypasses.
 
 The `/v1/mcp` route applies policy to a limited JSON-RPC method set. It is not a complete MCP
 transport. Empty allowlists deny all tools by default; blocklist-only behavior requires an
@@ -16,9 +16,7 @@ explicit setting and permits every tool not listed.
 
 ## Boundary protection (CC6.6)
 
-The proxy can transform detected values before the configured upstream request is built. The
-HTTP conformance profile checks its own declared fixtures at that boundary. A pass is not a claim
-about all data, detector recall, other destinations, or network isolation.
+The proxy can transform detected values before the configured upstream request is built. Note that name (PERSON) redaction requires a loaded ONNX NER model and is otherwise inactive. The HTTP conformance profile checks its own declared fixtures at that boundary. A pass is not a claim about all data, detector recall, other destinations, or network isolation.
 
 Supported outbound URL paths can also apply SSRF and DNS-rebinding checks. The protection depends
 on routing every relevant request through those paths and on the configured allow and deny rules.

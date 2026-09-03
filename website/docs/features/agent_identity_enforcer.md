@@ -60,7 +60,7 @@ the proof's freshness window -- the proof is still cryptographically valid, so s
 verification wouldn't catch it. The Enforcer closes that gap with a server-side replay
 cache:
 
-* Every DPoP proof must carry a `jti` claim. A proof with no `jti` is rejected outright,
+* Every DPoP proof should carry a `jti` claim. A proof with no `jti` is rejected outright,
   because the verifier cannot check that proof for reuse.
 * On each request, the proxy computes `f"{jkt}:{jti}"` (the JWK thumbprint bound to the
   proof, plus its unique ID) and checks it against an in-memory `TTLCache` (300s TTL,

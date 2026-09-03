@@ -2,53 +2,29 @@
 
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
-LLM-Shield-Proxy uses three detector tiers. Tiers 1 and 2 have the built-in patterns and
-heuristics listed below. Tier 3 uses an operator-supplied model, so its entity types depend on
-that model.
+LLM-Shield-Proxy uses a three-tier detection cascade. Tiers 1 and 2 rely on built-in structural patterns and entropy heuristics. Tier 3 utilizes an operator-supplied NER model, meaning its supported entities depend entirely on the model you deploy.
 
 ---
 
 ## 🛡️ Tier 1: Pre-Compiled Structured Patterns
-Tier 1 uses pre-compiled `google-re2` regular expressions to detect structured formats with RE2's bounded-time matching model.
+Tier 1 uses highly optimized `google-re2` regular expressions to detect deterministic, structured data formats. These patterns flag structural shapes; they do not validate if an identifier (like a credit card or SSN) was actually issued or is active.
 
-All ten native pattern names below have focused redaction, non-disclosure, and rehydration tests. That is pattern-path coverage, not a population-level precision or recall claim. The expressions match the documented shapes; structural signals below do not establish whether an identifier was actually issued.
-
-**Native Tier 1 pattern catalog:**
-1. **`CREDIT_CARD`**: 13-16 digits with optional spaces or hyphens. Every matching run is redacted. Selected issuer prefixes and the Luhn checksum contribute only to an internal confidence value; neither can drop a match. A finite issuer table cannot exclude private-label, gift, or newly assigned cards, and a one-digit error or transposition can make a genuine card fail Luhn. See [validation as a signal](#validation-is-a-signal-not-a-gate).
-2. **`SSN`**: US Social Security Number shapes such as `XXX-XX-XXXX`. The detector does not
-   validate issuance. A general-ledger code with the same shape is also redacted because the
-   pattern cannot distinguish it from an SSN.
-3. **`EMAIL`**: Standard email addresses. The domain is not checked against a public-suffix list, so a reserved or non-routable domain still matches.
-4. **`PHONE`**: Selected 7- or 10-digit domestic shapes with optional country prefix and common separators. Extensions are not part of the native expression. Punctuation is not a validation gate: a bare international number can be legitimate, so every native-regex match is redacted.
-5. **`IP_ADDRESS`**: IPv4 network addresses.
-6. **`AWS_API_KEY`**: AWS `AKIA`/`ASIA` access-key shapes and the existing `sk-` API-key shape.
+**Native Tier 1 Catalog:**
+1. **`CREDIT_CARD`**: 13-19 digits with optional spaces or hyphens. Every matching run is redacted. While Luhn checksums and issuer prefixes are evaluated, they are only used for internal confidence scoring—a typo in a real card could fail Luhn, so we redact the shape regardless to prevent leaks. Note: a redaction span is never allowed to stop mid-way through a run of digits; it grows to cover the whole identifier.
+2. **`SSN`**: US Social Security Number shapes (e.g., `XXX-XX-XXXX`).
+3. **`EMAIL`**: Standard email addresses. Domains are not validated against public-suffix lists, so non-routable domains will still match.
+4. **`PHONE`**: Standard 7- or 10-digit domestic shapes with optional country codes.
+5. **`IP_ADDRESS`**: Standard IPv4 network addresses.
+6. **`AWS_API_KEY`**: AWS `AKIA`/`ASIA` access-key shapes, and standard `sk-` API keys.
 7. **`GITHUB_PAT`**: GitHub Personal Access Tokens (e.g., `ghp_...`).
-8. **`SSH_PRIVATE_KEY`**: Private-key PEM/OpenSSH header text; the native expression does not parse or validate the key body.
-9. **`JWT_TOKEN`**: Three-segment JWT-shaped strings; signatures and claims are not validated.
-10. **`MRN`**: The project-specific `NNN-NN-NNX` medical-record-number shape.
+8. **`SSH_PRIVATE_KEY`**: Private-key PEM/OpenSSH header boundaries.
+9. **`JWT_TOKEN`**: Three-segment JWT-shaped strings (signatures/claims are not cryptographically validated).
+10. **`MRN`**: Project-specific Medical Record Number shapes (e.g., `NNN-NN-NNX`).
 
-### Validation is a signal, not a gate
+### Validation is a Signal, Not a Gate
+Tier 1 structural checks are confidence signals, not definitive gates. A ledger code formatted as `ddd-dd-dddd` will trigger the SSN redaction rule. A 16-digit order number will trigger the Credit Card rule. The pattern alone cannot safely distinguish them.
 
-Tier 1 structural checks are confidence signals only. For `CREDIT_CARD`, selected issuer
-prefixes and Luhn affect internal confidence, but every 13--16 digit native-regex match is
-redacted. `PHONE` has no structural rejection rule: a 12--15 digit international number
-may be written without a leading plus or separator. A validator exception keeps the span.
-
-**Measured false positives.** On a 22-string corpus of ordinary business text, the detector
-matched **17 strings and 18 spans (77.3% of strings)**. The corpus includes order numbers,
-invoice IDs, SKUs, ISBNs, tracking numbers, ledger codes, cost centres, and dates.
-
-Using issuer tables and Luhn to reject card-shaped matches reduced the count to 11 strings, but
-it also missed a private-label-shaped value after a digit transposition. Rejecting bare long
-phone matches also missed plausible international numbers. Those rejection rules were not used.
-
-As a result, the detector keeps known false positives. A `ddd-dd-dddd` ledger code has the same
-shape as an SSN. A 13--16 digit business identifier can have the same shape as a private-label,
-gift, new, or mistyped card number. The pattern alone cannot safely tell them apart.
-
-**Confidence is internal only.** The validator computes `high` or `medium`, but does not attach
-that value to the detected span, audit record, or OpenTelemetry span. The detection path receives
-only the decision to keep the match. If validation raises an exception, the match is kept.
+The proxy intentionally errs on the side of false positives (over-redacting) rather than false negatives (leaking data). 
 
 > [!TIP]
 > You can easily add your own Tier 1 detectors using the [Bring Your Own Regex (BYOR)](bring-your-own-regex-byor-custom-rules.md) feature via `policies.yaml`.
@@ -56,70 +32,32 @@ only the decision to keep the match. If validation raises an exception, the matc
 ---
 
 ## 🧠 Tier 2: Shannon Entropy (Unstructured Secrets & Cryptography)
-Tier 2 checks selected token candidates that may not match a known key prefix or structured
-pattern.
+Tier 2 identifies token candidates that do not match known Tier 1 patterns but exhibit the high mathematical randomness typical of secrets.
 
 **What gets detected:**
-- **Cryptographic Keys & Salts**: High-entropy strings exceeding `\tau_H \ge 4.5` bits/symbol.
-- **Obfuscated / Smuggled Data**: Text-sized Base64 candidates and Hex-encoded secrets. Base64 decoding is bounded to 8,192 characters; images and larger encoded interiors are outside this detector's scope.
-- **Secret candidates**: Configured high-entropy token shapes above the selected length and entropy thresholds. Entropy is a heuristic and can produce false positives and false negatives.
+- **Cryptographic Keys & Salts**: High-entropy strings exceeding 4.5 bits per symbol.
+- **Obfuscated / Smuggled Data**: Text-sized Base64 blobs and Hex-encoded secrets. Base64 decoding is bounded to 8,192 characters to prevent DoS attacks via massive images.
+- **Secret Candidates**: Any high-entropy token shapes exceeding configured thresholds. Entropy is a heuristic and will produce false positives on randomly generated IDs.
 
 ---
 
 ## 🤖 Tier 3: NLP NER Models (Semantic & Contextual Data)
-Tier 3 runs a compatible local ONNX Named Entity Recognition (NER) model. The model uses nearby
-text to classify configured entity types.
+Tier 3 runs a local, operator-supplied ONNX Named Entity Recognition (NER) model. This tier uses surrounding sentence context to identify unstructured semantic entities (like names or locations) that lack fixed regex patterns.
 
-Tiers 1 and 2 target configured structured formats and high-entropy candidates; both can produce false positives and false negatives. Tier 3 can add contextual entity detection, with quality depending on the selected model, thresholds, language, and evaluation corpus.
+### Strict Fallback Policy
+**There is no regex fallback for Tier 3.** If no ONNX model is loaded, the proxy will not attempt to guess names or organizations. Attempting to approximate names using capitalization rules (e.g., "Any Capitalized Phrase") results in catastrophic false-positive rates that destroy prompt grammar and context.
 
-### Name redaction requires a loaded model
-
-There is no regex fallback for Tier 3. If no ONNX NER model is loaded, **no `PERSON` span
-is produced at all**, and the proxy says so rather than approximating.
-
-Until 2026-09-02 a regular expression stood in when no model was present. It matched any
-run of capitalized words. Measured over a 60-string prose corpus, it fired on 25 of 25
-ordinary business sentences that contained a capitalized bigram, producing 26 fabricated
-names, and it detected 0 of 5 CJK, Hangul, Cyrillic or Arabic names.
-
-The reason it was removed rather than tuned is the direction of the failure. A Tier 1 false
-positive over-redacts, which is safe. A `PERSON` false positive replaces real text: with
-synthetic swapping enabled, `My Aadhaar is on the enrolment slip.` was rewritten to
-`Elizabeth is on the enrolment slip.` That output is grammatical English, so no consumer
-downstream could tell the text had been altered. Tightening the pattern was measured too: a
-grammatical rule that ignored capitalized phrases introduced by a determiner cut false
-positives to 4 of 25, but lost 4 of 4 genuine names introduced the same way, such as
-`the Jane Doe account`. Both directions were unacceptable.
-
-**What this costs.** 15 Latin-script names in that corpus were detected by the old
-heuristic and are not detected without a model. That is a real reduction in coverage. It was
-accepted because the same detector corrupted 25 of 25 non-name strings to achieve it.
-
-**How the gap is surfaced.** An operator cannot be left believing name redaction is on when
-it is not:
-
-- The engine logs a warning at startup, and on every policy hot-reload, naming each profile
-  that declares a Tier 3 entity and receives nothing.
-- `/health` and `/livez` include `"name_redaction": "ok" | "unavailable"`.
-- `/readyz` reports the same under `components`, plus a `warnings` entry naming the affected
-  profiles. It is deliberately **not** part of the readiness gate: a proxy without a NER
-  model is running correctly, it is simply not redacting names, and failing readiness for
-  every such deployment would make the signal useless.
-- The compliance pack contains a **Redaction Coverage In Force** section and a
-  `redaction_coverage.json` artifact, so an auditor can tell a configured control from an
-  active one.
-- A failed inference logs at warning level and produces no spans. It does not fall back.
-
-Tier 1 structured identifiers and Tier 2 high-entropy secrets are unaffected by all of this.
+If a profile requests Tier 3 entities but no model is loaded, the proxy logs a warning at startup and reports `"name_redaction": "unavailable"` in the `/health` endpoint.
 
 ### Standard PII (General NER)
+Depending on your model, common entities include:
 - **`PERSON`**: Full names, patient names, employee names.
 - **`ORGANIZATION`**: Company names, hospitals, government agencies.
 - **`LOCATION`**: Physical addresses, cities, states, zip codes.
 - **`DATE_TIME`**: Specific dates of birth, admission dates, meeting times.
 
 ### Domain-Specific Models
-If you deploy domain-specific NER models via the Proxy's ONNX runtime, the following domain-specific entities can be redacted for compliance:
+If you deploy domain-specific NER models via the Proxy's ONNX runtime, you can redact specialized data:
 
 #### 🏥 HIPAA & Healthcare (Clinical NER)
 - **`PHI_DIAGNOSIS`**: Medical conditions, ICD-10 codes.
@@ -131,7 +69,6 @@ If you deploy domain-specific NER models via the Proxy's ONNX runtime, the follo
 - **`BANK_ACCOUNT`**: Checking/Savings account numbers.
 - **`ROUTING_NUMBER`**: ABA Routing numbers.
 - **`SWIFT_BIC`**: International bank identifiers.
-- **`FINANCIAL_TRANSACTION`**: Specific ledger amounts or invoice numbers linked to an entity.
 
 ---
 **Next Steps:** Learn how the Proxy substitutes this detected data with synthetic equivalents in the [Format-Preserving Synthetic Masking](format-preserving-synthetic-masking-entropy.md) guide.

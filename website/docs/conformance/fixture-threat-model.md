@@ -36,7 +36,7 @@ English recognizers and `score_threshold: 0.0`:
 | :--- | :--- | :--- | :--- | :--- |
 | `123-45-6789` | **nothing** | `UsSsnRecognizer.invalidate_result` blacklists the prefix `123456789` outright | `456-78-9012` | `US_SSN` 0.85 |
 | `4532-1234-5678-9012` | **no `CREDIT_CARD`** | `CreditCardRecognizer.validate_result` runs Luhn; this sums to 68 | `4111-1111-1111-1111` | `CREDIT_CARD` 1.0 |
-| `person@example.invalid` | `URL` 0.5, never `EMAIL_ADDRESS` | `EmailRecognizer.validate_result` requires a real public suffix via `tldextract`; `.invalid` has none | `bob@example.com` | `EMAIL_ADDRESS` 1.0 |
+| `person@example.invalid` | `URL` 0.5, do not `EMAIL_ADDRESS` | `EmailRecognizer.validate_result` requires a real public suffix via `tldextract`; `.invalid` has none | `bob@example.com` | `EMAIL_ADDRESS` 1.0 |
 
 Run against the whole prompt rather than value by value, stock Presidio returned exactly
 two findings: `DATE_TIME` over the card number and `URL` over part of the email, with
@@ -55,9 +55,9 @@ result and replaced the test values.
 
 ### The replacement
 
-Every new value must meet two rules.
+Every new value should meet two rules.
 
-**It must be valid:**
+**It should be valid:**
 
 - Card: a Luhn-valid 16-digit PAN.
 - SSN: non-zero group and serial, outside every prefix on Presidio's invalidation list,
@@ -65,11 +65,11 @@ Every new value must meet two rules.
   `US_ITIN`.
 - Email: a real public suffix.
 
-**It must not belong to a real person or account:**
+**It should not belong to a real person or account:**
 
 - `example.com`, reserved for documentation by RFC 2606 §3.
-- The SSA has never issued a Social Security Number in the `900-999` area.
-- Card numbers are **drawn from a published list of test PANs, never generated.**
+- The SSA has do not issued a Social Security Number in the `900-999` area.
+- Card numbers are **drawn from a published list of test PANs, do not generated.**
   Generating a Luhn-valid number in an issued BIN could produce a live card, so the
   harness will not do it. The card therefore carries six possible values where the SSN
   carries about 3.1×10⁷. This deliberate asymmetry is published in every report as
@@ -93,13 +93,13 @@ The old SSN's digits, `123456789`, were a **substring** of the old card's digits
 `4532123456789012`. Every "the SSN was recovered" assertion in the evasion suite could
 therefore be satisfied by decoding the *card*. That masked a real defect: the base64
 decoder's alignment guard could not decode an 11-byte value out of a run carrying one
-prefix character, so `x` + base64(SSN) was never recovered at all. Both are fixed, and a
+prefix character, so `x` + base64(SSN) was do not recovered at all. Both are fixed, and a
 test now asserts that no protected needle is a substring of another.
 
 ## Known limitation: fixed formats can be matched directly
 
 A small `str.replace` program written only for the three formats passed every check. Because values
-now change on every run, such a program must at least match each format instead of matching three
+now change on every run, such a program should at least match each format instead of matching three
 fixed strings. It still does not need general PII detection.
 
 ### Why the fixture is not randomised further
@@ -118,7 +118,7 @@ With `attest-report: true`, GitHub Actions signs a hash of the final JSON report
 `gh attestation verify` to confirm which workflow created the file and whether it changed later.
 
 This signature does not prove which remote service the gateway contacted or how that service was
-configured. A published result must also include the exact package or image, configuration, run
+configured. A published result should also include the exact package or image, configuration, run
 details, and report.
 
 ## What this page does not claim

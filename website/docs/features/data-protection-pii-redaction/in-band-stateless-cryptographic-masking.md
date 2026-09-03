@@ -1,51 +1,42 @@
 # In-Band Stateless Cryptographic Masking
 
-[Back to Features Catalog](/docs/features-overview)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
-## Purpose
+## What It Does
 
-`STATELESS_CRYPTO` replaces a detected value with an AES-256-GCM token instead of storing a
-plaintext-to-placeholder mapping in Redis. The token contains a random nonce plus authenticated
-ciphertext and tag encoded with URL-safe Base64. It does not contain the encryption key.
+`STATELESS_CRYPTO` mode replaces detected sensitive values with an AES-256-GCM encrypted token rather than storing a plaintext mapping in a Redis database. The resulting token contains a random nonce, authenticated ciphertext, and a tag encoded in URL-safe Base64. It does not contain the encryption key.
 
-This mode removes the external mapping-database dependency for supported flows. It does not remove
-all data risk: ciphertext derived from protected data is sent to the configured upstream, key
-holders can recover the plaintext, and process memory contains plaintext during transformation.
+This mode removes the need for an external Redis dependency for supported masking flows. However, it is important to note that ciphertext derived from protected data is still sent to the configured upstream LLM, and any party with access to the encryption key can recover the plaintext.
 
-## Request and response flow
+## How It Works (Request and Response Flow)
 
-1. The detector identifies a configured value.
-2. The proxy encrypts the value with the configured 32-byte `SHIELD_ENCRYPTION_KEY` and emits an
-   `[ENC_v1_...]` token.
-3. The transformed request is handed to the configured upstream client.
-4. If the provider returns the intact token, the bounded response path can decrypt and replace it
-   for the authorized client.
+1. **Detection:** The engine identifies a configured sensitive value.
+2. **Encryption:** The proxy encrypts the value using the configured 32-byte `SHIELD_ENCRYPTION_KEY` and emits an `[ENC_v1_...]` token in the request payload.
+3. **Egress:** The transformed request is forwarded to the upstream LLM.
+4. **Rehydration:** If the upstream model returns the intact token in its response, the proxy decrypts the token on the fly and replaces it with the original value before sending the response back to the client.
 
-Provider echo is not assured. A model can omit, split, alter, summarize, or transform a token. Test
-the selected provider, model, prompt pattern, and parser before depending on rehydration.
+*Note: Models are not guaranteed to echo tokens intact. A model might omit, split, or alter the token. Always test your specific model and prompt patterns before relying heavily on stateless rehydration.*
 
-## Security properties and limits
+## Security Properties & Limitations
 
-- AES-GCM authenticates ciphertext and associated data used by the selected implementation path.
-- A modified or malformed token is not treated as successfully decrypted.
-- Security depends on key entropy, access control, nonce uniqueness, implementation correctness,
-  rotation, backups, and the surrounding deployment.
-- The standard text token format currently uses a single active key. Coordinate key rotation with
-  request draining and retained-token lifetime; changing the key can make older in-flight tokens
-  unrecoverable.
-- Removing Redis avoids one datastore attack surface but does not create "zero data liability" or
-  establish compliance.
+- **Authentication:** AES-GCM authenticates both the ciphertext and the associated data. Modified or malformed tokens will fail decryption.
+- **Key Management:** Security heavily depends on key entropy, nonce uniqueness, secure key rotation, and strict access controls. 
+- **Rotation Risk:** The standard implementation uses a single active key. If you rotate the key, any older in-flight tokens (from delayed model responses) will fail to decrypt. Key rotation must be coordinated with request draining.
+- **Compliance:** While removing Redis eliminates a datastore attack surface, it does not automatically establish compliance or eliminate data liability.
 
 ## Configuration
 
-Set `SHIELD_DEFAULT_MASKING_MODE=STATELESS_CRYPTO` and provide
-`SHIELD_ENCRYPTION_KEY` as a valid 32-byte Base64- or hex-encoded value. Load it through the
-deployment's secret-management mechanism rather than source control.
+Set the masking mode to `STATELESS_CRYPTO` and provide a valid 32-byte Base64 or hex-encoded key:
 
-All replicas that may handle the same in-flight token need the corresponding key material. Measure
-token expansion, model behavior, latency, and process RSS in the intended multi-replica topology.
+```env
+SHIELD_DEFAULT_MASKING_MODE=STATELESS_CRYPTO
+SHIELD_ENCRYPTION_KEY=<your_32_byte_key>
+```
+*Note: Always load `SHIELD_ENCRYPTION_KEY` through a secure secret-management mechanism (e.g., AWS Secrets Manager, HashiCorp Vault). Do not commit it to source control.*
 
-## Related implementation and tests
+If you are running multiple proxy replicas, all instances must share the same key material to successfully decrypt tokens in a load-balanced environment.
+
+## Related Implementation & Tests
 
 - `llm_shield_proxy/engines/crypto_vault.py`
 - `llm_shield_proxy/engines/stateless_mutation_engine/crypto.py`

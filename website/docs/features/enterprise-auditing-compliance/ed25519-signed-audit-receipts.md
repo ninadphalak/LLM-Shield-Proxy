@@ -1,48 +1,40 @@
 # Ed25519-Signed Audit Receipts
 
-[Back to Features Catalog](/docs/features-overview)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
-## What it does
+## What It Does
+The proxy signs canonical, hash-chained audit records using the Ed25519 cryptographic algorithm. An auditor with the correct public key can detect if records in the chain have been modified or reordered. It does not prevent an attacker from deleting the entire unanchored tail (suffix) of the log.
 
-The audit logger signs canonical hash-chained records with Ed25519 on instrumented paths. A
-verifier with a separately trusted public key can detect changes within the supplied chain. It
-cannot detect deletion of an unanchored suffix.
+## How It Works
+Signing records detects tampering within the file but relies on secure key custody and log retention infrastructure to provide true non-repudiation.
 
-Signing does not make the storage immutable and does not, by itself, establish legal non-repudiation. Those outcomes depend on key custody, identity binding, retention controls, and operating procedures.
+1. **Key Provisioning:** Operators provide a private key (`AUDIT_SIGNING_PRIVATE_KEY`). If omitted, the proxy generates an ephemeral key for development, which changes on restart (and is therefore useless for long-term audits).
+2. **Public Key Distribution:** The corresponding public key is exposed at `GET /api/v1/audit/pubkey`.
+3. **Receipt Generation:** Each emitted audit record includes the `chain_id`, monotonically increasing `sequence`, `previous_hash`, the new `hash`, a base64 `signature`, and the `public_key_fingerprint`.
 
-## Key provisioning
+## Performance Profile
+- **Overhead:** Hashing and Ed25519 signing consume CPU resources. In `best_effort` mode, this occurs asynchronously. In `durable` or `required` modes, the caller blocks while waiting for the signature and persistence. 
 
-Set `AUDIT_SIGNING_PRIVATE_KEY` to a PEM private key or a 32-byte seed encoded as base64 or hex. If it is unset, the proxy generates an ephemeral key for development. An ephemeral key changes at restart and is unsuitable for long-lived evidence verification.
+## Configuration Flags
 
-The public key and SHA-256 fingerprint are available at `GET /api/v1/audit/pubkey`. Archive the trusted key or fingerprint outside the audit sink.
+| Environment Variable | Description |
+| :--- | :--- |
+| `AUDIT_SIGNING_PRIVATE_KEY` | A PEM private key or a 32-byte seed encoded as base64 or hex. |
 
-## Receipt fields
+## Implementation Details & Edge Cases
+* **CLI Verification:** Verify the hash chain and signatures using the bundled CLI:
+  ```bash
+  llm-shield-proxy audit-verify --audit-log audit.jsonl --pubkey-file audit-public-key.pem
+  ```
+  Without `--pubkey-file`, the CLI only validates the self-consistent hash chain, which an attacker can trivially forge.
 
-Each completed record includes:
+## FAQ
 
-- `chain_id` and monotonically increasing `sequence`
-- `previous_hash` and `hash`
-- base64 `signature`
-- `public_key_fingerprint`
+**Q: Does signing the logs make them immutable?**
+A: No. Cryptographic signatures make *tampering evident*, but they do not make storage *immutable*. You must configure your storage layer (e.g., AWS S3 Object Lock) to prevent deletion. See [Tamper-Evident Audit Logging with Hash Chaining](./worm-compliant-audit-logging-with-hash-chaining.md).
 
-Use the bundled verifier rather than reconstructing canonical serialization manually:
+## Practical Effect
+This feature cryptographically signs audit log entries so modifications can be detected by the CLI verifier. It depends entirely on strict private key security and external WORM (Write Once, Read Many) storage to provide legal non-repudiation.
 
-```bash
-llm-shield-proxy audit-verify --audit-log audit.jsonl --pubkey-file audit-public-key.pem
-```
-
-`--pubkey-file` is what makes the result meaningful. Without it the verifier can only
-confirm that an unkeyed hash chain is self-consistent, which a forger reproduces at will,
-so the command exits non-zero unless `--allow-unsigned` is passed. When a key is supplied,
-any record lacking a signature fails the whole file rather than being counted as merely
-unsigned.
-
-## Performance and failure behavior
-
-In the default `best_effort` mode, hashing and signing run on the audit worker and the request does not wait for persistence. In `durable` or `required` mode, the caller waits for an acknowledged append; a sink failure or timeout is surfaced. Measure this trade-off on the storage used in production rather than relying on a generic signing-latency claim.
-
-See [Tamper-Evident Audit Logging with Hash Chaining](./worm-compliant-audit-logging-with-hash-chaining.md) for durability configuration and WORM boundaries.
-
-## Related tests
-
-See `tests/test_audit_signing.py` and `tests/test_audit_durability.py`.
+## Related Tests
+Tests: `tests/test_audit_signing.py` and `tests/test_audit_durability.py`.

@@ -1,27 +1,17 @@
 # Signed SSE Stream Digest Receipt
 
-[Back to Features Catalog](/docs/features-overview)
+[⬅️ Back to Features Catalog](/docs/features-overview)
 
-## What it records
+## What It Does
+The **StreamDigestReceipt** maintains a rolling SHA-256 cryptographic digest over the Server-Sent Event (SSE) chunks emitted by the proxy. When the stream completes, it emits an HMAC-signed audit event containing this final digest. This allows an auditor to cryptographically verify that the exact bytes recorded in a downstream log match what the proxy emitted.
 
-`StreamDigestReceipt` maintains a rolling SHA-256 digest over the SSE chunks emitted by the
-rehydration pipeline. At stream completion it writes an HMAC-signed audit event containing:
+## How It Works
+The receipt proves what the proxy emitted, but it is not a full packet capture.
 
-- the session identifier;
-- the final rolling digest;
-- the number of chunks processed; and
-- the emission timestamp.
-
-The emitted event type is `stream_digest_receipt`, and the digest field is
-`stream_digest_sha256`. The receipt covers bytes observed by this application-level response-stream path;
-it is not a packet capture and does not prove that protected data was absent from every request,
-response, log, process, or alternate network route.
-
-## How it works
-
-For each emitted chunk, the implementation computes `SHA256(chunk)` and feeds that digest into a
-running SHA-256 state. At completion, the metadata is serialized with sorted keys and signed with
-HMAC-SHA-256 using `SHIELD_ENCRYPTION_KEY`.
+1. **Rolling Digest:** As the proxy yields SSE chunks to the client, it continuously updates a running SHA-256 state with the bytes of each chunk.
+2. **Finalization:** When the stream completes, the proxy extracts the final digest.
+3. **Signature:** The proxy signs the digest, chunk count, session ID, and timestamp using `SHIELD_ENCRYPTION_KEY`.
+4. **Audit Log:** The signed `stream_digest_receipt` event is written to the configured audit sink.
 
 ```mermaid
 flowchart LR
@@ -31,46 +21,27 @@ flowchart LR
     D --> E[HMAC-signed audit event]
 ```
 
-This is a sequential digest accumulator, not a stored Merkle tree: the implementation retains a
-single hash state rather than leaves or authentication paths.
+## Performance Profile
+- **Overhead:** Hashing occurs incrementally on each chunk. The single HMAC signature operation runs at the very end of the stream. CPU impact is minimal but scales with stream length and byte volume.
 
-## Evidence boundary
+## Configuration Flags
 
-The receipt can support these checks:
+| Environment Variable | Description | Linked Guide |
+| :--- | :--- | :--- |
+| `SHIELD_ENCRYPTION_KEY` | Required. The symmetric HMAC key used to sign the digest. | [View in deployment.md](/docs/deployment) |
 
-- whether supplied receipt metadata was modified after signing;
-- whether a separately retained sequence of response chunks reproduces the recorded digest; and
-- how many chunks the application says it processed for the session.
+## Implementation Details & Edge Cases
+* **Evidence Boundary:** The digest only proves what bytes the proxy *attempted* to send. It does not prove what the client actually received (due to network drops), nor what the upstream LLM originally sent (before redaction).
+* **Identity:** Because HMAC is symmetric, anyone with the `SHIELD_ENCRYPTION_KEY` can generate valid signatures. Keep the key secure.
 
-It does not establish:
+## FAQ
 
-- detector recall or the absence of an undetected sensitive value;
-- what the upstream provider received on the request path;
-- that another process, log sink, side channel, or route did not transmit data;
-- durable or immutable storage of the audit event; or
-- the identity of a producer when the HMAC key is shared, ephemeral, or poorly controlled.
+**Q: Does this prove no PII was leaked?**
+A: No. It only proves the exact sequence of bytes emitted. You must still verify that the proxy's redaction logic operated correctly on the upstream payload.
 
-Use the configured-upstream conformance check to test declared request values, and use
-deployment-level network telemetry when the assurance question concerns actual packets or routes.
+## Practical Effect
+This feature emits a cryptographic checksum of an entire LLM streaming response, enabling auditors to detect if downstream systems tampered with or truncated the response logs.
 
-## Configuration and key handling
-
-The current implementation requires `SHIELD_ENCRYPTION_KEY` when it emits this receipt. Treat the
-key as a secret, load it through the deployment's secret-management mechanism, and document key
-identity and rotation. HMAC is symmetric: anyone with the key can generate a valid signature.
-
-The receipt is written through the audit logger. Its delivery and retention properties therefore
-depend on the selected audit durability mode and any independently administered retention system.
-See [Immutable Retention and External Checkpoint Anchoring](/docs/immutable-retention).
-
-## Performance scope
-
-The path performs one chunk hash, one running-hash update, and final event signing. Its CPU and
-allocation cost depend on chunk size and rate and should be measured as part of the selected
-service-level workload.
-
-## Related implementation and tests
-
-- `llm_shield_proxy/security/attestation.py`
-- `llm_shield_proxy/streaming/streaming.py`
+## Related Tests
+Tests: 
 - `tests/test_attestation.py`

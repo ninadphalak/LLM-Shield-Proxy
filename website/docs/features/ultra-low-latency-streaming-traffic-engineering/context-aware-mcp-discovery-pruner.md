@@ -1,21 +1,13 @@
 # Tool Catalog Policy Filter (MCP Discovery)
 
 ## Overview
-The pruner removes tools that the resolved policy does not allow from supported `tools/list`
-responses. Its middleware also recognizes `server/discover`, but the shipped `/v1/mcp` route does
-not expose that method. The pruner does not infer which allowed tools are relevant to the user's
-current task.
+The **Tool Catalog Policy Filter** prunes disallowed tools from Model Context Protocol (MCP) `tools/list` discovery responses before they reach the model. The proxy applies tenant-specific Role-Based Access Control (RBAC) to ensure agents only "see" tools they are authorized to execute.
 
 ## Architectural Mechanics
-* **Policy filtering:** The middleware checks tool names against tenant-specific `frozenset`
-  collections and removes disallowed entries from `result.tools`.
-* **Redis cache:** Filtered tool definitions can be cached with `redis.asyncio` under a composite
-  tenant and upstream hash key.
-* **TTL limits:** Upstream `_meta.ttlMs` values are clamped between 30 and 3,600 seconds. The
-  default is 300 seconds.
-* **Event-Driven Invalidation:** A handled `notifications/tools/list_changed` message invalidates the affected cache entry. Delivery loss, races, TTL, multi-process caches, and resolver propagation can still produce stale observations.
+* **Policy Filtering:** When the proxy intercepts a `tools/list` response, it checks each tool name against a tenant-specific `frozenset` derived from the active `policies.yaml` role. Unauthorized tools are stripped from the payload.
+* **Redis Cache:** To avoid repeatedly querying downstream MCP servers for static catalogs, the proxy caches filtered tool definitions in Redis under a composite hash key (tenant ID + upstream hash).
+* **TTL Limits:** Cache Time-To-Live (TTL) is driven by the upstream server's `_meta.ttlMs` field, strictly clamped between 30 and 3,600 seconds (defaulting to 300 seconds).
+* **Event-Driven Invalidation:** If the downstream MCP server emits a `notifications/tools/list_changed` event, the proxy immediately invalidates the affected Redis cache entry. Cache staleness can still occur due to network loss, race conditions, or propagation delays across multi-process deployments.
 
-## Practical effect
-The pruner hides tools that policy denies before an allowed `tools/list` result reaches the model.
-This can reduce catalog size. It does not rank tools, understand the task, or prove that a smaller
-catalog improves model behavior.
+## Practical Effect
+This pruner acts as a filter on discovery. By hiding disallowed tools from the agent's context window, it shrinks the catalog size, saving tokens and reducing the attack surface. It does not intelligently rank tools based on user intent; it strictly enforces authorization bounds.

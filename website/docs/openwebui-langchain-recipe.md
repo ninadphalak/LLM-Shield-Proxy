@@ -1,25 +1,28 @@
-# Open WebUI, LangChain, and LlamaIndex recipe
+# Open WebUI, LangChain, and LlamaIndex Recipe
 
-The repository provides an [Open WebUI Compose example and Python smoke clients](/docs/integrations)
-for LangChain and LlamaIndex.
+The repository provides [smoke clients and integration examples](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/examples/integrations) for common frameworks.
 
-Use this base URL for the OpenAI-compatible path:
+## Routing Configuration
 
-```text
-http://llm-shield:8000/v1     # from the same Compose network
-http://localhost:8000/v1      # from the host
-```
+Configure your framework to use the proxy's OpenAI-compatible endpoint:
+- Docker network: `http://llm-shield:8000/v1`
+- Local host: `http://localhost:8000/v1`
 
-For Open WebUI, set `OPENAI_API_BASE_URL` and a client credential accepted by the shield.
-Open WebUI queries `/v1/models`; if the selected upstream does not implement that endpoint,
-configure an explicit model allowlist in Open WebUI and test chat separately. RAG, audio, image,
-and background-task endpoints are distinct paths and require their own privacy and compatibility
-assessment.
+### Open WebUI
+Set the `OPENAI_API_BASE_URL` environment variable to the proxy address. Set the provider API key to a client credential accepted by the proxy.
 
-For LangChain `ChatOpenAI`, use `base_url`. For LlamaIndex's OpenAI adapter, use `api_base`.
-Changing a base URL is only the first step: test the exact messages, tools, structured output,
-streaming, retry, and error behavior used by the application.
+*Note: Open WebUI uses `/v1/models`. If your upstream LLM provider does not support this endpoint, you must configure a hardcoded model allowlist in Open WebUI.*
 
-[Review the runnable examples and acceptance checks](/docs/integrations), then
-[apply to the 30-day design-partner pilot](/docs/design-partner-pilot) if your team can run an
-independent evaluation.
+### LangChain
+When instantiating `ChatOpenAI`, set the `base_url` parameter to the proxy address.
+
+### LlamaIndex
+When using the OpenAI adapter, set the `api_base` parameter to the proxy address.
+
+## Validation Checklist
+Changing the base URL is just the first step. You must verify framework-specific behavior:
+- Chat streaming (SSE)
+- Tool/Function calling
+- Structured outputs (JSON mode)
+- Retry and error handling mechanisms
+- Non-chat routes (RAG, audio, image endpoints require separate evaluation)

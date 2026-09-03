@@ -3,57 +3,44 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Tier 2 Shannon Entropy Scanner** complements configured patterns by scoring selected token candidates with Shannon entropy. It can identify some high-entropy secret shapes that have no known prefix, but it can also miss low-entropy secrets and flag benign identifiers.
+The **Tier 2 Shannon Entropy Scanner** identifies unstructured secret candidates (like cryptographic keys, salts, or obfuscated tokens) by measuring their mathematical randomness. It catches high-entropy secrets that lack a known prefix, acting as a fallback for the rigid patterns of Tier 1.
 
 ## How It Works
-The scanner calculates Shannon entropy for selected Base64- and hexadecimal-shaped candidates.
+The scanner extracts potential candidates (Base64 or Hex strings) and evaluates their Shannon entropy.
 
-1. **Candidate scoring:** The engine calculates character entropy with
-   `H(S) = -\sum p(c) \log_2 p(c)`.
-2. **Thresholds:** It compares candidates with the configured thresholds. The defaults target
-   Base64 at `\ge 4.5` bits per character and hexadecimal at `\ge 3.4`.
-3. **Scoped Measurement:** Benchmark the scanner separately from the complete request path, using the intended chunk-size and input distribution.
-
+1. **Candidate Scoring:** The engine calculates character entropy using the formula `H(S) = -∑ p(c) log₂ p(c)`.
+2. **Thresholds:** It compares the score against configured limits. By default, it flags Base64 strings at `≥ 4.5` bits/character and Hex strings at `≥ 3.4` bits/character.
+3. **Bounded Decoding:** To prevent DoS via massive encoded payloads, Base64 candidate inspection is bounded. It extracts candidates over 20 characters and decodes strings up to 8,192 characters.
 
 ```mermaid
 flowchart TD
     A[Payload Stream] --> B(Extract Base64 & Hex Candidates)
-    B --> C(Calculate H(S))
+    B --> C{Calculate H(S)}
     C -->|>= 4.5 Bits/Char| D[Identify as Secret]
     C -->|< 4.5 Bits/Char| E[Identify as Safe Text]
     D --> F[Redact / Route to Vault]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
-## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Cost depends on candidate count, length, decoding, runtime, and concurrency.
-  Measure it with representative input.
-
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
 | `ENABLE_TIER2_ENTROPY` | Toggles the Shannon Entropy scanner on or off. Defaults to `true`. | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **False-positive trade-off:** The configured thresholds are heuristics. Evaluate them on representative secrets, identifiers, natural language, encoded content, and hard negatives before deployment.
-* **Base64 Candidate Inspection:** The engine extracts candidates of at least 20 characters and decodes text-sized values up to 8,192 characters. Larger encoded interiors are skipped to bound detector work; a 256-character guard on each boundary keeps adjacent plaintext in scope.
+## Implementation Details & Edge Cases
+* **False-Positive Trade-offs:** Entropy thresholds are heuristics, not guarantees. A sufficiently random identifier might be falsely flagged, while a low-entropy password (e.g., `password123`) will be missed. You must evaluate these thresholds against representative traffic.
+* **Payload Guards:** The engine imposes a 256-character guard on boundaries to ensure adjacent plaintext remains in scope while decoding.
 
 ## FAQ
 
-**Q: Why use entropy instead of a massive Regex dictionary for secrets?**
-A: Regex dictionaries can miss proprietary key formats. Entropy adds a format-independent signal for sufficiently long, high-density candidates, but its effectiveness depends on the configured threshold and input distribution.
+**Q: Why use entropy instead of a massive regex dictionary for secrets?**
+A: Regex dictionaries cannot anticipate every proprietary key format or newly generated token. Entropy provides a format-independent signal that captures high-density secrets regardless of their specific shape or origin.
 
 **Q: Will this accidentally redact normal words or long URLs?**
-A: False positives are possible with any heuristic. The default threshold reduces matches on ordinary prose, but deployments should validate URLs, identifiers, and domain-specific text against their own corpus.
+A: The default threshold is tuned to avoid matching ordinary prose or standard URLs. However, deployments should still validate this behavior against domain-specific text to tune the thresholds if necessary.
 
-
-## Practical effect
-The scanner computes Shannon entropy for selected candidates and flags values above configured thresholds. High entropy is neither necessary nor sufficient for a secret, so the tier can miss secrets and flag benign data.
+## Practical Effect
+Tier 2 dynamically detects unstructured secrets that evade standard pattern matching. While highly effective against cryptographic material, it can produce both false positives and false negatives due to its heuristic nature.
 
 ## Related Tests
 Tests: [`tests/test_pii_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_pii_engine.py).

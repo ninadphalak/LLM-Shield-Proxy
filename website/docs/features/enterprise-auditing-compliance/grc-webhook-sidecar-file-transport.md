@@ -3,66 +3,51 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-Two Python classes exist for custom evidence delivery. They do nothing in a normal proxy deployment unless application code imports them, constructs them, passes them to `DecisionTraceExporter`, and calls `record_decision(...)`. The catch-all proxy route and `/v1/mcp` do none of those steps.
+This repository provides two Python classes (`AsyncWebhookTransport` and `SidecarFileTransport`) for custom evidence delivery to Governance, Risk, and Compliance (GRC) tools. 
+
+**Important:** These are integration primitives. They do nothing in a normal proxy deployment unless you write custom Python code to instantiate them and wire them into the `DecisionTraceExporter`.
 
 ## How It Works
-This is the complete behavior:
+If manually wired into the proxy via custom code:
 
-1. `AsyncWebhookTransport(url)` creates an `httpx.AsyncClient` with a two-second default timeout.
-2. `dispatch(payload)` performs one `POST` to that URL with `payload` as JSON. It adds no GRC-specific authentication header.
-3. A timeout, network error, or HTTP 4xx/5xx is logged. The error is not returned to `DecisionTraceExporter`, persisted, or retried.
-4. `SidecarFileTransport(path)` appends one JSON object plus a newline to that path. It does not create the parent directory, call `fsync`, rotate the file, or start a sidecar container.
-5. The word “sidecar” describes one possible operator topology: another container may mount the same volume and ship the JSONL file. This repository does not create or configure that log-shipping container.
-
-Minimal manual wiring looks like this:
+1. `AsyncWebhookTransport(url)` performs a single `POST` request to a webhook URL containing the JSON payload. It does not add GRC-specific authentication headers.
+2. `SidecarFileTransport(path)` appends a single JSON object plus a newline to a file path.
 
 ```python
+# Example of manual wiring required in custom application code
 transport = AsyncWebhookTransport("https://internal.example/grc-events")
 exporter = DecisionTraceExporter(transports=[transport])
 exporter.record_decision(...)
 ```
 
-No equivalent environment-variable wiring exists in the running FastAPI application.
-
-
 ```mermaid
 flowchart LR
     A[Custom caller invokes record_decision] --> B[Build one OSCAL event]
-    B --> C[Caller-supplied transport]
+    B --> C{Caller-supplied transport}
     C -->|Webhook| D[One HTTP POST]
     C -->|File| E[Append one JSONL line]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Delivery behavior:** Dispatch runs in retained background tasks, but there is no durable queue or completion acknowledgement. Process termination and destination failures can lose artifacts.
+- **Overhead:** Webhook dispatch runs as a background task. File transport performs blocking I/O (appends).
 
-## Configuration
+## Configuration Flags
+There are **no** environment variables (like `GRC_WEBHOOK_URL`) to enable these in the standard FastAPI proxy. You must write custom Python code to use them.
 
-There are no `GRC_TRANSPORT_MODE`, `GRC_WEBHOOK_URL`, or `GRC_SIDECAR_FILE_PATH` settings in the current `Settings` model. Wiring these primitives into the running proxy is an integration task, not an enabled feature flag.
-
-## Critical Logic & Edge Cases
-* **Delivery is best-effort:** The exporter creates background tasks and does not wait for a receiving system to persist the event. A process exit can interrupt pending tasks.
-* **HTTP status handling:** HTTP 4xx/5xx, timeouts, and request errors are logged as unacknowledged events, but there is no retry or dead-letter queue.
-* **File durability:** Closing the file is not the same as an `fsync` durability guarantee. The caller must create the directory and configure permissions, rotation, retention, and any shared Kubernetes volume.
+## Implementation Details & Edge Cases
+* **Best-Effort Delivery:** Webhook delivery does not implement retries or dead-letter queues. If the destination is unreachable, the event is logged as an error and dropped.
+* **File Durability:** The file transport appends to a file but does not call `fsync` or rotate the file. You must configure directory permissions, log rotation, and any shared Kubernetes volume (for a sidecar pattern) yourself.
 
 ## FAQ
 
-**Q: Does “Sidecar File Transport” inject or launch a Kubernetes sidecar?**
-A: No. It only appends JSONL to a file path. An operator must separately define a shared volume and a log-shipping container or DaemonSet.
+**Q: Does "Sidecar File Transport" automatically launch a Kubernetes sidecar?**
+A: No. It simply writes to a file. You are responsible for configuring the Kubernetes Pod to share a volume with a log-shipping sidecar (like Fluentbit).
 
-**Q: Can I use both transports at the same time?**
-A: A caller can pass both transport instances to `DecisionTraceExporter`, but the main proxy does not currently expose configuration that does so.
+**Q: Can I use this out-of-the-box to send logs to Vanta or Drata?**
+A: No. These are raw primitives. You would need to write an adapter to handle the specific authentication and payload schema required by your GRC vendor.
 
-
-## Practical effect
-These are integration primitives for custom evidence delivery, not a ready-to-enable GRC connector.
-
-If custom code calls these classes, they can attempt one HTTP delivery or one file append. They are not a Vanta, Drata, or Sprinto integration, and they are not active in the proxy request path today.
+## Practical Effect
+These classes are building blocks for developers extending the proxy. They are not active out-of-the-box and require custom code and infrastructure to function.
 
 ## Related Tests
-See [`tests/test_transport.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_transport.py) for direct class tests. These tests do not demonstrate runtime route wiring or delivery to a GRC vendor.
+Tests: [`tests/test_transport.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_transport.py).

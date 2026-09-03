@@ -101,7 +101,7 @@ PII.
 Tier 1 now keeps structural validation as a **confidence signal**, never a
 redaction gate:
 
-- Every native 13–16 digit card match is redacted. Selected issuer prefixes and Luhn
+- Every native 13–19 digit card match is redacted. Selected issuer prefixes and Luhn
   affect only an internal, unsurfaced confidence value: a private-label/newly assigned
   card may be absent from a finite table, and a typo can invalidate Luhn.
 - Every native phone match is also retained. Bare 12–15 digit international numbers are

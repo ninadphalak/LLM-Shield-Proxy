@@ -1,107 +1,80 @@
-# Submitting a result
+# Submitting a Result
 
-The [results table](./results) is open to independent verification. This page describes
-the submission path: what a run must carry, how it is checked, and what makes a row count
-as replicated.
+The [results table](./results) is open to independent verification. This page outlines how to submit a run, what the submission should contain, how it is validated, and the criteria for a result to be considered "replicated".
 
-Submit both the report produced by the run and the exact configuration used for the run. A result
-becomes replicated only after three different people submit the same gateway and configuration.
+To submit a run, you must provide both the generated report and the exact configuration used. A result only achieves "replicated" status when three separate individuals submit runs for the exact same gateway and configuration.
 
-## Why replication is counted, not averaged
+## Why Replication is Counted (Not Averaged)
 
-Every measured row in the table today comes from the initial project-run measurement set rather
-than an independent reproduction. Only runs by other operators can change that status.
+Currently, the results table relies primarily on initial project measurements. We encourage independent runs to validate these findings.
 
-So the table publishes, per target:
+For each target, the table publishes:
+- **Runs:** Total number of complete artifacts.
+- **Distinct Submitters:** The number of unique accounts that provided the runs.
+- **Versions Covered:** The exact target versions or image digests measured.
+- **Date Range:** The timeline from the first to the most recent run.
+- **Disagreements:** Published as separate rows, rather than averaged out.
 
-- **runs** - how many complete artifacts exist;
-- **distinct submitters** - how many different accounts produced them;
-- **versions covered** - the exact target versions/digests measured;
-- **date range** - first and most recent run;
-- **disagreements** - shown as separate rows, never averaged into one.
+Until three different people submit runs, the result is marked as `unreplicated`. This applies to all gateways, including LLM-Shield-Proxy. 
 
-Until three different people submit runs, the result is `unreplicated`. This rule also applies to
-LLM-Shield-Proxy, which currently has one run from this project's maintainer.
+*Note: Runs performed by a gateway's maintainer do not count toward the required three independent replications.*
 
-The maintainer's runs never count toward the replication of *any* row, including a competitor's.
-Three runs by one operator are one setup measured three times.
+### Handling Disagreements
 
-### Disagreements are published as disagreements
+If two runs of the same target using the same pinned configuration yield different outcomes, both rows are kept. The target is marked as **disputed**, and the difference is documented. Disagreements are valuable because they often highlight undocumented defaults, version drift, or platform differences.
 
-If two runs of the same target and the same pinned configuration reach different outcomes, both
-rows stay. The target is marked **disputed** and the difference is described. A disagreement is
-usually a finding - an undocumented default, a version drift, a platform difference - and
-averaging it away destroys exactly the information that made it worth publishing.
+## What a Submission Should Contain
 
-## What a submission must contain
+Include both of the following in a single pull request or issue:
 
-Both of these, in one pull request or issue:
+1. **The Raw Artifact:** The unedited JSON output from the harness. Do not reformat, hand-correct, or partially quote it. If a field is incorrect, re-run the benchmark.
+2. **The Pinned Configuration:** A Markdown record specifying:
+   - The exact target version or image digest (e.g., `portkeyai/gateway@sha256:…`, `litellm[proxy]==1.99.0`).
+   - The runtime environment (e.g., Python/Node version, OS).
+   - **All settings affecting redaction:** Include verbatim details (guardrail IDs, plugins, config blocks). "Default configuration" is acceptable if true; a vague "PII redaction on" is insufficient.
+   - Any features explicitly disabled that could impact the result.
+   - The submitter's name and any affiliation with the vendor.
 
-1. **The raw artifact.** The unedited JSON the harness wrote. Not reformatted, not hand-corrected,
-   not partially quoted. If a field is wrong, re-run; do not edit.
-2. **The pinned configuration**, as a Markdown record beside it, containing:
-   - exact target version or image digest (`portkeyai/gateway@sha256:…`, `litellm[proxy]==1.99.0`);
-   - the runtime it ran on (Python/Node version, OS);
-   - **every setting that affects redaction**, verbatim - the guardrail, the plugin, the config
-     block. "Default configuration" is an acceptable and useful answer; "PII redaction on" is not;
-   - what was *not* enabled, when it plausibly would have changed the result;
-   - who ran it and any affiliation with the vendor.
+*Note: A run lacking configuration details cannot be reproduced and will not be published. Conversely, a configuration without an artifact is merely a claim, not a measurement.*
 
-A run with an artifact and no configuration is unpublishable because it cannot be reproduced. A
-configuration with no artifact is a claim, not a measurement.
+### Redact Before Submitting
 
-### Redact before you submit
+The harness is designed to exclude tokens, API keys, and extra header values from the report. However, you should manually redact certain fields before publishing:
 
-The token, API keys and extra-header values are never written to the report by design. These
-fields can still carry things you do not want public:
+- `target.base_url`: May contain account identifiers for hosted gateways.
+- `capture.target_must_be_preconfigured_for` and `capture.self_probe.advertised_url`: May expose your tunnel hostname or probe secret.
 
-- `target.base_url` - carries account identifiers for some hosted gateways;
-- `capture.target_must_be_preconfigured_for` and `capture.self_probe.advertised_url` - carry your
-  tunnel hostname and the per-run probe secret.
+**Substitute these with a placeholder (e.g., `[REDACTED]`). Do not delete the field entirely,** as the schema requires it for validation.
 
-**Substitute a placeholder; do not delete the field** - the schema requires it, and a submission
-that fails validation cannot be published.
+## How a Run is Verified
 
-## How a run is verified
+Before a row is added, it must pass the following checks. Submissions failing any check will be sent back for correction:
 
-Before a row appears, the following are checked. Anything that fails sends the submission back
-rather than being published with a caveat.
-
-| Check | What it proves |
+| Check | Purpose |
 | :--- | :--- |
-| Validates against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json) | The envelope is internally consistent. `outcome` is re-derived **in both directions**, so a hand-edited report fails here |
-| `capture.self_probe` recorded and answered | The capture was reachable and recording *before* any target traffic, so a leak finding is not an artifact of a hijacked port |
-| `configured_upstream_boundary.correlated_requests >= 1` | The captured traffic is attributable to this run. Zero correlation is `inconclusive`, never a leak |
-| `marker_words_observed_max` | Distinguishes an over-redacting gateway from a target that sent its traffic elsewhere |
-| `leak_evidence[].match_kind` | Whether each finding was `literal` (the value verbatim) or `normalized` (recovered only after joining and separator-stripping). **Read this before calling anything a leak** |
-| `needle_proximity` / `needle_lengths` | The margin on this specific run. A validated loopback run measures SSN 2 of 9 |
-| `redaction_claim.claim_citation` resolves and supports the claim | A product claim must be supported by a source before the benchmark assigns a pass or fail outcome |
-| `capture.mode` | `loopback` is the stronger observation; `public` ran over a network the tester fronted |
-| No credential appears anywhere in the artifact | The report gets pasted into issues |
+| Schema Validation | Ensures the artifact validates against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json). The `outcome` field is verified programmatically, preventing manual edits. |
+| `capture.self_probe` | Confirms the capture server was reachable before routing target traffic, ensuring leak findings are valid. |
+| `correlated_requests >= 1` | Verifies traffic reached the capture server. Zero correlation results in `inconclusive`, rather than a leak. |
+| `marker_words_observed_max` | Distinguishes between aggressive redaction and misrouted traffic. |
+| `leak_evidence[].match_kind` | Specifies whether findings were `literal` (verbatim) or `normalized`. Review this before confirming a leak. |
+| `needle_proximity` | Validates the SSN match margins for the specific run. |
+| `claim_citation` | Ensures the product's redaction claims are supported by documentation. |
+| `capture.mode` | Identifies if the test ran locally (`loopback`) or over a public network (`public`). |
+| No Credentials | Ensures no secrets are accidentally included in the JSON output. |
 
-`passed` is the raw measurement and is never overwritten. `outcome` is what the row may *say* -
-see [the outcome table](./results#what-a-row-is-allowed-to-say). A submission cannot type its own
-outcome.
+The `passed` raw measurement is never overwritten. The `outcome` field is strictly derived based on validation rules.
 
-## How to submit
+## How to Submit
 
-1. Run the profile. [Reproduction guide](./reproducing) ·
-   [hosted-gateway runbook](./hosted-gateway-runbook).
-2. Open a pull request adding both files to `benchmarks/results/`, or open an issue with both
-   attached if you would rather not open a PR.
-3. State your affiliation. A run submitted by someone who works on the target is welcome and is
-   labelled `vendor-submitted`; it counts as a run and as a distinct submitter, and the label
-   stays on the row.
+1. Run the profile using the [Reproduction Guide](./reproducing) or the [Hosted Gateway Runbook](./hosted-gateway-runbook).
+2. Open a Pull Request adding the artifact and configuration to `benchmarks/results/`, or attach them to a GitHub Issue.
+3. State your affiliation. Vendor-submitted runs are welcome, count toward total runs, and will be labeled `vendor-submitted`.
 
-Submissions are accepted for any OpenAI-compatible gateway, including ones this project has never
-heard of, including runs that differ from a published row.
+We accept submissions for any OpenAI-compatible gateway, including unlisted platforms or runs that dispute existing rows.
 
-## Running it in your own CI
+## CI Automation
 
-A run from your own repository's CI is easier to verify than a file sent by email. A run counts toward the independent-replication floor only when the finished JSON report carries verifiable, detached provenance from that CI run.
-
-A composite GitHub Action ships in this repository at
-[`.github/actions/pii-leak-benchmark`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/.github/actions/pii-leak-benchmark):
+A run generated by your repository's CI system is easiest to verify because it provides detached provenance. We provide a composite GitHub Action at [`.github/actions/pii-leak-benchmark`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/.github/actions/pii-leak-benchmark) to automate this:
 
 ```yaml
 permissions:
@@ -124,23 +97,14 @@ jobs:
           attest-report: "true"
 ```
 
-The action installs `pii-leak-benchmark` from PyPI, runs the test, adds the outcome to the job
-summary, and uploads the report. GitHub then signs a hash of that report. Verify the downloaded
-file against the repository that ran it:
+This action installs `pii-leak-benchmark`, runs the test, adds the outcome to the job summary, and uploads the report. GitHub signs a hash of the report, which you can verify using:
 
 ```bash
 gh attestation verify pii-leak-benchmark-report.json -R submitter/repository
 ```
 
-The report's own `attestation` block is self-reported. The separate GitHub attestation contains the
-file's SHA-256 and identifies the repository, workflow, commit, and run. Editing the report after
-the workflow makes verification fail.
+## Current Limitations
 
-## What is still missing
-
-Recorded here rather than in a roadmap, because it bounds what the table can currently mean:
-
-- **No independent reproduction exists yet.** Every row is `unreplicated`.
-- **The signature does not prove the remote target's identity.** Signed report provenance proves which workflow created the report; it does not prove that the remotely measured process used the version or image named by the submitter. The exact configuration, package or image digest, public log, and vendor review are still needed.
-- **A format-matching shim can pass the fixture** - this is a known limitation explained
-  in the [fixture threat model](./fixture-threat-model).
+- **Replication Status:** Currently, all rows are `unreplicated`.
+- **Identity Verification:** The GitHub signature proves which workflow created the report, but does not definitively prove the remote gateway process used the exact version stated. Peer review is still required.
+- **Formatting Shims:** A gateway that purely formats data without true redaction may pass the fixture (see [Fixture Threat Model](./fixture-threat-model)).

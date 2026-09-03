@@ -7,7 +7,7 @@ In this mode, the supported upstream path targets the configured internal egress
 
 ## Inner Workings & Topology
 
-The intended topology isolates the proxy from direct internet routes; deployment controls must enforce and test that property:
+The intended topology isolates the proxy from direct internet routes; deployment controls should enforce and test that property:
 
 ```mermaid
 sequenceDiagram
@@ -59,7 +59,7 @@ hop can add latency and introduces another failure point.
 
 **Q: Does Air-Gapped Mode support multiple LLM providers?**
 The proxy preserves supported request paths, such as `/v1/chat/completions`, when it sends them to
-`EGRESS_GATEWAY_URL`. The egress gateway must select the public provider.
+`EGRESS_GATEWAY_URL`. The egress gateway should select the public provider.
 
 **Q: Do I need to supply an `UPSTREAM_API_KEY` to LLM-Shield in Air-Gapped Mode?**
 No, if `FORWARD_CLIENT_AUTH` is disabled and the egress gateway handles the authentication, LLM-Shield does not need to possess the upstream API keys.

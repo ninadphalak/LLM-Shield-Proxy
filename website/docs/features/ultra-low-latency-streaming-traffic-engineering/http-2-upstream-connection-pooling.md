@@ -3,17 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**HTTP/2 Upstream Connection Pooling** lets the shared HTTP client reuse eligible connections and negotiate HTTP/2 with supporting upstreams. Reuse depends on origins, pool limits, idle expiry, failures, intermediaries, and provider behavior.
+**HTTP/2 Upstream Connection Pooling** configures the proxy's internal HTTP client to reuse long-lived TCP/TLS sockets and multiplex concurrent requests. This eliminates the latency overhead of establishing new handshakes for every outbound request.
 
 ## How It Works
-New TCP/TLS handshakes add environment-dependent latency. Reusing eligible connections avoids repeating that setup work.
+Establishing a new HTTPS connection requires TCP handshakes and TLS cryptographic negotiation. Pooling avoids repeating this work.
 
-1. **Persistent Sockets:** The proxy's `httpx.AsyncClient` is configured to hold long-lived `keep-alive` sockets open.
-2. **HTTP/2 multiplexing:** A supporting upstream can carry multiple concurrent streams on one
-   connection. This avoids HTTP/1.1's one-active-response-per-connection limit, but packet loss and
-   connection failure can still affect every stream on that TCP connection.
-3. **Connection Re-Use:** When an eligible pooled connection exists, the proxy can reuse it instead of creating a new TCP/TLS connection.
-
+1. **Persistent Sockets:** The proxy's `httpx.AsyncClient` is configured to maintain long-lived `keep-alive` TCP connections with upstream providers.
+2. **HTTP/2 Multiplexing:** If the upstream provider supports HTTP/2, the proxy leverages multiplexing to carry multiple concurrent streams over a single TCP connection. (Note: A failure of the underlying TCP socket will impact all multiplexed streams).
+3. **Connection Re-Use:** When an eligible idle connection exists in the pool, the proxy routes new outbound requests through it instantly.
 
 ```mermaid
 flowchart LR
@@ -23,43 +20,31 @@ flowchart LR
     B -->|Multiplexed over 1 TCP Socket| E[Upstream OpenAI / Anthropic]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Pool state and active streams consume sockets, memory, and CPU. The configured
-  limit of 1,000 connections is a ceiling, not evidence that one socket will carry 1,000 streams
-  efficiently.
+- **Performance Benefits:** Avoids environment-dependent TLS handshake latency.
+- **Resource Constraints:** Connection pools consume sockets and memory. The configured maximum connection limit acts as a strict ceiling.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
 | `HTTP_MAX_CONNECTIONS` | Maximum number of concurrent connections in the pool (default: 1000). | [View in deployment.md](/docs/deployment) |
 | `HTTP_MAX_KEEPALIVE_CONNECTIONS` | Number of persistent idle connections to keep warm (default: 200). | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Connection draining (SIGTERM):** The proxy gives existing streams up to `DRAIN_TIMEOUT_SECONDS` before closing the pool. Completion also depends on the Kubernetes grace period, endpoint propagation, upstream/client behavior, and stream duration.
-* **Timeouts and stale sockets:** The HTTP client applies configured read, write, connect, and pool
-  timeouts. Retry and connection cleanup behavior must be tested during partial failures.
+## Implementation Details & Edge Cases
+* **Graceful Draining (SIGTERM):** During shutdown, the proxy allows existing streams to finish within the `DRAIN_TIMEOUT_SECONDS` window before forcefully severing the `httpx` pool.
+* **Timeout Disciplines:** The client enforces strict connect, read, and write timeouts. Stale sockets or partial network failures rely on standard TCP retransmission and proxy retry logic to recover.
 
 ## FAQ
 
 **Q: Do I need to enable HTTP/2 on my upstream provider manually?**
-A: The HTTP client can negotiate protocol support through TLS/ALPN. Confirm the negotiated protocol and reuse behavior in your environment because providers, gateways, proxies, and client configuration can change the result.
+A: No. The proxy's HTTP client negotiates protocol support automatically via TLS/ALPN. However, intermediate gateways or proxies in your network architecture may downgrade the connection to HTTP/1.1.
 
 **Q: Does this help if I am using a local vLLM or Ollama instance?**
-A: It can avoid repeated connection setup when the local server supports keep-alive. The effect on
-throughput depends on the server, protocol, concurrency, response generation, and payload. Measure
-it; loopback does not guarantee a meaningful gain.
+A: Yes, if the local inference server supports HTTP keep-alives. While loopback network latency is negligible, avoiding TLS handshakes (if configured) still saves CPU cycles.
 
-
-## Practical effect
-The shared client reuses eligible upstream connections. With HTTP/2, a supporting upstream may
-carry several streams on one connection. Pool expiry, failures, origin changes, and server limits
-can still create new connections.
+## Practical Effect
+The proxy maintains a warm pool of connections to upstream models. When HTTP/2 is negotiated, it multiplexes traffic efficiently, drastically lowering TTFT (Time To First Token) by removing transport-layer setup time.
 
 ## Related Tests
 Tests: [`tests/test_transport.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_transport.py).

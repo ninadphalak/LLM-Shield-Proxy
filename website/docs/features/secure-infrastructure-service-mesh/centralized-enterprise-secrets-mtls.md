@@ -3,18 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-This feature supports retrieving configured secrets from HashiCorp Vault and applying selected TLS
-credentials. Suitability for a regulated environment depends on the full deployment, trust,
-identity, rotation, logging, and operational controls.
+The proxy can retrieve configuration secrets from HashiCorp Vault at startup and apply Mutual TLS (mTLS) to backend connections. This centralizes secret management but does not eliminate all secret-exposure risks in the deployment environment.
 
 ## How It Works
-Kubernetes ConfigMaps are not secret stores, and plaintext credential files can be copied or
-backed up. The Vault path lets the runtime fetch supported secrets at startup.
+Rather than mounting static, plaintext credentials (like Kubernetes ConfigMaps) that can be easily copied, the proxy fetches secrets dynamically.
 
-1. **Vault Authentication:** On startup, the proxy authenticates to HashiCorp Vault using Kubernetes Service Account Tokens or Vault AppRole credentials.
-2. **In-Memory Hydration:** The runtime can fetch configured secrets into process memory without intentionally writing them to an application file. Secret-manager agents, swap, crash dumps, logs, and platform snapshots require separate controls.
-3. **mTLS Transport:** Configured backend connections can require client certificates and server verification. Assurance depends on trust roots, hostname validation, key custody, protocol configuration, and the complete connection path.
-
+1. **Vault Authentication:** At startup, the proxy authenticates to HashiCorp Vault using a Kubernetes Service Account Token or Vault AppRole.
+2. **In-Memory Hydration:** Retrieved secrets are kept in process memory and used to configure the proxy (e.g., Redis credentials, API keys). They are not intentionally written to disk.
+3. **mTLS Transport:** The proxy can be configured to use client certificates for backend connections (like Redis), verifying both the client and the server.
 
 ```mermaid
 flowchart TD
@@ -24,37 +20,28 @@ flowchart TD
     D -->|mTLS Handshake| E[(Redis Cluster)]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Vault authentication, network requests, parsing, caching, and renewal use time and
-  resources. Measure startup and refresh behavior, including outages.
+- **Overhead:** Vault authentication and fetching secrets add latency to the startup sequence. Background lease renewal consumes minor asynchronous CPU cycles.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
 | `VAULT_ADDR` | The URL of the HashiCorp Vault cluster. | [View in deployment.md](/docs/deployment) |
-| `VAULT_AUTH_METHOD` | The auth mechanism (`kubernetes`, `approle`, `token`). | [View in deployment.md](/docs/deployment) |
+| `VAULT_AUTH_METHOD` | The authentication mechanism (`kubernetes`, `approle`, `token`). | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Dynamic lease renewal:** A background `asyncio` task can renew a supported Vault lease before
-  expiry. Renewal can fail, and a valid lease does not guarantee uninterrupted service.
-* **Startup failure on configured auth error:** When Vault-backed secrets are required, authentication failure prevents that startup path from becoming ready. Test optional-secret and cached-secret behavior separately.
+## Implementation Details & Edge Cases
+* **Dynamic Lease Renewal:** A background task automatically attempts to renew supported Vault leases before they expire. If renewal fails, the proxy will eventually lose access when the lease expires.
+* **Startup Failure:** If Vault is unreachable or authentication fails, the proxy will fail to start. Test your deployment's behavior during Vault outages.
+* **Memory Exposure:** Secrets are not written to disk by the application, but they reside in memory. Core dumps, swap space, hypervisor snapshots, or compromised host OS access can still expose them.
 
 ## FAQ
 
-**Q: Does it support AWS Secrets Manager or Azure Key Vault?**
-A: Currently, HashiCorp Vault is the natively supported provider for advanced dynamic leases and PKI (mTLS). However, basic secrets can be injected into the proxy's environment via standard Kubernetes Secrets integrations (like the External Secrets Operator) which bridge AWS/Azure into the pod.
+**Q: Does it support AWS Secrets Manager or Azure Key Vault natively?**
+A: HashiCorp Vault is natively supported for advanced dynamic leases. To use AWS/Azure, you must use standard Kubernetes Secrets integrations (like External Secrets Operator) to mount them into the environment, bypassing the native Vault integration.
 
-
-## Practical effect
-This feature centralizes secret retrieval; it does not remove secrets from process memory or every platform persistence and observability path.
-
-Vault-backed retrieval can avoid application-managed plaintext credential files. Operators still need controls for Vault, workload identity, memory, swap, dumps, logs, backups, and administrator access.
+## Practical Effect
+This feature shifts credential management out of static files and into a centralized, auditable Vault instance. You must still secure the proxy's runtime memory and execution environment.
 
 ## Related Tests
 Tests: [`tests/test_vault_mtls.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_vault_mtls.py).

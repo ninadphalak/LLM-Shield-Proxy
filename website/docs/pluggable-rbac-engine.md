@@ -1,12 +1,10 @@
-# Implementation Reference: Policy Resolution
+# Pluggable RBAC Engine
 
-The MCP tool-policy path separates policy storage from request-time enforcement. A resolver returns
-the allowed and blocked tools for a virtual key. The router applies that decision before it sends a
-supported tool call upstream.
+LLM-Shield-Proxy separates MCP tool policy storage from request-time enforcement. A resolver interface determines the allowed and blocked tools for a given virtual key, and the router applies that decision before forwarding the tool call upstream.
 
-## Resolver interface
+## Resolver Interface
 
-Resolvers implement the asynchronous `BasePolicyResolver` interface:
+All resolvers implement the `BasePolicyResolver` asynchronous interface:
 
 ```python
 from abc import ABC, abstractmethod
@@ -18,37 +16,17 @@ class BasePolicyResolver(ABC):
         pass
 ```
 
-## Available resolvers
+## Available Resolvers
 
-- **In-memory/YAML:** loads local role mappings and supports periodic reloads.
-- **Redis:** reads cached policy from Redis without an external HTTP policy call on a cache hit.
-- **OPA:** requests a decision from a configured Open Policy Agent endpoint and keeps a local
-  stale-while-revalidate snapshot.
-- **Vault:** reads policy from a configured HashiCorp Vault path and keeps a local
-  stale-while-revalidate snapshot.
-- **Custom:** applications can supply another `BasePolicyResolver` implementation.
+- **In-memory/YAML:** Loads role mappings from a local file and polls for updates.
+- **Redis:** Reads cached policies from a Redis cluster.
+- **OPA:** Requests a decision from an Open Policy Agent (OPA) endpoint, maintaining a local stale-while-revalidate cache.
+- **Vault:** Reads policies from HashiCorp Vault, maintaining a local stale-while-revalidate cache.
+- **Custom:** You can implement and inject your own `BasePolicyResolver`.
 
-These resolvers have different authentication, timeout, cache, revocation, and failure behavior.
-Test the selected resolver against the real backend before deployment. A cache hit still includes
-serialization and local processing, and a remote refresh adds network work.
+## Request Behavior
 
-## Request behavior
-
-The router resolves policy for the current request. With a non-empty allowlist, an unlisted tool is
-denied. An empty allowlist denies every tool by default. Setting
-`MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY` changes that behavior to allow every tool not explicitly
-blocked and emits a critical startup warning.
-
-Policy changes take effect according to the resolver's reload or cache rules. They do not change a
-decision that a request has already resolved.
-
-## Evidence and limits
-
-Tests cover fragmented tool names, resolver decisions, Redis integration, cache invalidation, and
-selected failure paths. They do not prove backend availability, complete MCP protocol support, or
-correct policy for a particular deployment. The `/v1/mcp` route implements a documented JSON-RPC
-subset; it is not a complete MCP Streamable HTTP transport.
-
-See the [MCP Tool Governance guide](/docs/guides/mcp-tool-governance) for configuration and the
-[OPA and Vault resolver page](/docs/features/ultra-low-latency-streaming-traffic-engineering/opa-vault-rbac-resolvers)
-for cache and failure semantics.
+The router resolves the policy per request.
+- **Allowlist defined:** Any unlisted tool is denied.
+- **Empty allowlist:** All tools are denied by default (`DENY_ALL`).
+- **Blocklist-only mode:** Setting `MCP_EMPTY_ALLOWLIST_MODE=BLOCKLIST_ONLY` allows any tool not explicitly blocked. *Note: This emits a critical startup warning as it violates secure-by-default principles.*

@@ -1,12 +1,9 @@
-# Immutable retention and multi-worker checkpoints
+# Immutable Retention and Checkpoints
 
-LLM-Shield-Proxy does not bundle a cloud storage SDK. The proxy writes signed per-worker chains, and an offline command produces a signed checkpoint that can be uploaded with the logs to the immutable store your organization already operates.
+LLM-Shield-Proxy does not contain built-in integrations for cloud storage providers (like AWS S3 or Google Cloud Storage). To achieve WORM (Write-Once, Read-Many) compliance for your audit logs, you must export the proxy's local JSONL logs to an external immutable storage system.
 
-This keeps cloud clients and network I/O out of the proxy process.
-
-## 1. Mount a stable signing key
-
-Provision an Ed25519 private key through your existing secret manager and mount it read-only:
+## 1. Mount a Stable Signing Key
+By default, the proxy generates an ephemeral Ed25519 key on startup. For production audit logs, you must mount a stable private key from your secret manager:
 
 ```dotenv
 AUDIT_SIGNING_KEY_FILE=/run/secrets/llm-shield-audit-ed25519.pem
@@ -14,11 +11,8 @@ AUDIT_DURABILITY=required
 AUDIT_DURABLE_PATH=/var/lib/llm-shield/audit-{instance_id}-{pid}.jsonl
 ```
 
-`AUDIT_SIGNING_KEY_FILE` takes precedence over inline key material and fails startup when the file is missing or invalid. Keep the public key and its fingerprint in a separate evidence catalog. Rotation should start a new documented key epoch; do not overwrite the old public key.
-
-## 2. Create one checkpoint for all workers
-
-Use a separate checkpoint-signing key controlled by the evidence pipeline:
+## 2. Generate Checkpoints
+Each proxy worker process maintains its own independent hash chain. When you rotate log files, you use the offline `audit-checkpoint` CLI to verify the chains and generate a signed terminal-state manifest (checkpoint) covering all workers.
 
 ```bash
 llm-shield-proxy audit-checkpoint \
@@ -26,38 +20,21 @@ llm-shield-proxy audit-checkpoint \
   --audit-log audit-worker-102.jsonl \
   --audit-pubkey-file audit-public.pem \
   --signing-key-file checkpoint-private.pem \
-  --out checkpoint-2026-08-30T1500Z.json
-
-llm-shield-proxy audit-checkpoint-verify \
-  --checkpoint checkpoint-2026-08-30T1500Z.json \
-  --pubkey-file checkpoint-public.pem
+  --out checkpoint-2026-08-30.json
 ```
 
-The command verifies every event signature and chain transition before recording each worker's chain ID, terminal sequence, terminal hash, time range, event count, source checksum, and audit-key fingerprint. The manifest is signed and contains no prompt or matched protected value.
+## 3. Retain Evidence Externally
+Configure a log forwarding agent (e.g., Fluent Bit, Datadog Agent) to upload the rotated JSONL files and the generated checkpoint JSON to immutable storage.
 
-The chains remain independently ordered. The checkpoint does not claim a global event order. Use request IDs, trace IDs, or an external ordered event service when cross-worker ordering matters.
+Common implementations:
+- **Amazon S3 Object Lock** (Compliance Mode)
+- **Azure Immutable Blob Storage** (Time-based retention policies)
+- **Google Cloud Storage Bucket Lock**
 
-## 3. Retain the evidence outside the proxy trust domain
+*Warning: Ensure you thoroughly test your retention policies in a staging environment. Immutable storage policies are often impossible to reverse or delete before the retention period expires.*
 
-Upload the closed log segments, signed checkpoint, checkpoint public key, and a small metadata record identifying the retention policy. Verify the upload checksum, then apply or confirm the immutable policy.
-
-Common operator-managed choices include:
-
-- [Amazon S3 Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html), using compliance mode when administrators must not be able to shorten retention;
-- [Azure immutable Blob Storage](https://learn.microsoft.com/azure/storage/blobs/immutable-storage-overview), using a locked time-based policy or legal hold;
-- [Google Cloud Storage Bucket Lock](https://cloud.google.com/storage/docs/bucket-lock), after testing the retention period before permanently locking it.
-
-Do not copy a production retention command from documentation without approval. Compliance-mode and locked retention policies are intentionally difficult or impossible to reverse before expiry.
-
-## 4. Recommended schedule
-
-- Rotate or close worker log segments at a defined interval, such as hourly or daily.
-- Generate a checkpoint only from closed segments.
-- Upload logs and checkpoint to an identity-separated immutable account or project.
-- Verify object checksums and retention status from a read-only audit identity.
-- Alert if a worker is absent, a chain fails verification, an upload is late, or retention is not active.
-- Keep checkpoint public keys and key-epoch metadata longer than the audit records they verify.
-
-## What this establishes
-
-The application verifies chain integrity and signs a multi-worker terminal-state manifest. The storage provider enforces retention. The operator controls identities, key lifecycle, upload completeness, monitoring, and policy duration. Together these controls can support an evidence-grade deployment; the Python package alone cannot certify one.
+## Recommended Operational Schedule
+1. **Rotate:** Close worker log segments periodically (e.g., hourly or daily).
+2. **Checkpoint:** Generate a single checkpoint encompassing all closed segments.
+3. **Upload:** Ship the logs and checkpoint to immutable storage.
+4. **Verify:** Periodically run the offline `audit-checkpoint-verify` CLI against the stored logs to ensure integrity.

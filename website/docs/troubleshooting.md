@@ -1,41 +1,37 @@
 [⬅️ Back to README](/)
 
-# Troubleshooting and Configuration
+# Troubleshooting
 
-This guide explains common startup, dependency, and traffic failures.
+This guide explains common startup and traffic failures.
 
-## Why is my proxy failing to start or dropping traffic?
+## Common Fail-Closed Configurations
 
-Some security paths fail closed, which means they reject traffic when a required check or
-dependency is unavailable. Other paths use configurable fallbacks or asynchronous delivery. Check
-the setting named in the error instead of assuming one failure policy applies to the whole proxy.
+LLM-Shield-Proxy defaults to a strict `FAIL_CLOSED` posture for core security dependencies. If a required dependency is unreachable, the proxy drops the request rather than bypassing the security check.
 
-### Common Fail Closed Configurations
+### 1. Redis Connection Drops
+If `SHIELD_DEFAULT_MASKING_MODE=STATEFUL` (the default) and the Redis server becomes unreachable, the proxy cannot safely map or retrieve synthetic entity mappings. It will block requests with a `503 Service Unavailable` or `429 Too Many Requests` error rather than allowing unmasked PII to egress.
+* **Fix:** Verify `REDIS_URL` and network connectivity. For local testing without Redis, set `SHIELD_DEFAULT_MASKING_MODE=STATELESS_CRYPTO`.
 
-#### 1. `TELEMETRY_ENDPOINT_URL`
-An unreachable telemetry or audit destination does not have one universal traffic outcome. OpenTelemetry export is asynchronous, while audit behavior depends on `AUDIT_DURABILITY` and its configured sink. Test queue saturation, destination outages, and restart behavior for the selected mode; use `durable` or `required` with a durable path when request acknowledgement must depend on local evidence persistence.
-*   **Production:** Use `required` durability when the request must fail if the local append cannot be acknowledged. Add independently administered immutable retention if the control requires WORM storage.
-*   **Local/POC Testing:** If you are just testing the proxy locally, you can disable this by unsetting `TELEMETRY_ENDPOINT_URL` or setting `FAIL_OPEN_ON_TELEMETRY_ERROR=True` (NOT RECOMMENDED for production).
+### 2. Missing Upstream API Key
+The proxy does not route traffic if it cannot authenticate with the upstream provider. If `UPSTREAM_API_KEY` is not set in the environment, and the client does not provide an override in the Authorization header, the proxy immediately drops the request.
 
-#### 2. Redis Connection Drops
-If `SHIELD_DEFAULT_MASKING_MODE=STATEFUL` and the Redis vault goes offline, the proxy cannot map synthetic entities. It will return a `503 Service Unavailable` or `429 Too Many Requests` (to trigger client retries) rather than passing unmasked PII.
-*   **Fix:** Ensure `REDIS_URL` is correct and network policies allow traffic. If you don't want to use Redis for testing, switch to `SHIELD_DEFAULT_MASKING_MODE=STATELESS_CRYPTO` to use AES-256-GCM entirely in-memory.
+### 3. Audit Logging Failures
+If `AUDIT_DURABILITY` is set to `required` (mandatory for strict compliance) and the local disk is full or the file path is unwritable, the proxy will fail the request.
+* **Fix:** Ensure the proxy process has write access to the configured `AUDIT_DURABLE_PATH`. For local development, you can use the default `best_effort` mode which writes to `stdout` and drops logs if the internal queue is full.
 
-#### 3. Missing `UPSTREAM_API_KEY`
-The proxy intercepts the stream but does not hold the ultimate LLM API key. If `UPSTREAM_API_KEY` is not provided in the environment or passed via the Authorization header, it drops the request immediately.
+## Checking Name Redaction Status
+Name (PERSON) redaction requires an ONNX NER model and is otherwise completely inactive. You can verify whether name redaction is active using the health endpoints or the compliance pack:
+*   `/health` and `/livez` return `name_redaction: ok` or `name_redaction: unavailable`. 
+*   `/readyz` reports the same under `components` and includes a `warnings[]` entry naming the affected policy profiles if inactive.
+*   The compliance pack includes a "Redaction Coverage In Force" section and a `redaction_coverage.json` file.
+*   **Note:** A status of `name_redaction: unavailable` does not fail readiness checks (the pod stays healthy) because most deployments run without a model.
 
----
-
-
-
-## 🏗️ Kubernetes & Helm Chart Troubleshooting
+## Kubernetes Deployment Issues
 
 ### The `readOnlyRootFilesystem` Warning
+The official Helm chart enforces `readOnlyRootFilesystem: true` in the pod's `securityContext` to prevent container breakout attacks. 
 
-> [!WARNING]
-> **Production Hardening Note:** Our official Helm chart sets `readOnlyRootFilesystem: true` in the pod `securityContext` by default. This is a critical production hardening step to prevent container breakouts or malicious file drops.
+LLM-Shield-Proxy operates entirely in memory and logs to `stdout` by default, making it fully compatible with a read-only filesystem.
 
-Because LLM-Shield-Proxy uses strictly in-memory processing and writes all logs to `stdout`, it natively supports a read-only filesystem.
-
-**If you encounter `Read-only file system` errors:**
-This only happens if you have modified the proxy to write local files (like SQLite databases or temporary file logs). If you implement custom local logging, you must mount an `emptyDir` or Persistent Volume to `/tmp` or `/app/logs` in your deployment, or disable `readOnlyRootFilesystem` in the `values.yaml` (not recommended).
+**If you encounter "Read-only file system" errors:**
+You have likely configured the proxy to write files locally (e.g., setting a local `AUDIT_DURABLE_PATH` for audit logs). You must mount an `emptyDir` or Persistent Volume to that specific path in your Kubernetes deployment. Do not disable `readOnlyRootFilesystem`.

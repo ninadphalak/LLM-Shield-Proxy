@@ -7,15 +7,13 @@ review.
 
 ## Data minimization and erasure
 
-- The proxy can replace detected values before it builds a request for the configured upstream.
-  Detection has false positives and false negatives, so test it on the languages and data in
-  scope.
+- The proxy can replace detected values before it builds a request for the configured upstream. Detection has false positives and false negatives, so test it on the languages and data in scope. Note that name (PERSON) redaction requires a loaded ONNX NER model; without it, name redaction is inactive.
 - Structured audit events are designed to record categories and decisions instead of prompt and
   response bodies. Verify errors, traces, custom attributes, and downstream log systems
   separately.
 - Local and Redis vault mappings expire after a configured TTL. Expiry does not prove that every
   copy was erased from memory, replicas, persistence files, backups, logs, or downstream systems.
-- A TTL is not a complete process for Article 17 requests. The organization must identify and
+- A TTL is not a complete process for Article 17 requests. The organization should identify and
   handle every other system that stores the data.
 
 ## Data protection by design
@@ -23,7 +21,7 @@ review.
 The masking mode controls how a detected value is represented:
 
 - `SYNTHETIC` uses a deterministic, format-aware substitute within the configured mapping scope.
-- `STRUCTURAL_TAG` uses a token such as `[PERSON_1]`.
+- `STRUCTURAL_TAG` uses a token such as `[EMAIL_1]`.
 - `SCRUB` uses a fixed marker and creates no rehydration mapping for that value.
 - `STATELESS_CRYPTO` encrypts selected values in the payload with AES-256-GCM. Rehydration requires
   an intact token and the correct key and context.

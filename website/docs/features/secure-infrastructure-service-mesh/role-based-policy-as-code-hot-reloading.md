@@ -3,16 +3,15 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Role-Based Policy-as-Code & Hot-Reloading** lets security teams manage supported proxy settings in a YAML file. The local resolver polls for changes and can replace its in-memory mapping without a process restart; propagation time and in-flight behavior must be tested.
+**Role-Based Policy-as-Code & Hot-Reloading** allows security teams to manage RBAC roles and routing settings in a YAML file (`policies.yaml`). The proxy periodically polls this file and hot-reloads it in memory without requiring a full process restart.
 
 ## How It Works
-Security policies in large organizations change rapidly. Waiting 10 minutes for a Kubernetes deployment to roll out a new regex rule is unacceptable during an active incident.
+Waiting for a Kubernetes deployment rollout during an active security incident is too slow.
 
-1. **GitOps Integration:** Policies are defined in a `policies.yaml` file (mounted via Kubernetes ConfigMap or pulled from an external Git repository).
-2. **Asynchronous Polling:** A background `asyncio` task polls the file or network endpoint for a new SHA-256 hash.
-3. **Validated replacement:** When a change is detected, the proxy parses and validates the new YAML before replacing the in-memory mapping.
-4. **Request-scoped transition:** Requests resolve policy at documented boundaries. In-flight and subsequent requests can observe different versions; measure reload latency and test malformed or partially written policy files.
-
+1. **GitOps Integration:** Policies are defined in a `policies.yaml` file, typically mounted via a Kubernetes ConfigMap.
+2. **Asynchronous Polling:** A background task polls the file or network endpoint for a new SHA-256 hash.
+3. **Validated Replacement:** When a change is detected, the proxy validates the new YAML structure. If valid, it atomically swaps the in-memory policy reference.
+4. **Request-Scoped Transition:** Existing in-flight requests finish using the policy they started with. New requests immediately use the new policy.
 
 ```mermaid
 flowchart LR
@@ -22,32 +21,26 @@ flowchart LR
     D --> E[Atomic Pointer Swap in Memory]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Validating the Pydantic models takes a few milliseconds but runs concurrently on a separate worker thread to protect the main proxy loop.
+- **Overhead:** Parsing and validating the YAML takes a few milliseconds but runs concurrently on a background worker thread, ensuring the main proxy event loop is not blocked.
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
-| `POLICIES_RELOAD_INTERVAL_SECONDS` | The polling interval for policy-file changes (default 5s). | [View in deployment.md](/docs/deployment) |
+| `POLICIES_RELOAD_INTERVAL_SECONDS` | The polling interval to check for file changes (default 5s). | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Validation Safety:** If a security engineer pushes a malformed YAML file (e.g., missing a required field or containing a syntax error), the Pydantic validator will reject it. The proxy will log a high-priority error and *continue using the last known good policy*, preventing an accidental DoS.
-* **In-flight streams:** Policy is resolved at documented request boundaries. Add a concurrency test for the selected resolver and version if in-flight consistency is a deployment requirement.
+## Implementation Details & Edge Cases
+* **Validation Safety:** If a malformed YAML file is pushed (e.g., invalid syntax or missing required fields), the proxy rejects it, logs a critical error, and **continues using the last known good policy**. This prevents an accidental Denial of Service (DoS).
+* **Propagation Delay:** Reload time includes the polling interval plus the time it takes Kubernetes to propagate ConfigMap updates to the mounted pod volume (which can take up to a minute).
 
 ## FAQ
 
-**Q: Can I use this to hot-reload my TLS certificates?**
-A: No. TLS certificates and core `google-re2` compilations (BYOR) operate at a lower C++ level and currently require a graceful pod restart to take effect. Hot-reloading strictly applies to the RBAC roles and routing settings in `policies.yaml`.
+**Q: Can I use this to hot-reload TLS certificates or core regex rules?**
+A: No. TLS certificates and core `google-re2` C++ compilations currently require a graceful pod restart. Hot-reloading strictly applies to the RBAC roles and tool governance settings defined in `policies.yaml`.
 
-
-## Practical effect
-The local resolver periodically checks the policy file and replaces the active validated mapping when it detects a change. Reload time includes the polling interval and file propagation; a process crash, invalid file, or dependency failure can still interrupt service.
+## Practical Effect
+This feature allows rapid iteration and incident response for RBAC and tool governance policies without dropping active proxy connections or requiring full deployment rollouts.
 
 ## Related Tests
 Tests: [`tests/test_policy_engine.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_policy_engine.py).

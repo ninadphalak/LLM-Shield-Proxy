@@ -46,7 +46,7 @@ View diagram on GitHub mobile 📱 -->
 ## FAQ
 
 **Q: Can I integrate this with Open Policy Agent (OPA)?**
-A: `BasePolicyResolver` is an extension point. An external OPA integration must define authentication, timeouts, caching, decision schema, revocation, failure mode, and no-PII telemetry before production use.
+A: `BasePolicyResolver` is an extension point. An external OPA integration should define authentication, timeouts, caching, decision schema, revocation, failure mode, and no-PII telemetry before production use.
 
 **Q: Does this secure Model Context Protocol (MCP) servers?**
 A: The gateway can enforce configured tool and egress policies on traffic routed through it. It does not prevent prompt injection, detector misses, stolen credentials, direct/bypass connections, or an allowed tool from returning sensitive data; combine it with network and application controls.

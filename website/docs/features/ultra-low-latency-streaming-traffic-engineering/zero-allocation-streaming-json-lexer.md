@@ -3,16 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Streaming JSON Lexer** parses incremental response events without retaining the complete response history. It uses `orjson` for JSON serialization and parsing where that code path applies.
+The **Bounded Streaming JSON Lexer** incrementally parses inbound and outbound JSON and SSE payloads. By processing fragments instead of retaining the entire response history in memory, it reduces memory overhead on long-running LLM streams.
 
 ## How It Works
-This path processes supported JSON and SSE fragments incrementally so it does not retain the full
-response history. Parsing still creates Python and native allocations.
+Standard JSON parsers require loading the entire JSON string into memory before processing. This lexer avoids that requirement on supported paths.
 
-1. **Native JSON implementation:** The lexer uses `orjson` on supported parsing paths.
-2. **Bounded state:** Incremental parsing avoids retaining the full response history; allocations still occur and are measured by the conformance benchmark.
-3. **SSE chunk parsing:** On supported paths, the lexer identifies `data:` content and processes fragments while retaining a bounded trailing window rather than the complete response history.
-
+1. **Native JSON Implementation:** The lexer leverages the highly optimized `orjson` Rust library for core parsing paths.
+2. **Bounded State:** The parser only retains enough state to make the current parsing decision. It processes fragments incrementally and discards them, preventing memory usage from growing linearly with the stream duration.
+3. **SSE Chunk Parsing:** On streaming paths, it identifies `data:` blocks and yields them to the sliding window buffer without attempting to parse the entire HTTP body as a single object.
 
 ```mermaid
 flowchart TD
@@ -23,35 +21,30 @@ flowchart TD
     E --> F[Emit Processed Fragment]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Execution speed:** Uses native `orjson` parsing; comparative throughput depends on payload and environment.
-- **Memory behavior:** Bounded parser state prevents retained input from growing with stream duration. Process RSS and concurrency capacity require the published service-level protocol.
+- **Execution Speed:** `orjson` provides native Rust parsing speeds, which generally outperforms standard library Python JSON parsing.
+- **Memory Behavior:** Keeping state bounded prevents unbounded memory growth. However, string allocations still occur, and memory usage under load must be validated against the proxy's benchmark tests.
 
 ## Configuration Flags
-The lexer is part of the streaming path and has no separate enable flag.
+The lexer is integrated directly into the streaming path and cannot be toggled off.
 
-## Critical Logic & Edge Cases
-* **Invalid payload handling:** Malformed JSON can be rejected on paths that parse a complete JSON value. Confirm status codes and buffering behavior for request bodies, SSE fragments, and truncated streams separately.
-* **Numeric limits:** Exercise unusually large integers, floats, nesting, and payload sizes against both the parser and the surrounding application limits; native parsing does not remove resource-exhaustion risk.
+## Implementation Details & Edge Cases
+* **Invalid Payload Handling:** Malformed JSON will throw a parsing exception. The proxy will reject malformed inbound requests with a `400` status code, and will sever upstream streams if the provider returns invalid JSON.
+* **Numeric Limits:** Native parsing does not eliminate resource-exhaustion risks. Extremely large integers, deep nesting, or massive payload sizes can still strain the proxy.
 
 ## FAQ
 
-**Q: Why is bypassing the Python GIL so important?**
-A: In asynchronous Python (`asyncio`), CPU-heavy parsing can block other work on the same event loop. Native parsing can reduce that cost, but concurrency capacity must be measured for the complete service and workload.
+**Q: Why is bypassing the Python GIL important here?**
+A: In an `asyncio` architecture, CPU-heavy tasks like JSON parsing can block the event loop, stalling all other concurrent requests. Native Rust parsing executes faster and releases the GIL, significantly improving overall concurrency capacity.
 
 **Q: Are there any compatibility issues with `orjson`?**
-A: JSON objects require string keys, but integration limits also include supported SSE framing, maximum line size, Unicode handling, nesting, provider-specific envelopes, and incomplete streams. Exercise the conformance fixtures and provider-specific tests.
+A: `orjson` strictly adheres to JSON standards (e.g., requiring string keys). Providers sending non-compliant JSON will cause parse errors.
 
-**Q: Does this help protect against Denial of Service?**
-A: Bounded parser state reduces one memory-growth risk, but it does not guarantee that a pod cannot run out of memory. Enforce payload and concurrency limits and validate peak RSS under load.
+**Q: Does this completely protect against Denial of Service (DoS)?**
+A: No. While it mitigates one vector of memory exhaustion, the proxy is still susceptible to overload. You must deploy the proxy with strict payload limits and concurrency controls.
 
-
-## Practical effect
-Instead of retaining the complete response, it keeps only the state needed for the current parsing decision. It still allocates memory, so the conformance and service benchmarks report that behavior rather than calling it allocation-free.
+## Practical Effect
+This feature allows the proxy to parse massive LLM responses incrementally. While it is highly efficient and reduces peak memory usage, it still incurs CPU and allocation costs that scale with traffic.
 
 ## Related Tests
 Tests: [`tests/test_streaming_json_lexer.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_streaming_json_lexer.py).

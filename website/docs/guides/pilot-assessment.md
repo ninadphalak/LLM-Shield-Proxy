@@ -1,8 +1,8 @@
 # Privacy-Safe Pilot Assessment
 
-The offline assessor turns representative JSON or JSONL traffic into an aggregate evaluation packet without calling an upstream model and without writing source, transformed, or tokenized records to the report.
+The offline assessor converts representative JSON or JSONL traffic into an aggregate evaluation packet. This process does not call an upstream model and excludes source, transformed, or tokenized records from the final report.
 
-## Run an assessment
+## Run an Assessment
 
 ```bash
 llm-shield-proxy assess \
@@ -11,28 +11,35 @@ llm-shield-proxy assess \
   --assessment-plan-href urn:uuid:YOUR-ASSESSMENT-PLAN
 ```
 
-Accepted input is a JSON object, an array of objects or strings, or one JSON object/string per JSONL line. Run it inside the organization that owns the sample; the command performs no network calls.
+Accepted inputs include a single JSON object, an array of objects/strings, or JSONL (one JSON object/string per line). Run this tool inside the organization that owns the data; it operates entirely offline and makes no network calls.
 
-The output directory contains:
+The output directory will contain:
 
-- `assessment.json`: source SHA-256, configuration, record totals, and aggregate finding counts
-- `assessment.html`: human-readable aggregate summary
-- `oscal-assessment-results.json`: OSCAL 1.2 Assessment Results metadata
+- `assessment.json`: Contains the source SHA-256, configuration, record totals, and aggregate finding counts.
+- `assessment.html`: A human-readable aggregate summary.
+- `oscal-assessment-results.json`: OSCAL 1.2 Assessment Results metadata.
 
-No matched value, prompt, transformed record, or reversible token is included. The `source.bytes` value is the sum of canonical JSON record sizes, not the input file's physical size.
+No matched values, prompts, transformed records, or reversible tokens are included in these files. The `source.bytes` value represents the sum of canonical JSON record sizes, not the physical size of the input file on disk.
 
-Tier 2 is enabled unless `--disable-tier2` is supplied. Tier 3 is opt-in with `--enable-tier3` and uses only the locally configured ONNX model; the assessor never downloads a model.
+Tier 2 (Entropy) is enabled by default unless `--disable-tier2` is supplied. Tier 3 (NER) is opt-in via `--enable-tier3` and uses only the locally configured ONNX model. The assessor does not download a model dynamically.
 
 ## Reproducibility
 
-Pin the package version and configuration, retain the input SHA-256, and set a stable timestamp:
+To ensure a repeatable aggregate JSON and deterministic OSCAL identifiers, pin the package version and configuration, retain the input file's SHA-256, and set a stable timestamp:
 
 ```bash
 SOURCE_DATE_EPOCH=1767225600 llm-shield-proxy assess --input traffic.jsonl --out assessment
 ```
 
-For identical input, configuration, software, and environment, `SOURCE_DATE_EPOCH` makes the aggregate JSON and deterministic OSCAL identifiers repeatable. The default OSCAL assessment-plan URN is only a placeholder; replace it before treating the artifact as formal evidence.
+*Note: The default OSCAL assessment-plan URN is a placeholder. Update it with a real identifier before treating the artifact as formal evidence.*
 
-## Suggested pilot acceptance criteria
+## Suggested Pilot Acceptance Criteria
 
-Agree on criteria before running the sample: protected entity types in scope, acceptable false-positive/false-negative review process, streaming fragmentation cases, fail-closed behavior, audit-delivery mode, and a production-like load profile. The report supplies evidence; it does not certify compliance or replace human control testing.
+Before running the sample, organizations should establish acceptance criteria. Consider agreeing on:
+- In-scope protected entity types.
+- Acceptable false-positive and false-negative review processes.
+- Expected behavior for streaming fragmentation.
+- Fail-closed behavior and audit-delivery modes.
+- Production-like load profiles.
+
+The resulting report supplies evidence for these criteria; it does not certify compliance or replace human control testing.

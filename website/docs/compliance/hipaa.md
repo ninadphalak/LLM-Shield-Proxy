@@ -13,7 +13,7 @@ reached that upstream boundary. It does not prove that every ePHI value was dete
 other network path exists.
 
 The proxy also supports inbound TLS/mTLS and outbound certificate verification or client
-certificates. Operators must still configure trust roots, certificate identity mapping,
+certificates. Operators should still configure trust roots, certificate identity mapping,
 authorization, revocation, key custody, routing, and monitoring.
 
 ## Detection and masking
@@ -21,8 +21,7 @@ authorization, revocation, key custody, routing, and monitoring.
 - Tier 1 uses configured RE2 patterns for structured shapes such as SSNs, medical-record numbers,
   phone numbers, and IP addresses.
 - Tier 2 uses an entropy heuristic for selected secret-like candidates.
-- Tier 3 can run a compatible operator-supplied ONNX entity model. Accuracy depends on the exact
-  model, tokenizer, threshold, language, and clinical evaluation corpus.
+- Tier 3 name (PERSON) detection requires an operator-supplied ONNX model. If no model is loaded, name redaction is completely inactive and does not fall back to heuristics. Accuracy depends on the exact model, tokenizer, threshold, language, and clinical evaluation corpus.
 - `STATELESS_CRYPTO` can encrypt selected detected values inside the payload with AES-256-GCM.
   Model changes or token loss can prevent rehydration.
 
@@ -33,7 +32,7 @@ positives with synthetic clinical fixtures before production use.
 
 Configured identity and policy resolvers can restrict supported operations. Hash-chained,
 Ed25519-signed audit records can expose changes within the supplied evidence. The default audit
-mode is best effort; use an acknowledged durability mode when missing events must fail the
+mode is best effort; use an acknowledged durability mode when missing events should fail the
 operation. Immutable retention and deleted-suffix detection require separate storage and external
 anchoring.
 

@@ -3,19 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-The **Anthropic Adapter Implementation** translates a documented subset of OpenAI-style chat fields and Anthropic response events. It can support selected clients without an Anthropic SDK, but it does not cover every OpenAI or Anthropic feature and does not remove semantic differences between models.
+The **Anthropic Adapter Implementation** provides translation between a documented subset of OpenAI-style chat fields and the Anthropic Messages API. This allows applications built for OpenAI to interface with Anthropic models without requiring an Anthropic-specific SDK. It is a structural adapter, not a semantic translator; it does not change the model's underlying behavior.
 
 ## How It Works
-Anthropic's Messages API and the OpenAI chat API use different request and streaming shapes. The
-adapter translates the documented subset below:
+Anthropic's Messages API and OpenAI's Chat API use different JSON structures. The proxy translates requests on the fly:
 
-1. **System messages:** The adapter moves supported OpenAI-style `system` content to Anthropic's
-   top-level `system` field.
-2. **Role sequence:** It merges consecutive messages with the same supported role using newline
-   separators.
-3. **Streaming events:** It converts supported Anthropic events such as `content_block_delta` into
-   OpenAI-style `choices[0].delta.content` SSE events.
-
+1. **System Messages:** The adapter moves OpenAI-style `system` role messages to Anthropic's top-level `system` field.
+2. **Role Sequencing:** Anthropic strictly requires alternating `user` and `assistant` roles. The adapter merges consecutive messages of the same role using newline separators to satisfy this constraint.
+3. **Streaming Events:** The adapter converts Anthropic's SSE stream formats (like `content_block_delta`) back into OpenAI-compatible `choices[0].delta.content` chunks before returning them to the client.
 
 ```mermaid
 flowchart TD
@@ -26,39 +21,29 @@ flowchart TD
     D --> E
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Avoids unnecessary full-payload duplication; measure allocations and RSS for the intended payload distribution.
+- **Overhead:** The translation occurs in-memory. It introduces minor CPU allocations for string manipulation and JSON reconstruction.
 
 ## Configuration Flags
 The adapter engages automatically when the proxy detects an Anthropic target URL.
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
-| `ANTHROPIC_API_VERSION` | Sets the `anthropic-version` API header. Default: `2023-06-01`. | [View in deployment.md](/docs/deployment) |
+| `ANTHROPIC_API_VERSION` | Sets the `anthropic-version` HTTP header sent upstream (Default: `2023-06-01`). | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Tool calling:** The adapter maps documented tool-definition and tool-use fields between selected OpenAI-style and Anthropic envelopes. Test parallel calls, IDs, content blocks, streaming deltas, validation errors, and unsupported fields for the pinned provider version.
+## Implementation Details & Edge Cases
+* **Tool Calling Mapping:** The adapter translates supported tool-definition and tool-use fields. You must test parallel calls, IDs, and validation errors for the exact Anthropic version you pin, as tool behavior differs slightly from OpenAI.
 
 ## FAQ
 
 **Q: Can I use Claude 3.5 Sonnet directly from my existing OpenAI SDK?**
-A: The adapter is unit-tested for a text-focused subset but has not been validated against the
-live Anthropic API. Check the current Anthropic model name and test every request field, tool,
-streaming event, and error path you use.
+A: Yes, for the supported text-focused subset. However, you must thoroughly test all edge cases—especially tool calling and streaming behaviors—because the proxy adapter is not a flawless 1:1 compatibility layer.
 
 **Q: Does Anthropic's SSE stream break the sliding-window buffer?**
-A: The adapter normalizes supported Anthropic events before the rehydration buffer. Rehydration still depends on token preservation, event coverage, buffer behavior, and the selected masking mode; exercise provider-specific fragmentation fixtures.
+A: No. The adapter normalizes the incoming Anthropic events into a standard structure *before* they hit the rehydration buffer, ensuring PII redaction rules still apply correctly.
 
-
-## Practical effect
-The adapter converts a documented subset of OpenAI-style messages and Anthropic streaming events.
-It may merge messages or move system content, which can change semantics. It is not a complete
-compatibility layer and must be tested against the pinned provider API.
+## Practical Effect
+This adapter translates a specific, documented subset of OpenAI request/response structures into Anthropic structures. It may merge messages or reorganize system content, which can subtly alter prompt semantics.
 
 ## Related Tests
 Tests: [`tests/test_provider_adapters.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_provider_adapters.py).

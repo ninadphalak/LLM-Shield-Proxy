@@ -3,16 +3,14 @@
 [⬅️ Back to Features Catalog](/docs/features-overview)
 
 ## What It Does
-**Automatic FinOps `stream_options` Injection** adds the supported usage-request option to eligible streaming payloads. Provider-reported usage can be missing, rejected, delayed, estimated, or priced differently and must be reconciled before chargeback.
+**Automatic FinOps `stream_options` Injection** ensures that streaming requests return usage data (token counts) by automatically mutating the outbound JSON payload. This enables the proxy to record Prometheus billing metrics even when the client application forgets to request them.
 
 ## How It Works
-By default, the OpenAI API does not return token usage statistics (input/output counts) on streaming requests unless specifically requested.
+By default, the OpenAI API does not return `prompt_tokens` and `completion_tokens` statistics on SSE streaming requests unless explicitly instructed to do so.
 
-1. **Request mutation:** For a supported `stream: true` request, the proxy updates the JSON body.
-2. **FinOps injection:** On the supported OpenAI-style payload path, the proxy sets `stream_options.include_usage` to `true` when metering is enabled. Validate behavior for caller-supplied values and non-OpenAI adapters.
-3. **Usage extraction:** If the final SSE event contains a supported `usage` object, the proxy
-   records it with the available tenant label through the metrics path.
-
+1. **Request Interception:** The proxy detects when an inbound payload requests a stream (`stream: true`).
+2. **FinOps Injection:** If FinOps metering is enabled, the proxy injects `stream_options: {"include_usage": true}` into the JSON body before forwarding it upstream. 
+3. **Usage Extraction:** When the final SSE event arrives containing the `usage` object, the proxy extracts it and routes it to the asynchronous metrics queue.
 
 ```mermaid
 flowchart LR
@@ -23,36 +21,29 @@ flowchart LR
     E --> F[Prometheus Chargeback Meter]
 ```
 
-
-View diagram on GitHub mobile 📱 -->
-
-
 ## Performance Profile
-- **Performance:** Workload and environment dependent; measure this path under the published benchmark protocol.
-- **Overhead:** Request mutation, usage parsing, queue operations, labels, and metric updates use
-  resources. Queue pressure can drop metrics.
+- **Overhead:** Mutating the JSON request and parsing the final response chunk requires minor CPU allocations. 
 
 ## Configuration Flags
 
-| Environment Variable | Description | Linked Deployment Guide |
+| Environment Variable | Description | Linked Guide |
 | :--- | :--- | :--- |
 | `ENABLE_FINOPS_METERING` | Toggles the automatic injection and metrics collection. | [View in deployment.md](/docs/deployment) |
 
-## Critical Logic & Edge Cases
-* **Non-Destructive Execution:** If a developer's application already explicitly provides `stream_options`, the proxy safely merges the dictionary, ensuring `include_usage` is true without overwriting other parameters (like custom stop sequences).
-* **Cross-Provider Normalization:** Anthropic Claude streams usage data by default. The proxy normalizes this behavior, ensuring Prometheus metrics receive uniform input/output token counts regardless of whether the target is OpenAI, Gemini, or Claude.
+## Implementation Details & Edge Cases
+* **Non-Destructive Merge:** If the client application already explicitly provides a `stream_options` dictionary, the proxy safely merges the dictionaries to ensure `include_usage` is true without overwriting other user-defined parameters.
+* **Anthropic Normalization:** Anthropic Claude returns streaming usage data by default without requiring this injection. The proxy simply normalizes Anthropic's output labels to match the OpenAI standard format.
 
 ## FAQ
 
 **Q: Why don't I just have my developers add `stream_options` in their code?**
-A: Applications can set the option themselves. Central injection can reduce configuration drift, but usage fields can still be missing, rejected, estimated, or interpreted differently by providers.
+A: You can. However, relying on client applications leads to configuration drift. Centralizing this injection at the proxy level guarantees consistent telemetry across the entire organization.
 
-**Q: Do I get billed for the tokens used by the synthetic/masked names?**
-A: Token count depends on the provider tokenizer and substitute. Compare structural, synthetic, scrub, and cryptographic modes on the actual model before making a cost claim.
+**Q: Do I get billed for the tokens used by synthetic/masked PII names?**
+A: Token counts are dictated by the upstream provider's tokenizer and the size of the substituted text. You must validate the exact structural differences before asserting cost savings.
 
-
-## Practical effect
-For supported provider requests, the proxy adds `stream_options.include_usage=true`. The provider may ignore or reject the option, and reported usage still requires validation before chargeback.
+## Practical Effect
+For supported OpenAI-style requests, the proxy automatically ensures the upstream provider returns token usage statistics, regardless of client configuration.
 
 ## Related Tests
 Tests: [`tests/test_finops_meter.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/tests/test_finops_meter.py).
