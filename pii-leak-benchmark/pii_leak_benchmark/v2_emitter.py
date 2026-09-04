@@ -1670,6 +1670,12 @@ def run_policy(
         "leak_adversarial": report["metrics"]["leak_rate"]["adversarial"],
         "delta_frag": report["metrics"]["delta_frag"],
         "cases": report["metrics"]["cases_scored"],
+        # Without these a run in which EVERY case failed is indistinguishable from a
+        # perfect one: all four rates come back 0.00 and the row reads as clean. That is
+        # not hypothetical -- a container that failed to start produced exactly such a
+        # row, and it looked like the best result in the table.
+        "inconclusive": report["metrics"]["cases_inconclusive"],
+        "echo_observable": report["metrics"]["cases_echo_observable"],
         "pairs": (
             report["corpus"]["coverage"]["pairs_covered"],
             report["corpus"]["coverage"]["pairs_required"],

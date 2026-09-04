@@ -48,7 +48,21 @@ def sweep(
                 upstream_port=upstream_port,
                 model=model,
             )
-            rows.append({"seed": seed, **{m: summary[m] for m in METRICS}})
+            rows.append({
+                "seed": seed,
+                **{m: summary[m] for m in METRICS},
+                "inconclusive": summary["inconclusive"],
+                "echo_observable": summary["echo_observable"],
+                "cases": summary["cases"],
+            })
+            if summary["inconclusive"] >= summary["cases"]:
+                # Every case refused. The four rates are all 0.00, which reads as a
+                # flawless gateway, so refuse to record it as a result at all.
+                raise SystemExit(
+                    f"{name} seed={seed}: all {summary['cases']} cases inconclusive -- "
+                    "the target answered nothing. Check the container is running and "
+                    "owns the port before trusting any row."
+                )
             print(
                 f"  {name:24} seed={seed}  "
                 + "  ".join(f"{m}={rows[-1][m]}" for m in METRICS),
