@@ -23,6 +23,38 @@ project's own wrapper, alongside the two Presidio rows.
 
 ---
 
+## Correction: the both-halves primitive is free and OSS
+
+An earlier version of this file implied that redact-and-restore was rare because it is
+hard. **It is not hard, and the primitive is free.** Microsoft Presidio's OSS anonymizer
+ships reversible operators, verified against the running container:
+
+```
+GET  /deanonymizers            -> ["decrypt", "deanonymize_keep"]
+POST /anonymize   (encrypt)    -> "contact SrkvqsgeaE2fhUgy13mL-...-8GvU3AVf7iOqDu now"
+POST /deanonymize (decrypt)    -> "contact nuwpcbba@example.com now"
+```
+
+A full round trip, in the same container the `presidio-*` rows already use.
+
+**LiteLLM ships Presidio and never calls it.** In its Presidio guardrail source,
+`deanonymize` appears **zero** times and the anonymizer is invoked with `mask`. Its
+FidelityRate of 0.00 is therefore an integration choice rather than a detector limitation:
+the component that could restore the caller's values is already a dependency, already
+running, and is asked only to mask.
+
+So the accurate statement for the paper is **not** "restoring is rare because it is hard".
+It is:
+
+> The primitive for restoring a caller's own values is free, open source, and already a
+> dependency of at least one gateway that does not use it. What is scarce is wiring it into
+> the streaming response path, where the gateway must also distinguish the caller's values
+> from the model's.
+
+That is a considerably more interesting claim, and it is the one the measurements support.
+
+---
+
 ## Ships the capability, cannot be measured here
 
 ### Kong Gateway -- `ai-sanitizer`
@@ -98,11 +130,46 @@ GuardrailStreamProcessingMode = ['sync', 'async']
 ```
 
 **AWS ships the buffering-versus-streaming trade-off as a configuration choice.** `sync`
-checks before emitting; `async` emits and checks after. That is precisely the trade-off
-`DeltaFrag` was built to separate, offered as a product knob, and the profile makes a
-testable prediction about it: the two modes should differ on `DeltaFrag` and agree on
-`LeakRate(single_chunk)`. A prediction a vendor's own configuration can confirm or refute
-is worth more than another redact-only row.
+checks a chunk before it is emitted; `async` emits first and checks after.
+
+**The prediction, stated so it can fail.** Running the same corpus in both modes:
+
+- `sync` should behave like the `bounded-retention` row: `DeltaFrag` at or near 0.00,
+  because a value cannot straddle a boundary that is never crossed unchecked.
+- `async` should behave like `chunk-local`: `DeltaFrag` clearly positive, because the
+  bytes are already with the client when the check runs. A post-hoc guardrail can stop the
+  NEXT chunk; it cannot recall the last one.
+- Both modes should agree on `LeakRate(single_chunk)`, because an unfragmented value is
+  the same value either way. **If they disagree there, the difference is detector
+  coverage, not streaming, and the whole reading is wrong.**
+
+**Refuted if:** `async` also shows `DeltaFrag` near zero. That would mean AWS reassembles
+across chunk boundaries before checking -- a retention window inside `async` -- and the
+sync/async distinction would be about latency rather than about correctness. That is a
+perfectly plausible implementation and the profile would have to report it.
+
+### The problem with actually running it, stated plainly
+
+`streamProcessingMode` is a parameter of Bedrock's own `ConverseStream`, so exercising it
+means **the upstream is an AWS model, not this harness's capture**. That costs the property
+the whole injection design rests on: the capture emits values that were never in the
+prompt, and the harness knows exactly what they are. A real model does not take
+instructions about what to leak, and any value it can be prompted into emitting was, by
+construction, in the prompt.
+
+So a Bedrock row would be **degraded**, and the degradation must be declared rather than
+glossed:
+
+- The **echo** half survives intact -- send known values, see whether they come back.
+- The **injection** half does not. The closest honest substitute is `ApplyGuardrail` called
+  directly on synthetic streamed text, which exercises the detector but **not**
+  `streamProcessingMode`, which is the only reason to want the keys.
+
+**Conclusion, and it is a downgrade from what this file said first.** Bedrock keys buy a
+clean echo-half measurement plus a detector row. The sync/async comparison -- the
+interesting part -- needs either a Bedrock model that can be made to emit known values
+never present in the prompt, or an admission that the injection half is not measured for
+that row. Ask for the keys, but do not promise the sync/async result until that is solved.
 
 ### Azure AI Language -- a detector, not a gateway
 
