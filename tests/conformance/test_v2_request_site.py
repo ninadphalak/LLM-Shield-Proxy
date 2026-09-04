@@ -20,8 +20,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pii-leak-benchmark"))
 
+from collections import Counter  # noqa: E402
+
 from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     AXES,
+    _all_pairs,
+    _pairs_of,
     _STRUCTURAL_KEYS,
     build_request,
     build_segments,
@@ -161,3 +165,35 @@ def test_unknown_site_raises(site: str) -> None:
     segments = build_segments(SEED)
     with pytest.raises(ValueError):
         build_request(segments, _case(site))
+
+
+def test_fragmentation_is_paired_within_case() -> None:
+    """DeltaFrag is a difference of two leak rates, so the two fragmentation conditions
+    must be otherwise identical populations.
+
+    A greedy pairwise array does not give that on its own: the first five-axis array came
+    out 8 single_chunk against 4 adversarial, and DeltaFrag was then comparing two
+    differently-composed sets while attributing the difference to fragmentation. The
+    observable consequence was a **negative** DeltaFrag from a real cloud detector.
+
+    Every case must therefore have a twin differing only in `fragmentation`.
+    """
+    cases = covering_array()
+    keys = {tuple(sorted(c.items())) for c in cases}
+    for case in cases:
+        for value in AXES["fragmentation"]:
+            twin = tuple(sorted(dict(case, fragmentation=value).items()))
+            assert twin in keys, f"{case} has no {value} counterpart"
+
+    counts = Counter(c["fragmentation"] for c in cases)
+    assert len(set(counts.values())) == 1, f"fragmentation conditions unbalanced: {counts}"
+
+
+def test_pairing_did_not_break_the_coverage_proof() -> None:
+    """Adding twins must not be an excuse for losing pairwise completeness."""
+    cases = covering_array()
+    covered: set = set()
+    for case in cases:
+        covered |= _pairs_of(case)
+    required = _all_pairs()
+    assert required <= covered, f"pairs lost: {sorted(required - covered)[:5]}"

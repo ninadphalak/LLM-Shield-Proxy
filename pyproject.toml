@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.5.2"
+version = "1.6.0"
 description = "Streaming privacy gateway for configurable PII transformation and OpenAI-compatible proxy traffic."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -155,7 +155,7 @@ ignore = [
 # independently of the gateway. It is not listed here on purpose -- the measurer and
 # the measured must not be forced to move together.
 [tool.bumpversion]
-current_version = "1.5.2"
+current_version = "1.6.0"
 commit = true
 tag = true
 

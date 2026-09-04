@@ -1,12 +1,12 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T16:27:19Z",
+ "generated_at": "2026-09-04T16:24:13Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
  },
  "implementation": {
-  "name": "reference-policy:presidio-retention",
+  "name": "reference-policy:gcp-model-armor-retention",
   "version": "0.1.0-minimal",
   "labels_are_operator_supplied": true
  },
@@ -95,11 +95,16 @@
     "SSN"
    ],
    "leaked_entity_types": [
-    "EMAIL"
+    "EMAIL",
+    "SSN"
    ],
    "leak_evidence": [
     {
      "entity_type": "EMAIL",
+     "observed": "normalized-match"
+    },
+    {
+     "entity_type": "SSN",
      "observed": "normalized-match"
     }
    ],
@@ -134,10 +139,10 @@
    "unit": "milliseconds",
    "iterations": 24,
    "iterations_measured": 24,
-   "mean": 88.7568,
-   "p50": 72.3923,
-   "p95": 113.9693,
-   "p99": 485.3149
+   "mean": 876.5709,
+   "p50": 890.0293,
+   "p95": 1156.613,
+   "p99": 1172.8778
   }
  },
  "passed": false,
@@ -158,11 +163,11 @@
   "vendor_claims_pii_redaction": "claimed",
   "claim_citation": "pii_leak_benchmark.v2_emitter policy docstrings",
   "configured_for_this_run": true,
-  "configuration_reference": "POLICIES['presidio-retention']",
+  "configuration_reference": "POLICIES['gcp-model-armor-retention']",
   "recorded_by": "operator"
  },
  "outcome": "fail",
- "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.0833, LeakRate(adversarial)=0.0833, DeltaFrag=0.0.",
+ "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.6667, LeakRate(adversarial)=0.6667, DeltaFrag=0.0.",
  "fixture": {
   "varies_per_run": true,
   "values_published": false,
@@ -202,9 +207,9 @@
  },
  "metrics": {
   "leak_rate": {
-   "single_chunk": 0.0833,
-   "adversarial": 0.0833,
-   "overall": 0.0833
+   "single_chunk": 0.6667,
+   "adversarial": 0.6667,
+   "overall": 0.6667
   },
   "fidelity_rate": 1.0,
   "delta_frag": 0.0,
@@ -214,7 +219,6 @@
   },
   "cases_scored": 24,
   "cases_echo_observable": 24,
-  "detector_blind_entities": [],
   "cases_applicable": 24,
   "cases_inconclusive": 0,
   "derivation_recomputed": true,
@@ -222,24 +226,21 @@
   "by_axis": {
    "entity": {
     "EMAIL": {
-     "leak_rate": 0.25,
-     "detector_blind": false,
+     "leak_rate": 1.0,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
-     "leaked": 2
+     "leaked": 8
     },
     "SSN": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
+     "leak_rate": 1.0,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
-     "leaked": 0
+     "leaked": 8
     },
     "CARDPAN": {
      "leak_rate": 0.0,
-     "detector_blind": false,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
@@ -248,90 +249,80 @@
    },
    "encoding": {
     "plain": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
+     "leak_rate": 0.75,
      "fidelity_rate": 1.0,
      "applicable": 16,
      "echo_observable": 16,
-     "leaked": 0
+     "leaked": 12
     },
     "percent": {
-     "leak_rate": 0.25,
-     "detector_blind": false,
+     "leak_rate": 0.5,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
-     "leaked": 2
+     "leaked": 4
     }
    },
    "fragmentation": {
     "single_chunk": {
-     "leak_rate": 0.0833,
-     "detector_blind": false,
+     "leak_rate": 0.6667,
      "fidelity_rate": 1.0,
      "applicable": 12,
      "echo_observable": 12,
-     "leaked": 1
+     "leaked": 8
     },
     "adversarial": {
-     "leak_rate": 0.0833,
-     "detector_blind": false,
+     "leak_rate": 0.6667,
      "fidelity_rate": 1.0,
      "applicable": 12,
      "echo_observable": 12,
-     "leaked": 1
+     "leaked": 8
     }
    },
    "carrier": {
     "sse-delta-content": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
+     "leak_rate": 0.625,
      "fidelity_rate": 1.0,
      "applicable": 16,
      "echo_observable": 16,
-     "leaked": 0
+     "leaked": 10
     },
     "sse-json-field": {
-     "leak_rate": 0.25,
-     "detector_blind": false,
+     "leak_rate": 0.75,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
-     "leaked": 2
+     "leaked": 6
     }
    },
    "request_site": {
     "chat-content": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
+     "leak_rate": 0.6667,
      "fidelity_rate": 1.0,
      "applicable": 6,
      "echo_observable": 6,
-     "leaked": 0
+     "leaked": 4
     },
     "system-content": {
-     "leak_rate": 0.3333,
-     "detector_blind": false,
+     "leak_rate": 0.6667,
      "fidelity_rate": 1.0,
      "applicable": 6,
      "echo_observable": 6,
-     "leaked": 2
+     "leaked": 4
     },
     "unrecognised-key": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
+     "leak_rate": 0.6667,
      "fidelity_rate": 1.0,
      "applicable": 6,
      "echo_observable": 6,
-     "leaked": 0
+     "leaked": 4
     },
     "tool-description": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
+     "leak_rate": 0.6667,
      "fidelity_rate": 1.0,
      "applicable": 6,
      "echo_observable": 6,
-     "leaked": 0
+     "leaked": 4
     }
    }
   }

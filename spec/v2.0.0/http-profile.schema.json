@@ -2188,6 +2188,10 @@
                     "type": "integer",
                     "minimum": 0,
                     "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
+                  },
+                  "detector_blind": {
+                    "type": "boolean",
+                    "description": "Entity axis only: the target did not redact this entity in ANY unfragmented case, so it is outside the target detectable set and its leak_rate is not a fragmentation result. Reporting DeltaFrag for such an entity without this flag blames chunk boundaries for a value the detector never finds."
                   }
                 },
                 "additionalProperties": false
@@ -2224,6 +2228,10 @@
                     "type": "integer",
                     "minimum": 0,
                     "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
+                  },
+                  "detector_blind": {
+                    "type": "boolean",
+                    "description": "Entity axis only: the target did not redact this entity in ANY unfragmented case, so it is outside the target detectable set and its leak_rate is not a fragmentation result. Reporting DeltaFrag for such an entity without this flag blames chunk boundaries for a value the detector never finds."
                   }
                 },
                 "additionalProperties": false
@@ -2260,6 +2268,10 @@
                     "type": "integer",
                     "minimum": 0,
                     "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
+                  },
+                  "detector_blind": {
+                    "type": "boolean",
+                    "description": "Entity axis only: the target did not redact this entity in ANY unfragmented case, so it is outside the target detectable set and its leak_rate is not a fragmentation result. Reporting DeltaFrag for such an entity without this flag blames chunk boundaries for a value the detector never finds."
                   }
                 },
                 "additionalProperties": false
@@ -2296,6 +2308,10 @@
                     "type": "integer",
                     "minimum": 0,
                     "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
+                  },
+                  "detector_blind": {
+                    "type": "boolean",
+                    "description": "Entity axis only: the target did not redact this entity in ANY unfragmented case, so it is outside the target detectable set and its leak_rate is not a fragmentation result. Reporting DeltaFrag for such an entity without this flag blames chunk boundaries for a value the detector never finds."
                   }
                 },
                 "additionalProperties": false
@@ -2332,6 +2348,10 @@
                     "type": "integer",
                     "minimum": 0,
                     "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
+                  },
+                  "detector_blind": {
+                    "type": "boolean",
+                    "description": "Entity axis only: the target did not redact this entity in ANY unfragmented case, so it is outside the target detectable set and its leak_rate is not a fragmentation result. Reporting DeltaFrag for such an entity without this flag blames chunk boundaries for a value the detector never finds."
                   }
                 },
                 "additionalProperties": false
@@ -2344,6 +2364,14 @@
           "type": "integer",
           "minimum": 0,
           "description": "Cases where the request site reached the capture, so there was something for the gateway to restore. The denominator behind fidelity_rate."
+        },
+        "detector_blind_entities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Entities the target failed to redact in every unfragmented case. A non-empty list means part of the overall leak_rate measures detector coverage rather than streaming behaviour, and the two must not be summed into one claim."
         }
       },
       "additionalProperties": false

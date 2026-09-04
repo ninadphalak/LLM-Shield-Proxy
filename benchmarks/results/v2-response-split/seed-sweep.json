@@ -132,86 +132,86 @@
    {
     "seed": "0000000000000001",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000007",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000008",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000009",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000a",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000b",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000c",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    }
   ],
   "summary": {
@@ -222,9 +222,9 @@
     "stdev": 0.0
    },
    "leak_single_chunk": {
-    "mean": 0.0,
-    "min": 0.0,
-    "max": 0.0,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "leak_adversarial": {
@@ -234,9 +234,9 @@
     "stdev": 0.0
    },
    "delta_frag": {
-    "mean": 1.0,
-    "min": 1.0,
-    "max": 1.0,
+    "mean": 0.9167,
+    "min": 0.9167,
+    "max": 0.9167,
     "stdev": 0.0
    }
   },
@@ -260,86 +260,86 @@
    {
     "seed": "0000000000000001",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000007",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000008",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000009",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000a",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000b",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000c",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    }
   ],
   "summary": {
@@ -350,9 +350,9 @@
     "stdev": 0.0
    },
    "leak_single_chunk": {
-    "mean": 0.0,
-    "min": 0.0,
-    "max": 0.0,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "leak_adversarial": {
@@ -362,9 +362,9 @@
     "stdev": 0.0
    },
    "delta_frag": {
-    "mean": 1.0,
-    "min": 1.0,
-    "max": 1.0,
+    "mean": 0.9167,
+    "min": 0.9167,
+    "max": 0.9167,
     "stdev": 0.0
    }
   },
@@ -388,86 +388,86 @@
    {
     "seed": "0000000000000001",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000007",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000008",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000009",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "000000000000000a",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "000000000000000b",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "000000000000000c",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    }
   ],
   "summary": {
@@ -478,21 +478,21 @@
     "stdev": 0.0
    },
    "leak_single_chunk": {
-    "mean": 0.0,
-    "min": 0.0,
-    "max": 0.0,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "leak_adversarial": {
-    "mean": 0.25,
-    "min": 0.25,
-    "max": 0.25,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "delta_frag": {
-    "mean": 0.25,
-    "min": 0.25,
-    "max": 0.25,
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
     "stdev": 0.0
    }
   },
@@ -644,86 +644,86 @@
    {
     "seed": "0000000000000001",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.6667,
+    "delta_frag": 0.5834
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "delta_frag": 0.6667
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.5,
-    "delta_frag": 0.5
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.4167,
+    "delta_frag": 0.3334
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.6667,
+    "delta_frag": 0.5834
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.9167,
+    "delta_frag": 0.8334
    },
    {
     "seed": "0000000000000007",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.9167,
+    "delta_frag": 0.8334
    },
    {
     "seed": "0000000000000008",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "0000000000000009",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000a",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
+    "leak_single_chunk": 0.0833,
     "leak_adversarial": 1.0,
-    "delta_frag": 1.0
+    "delta_frag": 0.9167
    },
    {
     "seed": "000000000000000b",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.6667,
+    "delta_frag": 0.5834
    },
    {
     "seed": "000000000000000c",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.75,
-    "delta_frag": 0.75
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.6667,
+    "delta_frag": 0.5834
    }
   ],
   "summary": {
@@ -734,22 +734,22 @@
     "stdev": 0.0
    },
    "leak_single_chunk": {
-    "mean": 0.0,
-    "min": 0.0,
-    "max": 0.0,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "leak_adversarial": {
-    "mean": 0.8125,
-    "min": 0.5,
+    "mean": 0.8056,
+    "min": 0.4167,
     "max": 1.0,
-    "stdev": 0.1554
+    "stdev": 0.1924
    },
    "delta_frag": {
-    "mean": 0.8125,
-    "min": 0.5,
-    "max": 1.0,
-    "stdev": 0.1554
+    "mean": 0.7223,
+    "min": 0.3334,
+    "max": 0.9167,
+    "stdev": 0.1924
    }
   },
   "seeds": [
@@ -772,86 +772,86 @@
    {
     "seed": "0000000000000001",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000007",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000008",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "0000000000000009",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "000000000000000a",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "000000000000000b",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    },
    {
     "seed": "000000000000000c",
     "fidelity_rate": 1.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.25,
-    "delta_frag": 0.25
+    "leak_single_chunk": 0.0833,
+    "leak_adversarial": 0.0833,
+    "delta_frag": 0.0
    }
   ],
   "summary": {
@@ -862,21 +862,21 @@
     "stdev": 0.0
    },
    "leak_single_chunk": {
-    "mean": 0.0,
-    "min": 0.0,
-    "max": 0.0,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "leak_adversarial": {
-    "mean": 0.25,
-    "min": 0.25,
-    "max": 0.25,
+    "mean": 0.0833,
+    "min": 0.0833,
+    "max": 0.0833,
     "stdev": 0.0
    },
    "delta_frag": {
-    "mean": 0.25,
-    "min": 0.25,
-    "max": 0.25,
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
     "stdev": 0.0
    }
   },

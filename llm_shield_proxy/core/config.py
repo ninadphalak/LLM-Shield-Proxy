@@ -231,6 +231,28 @@ class Settings(BaseSettings):
     MAX_SESSION_VAULTS: int = Field(default=10000, description="Maximum capacity of in-memory LRU session vault cache")
 
     # Redaction & Detection Cascade Settings
+    ENABLE_RESPONSE_PII_REDACTION: bool = Field(
+        default=False,
+        description=(
+            "Redact PII the MODEL produced -- values that were never in the request and so "
+            "are not in the vault -- before the response reaches the client. Off by default "
+            "because it changes what callers receive: a value the model rephrases rather "
+            "than quotes will not match a vault token, so it is redacted and not restored. "
+            "Turning it on trades that risk against egressing model-originated PII, which "
+            "is what happens with it off. Request-path redaction is unaffected either way."
+        ),
+    )
+    RESPONSE_PII_SCAN_WINDOW: int = Field(
+        default=64,
+        ge=16,
+        le=4096,
+        description=(
+            "Characters held back at the emit boundary when ENABLE_RESPONSE_PII_REDACTION "
+            "is on, so a detectable value cannot straddle two chunks and escape a "
+            "chunk-local scan. Bounded on purpose: this is the retention window, and an "
+            "unbounded one would reintroduce whole-response buffering."
+        ),
+    )
     SHIELD_DEFAULT_MASKING_MODE: str = Field(
         default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_CRYPTO)"
     )

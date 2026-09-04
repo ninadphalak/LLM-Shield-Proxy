@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import logging
 from typing import Any, AsyncGenerator, AsyncIterator, Optional
 
 import orjson as json
@@ -17,6 +18,56 @@ from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.tracing import tracer
 from llm_shield_proxy.streaming.json_lexer import StreamingJSONLexer
+
+logger = logging.getLogger(__name__)
+
+# Event keys whose values are structural: rewriting them changes what the event MEANS
+# rather than what it discloses. An id, a model name or a finish_reason is not PII, and a
+# scanner that mangles them breaks clients for no privacy gain.
+_SSE_STRUCTURAL_KEYS = frozenset(
+    {"id", "object", "model", "role", "type", "finish_reason", "index", "created"}
+)
+
+# The ordered content channels, already handled by the retention buffer above. They are
+# skipped at EVERY depth, not just the top level: the buffer has already rehydrated the
+# caller's own values into them, and re-scanning would redact the caller's data back out
+# -- fidelity 1.00 to 0.00 in one line, which is how this was caught.
+_CONTENT_KEYS = frozenset({"content", "text"})
+
+
+def _redact_sibling_strings(node: Any, buffer: "SSERehydrationBuffer", skip_content: bool = True) -> Any:
+    """Redact model-originated PII in event fields OTHER than the delta content.
+
+    The content field is the ordered stream and is handled by the retention buffer, which
+    reassembles values split across events. Everything else in the event JSON was
+    previously forwarded untouched, so a value carried in a sibling field reached the
+    client unscanned however obvious it was. Measured at LeakRate 1.00 for that carrier
+    by the v2 conformance profile, against LeakRate 0.00 for delta content.
+
+    This is the response-path counterpart of the deep request walk added in 1.5.1: the
+    request body is walked recursively, and until now the response was not.
+
+    KNOWN LIMIT, declared rather than hidden: sibling fields are scanned CHUNK-LOCALLY. A
+    value split across two events, half in each event's sibling field, is not reassembled
+    the way delta content is, because sibling fields are not an ordered stream and moving
+    text between events to buffer them would corrupt the event that carries them. The
+    conformance profile measures this as a non-zero DeltaFrag on the `sse-json-field`
+    carrier, and that number is the honest size of the gap.
+    """
+    if isinstance(node, dict):
+        return {
+            key: (
+                value
+                if key in _SSE_STRUCTURAL_KEYS or (skip_content and key in _CONTENT_KEYS)
+                else _redact_sibling_strings(value, buffer, skip_content=skip_content)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_redact_sibling_strings(v, buffer, skip_content=skip_content) for v in node]
+    if isinstance(node, str):
+        return buffer._redact_model_originated(node)
+    return node
 
 
 class _BoundedOutputCoalescer:
@@ -110,6 +161,61 @@ class SSERehydrationBuffer:
             )
         return self.vault.rehydrate(text, retention_length=retention_length)
 
+    def _response_retention_length(self, text: str) -> int:
+        """Characters to hold back so a detectable value cannot straddle the boundary.
+
+        Only used when response-side redaction is on. Holding a fixed-length tail is not
+        sufficient by itself: cutting inside a value emits its prefix unredacted, which is
+        the chunk-boundary failure this proxy exists to prevent. So the cut moves back to
+        the last whitespace inside the window, because every entity this engine detects is
+        a whitespace-free run. A window with no whitespace is retained whole.
+
+        The window is bounded on purpose. An unbounded one would be whole-response
+        buffering, which removes the leak by removing streaming.
+        """
+        if not text:
+            return 0
+        window = min(len(text), settings.RESPONSE_PII_SCAN_WINDOW)
+        tail = text[len(text) - window:]
+        boundary = tail.rfind(" ")
+        return window - boundary - 1 if boundary != -1 else window
+
+    def _redact_model_originated(self, text: str) -> str:
+        """Redact PII the model produced, leaving this vault's own tokens alone.
+
+        ORDER IS LOAD-BEARING, and it is the whole difficulty of the response path. The
+        text here still holds vault TOKENS, and in SYNTHETIC mode a token is a
+        realistic-looking value, so a detector cannot tell "the surrogate we substituted"
+        from "PII the model invented" by appearance alone. Redacting after rehydration
+        would destroy the caller's own data; redacting without consulting the vault would
+        destroy the surrogates and leave nothing to restore. Both mistakes are observable
+        in shipping gateways.
+
+        So spans whose matched text is a known token are skipped and everything else is
+        replaced. Rehydration then runs on what survives.
+        """
+        if not text:
+            return text
+        from llm_shield_proxy.engines.pii_engine import pii_engine
+
+        try:
+            spans = pii_engine.detect_spans(text)
+        except Exception:  # noqa: BLE001
+            # Deliberately NOT fail-closed, unlike the request path. Failing closed here
+            # means emitting nothing to the client, which breaks the response for a
+            # scanner error rather than for a leak. The text is forwarded and the failure
+            # is logged, so the gap is visible rather than silent.
+            logger.warning("Response PII scan failed; forwarding unscanned text", exc_info=True)
+            return text
+
+        known = getattr(self.vault, "token_to_original", None) or {}
+        out = list(text)
+        for start, end, entity_type, matched_text in reversed(spans):
+            if matched_text in known:
+                continue
+            out[start:end] = list(f"[{entity_type}_REDACTED]")
+        return "".join(out)
+
     def _calculate_retention_length(self, text: str) -> int:
         """Calculates the minimum trailing retention boundary needed for text.
 
@@ -198,6 +304,21 @@ class SSERehydrationBuffer:
                 # Calculate dynamic prefix retention bound
                 retention_length = self._calculate_retention_length(self.content_buffer)
 
+                if settings.ENABLE_RESPONSE_PII_REDACTION:
+                    # Widen the hold-back so a MODEL-originated value cannot straddle the
+                    # emit boundary. The vault bound covers only this session's own
+                    # tokens, and a value the model invented is not among them.
+                    retention_length = max(
+                        retention_length,
+                        self._response_retention_length(self.content_buffer),
+                    )
+                    scanned_to = len(self.content_buffer) - retention_length
+                    if scanned_to > 0:
+                        self.content_buffer = (
+                            self._redact_model_originated(self.content_buffer[:scanned_to])
+                            + self.content_buffer[scanned_to:]
+                        )
+
                 # Apply boundary-aware rehydration up to the retention boundary
                 self.content_buffer = self._rehydrate(
                     self.content_buffer, retention_length=retention_length
@@ -205,6 +326,13 @@ class SSERehydrationBuffer:
 
             # Recalculate retention in case replacements modified the tail
             retention_length = self._calculate_retention_length(self.content_buffer)
+            if settings.ENABLE_RESPONSE_PII_REDACTION and not is_final:
+                # Redaction rewrote the buffer, so the tail bound has to be recomputed
+                # against the new text or an unscanned suffix is emitted.
+                retention_length = max(
+                    retention_length,
+                    self._response_retention_length(self.content_buffer),
+                )
 
             if retention_length == 0 or len(self.content_buffer) <= retention_length:
                 if retention_length == 0:
@@ -216,6 +344,11 @@ class SSERehydrationBuffer:
                 emitted_parts.append(emitted)
 
         if is_final and self.content_buffer:
+            # The retained tail has never been scanned. At end of stream no further
+            # context is coming, so scan it now or it leaves the proxy unexamined --
+            # which is exactly where a value deliberately placed at the end would sit.
+            if settings.ENABLE_RESPONSE_PII_REDACTION:
+                self.content_buffer = self._redact_model_originated(self.content_buffer)
             emitted_parts.append(self._rehydrate(self.content_buffer, retention_length=0))
             self.content_buffer = ""
 
@@ -394,6 +527,10 @@ async def rehydrate_sse_stream(
                                         rehydrated_content = buffer.process_delta_text(raw_content)
                                         delta["content"] = rehydrated_content
                                         data_obj["choices"][0]["delta"] = delta
+                                        if settings.ENABLE_RESPONSE_PII_REDACTION:
+                                            # Sibling fields of the event, which were
+                                            # forwarded unscanned until 1.6.0.
+                                            data_obj = _redact_sibling_strings(data_obj, buffer)
                                         line = f"data: {json.dumps(data_obj).decode('utf-8')}"
                                 # 2. Anthropic Content Block Delta
                                 elif "delta" in data_obj and isinstance(data_obj["delta"], dict):

@@ -492,10 +492,200 @@ class PresidioRetaining(Retaining):
         return out
 
 
+
+# --------------------------------------------------------------------------------------
+# Credentialed cloud detectors.
+#
+# The Presidio rows above run a container on loopback. These two run a commercial SaaS
+# under a real billing account, which is a different claim: it is what a practitioner
+# gets by buying the vendor's answer rather than self-hosting one. Same caveat as the
+# Presidio rows and it is not a small one -- the DETECTOR is the vendor's, the streaming
+# integration and the rehydration half are this wrapper's. Neither vendor is being
+# ranked, and neither claims to be a streaming scanner.
+#
+# Credentials come from `gcloud auth application-default login`. Both APIs need
+# `x-goog-user-project` when the caller is a user account rather than a service account;
+# without it they answer 403 SERVICE_DISABLED, which reads as an outage rather than as a
+# missing header.
+# --------------------------------------------------------------------------------------
+
+_GCP_TOKEN_CACHE: dict[str, str] = {}
+
+
+def _gcp_context() -> tuple[str, str]:
+    """(access token, project id) from the local gcloud install, cached per process."""
+    import subprocess  # noqa: S404
+
+    if not _GCP_TOKEN_CACHE:
+        for key, argv in (
+            ("token", ["gcloud", "auth", "print-access-token"]),
+            ("project", ["gcloud", "config", "get-value", "project"]),
+        ):
+            done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602
+            value = done.stdout.strip()
+            if done.returncode != 0 or not value:
+                raise RuntimeError(f"gcloud {key} unavailable: {done.stderr.strip()[:200]}")
+            _GCP_TOKEN_CACHE[key] = value
+    return _GCP_TOKEN_CACHE["token"], _GCP_TOKEN_CACHE["project"]
+
+
+def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    token, project = _gcp_context()
+    request = Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "x-goog-user-project": project,
+        },
+    )
+    with urlopen(request, timeout=60) as response:  # noqa: S310
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _dlp_redact(text: str) -> str:
+    """Google Cloud DLP de-identification. The vendor rewrites the text itself.
+
+    Unlike Presidio (which returns spans this module then splices), DLP returns the
+    de-identified string, so the replacement policy is Google's and not ours.
+    """
+    if not text.strip():
+        return text
+    _token, project = _gcp_context()
+    url = f"https://dlp.googleapis.com/v2/projects/{project}/locations/global/content:deidentify"
+    body = {
+        "item": {"value": text},
+        "inspectConfig": {
+            "infoTypes": [
+                {"name": "EMAIL_ADDRESS"},
+                {"name": "US_SOCIAL_SECURITY_NUMBER"},
+                {"name": "CREDIT_CARD_NUMBER"},
+            ]
+        },
+        "deidentifyConfig": {
+            "infoTypeTransformations": {
+                "transformations": [{"primitiveTransformation": {"replaceWithInfoTypeConfig": {}}}]
+            }
+        },
+    }
+    return _gcp_post(url, body)["item"]["value"]
+
+
+MODEL_ARMOR_TEMPLATE = os.environ.get("V2_MODEL_ARMOR_TEMPLATE", "v2profile")
+MODEL_ARMOR_LOCATION = os.environ.get("V2_MODEL_ARMOR_LOCATION", "us-central1")
+
+
+def _model_armor_redact(text: str) -> str:
+    """Model Armor's response filter, which DETECTS rather than rewrites.
+
+    With `sdpSettings.basicConfig` the service returns findings with byte ranges and no
+    sanitized text -- de-identification needs an advanced config bound to a DLP template.
+    So the redaction here is span splicing on Google's findings, and the detector alone is
+    the vendor's. A gateway wired to Model Armor's basic config would typically BLOCK on
+    `MATCH_FOUND` rather than redact; blocking is measured separately by the NeMo row.
+    """
+    if not text.strip():
+        return text
+    _token, project = _gcp_context()
+    url = (
+        f"https://modelarmor.{MODEL_ARMOR_LOCATION}.rep.googleapis.com/v1/projects/"
+        f"{project}/locations/{MODEL_ARMOR_LOCATION}/templates/{MODEL_ARMOR_TEMPLATE}"
+        ":sanitizeModelResponse"
+    )
+    result = _gcp_post(url, {"modelResponseData": {"text": text}})
+    sdp = (
+        result.get("sanitizationResult", {})
+        .get("filterResults", {})
+        .get("sdp", {})
+        .get("sdpFilterResult", {})
+    )
+    findings = sdp.get("inspectResult", {}).get("findings", [])
+    spans = []
+    for finding in findings:
+        rng = finding.get("location", {}).get("codepointRange", {})
+        if "start" in rng and "end" in rng:
+            spans.append((int(rng["start"]), int(rng["end"])))
+    out = text
+    for start, end in sorted(spans, reverse=True):
+        out = out[:start] + "[REDACTED]" + out[end:]
+    return out
+
+
+class DlpChunkLocal(Policy):
+    """Google Cloud DLP applied per delta, with no state between deltas."""
+
+    name = "gcp-dlp-chunk-local"
+    rehydrates = True
+    redacts = True
+
+    def feed(self, delta: str) -> str:
+        out = _dlp_redact(delta)
+        for token, original in self.vault.items():
+            out = out.replace(token, original)
+        return out
+
+
+class DlpRetaining(PresidioRetaining):
+    """Google Cloud DLP behind the SAME bounded suffix carry as `presidio-retention`.
+
+    Subclassed for the carry mechanics, not the detector: `_finish` is the only thing
+    that differs, and it calls DLP. Keeping the carry identical is what makes the
+    chunk-local/retention pair comparable across detectors.
+    """
+
+    name = "gcp-dlp-retention"
+
+    def _finish(self, text: str) -> str:
+        out = _dlp_redact(text)
+        for token, original in self.vault.items():
+            out = out.replace(token, original)
+        return out
+
+
+class ModelArmorChunkLocal(Policy):
+    """Model Armor's response filter applied per delta, no state between deltas."""
+
+    name = "gcp-model-armor-chunk-local"
+    rehydrates = True
+    redacts = True
+
+    def feed(self, delta: str) -> str:
+        out = _model_armor_redact(delta)
+        for token, original in self.vault.items():
+            out = out.replace(token, original)
+        return out
+
+
+class ModelArmorRetaining(PresidioRetaining):
+    """Model Armor behind the same bounded suffix carry. See `DlpRetaining`."""
+
+    name = "gcp-model-armor-retention"
+
+    def _finish(self, text: str) -> str:
+        out = _model_armor_redact(text)
+        for token, original in self.vault.items():
+            out = out.replace(token, original)
+        return out
+
+
 POLICIES: dict[str, type[Policy]] = {
     p.name: p for p in (Passthrough, RedactAll, ChunkLocal, Retaining, RetainingDecoding,
                     PresidioChunkLocal, PresidioRetaining)
 }
+
+# Billed, network-dependent and therefore NOT part of a default run. `--only` opts in.
+CLOUD_POLICIES: dict[str, type[Policy]] = {
+    p.name: p for p in (DlpChunkLocal, DlpRetaining,
+                        ModelArmorChunkLocal, ModelArmorRetaining)
+}
+POLICIES.update(CLOUD_POLICIES)
+
+# The default sweep is the local set; a cloud row costs money per delta and must be asked
+# for by name.
+DEFAULT_POLICIES: tuple[str, ...] = tuple(
+    n for n in POLICIES if n not in CLOUD_POLICIES
+)
 
 
 # --------------------------------------------------------------------------------------
@@ -632,6 +822,24 @@ def covering_array() -> list[dict[str, str]]:
         chosen.append(best)
         remaining -= _pairs_of(best)
         candidates.remove(best)
+
+    # DeltaFrag is a DIFFERENCE of two leak rates, so it is only meaningful if the two
+    # fragmentation conditions are otherwise identical populations. A greedy pairwise
+    # array does not give that: the five-axis array came out 8 single_chunk against 4
+    # adversarial, and DeltaFrag was then comparing two differently-composed sets and
+    # attributing the difference to fragmentation. Adding each chosen case's
+    # fragmentation twin makes fragmentation a WITHIN-case factor, so every adversarial
+    # case has exactly one single_chunk counterpart differing in nothing else.
+    #
+    # This is why `gcp-dlp-retention` could report a NEGATIVE DeltaFrag before the fix.
+    seen = {tuple(sorted(c.items())) for c in chosen}
+    for case in list(chosen):
+        for value in AXES["fragmentation"]:
+            twin = dict(case, fragmentation=value)
+            key = tuple(sorted(twin.items()))
+            if key not in seen:
+                seen.add(key)
+                chosen.append(twin)
     return chosen
 
 
@@ -1072,6 +1280,26 @@ def build_report(
         covered |= _pairs_of(r.case)
     required = _all_pairs()
 
+    # An entity the target never catches EVEN UNFRAGMENTED is outside its detectable
+    # set, and its leak rate is not a fragmentation result. Reporting the two together
+    # would blame chunk boundaries for a value the detector was never going to find.
+    #
+    # This is not hypothetical and it is not the detector's fault. The fixture draws SSNs
+    # from area 900-999, which the SSA has never assigned -- deliberately, so a published
+    # corpus cannot contain a living person's SSN. Google Cloud DLP validates the area
+    # number and therefore never flags them, while Presidio does not validate and does.
+    # Verified directly: DLP flags 219-09-9999 (an assignable area) and ignores
+    # 950-36-9596. **For identifier types with assignment validation there is no value
+    # space that is both safe to publish and detectable by a validating detector**, so
+    # this is declared rather than engineered away.
+    detector_blind = {}
+    for entity in AXES["entity"]:
+        baseline = [
+            r for r in scored
+            if r.case["entity"] == entity and r.case["fragmentation"] == "single_chunk"
+        ]
+        detector_blind[entity] = bool(baseline) and all(r.injection_leaked for r in baseline)
+
     leaked_types = sorted({r.case["entity"] for r in results if r.injection_leaked})
     latencies = [ms for r in results for ms in r.latency_ms]
     worst = max(results, key=lambda r: (r.injection_leaked, -r.events_observed))
@@ -1090,6 +1318,8 @@ def build_report(
             visible = [r for r in rows if r.echo_observable]
             out[value] = {
                 "leak_rate": _rate(r.injection_leaked for r in rows),
+                # Only meaningful on the entity axis; False elsewhere.
+                "detector_blind": bool(axis == "entity" and detector_blind.get(value)),
                 "fidelity_rate": (
                     _rate(v for r in visible for v in r.echo_recovered.values())
                     if visible
@@ -1240,6 +1470,9 @@ def build_report(
             "cases_scored": len(results),
         # The denominator behind fidelity_rate at the top level, for the same reason.
         "cases_echo_observable": len(observable),
+        # Entities the target did not detect even unfragmented. DeltaFrag for these is a
+        # difference between two totals, not a fragmentation penalty.
+        "detector_blind_entities": sorted(k for k, v in detector_blind.items() if v),
             "cases_applicable": len(scored),
             "cases_inconclusive": len(inconclusive),
             "derivation_recomputed": True,
@@ -1476,7 +1709,10 @@ def main(argv: list[str] | None = None) -> int:
             return [f"{list(e.path)}: {e.message}" for e in v.iter_errors(report)]
 
     rows = []
-    selected = [n.strip() for n in args.only.split(",") if n.strip()] or list(POLICIES)
+    # Default to the LOCAL set. The cloud rows bill per delta against a real account,
+    # so running them must be an explicit `--only`, never a side effect of running the
+    # tool with no arguments.
+    selected = [n.strip() for n in args.only.split(",") if n.strip()] or list(DEFAULT_POLICIES)
     if args.gateway_url is None:
         unknown = [n for n in selected if n not in POLICIES]
         if unknown:

@@ -21,7 +21,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pii-leak-benchmark"))
 
-from pii_leak_benchmark.v2_emitter import POLICIES, run_policy  # noqa: E402
+from pii_leak_benchmark.v2_emitter import (  # noqa: E402
+    DEFAULT_POLICIES,
+    POLICIES,
+    run_policy,
+)
 
 METRICS = ("fidelity_rate", "leak_single_chunk", "leak_adversarial", "delta_frag")
 
@@ -78,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="test")
     args = parser.parse_args(argv)
 
-    policies = [n.strip() for n in args.only.split(",") if n.strip()] or list(POLICIES)
+    # Local policies only unless asked by name: the cloud rows are billed per delta.
+    policies = [n.strip() for n in args.only.split(",") if n.strip()] or list(DEFAULT_POLICIES)
     seeds = [f"{i:016x}" for i in range(1, args.seeds + 1)]
 
     print(f"sweeping {len(policies)} policies x {len(seeds)} seeds", flush=True)
