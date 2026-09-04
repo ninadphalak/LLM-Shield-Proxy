@@ -1,13 +1,14 @@
-# Same released 1.5.1 wheel as Dockerfile.pypi, plus PyJWT.
+# HISTORICAL. Kept so the 1.5.1 measurement stays reproducible; use Dockerfile.pypi for
+# current runs.
 #
 # `pip install llm-shield-proxy==1.5.1` alone cannot be profiled at all: every proxied
 # request 500s on `import jwt`, because PyJWT is imported at module scope by
-# security/identity.py and is NOT in the wheel's requires_dist. See
-# ../results/v2-response-split/README.md.
+# security/identity.py and is NOT in that wheel's requires_dist. This image adds PyJWT as
+# an EXPLICIT, DECLARED deviation, which is how 1.5.1 was scored on redaction behaviour
+# rather than on a packaging outage.
 #
-# PyJWT is installed here as an EXPLICIT, DECLARED deviation so the profile scores the
-# proxy's redaction behaviour rather than a packaging outage. Nothing else differs, and
-# no repo source is copied in.
+# 1.5.2 declares PyJWT, so it needs no deviation and Dockerfile.pypi builds it directly.
+# The two score identically, which is the evidence that the fix was packaging-only.
 FROM python:3.12-slim
 
 ARG SHIELD_VERSION=1.5.1

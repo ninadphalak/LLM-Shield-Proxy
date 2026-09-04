@@ -122,11 +122,11 @@ is only meaningful read next to FidelityRate and the LeakRates.
 | Gateway | FidelityRate | Leak (1-chunk) | Leak (adv) | DeltaFrag | Outcome |
 |---|---|---|---|---|---|
 | `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.00 | 0.00 | 0.00 | no-leak-profile-not-met |
-| `llm-shield-proxy-1.5.1` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
+| `llm-shield-proxy-1.5.2` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
 | `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
 
 All three are deterministic across 6 seeds (stdev 0.00 on every metric). See
-`seed-sweep-litellm.json`, `seed-sweep-shield.json`, `seed-sweep-portkey.json`.
+`seed-sweep-litellm.json`, `seed-sweep-shield-152.json`, `seed-sweep-portkey.json`.
 
 ### The two identical rows are not the same gateway
 
@@ -138,7 +138,7 @@ received can, and the harness records it:
 |---|---|
 | client sent | `Please review: lylyfwzv@example.com, 950-36-9596, 6011-1111-1111-1117` |
 | `portkey-gateway-oss` | `Please review: lylyfwzv@example.com, 950-36-9596, 6011-1111-1111-1117` |
-| `llm-shield-proxy-1.5.1` | `Please review: zmaxwell@example.com, 437-77-8683, 4989557827846679218` |
+| `llm-shield-proxy-1.5.2` | `Please review: zmaxwell@example.com, 437-77-8683, 4989557827846679218` |
 | `litellm-presidio` | `Please review: <EMAIL_ADDRESS_1>S_SSN_3>, <CREDIT_CARD_4>` |
 
 Portkey forwarded the caller's real values to the upstream. LLM-Shield-Proxy substituted
@@ -153,13 +153,22 @@ without also recording what the upstream received is rankable in the wrong direc
 v2 reports carry `capture.upstream_bodies` for exactly this reason, and any leaderboard
 built on this profile has to publish that column too.
 
-### LLM-Shield-Proxy 1.5.1
+### LLM-Shield-Proxy 1.5.2
 
 Installed **from PyPI, not built from this working tree** (`pip install
-llm-shield-proxy==1.5.1` inside `benchmarks/shield-v2-profile/Dockerfile.pypi`), so the
+llm-shield-proxy==1.5.2` inside `benchmarks/shield-v2-profile/Dockerfile.pypi`), so the
 measurement is of the released artefact. `UPSTREAM_BASE_URL` points at this harness's
 capture; default masking mode (`SYNTHETIC`), Tier-3 NER off, so only structured entities
 are in scope -- which is all the v2 corpus uses.
+
+**1.5.2 exists because of this measurement.** Profiling the published 1.5.1 found that
+every proxied request returned 500: `security/identity.py` imports `jwt` at module scope,
+`api/main.py` imports it from inside the request handler without gating, and PyJWT was
+absent from that wheel's `requires_dist`. A working-tree `docker build` installs
+`requirements.txt`, which has always been a superset of the wheel's declared dependencies,
+so it would have reported a clean gateway. 1.5.1 was scored with PyJWT added as a declared
+deviation; **1.5.2 needs none and scores identically**, which is the evidence that the fix
+was packaging-only. Details in `../../shield-v2-profile/STATUS.md`.
 
 - **FidelityRate 1.00.** All 18 echo values across all 6 seeds were restored exactly. The
   request/response vault round-trip works, and it works through a 5-event stream: unlike
@@ -167,7 +176,7 @@ are in scope -- which is all the v2 corpus uses.
 - **LeakRate 1.00, in both conditions.** Every injected value reached the client.
 
 This is the `passthrough` corner of the *response* space reached from the opposite side of
-the *request* space, and it is architectural rather than a misconfiguration: 1.5.1 has no
+the *request* space, and it is architectural rather than a misconfiguration: 1.5.2 has no
 setting for response-side detection. `grep`ping the released `core/config.py` for a
 response-scanning option returns nothing; the response path rehydrates vault placeholders,
 applies the canary tripwire and the watermark, and forwards everything else. The proxy
@@ -238,15 +247,25 @@ Reproduce the gateway rows (each needs its container up; see
 `docker run` lines):
 
 ```bash
-# LLM-Shield-Proxy 1.5.1, installed from PyPI inside the image
-docker build -f benchmarks/shield-v2-profile/Dockerfile.pypi-patched   -t shield-pypi:1.5.1-jwt benchmarks/shield-v2-profile
-V2_GATEWAY_TOKEN=sk-shield-v2-profile python benchmarks/v2_seed_sweep.py --seeds 6   --only llm-shield-proxy-1.5.1   --gateway-url http://127.0.0.1:8811/v1/chat/completions   --upstream-port 8799 --model capture   --out benchmarks/results/v2-response-split/seed-sweep-shield.json
+# LLM-Shield-Proxy 1.5.2, installed from PyPI inside the image
+docker build -f benchmarks/shield-v2-profile/Dockerfile.pypi \
+  -t shield-pypi:1.5.2 benchmarks/shield-v2-profile
 
-# Portkey OSS. Routing and guardrail config travel as headers, not in the URL.
-export V2_GATEWAY_HEADERS='{"x-portkey-provider":"openai",
-  "x-portkey-custom-host":"http://host.docker.internal:8799/v1",
-  "x-portkey-config":"{\"output_guardrails\":[{\"checks\":[{\"id\":\"portkey.pii\",\"parameters\":{\"redact\":true}}]}]}"}'
-V2_GATEWAY_TOKEN=sk-dummy python benchmarks/v2_seed_sweep.py --seeds 6   --only portkey-gateway-oss   --gateway-url http://127.0.0.1:8788/v1/chat/completions   --upstream-port 8799 --model capture   --out benchmarks/results/v2-response-split/seed-sweep-portkey.json
+V2_GATEWAY_TOKEN=sk-shield-v2-profile python benchmarks/v2_seed_sweep.py --seeds 6 \
+  --only llm-shield-proxy-1.5.2 \
+  --gateway-url http://127.0.0.1:8811/v1/chat/completions \
+  --upstream-port 8799 --model capture \
+  --out benchmarks/results/v2-response-split/seed-sweep-shield-152.json
+
+# Portkey OSS. Routing and guardrail config travel as headers, not in the URL, so they
+# go through V2_GATEWAY_HEADERS. Keep it on one line: the value is JSON inside JSON.
+export V2_GATEWAY_HEADERS='{"x-portkey-provider":"openai","x-portkey-custom-host":"http://host.docker.internal:8799/v1","x-portkey-config":"{\"output_guardrails\":[{\"checks\":[{\"id\":\"portkey.pii\",\"parameters\":{\"redact\":true}}]}]}"}'
+
+V2_GATEWAY_TOKEN=sk-dummy python benchmarks/v2_seed_sweep.py --seeds 6 \
+  --only portkey-gateway-oss \
+  --gateway-url http://127.0.0.1:8788/v1/chat/completions \
+  --upstream-port 8799 --model capture \
+  --out benchmarks/results/v2-response-split/seed-sweep-portkey.json
 ```
 
 `benchmarks/shield-v2-profile/probe_gateway.py --url ... --token ...` prints both sides of
@@ -442,6 +461,16 @@ version ranges, more than one carrier, and someone other than this project runni
 segment is what the harness chose to inject, not what a model would actually say. That is
 deliberate -- it is what makes the injected values known ground truth -- but it means the
 LeakRates are conditional on an injection pattern, not on observed model output.
+
+**The corpus only uses `messages[0].content`.** Every scored case puts its protected value
+in one chat field, so the profile says nothing about the rest of a request body -- and a
+real MCP or JSON-RPC caller carries values in `system`, in tool arguments, in nested
+metadata, in keys no schema names. `benchmarks/shield-v2-profile/probe_json_fields.py`
+checks that separately for LLM-Shield-Proxy and finds the deep walk masks all of them
+(leaving structural keys like `tools[0].function.name` alone, correctly) and that
+rehydration is keyed by value rather than by field. **That is a probe, not a scored row**,
+and it has been run against one gateway only. A carrier axis for non-chat JSON fields is
+the principled fix and has not been built.
 
 **Not yet done:** a dedicated run isolating the LiteLLM/Presidio placeholder collision; a
 run of LLM-Shield-Proxy with `SHIELD_DEFAULT_MASKING_MODE` other than `SYNTHETIC`; any

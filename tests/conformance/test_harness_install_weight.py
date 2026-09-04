@@ -37,8 +37,18 @@ BENCHMARK_PACKAGE = BENCHMARK_DIST / "pii_leak_benchmark"
 # The floor: httpx's own dependency tree. The profile itself needs nothing beyond it.
 # Listed generously (a venv with httpx[cli] present pulls click/rich/pygments) because
 # the assertion is a subset check -- what matters is that nothing else appears.
+#
+# `attr` is here for the same reason and it is worth spelling out, because it looked at
+# first like the gateway stack leaking in. `httpx/__init__.py` does a guarded
+# `from ._main import main`; `_main` imports click and rich; and `rich/pretty.py` does a
+# bare `import attr as _attr_module` at module scope. So whenever `attrs` happens to be
+# installed for some unrelated reason, `import httpx` reaches it -- through rich, which is
+# already allowed here. The dependency direction this file defends is untouched by that:
+# nothing from llm-shield-proxy appears either way. What the set must never grow is a
+# gateway package.
 HTTPX_TREE = {
     "anyio",
+    "attr",
     "certifi",
     "click",
     "h11",

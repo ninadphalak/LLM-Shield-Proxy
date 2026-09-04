@@ -1,7 +1,12 @@
 # LLM-Shield-Proxy v2 profile run -- measured
 
-**Status 2026-09-04: measured, from PyPI.** Results in `../results/v2-response-split/` --
-`llm-shield-proxy-1.5.1.json` and `seed-sweep-shield.json`.
+**Status 2026-09-04: measured. 1.5.2 is the version to cite.** Results in
+`../results/v2-response-split/`: `seed-sweep-shield-152.json` (1.5.2, current) and
+`seed-sweep-shield.json` + `llm-shield-proxy-1.5.1.json` (1.5.1, kept because the
+packaging defect below is part of the record).
+
+**1.5.2 and 1.5.1 score identically** -- fidelity 1.00, leak 1.00/1.00, DeltaFrag 0.00 --
+which is the evidence that the release changed packaging and nothing else.
 
 ## From the index, not from the working tree
 
@@ -11,7 +16,7 @@ been a superset of the wheel's declared dependencies, so it measures a distribut
 can actually download. The first run of this profile against a working-tree build would
 have reported a clean gateway.
 
-## The released 1.5.1 cannot be profiled at all as published
+## Why 1.5.2 exists: the released 1.5.1 could not be profiled at all
 
 `pip install llm-shield-proxy==1.5.1` gives an installation where **every proxied request
 returns 500**:
@@ -36,10 +41,13 @@ later. The guard added then -- `tests/ootb/test_pypi_cli.py` -- could not catch 
 it imported the ASGI app and a lazily imported module is never reached that way. Verified:
 a filesystem walk of the stock 1.5.1 install imports 50 modules and exactly one fails.
 
-Fixed here by declaring `PyJWT>=2.13.0` and by making the guard import **every** module in
-the installed package (`tests/ootb/_import_every_module.py`). Proven both directions
-against the two images below: exit 1 on `shield-pypi:1.5.1`, exit 0 on
-`shield-pypi:1.5.1-jwt`.
+Fixed in **1.5.2** by declaring `PyJWT>=2.13.0`, and the guard now imports **every**
+module in the installed package (`tests/ootb/_import_every_module.py`). Proven both
+directions against images built from the published wheels: exit 1 on `shield-pypi:1.5.1`
+naming `llm_shield_proxy.security.identity`, exit 0 on `shield-pypi:1.5.1-jwt` and on
+1.5.2. The 1.5.2 wheel was verified in a clean container -- 50 modules imported, zero
+undeclared dependencies, and a real proxied streaming request served end to end --
+**before** it was released, because a PyPI version cannot be re-uploaded.
 
 `pkgutil.walk_packages` is not usable for that walk -- it swallows the ImportError raised
 while importing a subpackage and silently skips its children, which on 1.5.1 reduced 50
@@ -63,7 +71,7 @@ MSYS_NO_PATHCONV=1 docker run -d --name shield-v2 --network v2profile \
   -e VALID_VIRTUAL_KEYS="sk-shield-v2-profile" \
   -e OPENAI_API_KEY="sk-dummy-upstream-not-used" \
   -e UPSTREAM_API_KEY="sk-dummy-upstream-not-used" \
-  shield-pypi:1.5.1-jwt
+  shield-pypi:1.5.2
 
 V2_GATEWAY_TOKEN=sk-shield-v2-profile python benchmarks/v2_seed_sweep.py --seeds 6 \
   --only llm-shield-proxy-1.5.1 \
@@ -95,3 +103,39 @@ Rehydration works and streaming is preserved (5 SSE events); the response path h
 detector for values the proxy never vaulted, and 1.5.1 has no setting to add one. Full
 write-up, including why this row and Portkey's identical row are not the same behaviour, is
 in `../results/v2-response-split/README.md`.
+
+## The request-path walk covers more than the v2 corpus does
+
+The v2 corpus puts every protected value in `messages[0].content`, so the profile alone
+says nothing about the deep payload walk that runs on the rest of the body. MCP and
+JSON-RPC callers routinely carry values in places a chat schema has no name for, so
+`probe_json_fields.py` asks the two questions separately. Against 1.5.2 with defaults
+(`ENABLE_DEEP_PAYLOAD_REDACTION=true`):
+
+| field | masked before reaching the upstream |
+|---|---|
+| `messages[0].content` | yes |
+| `messages[1].content` | yes |
+| `metadata.nested.note` | yes |
+| `an_unrecognised_key` (a brand-new top-level key) | yes |
+| `tools[0].function.description` | yes |
+| `tools[0].function.name` | **no, and correctly so** |
+
+`function.name` is structural: masking it would rename the function the provider is asked
+to call. That is what `PAYLOAD_PROTECTED_KEYS` and the built-in structural set are for.
+
+Restoration has to be asked per value rather than per field, because the capture echoes
+only `messages[0].content`. Running each value through that slot in turn, **both the email
+and the SSN come back as the originals** -- the vault is keyed by value, not by the field
+the value arrived in, so a value masked out of an unrecognised key is rehydrated the same
+way as one masked out of a chat message.
+
+```bash
+python benchmarks/shield-v2-profile/probe_json_fields.py   --url http://127.0.0.1:8811/v1/chat/completions --token sk-shield-v2-profile
+```
+
+This is a probe, not a scored profile: one payload, one shape per field, one version. It
+does not belong in the v2 numbers. It is here because the profile's own corpus cannot
+reach these fields, and a reviewer should be told which coverage claim rests on which
+evidence. Extending the corpus with a carrier axis for non-chat JSON fields is the
+principled fix and has not been done.

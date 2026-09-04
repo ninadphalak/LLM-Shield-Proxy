@@ -1,0 +1,82 @@
+{
+ "llm-shield-proxy-1.5.2": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_adversarial": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "delta_frag": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006"
+  ]
+ }
+}
