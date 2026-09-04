@@ -1,0 +1,19 @@
+# LLM-Shield-Proxy under test, installed FROM PyPI -- not from this working tree.
+#
+# The point of this image is that it contains the artefact a practitioner would get
+# with `pip install llm-shield-proxy==1.5.1`, so the v2 profile scores the released
+# distribution rather than whatever is checked out locally. Nothing from the repo is
+# copied in; if a fix exists only in the working tree, this image must not have it.
+FROM python:3.12-slim
+
+ARG SHIELD_VERSION=1.5.1
+
+RUN pip install --no-cache-dir "llm-shield-proxy==${SHIELD_VERSION}" "uvicorn[standard]"
+
+# Record what actually landed, so the image can be audited without rerunning pip.
+RUN python -c "import importlib.metadata as m; print('llm-shield-proxy', m.version('llm-shield-proxy'))" \
+    && pip freeze > /installed-requirements.txt
+
+EXPOSE 8000
+
+ENTRYPOINT ["uvicorn", "llm_shield_proxy.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

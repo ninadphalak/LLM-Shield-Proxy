@@ -1,4 +1,4 @@
-# v2 response-split emitter — measured run
+# v2 response-split emitter -- measured run
 
 **Run:** 2026-09-04, project-run, single machine. **Not independently reproduced.**
 
@@ -79,7 +79,7 @@ the seed alone. Cells are `mean [min-max]` over 12 seeds; seeds are recorded in
 
 All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
 
-**A real detector** — a live `mcr.microsoft.com/presidio-analyzer` container on
+**A real detector** -- a live `mcr.microsoft.com/presidio-analyzer` container on
 `127.0.0.1:5002`, stock recognizer registry, queried over HTTP per delta:
 
 | Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag |
@@ -87,7 +87,7 @@ All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
 | `presidio-chunk-local` | 1.00 | 0.00 | **0.81 [0.67-1.00]** | **0.81 [0.67-1.00]**, stdev 0.17 |
 | `presidio-retention` | 1.00 | 0.00 | **0.33 [0.33-0.33]** | **0.33 [0.33-0.33]**, stdev 0.00 |
 
-**A real gateway product** — LiteLLM 1.99 (`ghcr.io/berriai/litellm:main-latest`) in Docker,
+**A real gateway product** -- LiteLLM 1.99 (`ghcr.io/berriai/litellm:main-latest`) in Docker,
 with its own Presidio guardrail (`output_parse_pii: true`) pointed at the same analyzer
 container. LiteLLM does the masking, calls this harness as its configured upstream, and
 applies its own return path. Nothing here is modelled. 6 seeds:
@@ -103,7 +103,7 @@ perfect leak rate and returns none of the user's own data: 0 of 18 echo values r
 
 **Verified, not inferred.** A single-request probe captured both sides:
 
-- The prompt the upstream received was masked — `Please review: <EMAIL_ADDRESS_1>...`,
+- The prompt the upstream received was masked -- `Please review: <EMAIL_ADDRESS_1>...`,
   not the real values. **So masking ran.** FidelityRate 0.00 means "did not restore", not
   "nothing was there to restore".
 - The client received placeholders, not originals: `<CREDIT_CARD>`, `<URL>`.
@@ -113,17 +113,101 @@ That last number is the important one. **LiteLLM buffers the whole response and 
 as one chunk**, which independently reproduces evidence-ledger E15 by a different route.
 And it explains the DeltaFrag: **0.00 here does not mean the fragmentation bug was solved.
 It means there are no chunk boundaries left to straddle.** The bug was avoided by removing
-incremental delivery — the property the whole streaming architecture exists to provide.
+incremental delivery -- the property the whole streaming architecture exists to provide.
 Compare `passthrough`, which also scores DeltaFrag 0.00 while leaking everything: the metric
 is only meaningful read next to FidelityRate and the LeakRates.
 
-**Scope.** One gateway, one version, one guardrail configuration, one carrier sentence,
-project-run, unreplicated. Not a leaderboard row and not a comparison. LiteLLM makes no
-claim to rehydrate; `output_parse_pii` is documented as output parsing, so this measures a
-configuration a practitioner would plausibly deploy, not a broken promise.
+**Two more shipping gateways, same harness, same capture.**
+
+| Gateway | FidelityRate | Leak (1-chunk) | Leak (adv) | DeltaFrag | Outcome |
+|---|---|---|---|---|---|
+| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.00 | 0.00 | 0.00 | no-leak-profile-not-met |
+| `llm-shield-proxy-1.5.1` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
+| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
+
+All three are deterministic across 6 seeds (stdev 0.00 on every metric). See
+`seed-sweep-litellm.json`, `seed-sweep-shield.json`, `seed-sweep-portkey.json`.
+
+### The two identical rows are not the same gateway
+
+LLM-Shield-Proxy and Portkey score **identically on every response-path metric**, and they
+are doing opposite things. The response metrics cannot tell them apart. What the upstream
+received can, and the harness records it:
+
+| Gateway | prompt the upstream actually received |
+|---|---|
+| client sent | `Please review: lylyfwzv@example.com, 950-36-9596, 6011-1111-1111-1117` |
+| `portkey-gateway-oss` | `Please review: lylyfwzv@example.com, 950-36-9596, 6011-1111-1111-1117` |
+| `llm-shield-proxy-1.5.1` | `Please review: zmaxwell@example.com, 437-77-8683, 4989557827846679218` |
+| `litellm-presidio` | `Please review: <EMAIL_ADDRESS_1>S_SSN_3>, <CREDIT_CARD_4>` |
+
+Portkey forwarded the caller's real values to the upstream. LLM-Shield-Proxy substituted
+synthetic surrogates; LiteLLM substituted placeholders. **Portkey's FidelityRate of 1.00 is
+vacuous** -- nothing was ever masked, so "the originals came back" is not restoration, it is
+the absence of any transformation at all.
+
+**This is a finding about the metric, not only about the gateways.** FidelityRate and
+LeakRate are response-path measurements, and on their own they rank a gateway that does
+nothing equal to one that protects the request path completely. A profile that reports them
+without also recording what the upstream received is rankable in the wrong direction. The
+v2 reports carry `capture.upstream_bodies` for exactly this reason, and any leaderboard
+built on this profile has to publish that column too.
+
+### LLM-Shield-Proxy 1.5.1
+
+Installed **from PyPI, not built from this working tree** (`pip install
+llm-shield-proxy==1.5.1` inside `benchmarks/shield-v2-profile/Dockerfile.pypi`), so the
+measurement is of the released artefact. `UPSTREAM_BASE_URL` points at this harness's
+capture; default masking mode (`SYNTHETIC`), Tier-3 NER off, so only structured entities
+are in scope -- which is all the v2 corpus uses.
+
+- **FidelityRate 1.00.** All 18 echo values across all 6 seeds were restored exactly. The
+  request/response vault round-trip works, and it works through a 5-event stream: unlike
+  LiteLLM, incremental delivery is preserved.
+- **LeakRate 1.00, in both conditions.** Every injected value reached the client.
+
+This is the `passthrough` corner of the *response* space reached from the opposite side of
+the *request* space, and it is architectural rather than a misconfiguration: 1.5.1 has no
+setting for response-side detection. `grep`ping the released `core/config.py` for a
+response-scanning option returns nothing; the response path rehydrates vault placeholders,
+applies the canary tripwire and the watermark, and forwards everything else. The proxy
+makes no claim to redact model-originated PII, so this is a scope statement about the
+product, not a broken promise -- but it is also why it cannot pass a profile that requires
+both halves.
+
+**DeltaFrag 0.00 here means the value leaks in every condition**, so fragmentation adds
+nothing. Compare `redact-all`, which scores DeltaFrag 1.00 by leaking only when
+fragmented. The metric is a difference and it is zero at both extremes.
+
+### Portkey OSS gateway
+
+`portkeyai/gateway:latest`, configured with an `output_guardrails` check of
+`portkey.pii` with `redact: true`, passed through `x-portkey-config`.
+
+**The guardrail did nothing, and said nothing.** Byte-identical output with and without the
+config header, HTTP 200 either way, no error surfaced to the client. Reading the shipped
+bundle explains it: all six PII checks in the OSS distribution -- under the `qualifire`,
+`portkey`, `patronus`, `pangea`, `promptfoo` and `azure` namespaces -- are call-outs to a
+third-party service requiring `credentials.apiKey`, and `executeHooks` catches its own
+errors and returns `shouldDeny: false`. **The OSS gateway ships no local PII redaction**,
+and an unconfigured or failing remote guardrail fails open silently.
+
+That is worth stating carefully: it is a property of the open-source distribution run
+without third-party credentials, which is the configuration a practitioner gets by default.
+It says nothing about Portkey's hosted product or about the guardrail vendors themselves.
+
+**Scope, for all three gateways.** One version each, one guardrail configuration each,
+one carrier sentence, project-run, unreplicated, all against a synthetic capture rather
+than a live model. **Not a leaderboard and not a ranking.** Each gateway is measured in the
+configuration a practitioner would plausibly deploy, and each is doing roughly what its
+documentation says it does -- LiteLLM makes no claim to rehydrate, LLM-Shield-Proxy makes
+no claim to redact model-originated PII, and Portkey documents its PII guardrails as
+integrations with named third-party services. What the profile shows is that **none of the
+three satisfies both halves of the response split**, which is a statement about the
+category, not about any one product's honesty.
 
 **One further observation, reported as an observation.** The masked prompt LiteLLM sent
-upstream was `Please review: <EMAIL_ADDRESS_1>S_SSN_3>, <CREDIT_CARD_4>` — the separator
+upstream was `Please review: <EMAIL_ADDRESS_1>S_SSN_3>, <CREDIT_CARD_4>` -- the separator
 and the opening of the second placeholder are missing, so two anonymizer replacements
 collided. On the return path the client saw `lylyfwzv@<URL>`, part of the echo email's local
 part surviving alongside a `<URL>` replacement. This is the same *class* as the partial-span
@@ -146,11 +230,32 @@ schema-validation evidence. **The numbers to cite are the sweep above**, from
 `seed-sweep.json`. All reports validate against `spec/v2.0.0/http-profile.schema.json`
 (`jsonschema` 4.26.0, Draft 2020-12).
 
-Reproduce: `python benchmarks/v2_seed_sweep.py --seeds 12`
+Reproduce the reference and Presidio rows:
+`python benchmarks/v2_seed_sweep.py --seeds 12`
+
+Reproduce the gateway rows (each needs its container up; see
+`benchmarks/shield-v2-profile/` and `benchmarks/litellm-v2-profile/` for the exact
+`docker run` lines):
+
+```bash
+# LLM-Shield-Proxy 1.5.1, installed from PyPI inside the image
+docker build -f benchmarks/shield-v2-profile/Dockerfile.pypi-patched   -t shield-pypi:1.5.1-jwt benchmarks/shield-v2-profile
+V2_GATEWAY_TOKEN=sk-shield-v2-profile python benchmarks/v2_seed_sweep.py --seeds 6   --only llm-shield-proxy-1.5.1   --gateway-url http://127.0.0.1:8811/v1/chat/completions   --upstream-port 8799 --model capture   --out benchmarks/results/v2-response-split/seed-sweep-shield.json
+
+# Portkey OSS. Routing and guardrail config travel as headers, not in the URL.
+export V2_GATEWAY_HEADERS='{"x-portkey-provider":"openai",
+  "x-portkey-custom-host":"http://host.docker.internal:8799/v1",
+  "x-portkey-config":"{\"output_guardrails\":[{\"checks\":[{\"id\":\"portkey.pii\",\"parameters\":{\"redact\":true}}]}]}"}'
+V2_GATEWAY_TOKEN=sk-dummy python benchmarks/v2_seed_sweep.py --seeds 6   --only portkey-gateway-oss   --gateway-url http://127.0.0.1:8788/v1/chat/completions   --upstream-port 8799 --model capture   --out benchmarks/results/v2-response-split/seed-sweep-portkey.json
+```
+
+`benchmarks/shield-v2-profile/probe_gateway.py --url ... --token ...` prints both sides of
+a single request for any of them, which is how you check that a FidelityRate of 0.00 means
+"did not restore" and not "nothing was there to restore"
 
 ---
 
-## 2. The five findings a reviewer should check
+## 2. The six findings a reviewer should check
 
 ### 2.1 No single global response-path policy passes
 
@@ -170,7 +275,7 @@ tell a correct gateway from a destructive one.
 ### 2.2 DeltaFrag separates policies that are otherwise indistinguishable
 
 `chunk-local`, `bounded-retention` and `retention-plus-decoding` are **identical under the
-single-chunk condition** — all three score LeakRate 0.0 and FidelityRate 1.0. A benchmark
+single-chunk condition** -- all three score LeakRate 0.0 and FidelityRate 1.0. A benchmark
 that only sent whole values inside single chunks would rank them equal.
 
 Under the adversarial condition they separate: 1.0, 0.3333, 0.0. DeltaFrag is exactly that
@@ -179,7 +284,7 @@ artefact of being tested on unfragmented input.
 
 ### 2.3 The same result holds for a real detector, not just the models
 
-`presidio-chunk-local` and `presidio-retention` use a **live Presidio analyzer** — same
+`presidio-chunk-local` and `presidio-retention` use a **live Presidio analyzer** -- same
 container, same recognizer registry, same fixture, same corpus. The only difference between
 the two rows is whether a chunk boundary is allowed to fall inside a value.
 
@@ -223,6 +328,32 @@ exactly 0.3333 with stdev 0.00 across all 12 seeds, leaking the identical
 this is a property of the integration pattern rather than of the model detector, and the
 cross-check is the reason to trust the reference-policy row.
 
+### 2.6 The instrument had a capture-side false pass, and it flattered the target
+
+Found while measuring Portkey, fixed in this commit, and recorded because a leak
+instrument that fails toward "secure" is the one failure it must never have.
+
+An external-gateway run rebinds the capture to the **same fixed port** for every case. The
+old teardown called `shutdown()` only -- which ends the accept loop but leaves the socket
+bound and leaves live handler threads running. A gateway that pools connections held a
+keep-alive socket across the case boundary, the predecessor's thread answered, and the case
+was scored against the **previous case's** injected values.
+
+The observed symptom: Portkey, a gateway that redacts nothing at all, scored **LeakRate
+0.33** -- because in the SSN and CARDPAN cases the client received the EMAIL case's
+response, the SSN needle was correctly absent from it, and "needle absent" was scored as
+"did not leak". The true value is 1.00.
+
+The fix is `Connection: close` from the capture plus `server_close()` on teardown, so no
+socket can outlive the fixture it was opened against.
+`tests/conformance/test_v2_capture_isolation.py` fails without it.
+
+**Everything already published was re-measured after the fix, and nothing moved.** LiteLLM:
+0.00 on every metric, 6 seeds. The full 12-seed reference and Presidio sweep reproduced
+identically, `presidio-chunk-local` included at 0.81 [0.67-1.00]. Only external-gateway runs
+could ever have been affected, because in-process runs bind a fresh ephemeral port per case
+and so had no socket to reuse. No number in this file predates the fix.
+
 ### 2.5 The v2 corpus block cannot be satisfied by a partial run
 
 `corpus.coverage.axes` has `minItems: 4` and the enum is exactly
@@ -259,7 +390,7 @@ print('valid')
 "
 ```
 
-**Adversarial checks worth running** — each targets a way this result could be hollow:
+**Adversarial checks worth running** -- each targets a way this result could be hollow:
 
 1. **Is the gateway being handed the answers?** Grep `v2_emitter.py` for any path where a
    policy receives `segments.injection`. It should not exist: policies get only the request
@@ -271,16 +402,16 @@ print('valid')
    `fragmentation=adversarial` and assert `_injection_events` returns two pieces whose
    concatenation is the encoded value and neither of which contains it whole.
 4. **Is FidelityRate measuring rehydration or just echo?** Confirm `passthrough` scores 0.0
-   — it forwards the *masked* prompt, so a policy that does nothing must fail fidelity. If
+   -- it forwards the *masked* prompt, so a policy that does nothing must fail fidelity. If
    passthrough ever scores 1.0, the upstream is echoing unmasked text and the measurement
    is void.
 5. **Does the client inspector over-reach?** `_present` normalizes and percent-decodes. Confirm
-   it does not fold ASCII in a way that manufactures matches — the v1 harness has a
+   it does not fold ASCII in a way that manufactures matches -- the v1 harness has a
    documented false-positive incident from exactly that.
 
 ---
 
-## 4. Limits — stated in the reports and repeated here
+## 4. Limits -- stated in the reports and repeated here
 
 - **Reference policies, not products.** No third-party gateway is measured, named or
   ranked. These are deliberate models chosen to occupy the corners of the space.
@@ -293,17 +424,25 @@ print('valid')
   not be cited as such.
 - **No generative corpus** behind the case definitions; `corpus.sha256` digests the six
   case definitions this module emits and nothing more.
-- The `seed` field is recorded but **values are not reproducible from it** — the fixture
+- The `seed` field is recorded but **values are not reproducible from it** -- the fixture
   generator is not seeded. This is a real gap against the schema's intent, which is that a
   seed reproduces the drawn values. Recorded rather than papered over.
 
 ## 5. What this does not do
 
-It does not measure a full **gateway product**. The Presidio rows measure a real, widely
-deployed *detector* inside a wrapper written here — not LiteLLM's guardrail, not
-LLM-Shield-Proxy, not any vendor's shipped streaming path. The rehydration half is the
-wrapper's in every row.
+**The `presidio-*` rows are still models.** They measure a real, widely deployed *detector*
+inside a wrapper written here; the rehydration half is the wrapper's. Only the three
+gateway rows measure a vendor's own shipped streaming path end to end.
 
-Running the profile against LiteLLM's Presidio guardrail and against LLM-Shield-Proxy
-itself is the next step. `litellm` is not installed in this environment; the Presidio
-containers are.
+**It is not a leaderboard.** Three gateways, one version each, one configuration each, one
+carrier sentence, run once by the author of one of them. A leaderboard needs replication,
+version ranges, more than one carrier, and someone other than this project running it.
+
+**The capture is not a model.** The upstream is a synthetic SSE emitter, so the injection
+segment is what the harness chose to inject, not what a model would actually say. That is
+deliberate -- it is what makes the injected values known ground truth -- but it means the
+LeakRates are conditional on an injection pattern, not on observed model output.
+
+**Not yet done:** a dedicated run isolating the LiteLLM/Presidio placeholder collision; a
+run of LLM-Shield-Proxy with `SHIELD_DEFAULT_MASKING_MODE` other than `SYNTHETIC`; any
+gateway with a *local* response-side PII detector, which none of the three has.

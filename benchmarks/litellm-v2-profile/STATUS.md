@@ -1,6 +1,6 @@
-# LiteLLM v2 profile run — RESOLVED via Docker
+# LiteLLM v2 profile run -- RESOLVED via Docker
 
-**Status 2026-09-04: measured.** Results in `../results/v2-response-split/` —
+**Status 2026-09-04: measured.** Results in `../results/v2-response-split/` --
 `litellm-presidio.json` and `seed-sweep-litellm.json`.
 
 Run it with `config.docker.yaml`, not `config.yaml`. The pip route was abandoned; see
@@ -53,7 +53,7 @@ from LiteLLM when no run is in flight is expected, not a fault.
 Installing `litellm[proxy]` into the harness venv **broke a project invariant**:
 `tests/conformance/test_harness_install_weight.py` asserts that importing
 `pii_leak_benchmark` pulls in nothing beyond the httpx dependency tree. `httpx/__init__.py`
-does a guarded `from ._main import main`, and `_main` imports `click` and `rich` — so once
+does a guarded `from ._main import main`, and `_main` imports `click` and `rich` -- so once
 the install completed that chain, `import httpx` started dragging them in and three tests
 failed. Uninstalling litellm and its dependencies did **not** restore it.
 
@@ -80,7 +80,7 @@ session**, running under a different Python. `curl http://127.0.0.1:4000/...` an
 setup *looked* successful when this session's proxy had not started at all. Several
 intermediate "results" were that other proxy replying.
 
-Those processes were deliberately left running — they are not this session's to kill. The
+Those processes were deliberately left running -- they are not this session's to kill. The
 container publishes on **4321** to stay clear of them.
 
 **Always confirm your own process owns the port** before trusting a response:

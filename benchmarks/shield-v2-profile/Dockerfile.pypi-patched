@@ -1,0 +1,22 @@
+# Same released 1.5.1 wheel as Dockerfile.pypi, plus PyJWT.
+#
+# `pip install llm-shield-proxy==1.5.1` alone cannot be profiled at all: every proxied
+# request 500s on `import jwt`, because PyJWT is imported at module scope by
+# security/identity.py and is NOT in the wheel's requires_dist. See
+# ../results/v2-response-split/README.md.
+#
+# PyJWT is installed here as an EXPLICIT, DECLARED deviation so the profile scores the
+# proxy's redaction behaviour rather than a packaging outage. Nothing else differs, and
+# no repo source is copied in.
+FROM python:3.12-slim
+
+ARG SHIELD_VERSION=1.5.1
+
+RUN pip install --no-cache-dir "llm-shield-proxy==${SHIELD_VERSION}" "uvicorn[standard]" \
+    && pip install --no-cache-dir "PyJWT>=2.13.0"
+
+RUN pip freeze > /installed-requirements.txt
+
+EXPOSE 8000
+
+ENTRYPOINT ["uvicorn", "llm_shield_proxy.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

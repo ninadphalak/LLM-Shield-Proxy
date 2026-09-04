@@ -29,8 +29,21 @@ DeltaFrag = LeakRate(adversarial) - LeakRate(single_chunk) is then the number th
 separates a chunk-local scanner from a retaining one. Both score identically when every
 value arrives inside one chunk; only the adversarial condition tells them apart.
 
-The reference policies are deliberate models, not products. No third-party gateway is
-measured, named or ranked here.
+The reference policies are deliberate models, not products, and nothing in this module
+names or ranks a vendor.
+
+EXTERNAL GATEWAYS. `--gateway-url` skips the in-process policies entirely and drives a real
+proxy that is already running and already configured to use this harness's capture as its
+upstream. `policy_name` is then only a label. Two things make that mode honest and both are
+easy to get wrong:
+
+  - The capture must answer each case with ITS OWN fixture. It is rebound to the same fixed
+    port every case, so it sends `Connection: close`; without that a pooling gateway gets
+    the previous case's response and the case scores as a non-leak. See `_stop`.
+  - The report's `capture.upstream_bodies` is not optional colour. FidelityRate and
+    LeakRate are response-path measurements, and a gateway that masks nothing scores
+    FidelityRate 1.0 for the trivial reason that there was nothing to restore. Only the
+    prompt the upstream received separates that from real rehydration.
 """
 
 from __future__ import annotations
@@ -618,8 +631,17 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
+            # Each case gets a fresh capture bound to the same port, so a pooled
+            # keep-alive connection outlives the fixture it was opened against: the
+            # gateway reuses the socket, the OLD handler thread answers, and the case is
+            # scored against the PREVIOUS case's injected values. Measured, not theorised
+            # -- an SSN case came back carrying the EMAIL case's needle, which reads as
+            # "the gateway redacted the SSN" and is entirely false. Refusing reuse costs a
+            # TCP handshake per case and buys per-case independence.
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+            self.close_connection = True
 
     return Handler
 
@@ -695,10 +717,24 @@ def _serve(
     handler: type[BaseHTTPRequestHandler], port: int = 0
 ) -> tuple[ThreadingHTTPServer, str]:
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server.allow_reuse_address = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address[:2]
     return server, f"http://{host}:{port}/v1/chat/completions"
+
+
+def _stop(server: ThreadingHTTPServer) -> None:
+    """Stop accepting AND release the listening socket.
+
+    `shutdown()` alone only ends the accept loop; it leaves the socket bound and leaves
+    live handler threads running. The capture is rebound to the SAME fixed port for every
+    case of an external-gateway run, so a half-closed predecessor is not a tidiness
+    problem -- it answers the next case with the previous case's fixture. See the
+    `Connection: close` note on the capture handler.
+    """
+    server.shutdown()
+    server.server_close()
 
 
 def _haystacks(sse: str) -> list[str]:
@@ -738,6 +774,26 @@ def _present(value: str, haystacks: list[str]) -> bool:
     return False
 
 
+def _extra_gateway_headers() -> dict[str, str]:
+    """Extra request headers for an external gateway, from V2_GATEWAY_HEADERS (JSON).
+
+    Some gateways cannot be addressed by URL alone: Portkey routes on
+    `x-portkey-provider` / `x-portkey-custom-host` and takes its guardrail configuration
+    from an `x-portkey-config` header. Those belong to the deployment being measured, not
+    to the profile, so they are supplied from the environment rather than modelled here.
+    A malformed value is a configuration error and is raised, not ignored -- silently
+    dropping the header that selects the guardrail would produce a passthrough run
+    labelled as a guarded one.
+    """
+    raw = os.environ.get("V2_GATEWAY_HEADERS")
+    if not raw:
+        return {}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise TypeError("V2_GATEWAY_HEADERS must be a JSON object of header name -> value")
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
 def run_case(
     segments: Segments,
     policy_name: str,
@@ -774,15 +830,16 @@ def run_case(
             token = os.environ.get("V2_GATEWAY_TOKEN")
             if token:
                 headers["Authorization"] = f"Bearer {token}"
+            headers.update(_extra_gateway_headers())
             request = Request(gateway_url, data=body, headers=headers)
             with urlopen(request, timeout=120) as response:  # noqa: S310
                 sse = response.read().decode("utf-8", "replace")
             latencies.append((time.perf_counter() - started) * 1000.0)
             events = sum(1 for line in sse.splitlines() if line.startswith("data: "))
     finally:
-        upstream.shutdown()
+        _stop(upstream)
         if gateway is not None:
-            gateway.shutdown()
+            _stop(gateway)
 
     hay = _haystacks(sse)
     return RunResult(
