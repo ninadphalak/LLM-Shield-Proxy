@@ -142,3 +142,71 @@ def test_passthrough_style_stream_leaks_everything_it_carries() -> None:
     hay = _haystacks(_sse(*events))
     for needle in (NEEDLE, "219-09-9999", "4111111111111111", "212-555-0143"):
         assert _present(needle, hay), f"{needle} was carried to the client and not seen"
+
+
+# --------------------------------------------------------------------------------------
+# The other direction: what the inspector must NOT report.
+#
+# A leak instrument that over-reports is useless in a different way from one that
+# under-reports, and both were checked. These pin the boundary.
+# --------------------------------------------------------------------------------------
+
+
+def test_halves_separated_by_other_content_are_not_joined() -> None:
+    sse = _sse(
+        {"choices": [{"delta": {"content": NEEDLE[:9]}}]},
+        {"choices": [{"delta": {"content": "UNRELATED TEXT"}}]},
+        {"choices": [{"delta": {"content": NEEDLE[9:]}}]},
+    )
+    assert not _present(NEEDLE, _haystacks(sse))
+
+
+def test_halves_separated_by_other_sibling_text_are_not_joined() -> None:
+    sse = _sse(
+        {"choices": [{"delta": {"content": "", "r": NEEDLE[:9]}}]},
+        {"choices": [{"delta": {"content": "", "r": "UNRELATED TEXT"}}]},
+        {"choices": [{"delta": {"content": "", "r": NEEDLE[9:]}}]},
+    )
+    assert not _present(NEEDLE, _haystacks(sse))
+
+
+def test_the_two_ordered_streams_do_not_splice_into_each_other() -> None:
+    """Content and sibling fields are different channels. A value half in one and half in
+    the other was never contiguous for the client and must not be reported."""
+    sse = _sse({"choices": [{"delta": {"content": NEEDLE[:9], "r": NEEDLE[9:]}}]})
+    assert not _present(NEEDLE, _haystacks(sse))
+
+
+def test_an_unrelated_value_of_the_same_shape_is_not_reported() -> None:
+    other = _sse({"choices": [{"delta": {"content": "someoneelse@example.com"}}]})
+    assert not _present(NEEDLE, _haystacks(other))
+
+
+def test_a_prefix_of_the_needle_is_not_a_leak() -> None:
+    partial = _sse({"choices": [{"delta": {"content": NEEDLE[:-4]}}]})
+    assert not _present(NEEDLE, _haystacks(partial))
+
+
+def test_adjacent_fragments_that_reassemble_ARE_reported_deliberately() -> None:
+    """Not a false positive, and it must never be "fixed".
+
+    Three content deltas "219", "09", "9999" join to 219099999, which is the SSN
+    219-09-9999 with separators removed. The inspector reports a leak, and it is right
+    to: the bytes the client received reassemble into the value, which is exactly the
+    fragmentation behaviour this benchmark exists to detect.
+
+    The instrument cannot distinguish "the value leaked in fragments" from "unrelated
+    tokens happened to concatenate into the value", and it must not try, because the
+    client cannot either. It errs toward reporting a leak, which is the only safe
+    direction for a leak instrument. `shortest_needle_length` is published in every
+    report so a reader can judge the coincidence risk for themselves.
+    """
+    scattered = _sse(
+        {"choices": [{"delta": {"content": "219"}}]},
+        {"choices": [{"delta": {"content": "09"}}]},
+        {"choices": [{"delta": {"content": "9999"}}]},
+    )
+    assert _present("219-09-9999", _haystacks(scattered)), (
+        "adjacent fragments that reassemble into the value stopped being reported; that "
+        "is the fragmentation leak this whole profile is built to measure"
+    )

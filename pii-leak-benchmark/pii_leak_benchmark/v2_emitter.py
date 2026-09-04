@@ -1637,6 +1637,70 @@ def _derive_outcome(leak_adv: float, fidelity: float, separated: bool) -> str:
     return "pass"
 
 
+# --------------------------------------------------------------------------------------
+# What the client-side inspector actually does, as data rather than as prose.
+#
+# WHY THIS IS A LIST AND NOT A SENTENCE. The report's `inspection_scope` used to be a
+# hand-written paragraph copied from the v1 harness, describing a recursive walk with
+# decoding that the v2 inspector did not perform. The sentence and the code were in
+# different files with nothing connecting them, so the sentence stayed true of v1 and
+# false of v2 for as long as nobody re-read both. Six placements -- nested objects, lists,
+# `choices[1]`, top-level fields, `tool_calls[].function.arguments`, base64 -- reached the
+# client and scored as NO LEAK while the report claimed they were inspected.
+#
+# The fix is not "be careful when editing the sentence". It is that the sentence is now
+# GENERATED from this list, every entry has a `key`, and
+# `tests/conformance/test_v2_leak_inspector_scope.py` fails if any key lacks a test that
+# demonstrates it. A capability cannot be claimed without a proof, and a claim cannot be
+# quietly widened: adding a clause here breaks the build until the proof exists.
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class InspectionCapability:
+    """One thing the inspector can do, and the words it contributes to the report."""
+
+    key: str
+    clause: str
+
+
+CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
+    InspectionCapability("sse_events", "every SSE event the client received"),
+    InspectionCapability("json_parsed", "event data parsed as JSON"),
+    InspectionCapability(
+        "recursive_walk",
+        "walked recursively over all JSON types, including nested objects, lists, "
+        "numbers and object keys",
+    ),
+    InspectionCapability("all_choices", "every element of choices, not only the first"),
+    InspectionCapability(
+        "ordered_content_join", "delta content reassembled in arrival order"
+    ),
+    InspectionCapability(
+        "ordered_sibling_join",
+        "non-content string fields reassembled in arrival order, in a stream kept "
+        "separate from delta content",
+    ),
+    InspectionCapability(
+        "unparseable_events", "events that do not parse as JSON scanned as raw text"
+    ),
+    InspectionCapability("base64", "base64-encoded runs decoded, over multiple rounds"),
+    InspectionCapability("hex", "hex-encoded runs decoded"),
+    InspectionCapability("percent", "percent-encoded runs decoded"),
+    InspectionCapability("char_code_arrays", "character-code arrays reconstructed"),
+    InspectionCapability(
+        "separators_removed", "matched literally and with separators removed"
+    ),
+    InspectionCapability(
+        "nfkd_confusables",
+        "over NFKD-decomposed text with non-Latin digits resolved to their decimal value "
+        "and non-ASCII look-alikes folded to ASCII per UTS #39",
+    ),
+)
+
+CLIENT_INSPECTION_SCOPE = "; ".join(c.clause for c in CLIENT_INSPECTION_CAPABILITIES)
+
+
 _BOUNDARY_INSPECTION_SCOPE = (
     "every HTTP/1.x request to the capture origin on any path or method: request line, "
     "headers, chunk extensions, trailers, and body, after transfer-encoding and "
@@ -1727,14 +1791,9 @@ def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[
         "needle_lengths": {},
         "delivery_confirmed": delivery_confirmed,
         "client_capture_inspectable": True,
-        "inspection_scope": (
-            "every SSE event the client received: event data parsed as JSON and walked "
-            "recursively over all types, reassembled delta content concatenated in arrival "
-            "order, with base64/hex/percent-encoded runs and character-code arrays decoded, "
-            "matched literally and with separators removed, over NFKD-decomposed text with "
-            "non-Latin digits resolved to their decimal value and non-ASCII look-alikes "
-            "folded to ASCII per UTS #39"
-        ),
+        # Generated from CLIENT_INSPECTION_CAPABILITIES, never hand-written. See the
+        # comment on that list for why.
+        "inspection_scope": CLIENT_INSPECTION_SCOPE,
         "payload_content_included": False,
     }
 
