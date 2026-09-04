@@ -6,11 +6,17 @@ one. It runs two loopback HTTP servers -- an upstream (the capture) and a gatewa
 test -- and drives them with a real streaming client.
 
 WHAT IT IS NOT. Not the full v2 harness. It carries a real pairwise covering array over the
-four axes the v2 corpus block requires -- entity, encoding, fragmentation, carrier -- but each
-axis has only two or three values, fragmentation is a single midpoint split rather than every
-split point, and there is no generative corpus behind the case definitions. Every such
-narrowing is declared in `limitations.method_limits` in the emitted report. Nothing in the
-report claims coverage this module does not measure.
+five axes the v2 corpus block requires -- entity, encoding, fragmentation, carrier,
+request_site -- but each axis has only two to four values, fragmentation is a single midpoint
+split rather than every split point, and there is no generative corpus behind the case
+definitions. Every such narrowing is declared in `limitations.method_limits` in the emitted
+report. Nothing in the report claims coverage this module does not measure.
+
+`request_site` was added late, and how it was missed is worth keeping. Every case used to put
+its protected values in `messages[0].content`. Nothing in the report said so, and every
+gateway measured looked like it had been asked about its whole request path when it had only
+been asked about one field of it. The axis exists because a profile that varies four things
+and silently fixes a fifth reports a narrower result than it appears to.
 
 THE POINT. On the response path a correct gateway must do two OPPOSITE things at once:
 
@@ -505,8 +511,91 @@ AXES: dict[str, tuple[str, ...]] = {
     "entity": ("EMAIL", "SSN", "CARDPAN"),
     "encoding": ("plain", "percent"),
     "fragmentation": ("single_chunk", "adversarial"),
+    # WHERE IN THE RESPONSE the injected value is carried.
     "carrier": ("sse-delta-content", "sse-json-field"),
+    # WHERE IN THE REQUEST the protected values are placed. Added after the profile was
+    # already reporting results, because until then every case put its values in
+    # `messages[0].content` and the profile therefore said nothing about the rest of the
+    # body -- while a real MCP or JSON-RPC caller routinely puts them somewhere else. A
+    # gateway that walks only the chat shapes it knows by name scores identically to one
+    # that walks everything, which is precisely the kind of blindness this profile exists
+    # to make visible. `carrier` is the response-side question; this is the request-side
+    # one, and they are independent.
+    "request_site": (
+        "chat-content",
+        "system-content",
+        "unrecognised-key",
+        "tool-description",
+    ),
 }
+
+# Keys whose VALUES are structural: masking them changes what the request means rather
+# than what it discloses. `model` selects the deployment, `name` names the function the
+# provider is asked to call, `role` and `type` are enum tags. A gateway that rewrites
+# these is broken in a different way, so the reference gateway leaves them alone and the
+# profile does not place protected values in them.
+_STRUCTURAL_KEYS = frozenset({"model", "name", "role", "type"})
+
+
+def build_request(segments: "Segments", case: dict[str, str], model: str = "test") -> dict[str, Any]:
+    """The request body for one case, with the protected values at the case's site.
+
+    Every site carries the SAME text, so the only thing that varies across sites is where
+    a gateway has to look to find it.
+    """
+    text = "Please review: " + ", ".join(segments.echo.values())
+    body: dict[str, Any] = {
+        "model": model,
+        "stream": True,
+        "messages": [{"role": "user", "content": "Summarise the attached record."}],
+    }
+    site = case["request_site"]
+    if site == "chat-content":
+        body["messages"][0]["content"] = text
+    elif site == "system-content":
+        body["messages"].insert(0, {"role": "system", "content": text})
+    elif site == "unrecognised-key":
+        # No OpenAI schema names this. It stands for the JSON-RPC / MCP shape, where a
+        # caller adds keys the gateway has never seen.
+        body["session_note"] = text
+    elif site == "tool-description":
+        body["tools"] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup_record",
+                    "description": text,
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+    else:
+        raise ValueError(f"unknown request_site {site!r}")
+    return body
+
+
+def extract_site(body: dict[str, Any], site: str) -> str | None:
+    """Read back the string a case placed, from whatever the upstream received.
+
+    Returns None when the field is absent, which is NOT the same as an empty string: a
+    gateway is entitled to drop a key it does not recognise, and a dropped key makes the
+    echo half of the case unmeasurable rather than failed. See `RunResult.echo_observable`.
+    """
+    try:
+        if site == "chat-content":
+            return body["messages"][0]["content"]
+        if site == "system-content":
+            for message in body["messages"]:
+                if message.get("role") == "system":
+                    return message["content"]
+            return None
+        if site == "unrecognised-key":
+            return body["session_note"]
+        if site == "tool-description":
+            return body["tools"][0]["function"]["description"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    raise ValueError(f"unknown request_site {site!r}")
 
 
 def _all_pairs() -> set[tuple[str, str, str, str]]:
@@ -620,10 +709,33 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             return
 
         def do_POST(self) -> None:  # noqa: N802
+            try:
+                self._respond()
+            except Exception as exc:  # noqa: BLE001
+                # An exception here used to escape into BaseHTTPRequestHandler, which
+                # closes the socket without writing anything. The client then reports
+                # "Server disconnected without sending a response" -- a transport error,
+                # for what is really a harness bug, and it sends you looking at the
+                # gateway. A case dict missing an axis key produced exactly that, and it
+                # cost an hour. Answer 500 with the reason instead.
+                message = json.dumps({"harness_error": f"{type(exc).__name__}: {exc}"}).encode()
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(message)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(message)
+                self.close_connection = True
+
+        def _respond(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", "replace")
             state.received_bodies.append(raw)
-            prompt = json.loads(raw)["messages"][0]["content"]
+            # Echo back whatever arrived AT THE CASE'S SITE, not a fixed field. Echoing
+            # messages[0].content regardless of site would report "not restored" for every
+            # case that put its values somewhere else, which says nothing about the gateway.
+            echoed = extract_site(json.loads(raw), state.case["request_site"])
+            prompt = "" if echoed is None else echoed
 
             events = [{"content": f"You sent: {prompt}\n"}]
             events.extend(_injection_events(state.segments, state.case))
@@ -657,10 +769,25 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", "replace")
             payload = json.loads(raw)
-            prompt = payload["messages"][0]["content"]
+            # Walk the WHOLE body, not the chat shapes this code happens to know. A
+            # reference gateway that only masked messages[0].content would score a perfect
+            # FidelityRate on the chat-content site and silently egress every other one,
+            # which is the defect the request_site axis exists to expose. Structural keys
+            # are left alone.
+            vault: dict[str, str] = {}
 
-            masked, vault = mask(prompt)
-            payload["messages"][0]["content"] = masked
+            def _walk(node: Any, key: str | None = None) -> Any:
+                if isinstance(node, dict):
+                    return {k: _walk(v, k) for k, v in node.items()}
+                if isinstance(node, list):
+                    return [_walk(v, key) for v in node]
+                if isinstance(node, str) and key not in _STRUCTURAL_KEYS:
+                    masked_value, found = mask(node)
+                    vault.update(found)
+                    return masked_value
+                return node
+
+            payload = _walk(payload)
             request = Request(
                 upstream_url,
                 data=json.dumps(payload).encode(),
@@ -707,6 +834,16 @@ class RunResult:
     case: dict[str, str]
     client_text: str
     echo_recovered: dict[str, bool]
+    # False when the gateway never forwarded the case's request site at all. The echo
+    # half is then unmeasurable, not failed, and it is excluded from FidelityRate rather
+    # than counted as a miss. Dropping an unrecognised key is a legitimate thing for a
+    # gateway to do, and scoring it as a fidelity failure would punish it for that.
+    echo_observable: bool
+    # Set when the gateway refused the case outright -- an HTTP error, a rejected schema,
+    # a transport failure. The case is then INCONCLUSIVE: nothing was measured, and it
+    # must not be counted as "did not leak". NeMo Guardrails 0.24.0 answers 422 to a
+    # request carrying an unrecognised top-level key, which is how this arose.
+    transport_error: str | None
     injection_leaked: bool
     events_observed: int
     upstream_bodies: list[str]
@@ -754,7 +891,15 @@ def _haystacks(sse: str) -> list[str]:
         data = line[6:]
         if data == "[DONE]":
             continue
-        delta = json.loads(data)["choices"][0]["delta"]
+        try:
+            delta = json.loads(data)["choices"][0]["delta"]
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+            # An event that is not a standard delta -- a gateway's error object, a
+            # provider-specific frame, a chunk shape this code has not seen. Skipping it
+            # would be a FALSE PASS: those bytes reached the client, so if the needle is
+            # in them it leaked. Scan the raw event instead of guessing its schema.
+            siblings.append(data)
+            continue
         ordered.append(delta.get("content", ""))
         for key, value in delta.items():
             if key != "content" and isinstance(value, str):
@@ -818,12 +963,9 @@ def run_case(
     latencies: list[float] = []
     sse = ""
     events = 0
+    transport_error: str | None = None
     try:
-        prompt = "Please review: " + ", ".join(segments.echo.values())
-        body = json.dumps(
-            {"model": model, "stream": True,
-             "messages": [{"role": "user", "content": prompt}]}
-        ).encode()
+        body = json.dumps(build_request(segments, case, model=model)).encode()
         for _ in range(iterations):
             started = time.perf_counter()
             headers = {"Content-Type": "application/json"}
@@ -832,8 +974,19 @@ def run_case(
                 headers["Authorization"] = f"Bearer {token}"
             headers.update(_extra_gateway_headers())
             request = Request(gateway_url, data=body, headers=headers)
-            with urlopen(request, timeout=120) as response:  # noqa: S310
-                sse = response.read().decode("utf-8", "replace")
+            try:
+                with urlopen(request, timeout=120) as response:  # noqa: S310
+                    sse = response.read().decode("utf-8", "replace")
+            except Exception as exc:  # noqa: BLE001
+                # Refusing a case is a legitimate gateway behaviour and it is also the
+                # end of the measurement for that case. Aborting the whole run would
+                # lose the eleven cases that did work; scoring it 0 would credit the
+                # gateway with a clean result it never earned. Inconclusive is the only
+                # honest third answer, and the schema already forbids a pass when any
+                # case is inconclusive.
+                transport_error = f"{type(exc).__name__}: {exc}"
+                sse = ""
+                break
             latencies.append((time.perf_counter() - started) * 1000.0)
             events = sum(1 for line in sse.splitlines() if line.startswith("data: "))
     finally:
@@ -842,11 +995,19 @@ def run_case(
             _stop(gateway)
 
     hay = _haystacks(sse)
+    site_text = None
+    if state.received_bodies:
+        try:
+            site_text = extract_site(json.loads(state.received_bodies[0]), case["request_site"])
+        except (ValueError, json.JSONDecodeError):
+            site_text = None
     return RunResult(
         policy=policy_name,
         case=case,
         client_text=hay[0],
         echo_recovered={k: _present(v, hay) for k, v in segments.echo.items()},
+        echo_observable=bool(site_text) and transport_error is None,
+        transport_error=transport_error,
         injection_leaked=_present(segments.injection[case["entity"]], hay),
         events_observed=events,
         upstream_bodies=list(state.received_bodies),
@@ -883,10 +1044,19 @@ def build_report(
     for r in results:
         by_frag[r.case["fragmentation"]].append(r)
 
+    # A refused case measured nothing. Leaving it in the denominator as a non-leak would
+    # let a gateway improve its LeakRate by rejecting the cases it cannot handle.
+    scored = [r for r in results if r.transport_error is None]
+    inconclusive = [r for r in results if r.transport_error is not None]
+    by_frag = {k: [r for r in v if r.transport_error is None] for k, v in by_frag.items()}
     leak_single = _rate(r.injection_leaked for r in by_frag["single_chunk"])
     leak_adv = _rate(r.injection_leaked for r in by_frag["adversarial"])
-    leak_overall = _rate(r.injection_leaked for r in results)
-    fidelity = _rate(v for r in results for v in r.echo_recovered.values())
+    leak_overall = _rate(r.injection_leaked for r in scored)
+    observable = [r for r in scored if r.echo_observable]
+    # No observable case means the gateway forwarded none of the request sites, so there
+    # is no fidelity claim to make either way. 0.0 would assert a failure that was not
+    # measured.
+    fidelity = _rate(v for r in observable for v in r.echo_recovered.values()) if observable else 0.0
     delta_frag = round(leak_adv - leak_single, 4)
 
     case_defs = sorted(
@@ -914,13 +1084,25 @@ def build_report(
         """
         out: dict[str, dict[str, Any]] = {}
         for value in AXES[axis]:
-            rows = [r for r in results if r.case[axis] == value]
+            rows = [r for r in scored if r.case[axis] == value]
             if not rows:
                 continue
+            visible = [r for r in rows if r.echo_observable]
             out[value] = {
                 "leak_rate": _rate(r.injection_leaked for r in rows),
-                "fidelity_rate": _rate(v for r in rows for v in r.echo_recovered.values()),
+                "fidelity_rate": (
+                    _rate(v for r in visible for v in r.echo_recovered.values())
+                    if visible
+                    else 0.0
+                ),
                 "applicable": len(rows),
+                # The denominator behind fidelity_rate, and it is not len(rows). A
+                # gateway that drops the field never presented anything to restore, so
+                # 0 here means fidelity_rate was NOT MEASURED for this slice -- which is
+                # a different statement from "measured and failed" and must not be read
+                # as one. Portkey drops an unrecognised top-level key, which is how this
+                # case arose rather than a hypothetical.
+                "echo_observable": len(visible),
                 "leaked": sum(1 for r in rows if r.injection_leaked),
             }
         return out
@@ -970,7 +1152,7 @@ def build_report(
             "fragmentation_safety": _fragmentation_check(worst),
             "sse_validity": _sse_check(),
             "response_fidelity": _fidelity_check(results),
-            "response_injection_containment": _injection_check(results, leaked_types),
+            "response_injection_containment": _injection_check(scored, leaked_types),
             "segment_separation": separation,
             "client_observed_latency": {
                 "passed": True,
@@ -991,8 +1173,9 @@ def build_report(
                 "Loopback transport on a single machine; project-run and unreplicated.",
             ],
             "method_limits": [
-                str(len(results)) + " cases: a pairwise covering array over the four axes, not exhaustive.",
-                "Three entity types, two encodings, two carriers, two fragmentation conditions.",
+                str(len(results)) + " cases: a pairwise covering array over the five axes, not exhaustive.",
+                "Three entity types, two encodings, two carriers, two fragmentation conditions, four request sites.",
+                "Request sites are four shapes, not a survey of real client payloads.",
                 "Fragmentation is a two-part split at the value midpoint, not every split point.",
                 "Latency is loopback and in-process; it is not gateway overhead on a network.",
             ],
@@ -1055,8 +1238,10 @@ def build_report(
                 "adversarial": len(by_frag["adversarial"]),
             },
             "cases_scored": len(results),
-            "cases_applicable": len(results),
-            "cases_inconclusive": 0,
+        # The denominator behind fidelity_rate at the top level, for the same reason.
+        "cases_echo_observable": len(observable),
+            "cases_applicable": len(scored),
+            "cases_inconclusive": len(inconclusive),
             "derivation_recomputed": True,
             "sidecar_case_count_matches": True,
             "by_axis": {axis: _axis_slice(axis) for axis in AXES},
@@ -1173,8 +1358,12 @@ def _fidelity_check(results: list[RunResult]) -> dict[str, Any]:
 
 
 def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[str, Any]:
+    # A case the client never saw a response for cannot testify to containment. The
+    # schema already forbids `passed` alongside `delivery_confirmed: false`; tying them
+    # here means the emitter cannot produce that contradiction in the first place.
+    delivery_confirmed = bool(results) and all(bool(r.client_text) for r in results)
     return {
-        "passed": not leaked_types,
+        "passed": (not leaked_types) and delivery_confirmed,
         "segment": "injection",
         "fragmentation_strategy": "exhaustive-2-part",
         "injected_entity_types": sorted({r.case["entity"] for r in results}),
@@ -1184,7 +1373,7 @@ def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[
         ],
         "needle_proximity": {},
         "needle_lengths": {},
-        "delivery_confirmed": all(bool(r.client_text) for r in results),
+        "delivery_confirmed": delivery_confirmed,
         "client_capture_inspectable": True,
         "inspection_scope": (
             "every SSE event the client received: event data parsed as JSON and walked "
@@ -1220,8 +1409,15 @@ def run_policy(
             f"external gateway. Known policies: {sorted(POLICIES)}"
         )
     segments = build_segments(seed)
-    prompt = "Please review: " + ", ".join(segments.echo.values())
-    separation = check_segment_separation(segments, prompt)
+    # Separation is asserted against every request body the run will send, serialized,
+    # not against one representative prompt. With the request_site axis the bodies differ
+    # in shape, and "no injected value appears in the request" has to hold for all of
+    # them or the injection half of some case is not measuring what it claims.
+    all_bodies = json.dumps(
+        [build_request(segments, case) for case in covering_array()],
+        sort_keys=True,
+    )
+    separation = check_segment_separation(segments, all_bodies)
     results = [
         run_case(
             segments,

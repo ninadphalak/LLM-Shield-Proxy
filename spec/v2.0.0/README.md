@@ -1,8 +1,14 @@
 # Streaming Privacy Gateway Conformance Specification v2.0.0
 
-**Status: draft.** The schema is published and tested; no harness emits it yet. The
-Axis C fragmentation harness is written against this document, not the other way round
-— that ordering is the point of publishing the schema first.
+**Status: draft, and amended once since first publication (2026-09-04, `request_site`,
+§3a).** The schema is published and tested, and
+`pii_leak_benchmark.v2_emitter` now emits it. The Axis C fragmentation harness is written
+against this document, not the other way round — that ordering is the point of publishing
+the schema first.
+
+Amending a draft in place is only defensible while the draft is a draft. `spec/v1.0.0/` is
+frozen and has never been touched; when v2 freezes, the same rule applies to it and the
+next change becomes v2.1.0.
 
 Normative changes and result labeling follow the
 [public governance process](../../website/docs/conformance/governance.md).
@@ -14,7 +20,7 @@ missing.
 
 | File | Covers | Emitted by |
 |---|---|---|
-| `http-profile.schema.json` | OpenAI-compatible HTTP gateway profile, corpus run | `pii-leak-benchmark` (not yet) |
+| `http-profile.schema.json` | OpenAI-compatible HTTP gateway profile, corpus run | `pii_leak_benchmark.v2_emitter` |
 
 ---
 
@@ -129,6 +135,52 @@ These are `const: true` so they cannot be omitted or negated, which is the same 
 model as v1's `payload_content_included: false`. **They are not a defence against a
 hand-forged report**, and nothing in either schema is. Stating that plainly is cheaper
 than being caught implying otherwise.
+
+---
+
+## 3a. `request_site`: the axis that was missing, and why that mattered
+
+**Normative change, 2026-09-04.** `corpus.coverage.axes` now requires five axes rather
+than four. `request_site` joins `entity`, `encoding`, `fragmentation` and `carrier`, and
+`metrics.by_axis` must carry a slice for it.
+
+The four original axes vary the entity, its encoding, how the response is fragmented, and
+which response field carries it. Every one of them is a question about the **response**.
+The request was fixed: every case put its protected values in `messages[0].content`.
+
+Nothing in a report said so. A gateway measured under those four axes looked as though it
+had been asked about its request path, when it had been asked about one field of it. The
+two are not the same question, because a gateway that walks only the chat shapes it knows
+by name scores exactly the same as one that walks the whole body — and a real MCP or
+JSON-RPC caller puts values in `system`, in tool arguments, in nested metadata, and in
+keys no schema names.
+
+The emitter's four sites:
+
+| Value | Where the protected values sit |
+|---|---|
+| `chat-content` | `messages[0].content` — the original, now one case among several |
+| `system-content` | a `system` role message |
+| `unrecognised-key` | a top-level key no OpenAI schema names, standing for the JSON-RPC / MCP shape |
+| `tool-description` | `tools[0].function.description` |
+
+Structural values are deliberately **not** sites. `model`, `role`, `type` and a function's
+`name` decide what the request means, not what it discloses; a gateway that rewrites them
+is broken in a different way, and a profile that demanded their redaction would be scoring
+the wrong thing.
+
+### The denominator this forced into the schema
+
+A gateway may legitimately **drop** a field it does not recognise. The echo half of such a
+case is then unmeasurable, not failed — there was nothing for the gateway to restore. So
+`metrics.cases_echo_observable`, and a per-slice `echo_observable`, publish the denominator
+behind every `fidelity_rate`.
+
+Without it, `fidelity_rate: 0.0` is ambiguous between *measured and failed* and *never
+measured*, and those are opposite findings. This is not hypothetical: in the first
+five-axis run one gateway dropped the unrecognised top-level key outright, and read
+without the denominator its slice would have said the gateway failed to restore something
+it had never been given.
 
 ---
 

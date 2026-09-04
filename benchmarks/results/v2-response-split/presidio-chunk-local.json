@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T11:19:10Z",
+ "generated_at": "2026-09-04T15:43:01Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -79,9 +79,9 @@
   "response_fidelity": {
    "passed": true,
    "expected_value_reconstructed": true,
-   "iterations_matching": 18,
-   "iterations_completed": 18,
-   "iterations_requested": 18,
+   "iterations_matching": 36,
+   "iterations_completed": 36,
+   "iterations_requested": 36,
    "payload_content_included": false,
    "segment": "echo"
   },
@@ -95,9 +95,14 @@
     "SSN"
    ],
    "leaked_entity_types": [
+    "EMAIL",
     "SSN"
    ],
    "leak_evidence": [
+    {
+     "entity_type": "EMAIL",
+     "observed": "normalized-match"
+    },
     {
      "entity_type": "SSN",
      "observed": "normalized-match"
@@ -132,12 +137,12 @@
    "passed": true,
    "threshold_enforced": false,
    "unit": "milliseconds",
-   "iterations": 6,
-   "iterations_measured": 6,
-   "mean": 193.1139,
-   "p50": 128.4673,
-   "p95": 578.5641,
-   "p99": 578.5641
+   "iterations": 12,
+   "iterations_measured": 12,
+   "mean": 138.5692,
+   "p50": 107.6347,
+   "p95": 156.9736,
+   "p99": 612.9294
   }
  },
  "passed": false,
@@ -147,8 +152,9 @@
    "Loopback transport on a single machine; project-run and unreplicated."
   ],
   "method_limits": [
-   "6 cases: a pairwise covering array over the four axes, not exhaustive.",
-   "Three entity types, two encodings, two carriers, two fragmentation conditions.",
+   "12 cases: a pairwise covering array over the five axes, not exhaustive.",
+   "Three entity types, two encodings, two carriers, two fragmentation conditions, four request sites.",
+   "Request sites are four shapes, not a survey of real client payloads.",
    "Fragmentation is a two-part split at the value midpoint, not every split point.",
    "Latency is loopback and in-process; it is not gateway overhead on a network."
   ]
@@ -161,7 +167,7 @@
   "recorded_by": "operator"
  },
  "outcome": "fail",
- "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.0, LeakRate(adversarial)=0.3333, DeltaFrag=0.3333.",
+ "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.0, LeakRate(adversarial)=0.5, DeltaFrag=0.5.",
  "fixture": {
   "varies_per_run": true,
   "values_published": false,
@@ -181,8 +187,8 @@
  "corpus": {
   "id": "minimal-response-split",
   "version": "0.1.0",
-  "sha256": "06f7b0f72f651587be93c75eb5a0037e90300455c9bcac777c9fbbecb04cdbcf",
-  "case_count": 6,
+  "sha256": "a64189d0f9bf9fa3746d27ef6b9d4cdd03df7f93a6f90565f9d6a42816cad7e0",
+  "case_count": 12,
   "seed": "a1b2c3d4e5f60001",
   "coverage": {
    "strategy": "pairwise",
@@ -190,10 +196,11 @@
     "carrier",
     "encoding",
     "entity",
-    "fragmentation"
+    "fragmentation",
+    "request_site"
    ],
-   "pairs_required": 30,
-   "pairs_covered": 30,
+   "pairs_required": 66,
+   "pairs_covered": 66,
    "proof_complete": true
   },
   "values_published": false
@@ -201,52 +208,58 @@
  "metrics": {
   "leak_rate": {
    "single_chunk": 0.0,
-   "adversarial": 0.3333,
+   "adversarial": 0.5,
    "overall": 0.1667
   },
   "fidelity_rate": 1.0,
-  "delta_frag": 0.3333,
+  "delta_frag": 0.5,
   "cases_by_condition": {
-   "single_chunk": 3,
-   "adversarial": 3
+   "single_chunk": 8,
+   "adversarial": 4
   },
-  "cases_scored": 6,
-  "cases_applicable": 6,
+  "cases_scored": 12,
+  "cases_echo_observable": 12,
+  "cases_applicable": 12,
   "cases_inconclusive": 0,
   "derivation_recomputed": true,
   "sidecar_case_count_matches": true,
   "by_axis": {
    "entity": {
     "EMAIL": {
-     "leak_rate": 0.0,
+     "leak_rate": 0.25,
      "fidelity_rate": 1.0,
-     "applicable": 2,
-     "leaked": 0
+     "applicable": 4,
+     "echo_observable": 4,
+     "leaked": 1
     },
     "SSN": {
-     "leak_rate": 0.5,
+     "leak_rate": 0.25,
      "fidelity_rate": 1.0,
-     "applicable": 2,
+     "applicable": 4,
+     "echo_observable": 4,
      "leaked": 1
     },
     "CARDPAN": {
      "leak_rate": 0.0,
      "fidelity_rate": 1.0,
-     "applicable": 2,
+     "applicable": 4,
+     "echo_observable": 4,
      "leaked": 0
     }
    },
    "encoding": {
     "plain": {
-     "leak_rate": 0.0,
+     "leak_rate": 0.125,
      "fidelity_rate": 1.0,
-     "applicable": 3,
-     "leaked": 0
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 1
     },
     "percent": {
-     "leak_rate": 0.3333,
+     "leak_rate": 0.25,
      "fidelity_rate": 1.0,
-     "applicable": 3,
+     "applicable": 4,
+     "echo_observable": 4,
      "leaked": 1
     }
    },
@@ -254,28 +267,62 @@
     "single_chunk": {
      "leak_rate": 0.0,
      "fidelity_rate": 1.0,
-     "applicable": 3,
+     "applicable": 8,
+     "echo_observable": 8,
      "leaked": 0
     },
     "adversarial": {
-     "leak_rate": 0.3333,
+     "leak_rate": 0.5,
      "fidelity_rate": 1.0,
-     "applicable": 3,
-     "leaked": 1
+     "applicable": 4,
+     "echo_observable": 4,
+     "leaked": 2
     }
    },
    "carrier": {
     "sse-delta-content": {
-     "leak_rate": 0.3333,
+     "leak_rate": 0.25,
      "fidelity_rate": 1.0,
-     "applicable": 3,
-     "leaked": 1
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 2
     },
     "sse-json-field": {
      "leak_rate": 0.0,
      "fidelity_rate": 1.0,
-     "applicable": 3,
+     "applicable": 4,
+     "echo_observable": 4,
      "leaked": 0
+    }
+   },
+   "request_site": {
+    "chat-content": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "echo_observable": 3,
+     "leaked": 0
+    },
+    "system-content": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "echo_observable": 3,
+     "leaked": 0
+    },
+    "unrecognised-key": {
+     "leak_rate": 0.3333,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "echo_observable": 3,
+     "leaked": 1
+    },
+    "tool-description": {
+     "leak_rate": 0.3333,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "echo_observable": 3,
+     "leaked": 1
     }
    }
   }
@@ -293,5 +340,5 @@
   "recorded_by": "operator",
   "source": "pii_leak_benchmark.v2_emitter._DETECTORS"
  },
- "cases_digest": "06f7b0f72f651587be93c75eb5a0037e90300455c9bcac777c9fbbecb04cdbcf"
+ "cases_digest": "a64189d0f9bf9fa3746d27ef6b9d4cdd03df7f93a6f90565f9d6a42816cad7e0"
 }

@@ -58,6 +58,7 @@ def test_capture_refuses_connection_reuse() -> None:
         "encoding": "plain",
         "fragmentation": "single_chunk",
         "carrier": "sse-delta-content",
+        "request_site": "chat-content",
     }
     state = UpstreamState(segments=segments, case=case)
     server, url = _serve(_make_upstream(state), port=PORT)
@@ -88,6 +89,7 @@ def test_rebound_capture_serves_the_new_fixture() -> None:
             "encoding": "plain",
             "fragmentation": "single_chunk",
             "carrier": "sse-delta-content",
+            "request_site": "chat-content",
         }
         state = UpstreamState(segments=segments, case=case)
         server, url = _serve(_make_upstream(state), port=PORT)
@@ -112,6 +114,7 @@ def test_stop_releases_the_port() -> None:
         "encoding": "plain",
         "fragmentation": "single_chunk",
         "carrier": "sse-delta-content",
+        "request_site": "chat-content",
     }
     first, _url = _serve(_make_upstream(UpstreamState(segments=segments, case=case)), port=PORT)
     _stop(first)

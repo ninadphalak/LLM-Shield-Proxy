@@ -74,18 +74,24 @@ the seed alone. Cells are `mean [min-max]` over 12 seeds; seeds are recorded in
 | `passthrough` | 0.00 | 1.00 | 1.00 | 0.00 |
 | `redact-all` | 0.00 | 0.00 | 1.00 | 1.00 |
 | `chunk-local` | 1.00 | 0.00 | 1.00 | 1.00 |
-| `bounded-retention` | 1.00 | 0.00 | 0.33 | 0.33 |
-| `retention-plus-decoding` | 1.00 | 0.00 | 0.00 | 0.00 |
+| `bounded-retention` | 1.00 | 0.00 | 0.25 | 0.25 |
+| `retention-plus-decoding` | 1.00 | 0.00 | 0.00 | **0.00 -- the only `pass`** |
 
 All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
+
+**These are five-axis numbers and they are not comparable case-for-case with anything
+published here before 2026-09-04.** Adding `request_site` took a run from 6 cases to 12, so
+the denominators moved: `bounded-retention` reads 0.25 rather than 0.33 because it leaks one
+case out of four adversarial cases instead of one out of three. **The same single case leaks.
+Nothing about any policy changed.**
 
 **A real detector** -- a live `mcr.microsoft.com/presidio-analyzer` container on
 `127.0.0.1:5002`, stock recognizer registry, queried over HTTP per delta:
 
 | Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag |
 |---|---|---|---|---|
-| `presidio-chunk-local` | 1.00 | 0.00 | **0.81 [0.67-1.00]** | **0.81 [0.67-1.00]**, stdev 0.17 |
-| `presidio-retention` | 1.00 | 0.00 | **0.33 [0.33-0.33]** | **0.33 [0.33-0.33]**, stdev 0.00 |
+| `presidio-chunk-local` | 1.00 | 0.00 | **0.81 [0.50-1.00]** | **0.81 [0.50-1.00]** |
+| `presidio-retention` | 1.00 | 0.00 | **0.25 [0.25-0.25]** | **0.25 [0.25-0.25]**, stdev 0.00 |
 
 **A real gateway product** -- LiteLLM 1.99 (`ghcr.io/berriai/litellm:main-latest`) in Docker,
 with its own Presidio guardrail (`output_parse_pii: true`) pointed at the same analyzer
@@ -119,14 +125,33 @@ is only meaningful read next to FidelityRate and the LeakRates.
 
 **Two more shipping gateways, same harness, same capture.**
 
-| Gateway | FidelityRate | Leak (1-chunk) | Leak (adv) | DeltaFrag | Outcome |
-|---|---|---|---|---|---|
-| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.00 | 0.00 | 0.00 | no-leak-profile-not-met |
-| `llm-shield-proxy-1.5.2` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
-| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 | fail |
+| Gateway | Fidelity | Leak (1-chunk) | Leak (adv) | DeltaFrag | Echo observable | Inconclusive | Outcome |
+|---|---|---|---|---|---|---|---|
+| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.00 | 0.00 | 0.00 | 12/12 | 0 | no-leak-profile-not-met |
+| `llm-shield-proxy-1.5.2` | **1.00** | **1.00** | **1.00** | 0.00 | 12/12 | 0 | fail |
+| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 | **9/12** | 0 | fail |
+| `nemo-guardrails-0.24.0` | 0.00 | 0.00 | 0.00 | 0.00 | **3/12** | **3** | no-leak-profile-not-met |
 
-All three are deterministic across 6 seeds (stdev 0.00 on every metric). See
-`seed-sweep-litellm.json`, `seed-sweep-shield-152.json`, `seed-sweep-portkey.json`.
+All four are deterministic across 6 seeds (stdev 0.00 on every metric). See
+`seed-sweep-litellm.json`, `seed-sweep-shield-152.json`, `seed-sweep-portkey.json`,
+`seed-sweep-nemo.json`.
+
+**Read the last two columns before the first four.** "Echo observable" is the denominator
+behind FidelityRate: a gateway that never forwarded the field had nothing to restore, so
+`0.00` there means **not measured**, not **failed**. "Inconclusive" counts cases the gateway
+refused outright. Both exist because both happened -- Portkey silently drops an unrecognised
+top-level key and returns 200; NeMo answers 422 to one of the four request sites. Those are
+different behaviours and the profile records them differently.
+
+**NeMo is measured with `detect sensitive data on output`, not `mask`.** The mask rail is
+unusable in 0.24.0: `mask_sensitive_data() got an unexpected keyword argument 'context'` on
+every request, because its signature omits the `**kwargs` its sibling `detect_sensitive_data`
+has. Verified with `inspect.signature` against the installed package. See
+`../../nemo-v2-profile/STATUS.md`, which also records that NeMo refuses to stream at all when
+a response guardrail is configured unless streaming rails are explicitly enabled, and that its
+config validator will not allow a **rewriting** output rail to keep a retention window --
+`context_size` must be `0`, which is exactly the `chunk-local` policy this profile shows
+leaking under fragmentation.
 
 ### The two identical rows are not the same gateway
 
@@ -205,15 +230,17 @@ That is worth stating carefully: it is a property of the open-source distributio
 without third-party credentials, which is the configuration a practitioner gets by default.
 It says nothing about Portkey's hosted product or about the guardrail vendors themselves.
 
-**Scope, for all three gateways.** One version each, one guardrail configuration each,
+**Scope, for all four gateways.** One version each, one guardrail configuration each,
 one carrier sentence, project-run, unreplicated, all against a synthetic capture rather
 than a live model. **Not a leaderboard and not a ranking.** Each gateway is measured in the
 configuration a practitioner would plausibly deploy, and each is doing roughly what its
 documentation says it does -- LiteLLM makes no claim to rehydrate, LLM-Shield-Proxy makes
 no claim to redact model-originated PII, and Portkey documents its PII guardrails as
 integrations with named third-party services. What the profile shows is that **none of the
-three satisfies both halves of the response split**, which is a statement about the
-category, not about any one product's honesty.
+four satisfies both halves of the response split**, which is a statement about the
+category, not about any one product's honesty. NeMo Guardrails is measured with its detect
+rail because its mask rail does not run at all in 0.24.0, which is declared beside the row
+rather than folded into it.
 
 **One further observation, reported as an observation.** The masked prompt LiteLLM sent
 upstream was `Please review: <EMAIL_ADDRESS_1>S_SSN_3>, <CREDIT_CARD_4>` -- the separator
@@ -453,7 +480,7 @@ print('valid')
 inside a wrapper written here; the rehydration half is the wrapper's. Only the three
 gateway rows measure a vendor's own shipped streaming path end to end.
 
-**It is not a leaderboard.** Three gateways, one version each, one configuration each, one
+**It is not a leaderboard.** Four gateways, one version each, one configuration each, one
 carrier sentence, run once by the author of one of them. A leaderboard needs replication,
 version ranges, more than one carrier, and someone other than this project running it.
 

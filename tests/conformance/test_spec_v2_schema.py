@@ -109,7 +109,7 @@ def _v2_exemplar():
         "seed": "0123456789abcdef",
         "coverage": {
             "strategy": "pairwise-plus-adversarial",
-            "axes": ["entity", "encoding", "fragmentation", "carrier"],
+            "axes": ["entity", "encoding", "fragmentation", "carrier", "request_site"],
             "pairs_required": 1_184,
             "pairs_covered": 1_184,
             "proof_complete": True,
@@ -134,6 +134,18 @@ def _v2_exemplar():
             },
             "carrier": {
                 "message-content": {"leak_rate": 0.0, "applicable": 90, "leaked": 0}
+            },
+            # Required since the 2026-09-04 amendment. `echo_observable` is the
+            # denominator behind fidelity_rate: a gateway that drops the field never
+            # presented anything to restore, so 0 there means NOT MEASURED, which is a
+            # different statement from measured-and-failed.
+            "request_site": {
+                "unrecognised-key": {
+                    "leak_rate": 0.0,
+                    "applicable": 90,
+                    "echo_observable": 90,
+                    "leaked": 0,
+                }
             },
         },
     }

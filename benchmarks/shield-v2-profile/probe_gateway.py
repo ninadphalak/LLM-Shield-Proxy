@@ -31,7 +31,8 @@ args = ap.parse_args()
 
 segments = build_segments(args.seed)
 case = {"entity": "EMAIL", "encoding": "plain",
-        "fragmentation": "adversarial", "carrier": "sse-delta-content"}
+        "fragmentation": "adversarial", "carrier": "sse-delta-content",
+        "request_site": "chat-content"}
 state = UpstreamState(segments=segments, case=case)
 server, _url = _serve(_make_upstream(state), port=args.upstream_port)
 

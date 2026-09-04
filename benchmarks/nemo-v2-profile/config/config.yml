@@ -1,0 +1,60 @@
+# NeMo Guardrails with a LOCAL Presidio output rail.
+#
+# Why this row exists: LiteLLM, LLM-Shield-Proxy and Portkey between them have no local
+# response-side PII detector. LiteLLM calls a Presidio service and buffers the whole
+# response; LLM-Shield-Proxy has no response detector at all; every Portkey PII check is a
+# remote call-out. NeMo runs Presidio in-process as an output rail, which is the quadrant
+# none of the other three occupies.
+#
+# The "model" is the harness capture, reached as an OpenAI-compatible endpoint.
+models:
+  - type: main
+    engine: openai
+    model: capture
+    parameters:
+      base_url: http://host.docker.internal:8799/v1
+      api_key: sk-dummy-not-used
+
+rails:
+  config:
+    sensitive_data_detection:
+      output:
+        entities:
+          - EMAIL_ADDRESS
+          - US_SSN
+          - CREDIT_CARD
+  output:
+    flows:
+      # "mask sensitive data on output" is UNUSABLE in nemoguardrails 0.24.0. The action
+      # dispatcher passes context= to every action, and the shipped signature is
+      #   mask_sensitive_data(source, text, config)          <- no **kwargs
+      #   detect_sensitive_data(source, text, config, **kwargs)
+      # so the mask rail dies with "mask_sensitive_data() got an unexpected keyword
+      # argument 'context'" on every request while its sibling works. Verified by
+      # inspect.signature against the installed package, not inferred from the error.
+      - detect sensitive data on output
+    # Without this NeMo returns HTTP 400 rather than streaming:
+    #   "stream_async() cannot be used when output rails are configured but
+    #    rails.output.streaming.enabled is False"
+    # That is a deliberate refusal, not a bug, and it is worth recording: the default
+    # posture when a response guardrail is configured is to NOT stream.
+    #
+    # chunk_size / context_size are exactly the bounded-retention window the profile's
+    # DeltaFrag metric was built to measure. They are left at NeMo's defaults here, so
+    # the row reports the shipped configuration rather than a tuned one.
+    streaming:
+      enabled: true
+      # NeMo's own config validator refuses any other combination here:
+      #   "Output rails ['mask sensitive data on output'] rewrite the response, which
+      #    streaming cannot apply with stream_first: True and context_size: 50: set
+      #    rails.output.streaming.stream_first to False and context_size to 0, or remove
+      #    the rewriting rails from a streaming configuration."
+      # context_size: 0 means NO retention across chunk boundaries. That is the
+      # chunk-local policy, arrived at not by choice but because the product will not
+      # start in any other streaming configuration with a masking rail. The default
+      # context_size is 50.
+      # detect is a non-rewriting rail, so the validator that forced context_size: 0 for
+      # the mask rail does not apply and a real retention window is available. This is
+      # the shipped default (50), not a tuned value.
+      stream_first: false
+      context_size: 50

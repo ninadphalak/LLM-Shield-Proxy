@@ -2027,10 +2027,11 @@
                   "entity",
                   "encoding",
                   "fragmentation",
-                  "carrier"
+                  "carrier",
+                  "request_site"
                 ]
               },
-              "minItems": 4,
+              "minItems": 5,
               "uniqueItems": true
             },
             "pairs_required": {
@@ -2152,7 +2153,8 @@
             "entity",
             "encoding",
             "fragmentation",
-            "carrier"
+            "carrier",
+            "request_site"
           ],
           "properties": {
             "entity": {
@@ -2181,6 +2183,11 @@
                   "leaked": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "echo_observable": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
                   }
                 },
                 "additionalProperties": false
@@ -2212,6 +2219,11 @@
                   "leaked": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "echo_observable": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
                   }
                 },
                 "additionalProperties": false
@@ -2243,6 +2255,11 @@
                   "leaked": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "echo_observable": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
                   }
                 },
                 "additionalProperties": false
@@ -2274,6 +2291,47 @@
                   "leaked": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "echo_observable": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "request_site": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "leak_rate",
+                  "applicable"
+                ],
+                "properties": {
+                  "leak_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "fidelity_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "applicable": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "leaked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "echo_observable": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Cases in this slice where the request site actually reached the capture, and therefore the denominator behind fidelity_rate. Zero means fidelity_rate was not measured for this slice, which is not the same as measured and failed."
                   }
                 },
                 "additionalProperties": false
@@ -2281,6 +2339,11 @@
             }
           },
           "additionalProperties": false
+        },
+        "cases_echo_observable": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cases where the request site reached the capture, so there was something for the gateway to restore. The denominator behind fidelity_rate."
         }
       },
       "additionalProperties": false

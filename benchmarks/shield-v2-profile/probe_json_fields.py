@@ -82,6 +82,7 @@ case = {
     "encoding": "plain",
     "fragmentation": "single_chunk",
     "carrier": "sse-delta-content",
+    "request_site": "chat-content",
 }
 
 
