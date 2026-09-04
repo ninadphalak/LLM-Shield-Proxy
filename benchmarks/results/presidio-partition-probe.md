@@ -1,4 +1,4 @@
-# Presidio partition probe — is a whole-string scanner chunk-composable?
+# Presidio partition probe: is a whole-string scanner chunk-composable?
 
 **Run:** 2026-09-03, project-run, single machine. **Not independently reproduced.**
 
@@ -6,7 +6,7 @@
 - Subject: `mcr.microsoft.com/presidio-analyzer`, stock recognizer registry, no ad-hoc
   recognizers, container up and healthy on `127.0.0.1:5002`
 - Harness host: Windows 11, CPython 3.14, AMD64
-- Fixture: the current valid, non-real benchmark fixture —
+- Fixture: the current valid, non-real benchmark fixture:
   `euefmius@example.com`, `939-38-8264`, `5555-5555-5555-4444`
 
 ## What this is, and what it is not
@@ -28,10 +28,10 @@ For each fixture value, place it in a carrier sentence, confirm whole-string ana
 the full value span, then split the stream at every internal offset of the value and analyse
 the two chunks independently. Classify each split:
 
-- **protected** — a chunk match covers the whole value; nothing leaks.
-- **partial** — a chunk match covers only part of the value; the rest reaches the wire.
+- **protected**: a chunk match covers the whole value; nothing leaks.
+- **partial**: a chunk match covers only part of the value; the rest reaches the wire.
   Worse than a miss, because the output looks redacted.
-- **missed** — no chunk matches; the whole value reaches the wire.
+- **missed**: no chunk matches; the whole value reaches the wire.
 
 ## Result
 
@@ -50,17 +50,17 @@ split points protects it under chunk-local scanning.**
 `EMAIL` is the only entity with any chunk hits, and all 8 are partial:
 
 - Splits 1–7 fall inside the local part. The right chunk still contains a *complete, valid
-  but different* address — `euefmius@example.com` split at 5 leaves `ius@example.com`, which
+  but different* address. `euefmius@example.com` split at 5 leaves `ius@example.com`, which
   Presidio correctly detects. Redaction fires, and the leading characters of the local part
   go to the wire.
-- Split 19 leaves `euefmius@example.co` on the left — a valid address with the `.co` TLD.
+- Split 19 leaves `euefmius@example.co` on the left, a valid address with the `.co` TLD.
   Detected, and the trailing `m` goes to the wire.
 - Splits 8–18 miss entirely.
 
 So the fragment that survives is a value the scanner is *right* about and the integrator is
 *wrong* about. This is the same defect class as the partial-redaction leak found in
 LLM-Shield-Proxy's own Tier 1 (`319604c`), where `PHONE` consumed 8 of 12 Aadhaar digits and
-left 4 on the wire — reproduced here in an unrelated implementation, from a different cause.
+left 4 on the wire, reproduced here in an unrelated implementation, from a different cause.
 
 `SSN` and `CREDIT_CARD` show no partials because both recognizers validate: a fragment is not
 a checksum-valid card or a well-formed SSN, so it produces nothing rather than something
@@ -77,7 +77,7 @@ avoids this bug class by **giving up incremental delivery**. It buffers, so ther
 chunk boundaries to straddle. It also never restores the original values, so it is a one-way
 anonymiser rather than a masking gateway.
 
-That is the honest framing of what bounded suffix retention buys — not "we detect more", but
+That is the honest framing of what bounded suffix retention buys. Not "we detect more", but
 "the value can be protected without buffering the response."
 
 ## Limits
