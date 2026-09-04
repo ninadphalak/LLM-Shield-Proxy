@@ -1,0 +1,297 @@
+{
+ "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
+ "generated_at": "2026-09-04T09:08:47Z",
+ "profile": {
+  "name": "OpenAI-compatible HTTP gateway profile",
+  "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+ },
+ "implementation": {
+  "name": "reference-policy:presidio-retention",
+  "version": "0.1.0-minimal",
+  "labels_are_operator_supplied": true
+ },
+ "target": {
+  "base_url": "http://127.0.0.1/v1 (ephemeral loopback)",
+  "model": "test",
+  "raw_pass_through_baseline": false
+ },
+ "harness_revision": "0.1.0-minimal",
+ "environment": {
+  "python": "3.14.7",
+  "implementation": "CPython",
+  "platform": "Windows-11-10.0.26200-SP0"
+ },
+ "capture": {
+  "mode": "loopback",
+  "bind_host": "127.0.0.1",
+  "port": 0,
+  "authentication_required": false,
+  "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
+  "self_probe": {
+   "performed": true,
+   "url": "http://127.0.0.1/__probe__ (ephemeral loopback)",
+   "recorded": true,
+   "round_trip_ms": 0.0
+  }
+ },
+ "checks": {
+  "configured_upstream_boundary": {
+   "passed": true,
+   "captured_requests": 1,
+   "correlated_requests": 1,
+   "uninspectable_requests": 0,
+   "uninspectable_reasons": [],
+   "leaked_entity_types": [],
+   "upstream_paths_observed": [
+    "/v1/chat/completions"
+   ],
+   "marker_words_required": 3,
+   "marker_words_total": 5,
+   "marker_words_observed_max": 5,
+   "payload_content_included": false,
+   "inspection_scope": "every HTTP/1.x request to the capture origin on any path or method: request line, headers, chunk extensions, trailers, and body, after transfer-encoding and content-encoding decoding, walked recursively over all JSON types, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39, including ordered per-channel joins across captured requests with decoded material held out of the ordered stream",
+   "capture_mode": "loopback",
+   "unattributed_requests": 0,
+   "unattributed_uninspectable_requests": 0,
+   "unattributed_leaked_entity_types": [],
+   "leak_evidence": [],
+   "needle_proximity": {},
+   "needle_lengths": {}
+  },
+  "fragmentation_safety": {
+   "passed": true,
+   "one_character_events_requested": true,
+   "events_observed": 6,
+   "events_observed_max": 6,
+   "coalescing_not_distinguished": true,
+   "response_reconstructed": true
+  },
+  "sse_validity": {
+   "passed": true,
+   "invalid_events": 0,
+   "done_markers_valid": true,
+   "content_type_valid": true,
+   "status_codes": [
+    200
+   ],
+   "errors": []
+  },
+  "response_fidelity": {
+   "passed": true,
+   "expected_value_reconstructed": true,
+   "iterations_matching": 18,
+   "iterations_completed": 18,
+   "iterations_requested": 18,
+   "payload_content_included": false,
+   "segment": "echo"
+  },
+  "response_injection_containment": {
+   "passed": false,
+   "segment": "injection",
+   "fragmentation_strategy": "exhaustive-2-part",
+   "injected_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN"
+   ],
+   "leaked_entity_types": [
+    "EMAIL"
+   ],
+   "leak_evidence": [
+    {
+     "entity_type": "EMAIL",
+     "observed": "normalized-match"
+    }
+   ],
+   "needle_proximity": {},
+   "needle_lengths": {},
+   "delivery_confirmed": true,
+   "client_capture_inspectable": true,
+   "inspection_scope": "every SSE event the client received: event data parsed as JSON and walked recursively over all types, reassembled delta content concatenated in arrival order, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
+   "payload_content_included": false
+  },
+  "segment_separation": {
+   "passed": true,
+   "echo_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN"
+   ],
+   "injection_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN"
+   ],
+   "values_disjoint": true,
+   "normalized_forms_disjoint": true,
+   "injection_absent_from_request": true,
+   "shared_substring_max": 12,
+   "shortest_needle_length": 9
+  },
+  "client_observed_latency": {
+   "passed": true,
+   "threshold_enforced": false,
+   "unit": "milliseconds",
+   "iterations": 6,
+   "iterations_measured": 6,
+   "mean": 96.9659,
+   "p50": 99.6817,
+   "p95": 114.3263,
+   "p99": 114.3263
+  }
+ },
+ "passed": false,
+ "limitations": {
+  "run_validity": [
+   "Reference response-path policies, not products. No third-party gateway is measured here.",
+   "Loopback transport on a single machine; project-run and unreplicated."
+  ],
+  "method_limits": [
+   "6 cases: a pairwise covering array over the four axes, not exhaustive.",
+   "Three entity types, two encodings, two carriers, two fragmentation conditions.",
+   "Fragmentation is a two-part split at the value midpoint, not every split point.",
+   "Latency is loopback and in-process; it is not gateway overhead on a network."
+  ]
+ },
+ "redaction_claim": {
+  "vendor_claims_pii_redaction": "claimed",
+  "claim_citation": "pii_leak_benchmark.v2_emitter policy docstrings",
+  "configured_for_this_run": true,
+  "configuration_reference": "POLICIES['presidio-retention']",
+  "recorded_by": "operator"
+ },
+ "outcome": "fail",
+ "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.0, LeakRate(adversarial)=0.3333, DeltaFrag=0.3333.",
+ "fixture": {
+  "varies_per_run": true,
+  "values_published": false,
+  "formats": {
+   "EMAIL": "local@example.com",
+   "SSN": "AAA-GG-SSSS",
+   "CARDPAN": "published test-range PAN"
+  },
+  "value_space_nominal": {
+   "EMAIL": 208827064576,
+   "SSN": 48995100,
+   "CARDPAN": 6
+  },
+  "specimens_are_valid": "Luhn and SSA-range constraints enforced by make_fixture",
+  "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only"
+ },
+ "corpus": {
+  "id": "minimal-response-split",
+  "version": "0.1.0",
+  "sha256": "06f7b0f72f651587be93c75eb5a0037e90300455c9bcac777c9fbbecb04cdbcf",
+  "case_count": 6,
+  "seed": "1c5d2e208994e85c",
+  "coverage": {
+   "strategy": "pairwise",
+   "axes": [
+    "carrier",
+    "encoding",
+    "entity",
+    "fragmentation"
+   ],
+   "pairs_required": 30,
+   "pairs_covered": 30,
+   "proof_complete": true
+  },
+  "values_published": false
+ },
+ "metrics": {
+  "leak_rate": {
+   "single_chunk": 0.0,
+   "adversarial": 0.3333,
+   "overall": 0.1667
+  },
+  "fidelity_rate": 1.0,
+  "delta_frag": 0.3333,
+  "cases_by_condition": {
+   "single_chunk": 3,
+   "adversarial": 3
+  },
+  "cases_scored": 6,
+  "cases_applicable": 6,
+  "cases_inconclusive": 0,
+  "derivation_recomputed": true,
+  "sidecar_case_count_matches": true,
+  "by_axis": {
+   "entity": {
+    "EMAIL": {
+     "leak_rate": 0.5,
+     "fidelity_rate": 1.0,
+     "applicable": 2,
+     "leaked": 1
+    },
+    "SSN": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 2,
+     "leaked": 0
+    },
+    "CARDPAN": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 2,
+     "leaked": 0
+    }
+   },
+   "encoding": {
+    "plain": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "leaked": 0
+    },
+    "percent": {
+     "leak_rate": 0.3333,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "leaked": 1
+    }
+   },
+   "fragmentation": {
+    "single_chunk": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "leaked": 0
+    },
+    "adversarial": {
+     "leak_rate": 0.3333,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "leaked": 1
+    }
+   },
+   "carrier": {
+    "sse-delta-content": {
+     "leak_rate": 0.0,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "leaked": 0
+    },
+    "sse-json-field": {
+     "leak_rate": 0.3333,
+     "fidelity_rate": 1.0,
+     "applicable": 3,
+     "leaked": 1
+    }
+   }
+  }
+ },
+ "entity_scope": {
+  "mechanism": "reference-policy detector set",
+  "enabled": [
+   "EMAIL",
+   "SSN",
+   "CARDPAN"
+  ],
+  "not_enabled": [],
+  "unknown": [],
+  "partitions_corpus": true,
+  "recorded_by": "operator",
+  "source": "pii_leak_benchmark.v2_emitter._DETECTORS"
+ },
+ "cases_digest": "06f7b0f72f651587be93c75eb5a0037e90300455c9bcac777c9fbbecb04cdbcf"
+}
