@@ -576,3 +576,69 @@ def test_the_ceiling_and_policy_are_per_virtual_key():
 
     # The same payload is fine under the global defaults.
     assert engine.redact_payload({"blob": "B" * 200}, Vault())["blob"] == "B" * 200
+
+
+def test_anthropic_tool_result_content_is_redacted():
+    """A tool_result nests its own content, as a string or as further blocks.
+
+    Only each block's `text` was being redacted, so a tool result carrying personal
+    data reached the provider intact.
+    """
+    engine = PIIEngine()
+
+    as_string = engine.redact_payload(
+        {"messages": [{"role": "user", "content": [{"type": "tool_result", "content": "found jane.doe@example.com"}]}]},
+        Vault(),
+    )
+    assert "jane.doe@example.com" not in json.dumps(as_string)
+
+    as_blocks = engine.redact_payload(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "content": [{"type": "text", "text": "found jane.doe@example.com"}]}
+                    ],
+                }
+            ]
+        },
+        Vault(),
+    )
+    assert "jane.doe@example.com" not in json.dumps(as_blocks)
+
+
+def test_nested_tool_results_are_bounded():
+    """Nesting is caller controlled, so the descent stops rather than following it.
+
+    A shallow value alongside the chain proves the walk ran; the value buried past
+    the bound proves it stopped.
+    """
+    engine = PIIEngine()
+
+    deep = {"type": "tool_result", "content": "jane.doe@example.com"}
+    for _ in range(200):
+        deep = {"type": "tool_result", "content": [deep]}
+
+    payload = {
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "shallow bob@example.com"}, deep]}]
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "bob@example.com" not in serialised
+    assert "jane.doe@example.com" in serialised, "the walk followed the chain past its bound"
+
+
+def test_non_text_blocks_survive_tool_result_handling():
+    """Image parts have no text and must come through untouched."""
+    engine = PIIEngine()
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": [{"type": "image", "source": {"url": "s3://bucket/x.png"}}]}
+        ]
+    }
+    redacted = engine.redact_payload(payload, Vault())
+
+    assert redacted["messages"][0]["content"][0]["source"]["url"] == "s3://bucket/x.png"

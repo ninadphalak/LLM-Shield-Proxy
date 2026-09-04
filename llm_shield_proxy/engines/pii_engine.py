@@ -806,6 +806,12 @@ class PIIEngine:
                                             "[SYSTEM_OVERRIDE_BLOCKED]", text_val
                                         )
                                     block_copy["text"] = self.redact_text(text_val, vault, active_profile)
+                                # An Anthropic tool_result nests its own content, as a
+                                # string or as further blocks.
+                                if "content" in block_copy:
+                                    block_copy["content"] = self._redact_nested_content(
+                                        block_copy["content"], vault, active_profile
+                                    )
                                 new_content_blocks.append(block_copy)
                             else:
                                 new_content_blocks.append(block)
@@ -982,6 +988,44 @@ class PIIEngine:
         if policy == "warn":
             AuditLogger.log_unmapped_blob(json_path=json_path or "<root>", size_bytes=len(blob))
         return blob
+
+    def _redact_nested_content(
+        self,
+        content: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        max_depth: int = 8,
+    ) -> Any:
+        """Redacts a tool_result's own content, a string or further blocks.
+
+        Walked with an explicit queue and a depth bound rather than by recursion.
+        The nesting is caller controlled, so an unbounded descent is a JSON bomb.
+        """
+        if isinstance(content, str):
+            return self.redact_text(content, vault, active_profile)
+        if not isinstance(content, list):
+            return content
+
+        root: List[Any] = [block.copy() if isinstance(block, dict) else block for block in content]
+        pending: List[Tuple[List[Any], int]] = [(root, 0)]
+        cursor = 0
+        while cursor < len(pending):
+            blocks, depth = pending[cursor]
+            cursor += 1
+            for position, block in enumerate(blocks):
+                if not isinstance(block, dict):
+                    continue
+                if isinstance(block.get("text"), str):
+                    block["text"] = self.redact_text(block["text"], vault, active_profile)
+                nested = block.get("content")
+                if isinstance(nested, str):
+                    block["content"] = self.redact_text(nested, vault, active_profile)
+                elif isinstance(nested, list) and depth + 1 < max_depth:
+                    copied = [item.copy() if isinstance(item, dict) else item for item in nested]
+                    block["content"] = copied
+                    pending.append((copied, depth + 1))
+                blocks[position] = block
+        return root
 
     def _redact_text_blocks(
         self,
