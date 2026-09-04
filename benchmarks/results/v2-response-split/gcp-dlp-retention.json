@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T18:07:59Z",
+ "generated_at": "2026-09-04T19:32:19Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -142,10 +142,10 @@
    "unit": "milliseconds",
    "iterations": 32,
    "iterations_measured": 32,
-   "mean": 783.9066,
-   "p50": 805.4182,
-   "p95": 1006.1781,
-   "p99": 1137.3948
+   "mean": 858.0522,
+   "p50": 860.4916,
+   "p95": 1033.6534,
+   "p99": 2234.7502
   }
  },
  "passed": false,
