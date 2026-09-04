@@ -1,6 +1,7 @@
 """Unit tests for 3-Tier PII & Secret Detection Engine."""
 
 import base64
+import json
 import os
 import tempfile
 import time
@@ -315,3 +316,67 @@ def test_subword_boundary_safe_rehydration():
     assert "Maybe" in rehydrated
     assert "Sarahbe" not in rehydrated
     assert "check with Sarah tomorrow" in rehydrated
+
+
+def test_anthropic_system_block_list_is_redacted():
+    """A system prompt sent as content blocks must not reach the wire intact.
+
+    Anthropic accepts `system` as a bare string or a list of blocks. Only the
+    string form was redacted, so the block form left the value in the request
+    while the proxy reported redaction as enabled.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {"system": [{"type": "text", "text": "Contact jane.doe@example.com"}]}
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_responses_instructions_are_redacted():
+    """The Responses API carries caller text outside both `messages` and `input`."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {"instructions": "Contact jane.doe@example.com", "input": ""}
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_responses_input_items_are_redacted():
+    """`input` items hold text in `content`, and tool items hold it outside `content`.
+
+    Only bare strings in the `input` list were redacted, so every structured item
+    shape the Responses API sends went through untouched.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "input": [
+            {"role": "user", "content": "Contact jane.doe@example.com"},
+            {"role": "user", "content": [{"type": "input_text", "text": "Also jane.doe@example.com"}]},
+            {"type": "function_call", "name": "send", "arguments": '{"email": "jane.doe@example.com"}'},
+            {"type": "function_call_output", "call_id": "c1", "output": "sent to jane.doe@example.com"},
+        ]
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_non_text_blocks_and_unknown_items_survive_redaction():
+    """Redaction must not damage image blocks or item types it does not understand."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "system": [{"type": "text", "text": "Contact jane.doe@example.com"}, {"type": "image", "source": "s3://x"}],
+        "input": [{"type": "unknown_item", "opaque": 42}],
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert redacted["system"][1] == {"type": "image", "source": "s3://x"}
+    assert redacted["input"][0] == {"type": "unknown_item", "opaque": 42}

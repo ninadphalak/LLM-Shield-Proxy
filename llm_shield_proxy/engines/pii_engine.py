@@ -826,9 +826,23 @@ class PIIEngine:
                     for p in new_payload["prompt"]
                 ]
 
-        # Redact system prompt if separated at top level
-        if "system" in new_payload and isinstance(new_payload["system"], str):
-            new_payload["system"] = self.redact_text(new_payload["system"], vault, active_profile)
+        # Redact system prompt if separated at top level. Anthropic sends this as a
+        # bare string or as a list of content blocks; a block list reaching the wire
+        # unredacted is the same leak as an unredacted message.
+        if "system" in new_payload:
+            if isinstance(new_payload["system"], str):
+                new_payload["system"] = self.redact_text(new_payload["system"], vault, active_profile)
+            elif isinstance(new_payload["system"], list):
+                new_payload["system"] = self._redact_text_blocks(
+                    new_payload["system"], vault, active_profile
+                )
+
+        # Redact the Responses API instructions field, which carries caller text
+        # outside both `messages` and `input`.
+        if "instructions" in new_payload and isinstance(new_payload["instructions"], str):
+            new_payload["instructions"] = self.redact_text(
+                new_payload["instructions"], vault, active_profile
+            )
 
         # Redact embeddings / moderation / responses input field
         if "input" in new_payload:
@@ -836,11 +850,58 @@ class PIIEngine:
                 new_payload["input"] = self.redact_text(new_payload["input"], vault, active_profile)
             elif isinstance(new_payload["input"], list):
                 new_payload["input"] = [
-                    self.redact_text(item, vault, active_profile) if isinstance(item, str) else item
+                    self.redact_text(item, vault, active_profile)
+                    if isinstance(item, str)
+                    else self._redact_input_item(item, vault, active_profile)
                     for item in new_payload["input"]
                 ]
 
         return new_payload
+
+    def _redact_text_blocks(
+        self,
+        blocks: List[Any],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+    ) -> List[Any]:
+        """Redacts the `text` of every content block, leaving other block types alone."""
+        redacted: List[Any] = []
+        for block in blocks:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                block_copy = block.copy()
+                block_copy["text"] = self.redact_text(block_copy["text"], vault, active_profile)
+                redacted.append(block_copy)
+            else:
+                redacted.append(block)
+        return redacted
+
+    def _redact_input_item(
+        self,
+        item: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+    ) -> Any:
+        """Redacts one Responses API input item.
+
+        An item carries its text in `content` (a string or a block list), and tool
+        items carry it outside `content` entirely: a function_call in `arguments`,
+        a function_call_output in `output`.
+        """
+        if not isinstance(item, dict):
+            return item
+
+        item_copy = item.copy()
+        content = item_copy.get("content")
+        if isinstance(content, str):
+            item_copy["content"] = self.redact_text(content, vault, active_profile)
+        elif isinstance(content, list):
+            item_copy["content"] = self._redact_text_blocks(content, vault, active_profile)
+
+        for tool_field in ("arguments", "output"):
+            if isinstance(item_copy.get(tool_field), str):
+                item_copy[tool_field] = self.redact_text(item_copy[tool_field], vault, active_profile)
+
+        return item_copy
 
 
 pii_engine = PIIEngine()
