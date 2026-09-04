@@ -30,9 +30,21 @@ Configuration records: `http-profile-litellm-1.99.0.md`,
 
 ## Local profile artifact
 
-`conformance-v1.0.0-pre-release-windows.json` is the local profile: this project's own
-engines measured in process. It exercises no third party and is not comparable to
-anything above.
+`conformance-v1.0.0-1.6.0-windows.json` is the local profile: this project's own engines
+measured in process. It exercises no third party and is not comparable to anything above.
+
+**Cite this file, not the pre-release one.** It was produced from a clean tree, so its
+`source_revision` is a plain commit hash (`007994bf4e164cdd40f1b2eb0c8ac5d96df95d35`) and
+the run is reproducible from that commit:
+
+```bash
+LLM_SHIELD_SOURCE_REVISION=$(git rev-parse HEAD)   llm-shield-proxy benchmark --iterations 10000   --json-out benchmarks/results/conformance-v1.0.0-1.6.0-windows.json
+```
+
+`conformance-v1.0.0-pre-release-windows.json` is **superseded and kept only as a record**.
+Its `source_revision` ends in `+working-tree`, which is an honest label for a run made
+against uncommitted changes and also means the run cannot be reproduced from any commit.
+An artefact nobody can re-execute is not evidence, whatever it reports.
 
 ## Latency
 
