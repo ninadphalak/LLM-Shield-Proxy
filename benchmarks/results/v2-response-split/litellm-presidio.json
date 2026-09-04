@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T19:29:53Z",
+ "generated_at": "2026-09-04T22:39:24Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -101,7 +101,7 @@
    "needle_lengths": {},
    "delivery_confirmed": true,
    "client_capture_inspectable": true,
-   "inspection_scope": "every SSE event the client received: event data parsed as JSON and walked recursively over all types, reassembled delta content concatenated in arrival order, with base64/hex/percent-encoded runs and character-code arrays decoded, matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
+   "inspection_scope": "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; events that do not parse as JSON scanned as raw text; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
    "payload_content_included": false
   },
   "segment_separation": {
@@ -130,10 +130,10 @@
    "unit": "milliseconds",
    "iterations": 32,
    "iterations_measured": 32,
-   "mean": 127.1968,
-   "p50": 71.1376,
-   "p95": 111.5169,
-   "p99": 1101.9708
+   "mean": 108.4015,
+   "p50": 71.0813,
+   "p95": 102.8164,
+   "p99": 1221.3874
   }
  },
  "passed": false,

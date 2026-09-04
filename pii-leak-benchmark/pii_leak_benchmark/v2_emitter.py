@@ -1102,8 +1102,14 @@ class RunResult:
 def _serve(
     handler: type[BaseHTTPRequestHandler], port: int = 0
 ) -> tuple[ThreadingHTTPServer, str]:
+    # allow_reuse_address is deliberately NOT set. It was, and on Windows SO_REUSEADDR
+    # lets a SECOND socket bind a port another process already holds -- and the older
+    # socket keeps receiving. A stale capture from a previous run then answered every
+    # request while the new one recorded nothing, and the case scored as "did not leak"
+    # because the stale fixture's needles differ from the current one's. Binding must
+    # fail loudly instead.
+    ThreadingHTTPServer.allow_reuse_address = False
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    server.allow_reuse_address = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address[:2]
@@ -1300,6 +1306,16 @@ def run_case(
         if gateway is not None:
             _stop(gateway)
 
+    # A response that did not come from THIS capture proves nothing about the gateway.
+    # Zero recorded requests means something else answered -- a stale capture on the same
+    # port, a proxy cache, another process -- and the client text belongs to a fixture
+    # this case never used, so its needles are absent and the case would score as a
+    # non-leak. Fail the case rather than accept the flattering answer.
+    if not state.received_bodies and transport_error is None:
+        transport_error = (
+            "capture recorded no request: the response did not come from this run's "
+            "upstream, so nothing about the gateway was measured"
+        )
     hay = _haystacks(sse)
     site_text = None
     if state.received_bodies:

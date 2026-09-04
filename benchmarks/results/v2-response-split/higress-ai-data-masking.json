@@ -1,12 +1,12 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T22:39:44Z",
+ "generated_at": "2026-09-04T22:34:22Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
  },
  "implementation": {
-  "name": "external-gateway:nemo-guardrails-0.24.0",
+  "name": "external-gateway:higress-ai-data-masking",
   "version": "0.1.0-minimal",
   "labels_are_operator_supplied": true
  },
@@ -59,12 +59,12 @@
    "needle_lengths": {}
   },
   "fragmentation_safety": {
-   "passed": false,
+   "passed": true,
    "one_character_events_requested": true,
-   "events_observed": 0,
-   "events_observed_max": 0,
+   "events_observed": 4,
+   "events_observed_max": 4,
    "coalescing_not_distinguished": true,
-   "response_reconstructed": false
+   "response_reconstructed": true
   },
   "sse_validity": {
    "passed": true,
@@ -77,9 +77,9 @@
    "errors": []
   },
   "response_fidelity": {
-   "passed": false,
-   "expected_value_reconstructed": false,
-   "iterations_matching": 0,
+   "passed": true,
+   "expected_value_reconstructed": true,
+   "iterations_matching": 128,
    "iterations_completed": 128,
    "iterations_requested": 128,
    "payload_content_included": false,
@@ -95,11 +95,33 @@
     "SSN",
     "USPHONE"
    ],
-   "leaked_entity_types": [],
-   "leak_evidence": [],
+   "leaked_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN",
+    "USPHONE"
+   ],
+   "leak_evidence": [
+    {
+     "entity_type": "CARDPAN",
+     "observed": "normalized-match"
+    },
+    {
+     "entity_type": "EMAIL",
+     "observed": "normalized-match"
+    },
+    {
+     "entity_type": "SSN",
+     "observed": "normalized-match"
+    },
+    {
+     "entity_type": "USPHONE",
+     "observed": "normalized-match"
+    }
+   ],
    "needle_proximity": {},
    "needle_lengths": {},
-   "delivery_confirmed": false,
+   "delivery_confirmed": true,
    "client_capture_inspectable": true,
    "inspection_scope": "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; events that do not parse as JSON scanned as raw text; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
    "payload_content_included": false
@@ -128,12 +150,12 @@
    "passed": true,
    "threshold_enforced": false,
    "unit": "milliseconds",
-   "iterations": 24,
-   "iterations_measured": 24,
-   "mean": 191.3771,
-   "p50": 103.3066,
-   "p95": 148.8063,
-   "p99": 2374.2527
+   "iterations": 32,
+   "iterations_measured": 32,
+   "mean": 16.085,
+   "p50": 18.514,
+   "p95": 20.5498,
+   "p99": 41.4522
   }
  },
  "passed": false,
@@ -157,8 +179,8 @@
   "configuration_reference": "external gateway configured by the operator; see the run script",
   "recorded_by": "operator"
  },
- "outcome": "no-leak-profile-not-met",
- "outcome_rationale": "FidelityRate=0.0, LeakRate(single_chunk)=0.0, LeakRate(adversarial)=0.0, DeltaFrag=0.0.",
+ "outcome": "fail",
+ "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=1.0, LeakRate(adversarial)=1.0, DeltaFrag=0.0.",
  "fixture": {
   "varies_per_run": true,
   "values_published": false,
@@ -198,136 +220,149 @@
  },
  "metrics": {
   "leak_rate": {
-   "single_chunk": 0.0,
-   "adversarial": 0.0,
-   "overall": 0.0
+   "single_chunk": 1.0,
+   "adversarial": 1.0,
+   "overall": 1.0
   },
-  "fidelity_rate": 0.0,
+  "fidelity_rate": 1.0,
   "delta_frag": 0.0,
   "cases_by_condition": {
-   "single_chunk": 12,
-   "adversarial": 12
+   "single_chunk": 16,
+   "adversarial": 16
   },
   "cases_scored": 32,
-  "cases_echo_observable": 8,
-  "detector_blind_entities": [],
-  "cases_applicable": 24,
-  "cases_inconclusive": 8,
+  "cases_echo_observable": 32,
+  "detector_blind_entities": [
+   "CARDPAN",
+   "EMAIL",
+   "SSN",
+   "USPHONE"
+  ],
+  "cases_applicable": 32,
+  "cases_inconclusive": 0,
   "derivation_recomputed": true,
   "sidecar_case_count_matches": true,
   "by_axis": {
    "entity": {
     "EMAIL": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 6,
-     "echo_observable": 2,
-     "leaked": 0
+     "leak_rate": 1.0,
+     "detector_blind": true,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     },
     "SSN": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 6,
-     "echo_observable": 2,
-     "leaked": 0
+     "leak_rate": 1.0,
+     "detector_blind": true,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     },
     "CARDPAN": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 6,
-     "echo_observable": 2,
-     "leaked": 0
+     "leak_rate": 1.0,
+     "detector_blind": true,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     },
     "USPHONE": {
-     "leak_rate": 0.0,
-     "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 6,
-     "echo_observable": 2,
-     "leaked": 0
+     "leak_rate": 1.0,
+     "detector_blind": true,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     }
    },
    "encoding": {
     "plain": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 18,
-     "echo_observable": 6,
-     "leaked": 0
+     "fidelity_rate": 1.0,
+     "applicable": 22,
+     "echo_observable": 22,
+     "leaked": 22
     },
     "percent": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 6,
-     "echo_observable": 2,
-     "leaked": 0
+     "fidelity_rate": 1.0,
+     "applicable": 10,
+     "echo_observable": 10,
+     "leaked": 10
     }
    },
    "fragmentation": {
     "single_chunk": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 12,
-     "echo_observable": 4,
-     "leaked": 0
+     "fidelity_rate": 1.0,
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 16
     },
     "adversarial": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 12,
-     "echo_observable": 4,
-     "leaked": 0
+     "fidelity_rate": 1.0,
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 16
     }
    },
    "carrier": {
     "sse-delta-content": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 18,
-     "echo_observable": 6,
-     "leaked": 0
+     "fidelity_rate": 1.0,
+     "applicable": 24,
+     "echo_observable": 24,
+     "leaked": 24
     },
     "sse-json-field": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
-     "applicable": 6,
-     "echo_observable": 2,
-     "leaked": 0
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     }
    },
    "request_site": {
     "chat-content": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
+     "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
-     "leaked": 0
+     "leaked": 8
     },
     "system-content": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
+     "fidelity_rate": 1.0,
      "applicable": 8,
-     "echo_observable": 0,
-     "leaked": 0
+     "echo_observable": 8,
+     "leaked": 8
     },
     "unrecognised-key": {
-     "leak_rate": 0.0,
+     "leak_rate": 1.0,
      "detector_blind": false,
-     "fidelity_rate": 0.0,
+     "fidelity_rate": 1.0,
      "applicable": 8,
-     "echo_observable": 0,
-     "leaked": 0
+     "echo_observable": 8,
+     "leaked": 8
+    },
+    "tool-description": {
+     "leak_rate": 1.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     }
    }
   }

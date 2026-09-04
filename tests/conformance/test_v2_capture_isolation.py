@@ -125,3 +125,59 @@ def test_stop_releases_the_port() -> None:
     except OSError as exc:  # pragma: no cover - the regression this guards
         pytest.fail(f"port {PORT} still bound after _stop: {exc}")
     _stop(second)
+
+
+def test_a_response_that_never_reached_the_capture_is_inconclusive() -> None:
+    """If the capture recorded nothing, the response came from somewhere else.
+
+    A stale capture on the same port, a proxy cache, another process on the machine --
+    the cause does not matter. What matters is that the client text belongs to a fixture
+    this case never used, so its needles are absent and the case scores as "did not
+    leak". A FALSE PASS, and the most flattering kind: it looks like a perfect row.
+
+    Observed for real. A leftover capture from an earlier run held port 8799, the new
+    capture bound alongside it (Windows SO_REUSEADDR lets a second socket bind, and the
+    OLDER one keeps receiving), and a Higress probe reported every injected value
+    contained while the capture for that run had recorded zero requests.
+    """
+    from pii_leak_benchmark.v2_emitter import _sse, run_case
+    from http.server import BaseHTTPRequestHandler
+
+    segments = build_segments("a1b2c3d4e5f60001")
+    case = {
+        "entity": "EMAIL",
+        "encoding": "plain",
+        "fragmentation": "single_chunk",
+        "carrier": "sse-delta-content",
+        "request_site": "chat-content",
+    }
+
+    class AnswersWithoutTheUpstream(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args) -> None:  # noqa: A003
+            return
+
+        def do_POST(self) -> None:  # noqa: N802
+            body = _sse([{"content": "a response this run's capture never produced"}])
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            self.close_connection = True
+
+    gateway, url = _serve(AnswersWithoutTheUpstream, port=0)
+    try:
+        result = run_case(segments, "probe", case, iterations=1, gateway_url=url, upstream_port=0)
+    finally:
+        _stop(gateway)
+
+    assert not result.upstream_bodies, "precondition: the capture must have seen nothing"
+    assert result.transport_error, (
+        "a case whose capture recorded no request was scored as a measurement; every "
+        "needle is absent from a response this run did not produce, so it reads as a "
+        "clean row"
+    )
+    assert not result.echo_observable
