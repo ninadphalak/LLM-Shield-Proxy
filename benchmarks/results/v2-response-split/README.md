@@ -87,6 +87,52 @@ All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
 | `presidio-chunk-local` | 1.00 | 0.00 | **0.81 [0.67-1.00]** | **0.81 [0.67-1.00]**, stdev 0.17 |
 | `presidio-retention` | 1.00 | 0.00 | **0.33 [0.33-0.33]** | **0.33 [0.33-0.33]**, stdev 0.00 |
 
+**A real gateway product** — LiteLLM 1.99 (`ghcr.io/berriai/litellm:main-latest`) in Docker,
+with its own Presidio guardrail (`output_parse_pii: true`) pointed at the same analyzer
+container. LiteLLM does the masking, calls this harness as its configured upstream, and
+applies its own return path. Nothing here is modelled. 6 seeds:
+
+| Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag | Outcome |
+|---|---|---|---|---|---|
+| `litellm-presidio` | **0.00** | 0.00 | 0.00 | 0.00 | **no-leak-profile-not-met** |
+
+Identical on all 6 seeds (stdev 0.00 everywhere). See `seed-sweep-litellm.json`.
+
+**This is the `redact-all` quadrant, reached by a shipping product.** LiteLLM scores a
+perfect leak rate and returns none of the user's own data: 0 of 18 echo values recovered.
+
+**Verified, not inferred.** A single-request probe captured both sides:
+
+- The prompt the upstream received was masked — `Please review: <EMAIL_ADDRESS_1>...`,
+  not the real values. **So masking ran.** FidelityRate 0.00 means "did not restore", not
+  "nothing was there to restore".
+- The client received placeholders, not originals: `<CREDIT_CARD>`, `<URL>`.
+- `events_observed: 2` regardless of how many events the upstream emitted.
+
+That last number is the important one. **LiteLLM buffers the whole response and re-emits it
+as one chunk**, which independently reproduces evidence-ledger E15 by a different route.
+And it explains the DeltaFrag: **0.00 here does not mean the fragmentation bug was solved.
+It means there are no chunk boundaries left to straddle.** The bug was avoided by removing
+incremental delivery — the property the whole streaming architecture exists to provide.
+Compare `passthrough`, which also scores DeltaFrag 0.00 while leaking everything: the metric
+is only meaningful read next to FidelityRate and the LeakRates.
+
+**Scope.** One gateway, one version, one guardrail configuration, one carrier sentence,
+project-run, unreplicated. Not a leaderboard row and not a comparison. LiteLLM makes no
+claim to rehydrate; `output_parse_pii` is documented as output parsing, so this measures a
+configuration a practitioner would plausibly deploy, not a broken promise.
+
+**One further observation, reported as an observation.** The masked prompt LiteLLM sent
+upstream was `Please review: <EMAIL_ADDRESS_1>S_SSN_3>, <CREDIT_CARD_4>` — the separator
+and the opening of the second placeholder are missing, so two anonymizer replacements
+collided. On the return path the client saw `lylyfwzv@<URL>`, part of the echo email's local
+part surviving alongside a `<URL>` replacement. This is the same *class* as the partial-span
+defect in ledger E5, from a different cause. **It is not a defect claim:** it was seen with
+one carrier sentence and one entity ordering, and overlapping EMAIL/URL recognizer spans are
+the likely mechanism. Isolating it needs a dedicated run, and that run has not been done.
+
+---
+
 **The real detector is the only thing here that varies with the seed**, and that is
 informative rather than noise: whether a split leaves a still-detectable fragment depends
 on the actual characters. The models are deterministic because their regexes are.

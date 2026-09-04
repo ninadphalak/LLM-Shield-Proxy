@@ -26,12 +26,24 @@ from pii_leak_benchmark.v2_emitter import POLICIES, run_policy  # noqa: E402
 METRICS = ("fidelity_rate", "leak_single_chunk", "leak_adversarial", "delta_frag")
 
 
-def sweep(policies: list[str], seeds: list[str]) -> dict[str, dict]:
+def sweep(
+    policies: list[str],
+    seeds: list[str],
+    gateway_url: str | None = None,
+    upstream_port: int = 0,
+    model: str = "test",
+) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for name in policies:
         rows = []
         for seed in seeds:
-            _report, summary = run_policy(name, seed=seed)
+            _report, summary = run_policy(
+                name,
+                seed=seed,
+                gateway_url=gateway_url,
+                upstream_port=upstream_port,
+                model=model,
+            )
             rows.append({"seed": seed, **{m: summary[m] for m in METRICS}})
             print(
                 f"  {name:24} seed={seed}  "
@@ -61,13 +73,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seeds", type=int, default=10)
     parser.add_argument("--only", default="")
     parser.add_argument("--out", default="benchmarks/results/v2-response-split/seed-sweep.json")
+    parser.add_argument("--gateway-url", default=None)
+    parser.add_argument("--upstream-port", type=int, default=0)
+    parser.add_argument("--model", default="test")
     args = parser.parse_args(argv)
 
     policies = [n.strip() for n in args.only.split(",") if n.strip()] or list(POLICIES)
     seeds = [f"{i:016x}" for i in range(1, args.seeds + 1)]
 
     print(f"sweeping {len(policies)} policies x {len(seeds)} seeds", flush=True)
-    results = sweep(policies, seeds)
+    results = sweep(
+        policies,
+        seeds,
+        gateway_url=args.gateway_url,
+        upstream_port=args.upstream_port,
+        model=args.model,
+    )
 
     Path(args.out).write_text(json.dumps(results, indent=1), encoding="utf-8")
 
