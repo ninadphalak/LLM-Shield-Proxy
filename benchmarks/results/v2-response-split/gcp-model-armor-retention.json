@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T16:24:13Z",
+ "generated_at": "2026-09-04T18:05:56Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -79,9 +79,9 @@
   "response_fidelity": {
    "passed": true,
    "expected_value_reconstructed": true,
-   "iterations_matching": 72,
-   "iterations_completed": 72,
-   "iterations_requested": 72,
+   "iterations_matching": 128,
+   "iterations_completed": 128,
+   "iterations_requested": 128,
    "payload_content_included": false,
    "segment": "echo"
   },
@@ -92,11 +92,13 @@
    "injected_entity_types": [
     "CARDPAN",
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "leaked_entity_types": [
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "leak_evidence": [
     {
@@ -105,6 +107,10 @@
     },
     {
      "entity_type": "SSN",
+     "observed": "normalized-match"
+    },
+    {
+     "entity_type": "USPHONE",
      "observed": "normalized-match"
     }
    ],
@@ -120,12 +126,14 @@
    "echo_entity_types": [
     "CARDPAN",
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "injection_entity_types": [
     "CARDPAN",
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "values_disjoint": true,
    "normalized_forms_disjoint": true,
@@ -137,12 +145,12 @@
    "passed": true,
    "threshold_enforced": false,
    "unit": "milliseconds",
-   "iterations": 24,
-   "iterations_measured": 24,
-   "mean": 876.5709,
-   "p50": 890.0293,
-   "p95": 1156.613,
-   "p99": 1172.8778
+   "iterations": 32,
+   "iterations_measured": 32,
+   "mean": 1156.5713,
+   "p50": 940.9758,
+   "p95": 2893.254,
+   "p99": 3895.1335
   }
  },
  "passed": false,
@@ -152,7 +160,7 @@
    "Loopback transport on a single machine; project-run and unreplicated."
   ],
   "method_limits": [
-   "24 cases: a pairwise covering array over the five axes, not exhaustive.",
+   "32 cases: a pairwise covering array over the five axes, not exhaustive.",
    "Three entity types, two encodings, two carriers, two fragmentation conditions, four request sites.",
    "Request sites are four shapes, not a survey of real client payloads.",
    "Fragmentation is a two-part split at the value midpoint, not every split point.",
@@ -167,7 +175,7 @@
   "recorded_by": "operator"
  },
  "outcome": "fail",
- "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.6667, LeakRate(adversarial)=0.6667, DeltaFrag=0.0.",
+ "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.75, LeakRate(adversarial)=0.75, DeltaFrag=0.0.",
  "fixture": {
   "varies_per_run": true,
   "values_published": false,
@@ -187,8 +195,8 @@
  "corpus": {
   "id": "minimal-response-split",
   "version": "0.1.0",
-  "sha256": "73d9b55f9a72113c06a00d34876719ee9ca4633a19c40d361926baebed8e78a9",
-  "case_count": 24,
+  "sha256": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+  "case_count": 32,
   "seed": "a1b2c3d4e5f60001",
   "coverage": {
    "strategy": "pairwise",
@@ -199,27 +207,32 @@
     "fragmentation",
     "request_site"
    ],
-   "pairs_required": 66,
-   "pairs_covered": 66,
+   "pairs_required": 76,
+   "pairs_covered": 76,
    "proof_complete": true
   },
   "values_published": false
  },
  "metrics": {
   "leak_rate": {
-   "single_chunk": 0.6667,
-   "adversarial": 0.6667,
-   "overall": 0.6667
+   "single_chunk": 0.75,
+   "adversarial": 0.75,
+   "overall": 0.75
   },
   "fidelity_rate": 1.0,
   "delta_frag": 0.0,
   "cases_by_condition": {
-   "single_chunk": 12,
-   "adversarial": 12
+   "single_chunk": 16,
+   "adversarial": 16
   },
-  "cases_scored": 24,
-  "cases_echo_observable": 24,
-  "cases_applicable": 24,
+  "cases_scored": 32,
+  "cases_echo_observable": 32,
+  "detector_blind_entities": [
+   "EMAIL",
+   "SSN",
+   "USPHONE"
+  ],
+  "cases_applicable": 32,
   "cases_inconclusive": 0,
   "derivation_recomputed": true,
   "sidecar_case_count_matches": true,
@@ -227,6 +240,7 @@
    "entity": {
     "EMAIL": {
      "leak_rate": 1.0,
+     "detector_blind": true,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
@@ -234,6 +248,7 @@
     },
     "SSN": {
      "leak_rate": 1.0,
+     "detector_blind": true,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
@@ -241,54 +256,69 @@
     },
     "CARDPAN": {
      "leak_rate": 0.0,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
      "leaked": 0
+    },
+    "USPHONE": {
+     "leak_rate": 1.0,
+     "detector_blind": true,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 8
     }
    },
    "encoding": {
     "plain": {
+     "leak_rate": 0.7273,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 22,
+     "echo_observable": 22,
+     "leaked": 16
+    },
+    "percent": {
+     "leak_rate": 0.8,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 10,
+     "echo_observable": 10,
+     "leaked": 8
+    }
+   },
+   "fragmentation": {
+    "single_chunk": {
      "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
      "applicable": 16,
      "echo_observable": 16,
      "leaked": 12
     },
-    "percent": {
-     "leak_rate": 0.5,
-     "fidelity_rate": 1.0,
-     "applicable": 8,
-     "echo_observable": 8,
-     "leaked": 4
-    }
-   },
-   "fragmentation": {
-    "single_chunk": {
-     "leak_rate": 0.6667,
-     "fidelity_rate": 1.0,
-     "applicable": 12,
-     "echo_observable": 12,
-     "leaked": 8
-    },
     "adversarial": {
-     "leak_rate": 0.6667,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 12,
-     "echo_observable": 12,
-     "leaked": 8
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 12
     }
    },
    "carrier": {
     "sse-delta-content": {
-     "leak_rate": 0.625,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 16,
-     "echo_observable": 16,
-     "leaked": 10
+     "applicable": 24,
+     "echo_observable": 24,
+     "leaked": 18
     },
     "sse-json-field": {
      "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
@@ -297,32 +327,36 @@
    },
    "request_site": {
     "chat-content": {
-     "leak_rate": 0.6667,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 6,
-     "echo_observable": 6,
-     "leaked": 4
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 6
     },
     "system-content": {
-     "leak_rate": 0.6667,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 6,
-     "echo_observable": 6,
-     "leaked": 4
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 6
     },
     "unrecognised-key": {
-     "leak_rate": 0.6667,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 6,
-     "echo_observable": 6,
-     "leaked": 4
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 6
     },
     "tool-description": {
-     "leak_rate": 0.6667,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 6,
-     "echo_observable": 6,
-     "leaked": 4
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 6
     }
    }
   }
@@ -332,7 +366,8 @@
   "enabled": [
    "EMAIL",
    "SSN",
-   "CARDPAN"
+   "CARDPAN",
+   "USPHONE"
   ],
   "not_enabled": [],
   "unknown": [],
@@ -340,5 +375,5 @@
   "recorded_by": "operator",
   "source": "pii_leak_benchmark.v2_emitter._DETECTORS"
  },
- "cases_digest": "73d9b55f9a72113c06a00d34876719ee9ca4633a19c40d361926baebed8e78a9"
+ "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c"
 }

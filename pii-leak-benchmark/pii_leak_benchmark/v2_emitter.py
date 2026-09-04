@@ -91,6 +91,10 @@ _DETECTORS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("EMAIL", re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)),
     ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
     ("CARDPAN", re.compile(r"\b(?:\d[ -]?){13,19}\b")),
+    # Ordered after SSN on purpose: an SSN is 3-2-4 digits and a US phone is 3-3-4, so
+    # the two patterns cannot both match the same run, but keeping the more specific
+    # shape first documents the intent.
+    ("USPHONE", re.compile(r"\b\d{3}-\d{3}-\d{4}\b")),
 )
 
 _PLACEHOLDER = re.compile(r"\[(?:EMAIL|SSN|CARDPAN)_\d+\]")
@@ -112,7 +116,8 @@ class Segments:
 # v2 caps entity ids at 10 characters, because vault retention L = N-1 makes the longest
 # id a hot-path cost. make_fixture() still uses v1's names, so map them once here.
 _V2_ENTITY_ID = {"email": "EMAIL", "ssn": "SSN", "card": "CARDPAN", "credit_card": "CARDPAN",
-                 "CREDIT_CARD": "CARDPAN", "EMAIL": "EMAIL", "SSN": "SSN"}
+                 "CREDIT_CARD": "CARDPAN", "EMAIL": "EMAIL", "SSN": "SSN",
+                 "phone": "USPHONE", "USPHONE": "USPHONE"}
 
 
 def _v2_id(key: str) -> str:
@@ -158,10 +163,40 @@ def make_seeded_fixture(rng: "random.Random") -> dict[str, str]:
         for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH)
     )
     card = rng.choice(_FIXTURE_TEST_CARDS)
+
+    # USPHONE is drawn from 555-0100 through 555-0199, in any valid area code. That block
+    # is WIDELY CITED as reserved by the NANP for fictitious use, and `entity-list.md`
+    # records the citation as UNVERIFIED: ATIS/INC and NANPA sources were unreachable. So
+    # the safety claim here rests on that citation, not on a retrieved primary source, and
+    # it is labelled the same way in the registry. What IS verified in this repository is
+    # the detectability half: Google Cloud DLP flags 212-555-0143.
+    #
+    # This entity is in the corpus for a specific methodological reason.
+    #
+    # A fixture value must be BOTH safe to publish and detectable by the detectors under
+    # test, and those two requirements conflict for identifiers validated against real
+    # assignment. The SSN above resolves the conflict in favour of safety -- area 900-999
+    # is never assigned, so no living person's SSN can appear in this corpus -- and pays
+    # for it by being invisible to any detector that validates the area, Google Cloud DLP
+    # among them. That is reported per run as `detector_blind_entities`.
+    #
+    # USPHONE shows the conflict is NOT inherent. Where the governing body publishes a
+    # reserved range for fiction AND detectors honour it, a fixture can be both. Verified:
+    # DLP flags 212-555-0143. The same holds for EMAIL via RFC 2606 `example.com` and for
+    # CARDPAN via the published test PANs, both already used above. SSN is the exception
+    # because the SSA's reserved advertising block (987-65-4320..4329) sits inside the
+    # 900-999 area that validating detectors reject, so its reserved range and its
+    # detectable range are disjoint.
+    #
+    # Corpus design rule, and the reason this entity is here: prefer entities with a
+    # reserved-and-honoured test range; for the rest, declare the blindness.
+    area = rng.randint(2, 9) * 100 + rng.randint(0, 99)
+    line = rng.randint(0, 99)
     return {
         "EMAIL": f"{local}@{_FIXTURE_EMAIL_DOMAIN}",
         "SSN": ssn,
         "CARDPAN": "-".join(card[i : i + 4] for i in range(0, 16, 4)),
+        "USPHONE": f"{area:03d}-555-01{line:02d}",
     }
 
 
@@ -557,10 +592,16 @@ def _dlp_redact(text: str) -> str:
     body = {
         "item": {"value": text},
         "inspectConfig": {
+            # Must name every entity the corpus scores. DLP inspects only the infoTypes
+            # asked for, so a missing one reads as a detector miss when it is really a
+            # missing line in this file. USPHONE was added to the corpus after this list
+            # was written and its absence made DLP look blind on phone numbers, which it
+            # is not: it flags 212-555-0143 when asked.
             "infoTypes": [
                 {"name": "EMAIL_ADDRESS"},
                 {"name": "US_SOCIAL_SECURITY_NUMBER"},
                 {"name": "CREDIT_CARD_NUMBER"},
+                {"name": "PHONE_NUMBER"},
             ]
         },
         "deidentifyConfig": {
@@ -698,7 +739,7 @@ DEFAULT_POLICIES: tuple[str, ...] = tuple(
 # --------------------------------------------------------------------------------------
 
 AXES: dict[str, tuple[str, ...]] = {
-    "entity": ("EMAIL", "SSN", "CARDPAN"),
+    "entity": ("EMAIL", "SSN", "CARDPAN", "USPHONE"),
     "encoding": ("plain", "percent"),
     "fragmentation": ("single_chunk", "adversarial"),
     # WHERE IN THE RESPONSE the injected value is carried.
@@ -1292,6 +1333,12 @@ def build_report(
     # 950-36-9596. **For identifier types with assignment validation there is no value
     # space that is both safe to publish and detectable by a validating detector**, so
     # this is declared rather than engineered away.
+    # Read as "blind IN THIS CARRIER", not "blind". Detectability is context-scored in at
+    # least one commercial detector: Google Cloud DLP flags 212-555-0143 in "Call me on
+    # ... tomorrow" and does not flag the same number in "Reference record: ...". The
+    # corpus carries one sentence, so a context-scored recogniser is being measured
+    # against that sentence rather than in general. A carrier-context axis is the fix and
+    # is not built.
     detector_blind = {}
     for entity in AXES["entity"]:
         baseline = [

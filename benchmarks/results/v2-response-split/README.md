@@ -125,12 +125,22 @@ is only meaningful read next to FidelityRate and the LeakRates.
 
 **Two more shipping gateways, same harness, same capture.**
 
-| Gateway | Fidelity | Leak (1-chunk) | Leak (adv) | DeltaFrag | Echo observable | Inconclusive | Outcome |
-|---|---|---|---|---|---|---|---|
-| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.00 | 0.00 | 0.00 | 12/12 | 0 | no-leak-profile-not-met |
-| `llm-shield-proxy-1.5.2` | **1.00** | **1.00** | **1.00** | 0.00 | 12/12 | 0 | fail |
-| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 | **9/12** | 0 | fail |
-| `nemo-guardrails-0.24.0` | 0.00 | 0.00 | 0.00 | 0.00 | **3/12** | **3** | no-leak-profile-not-met |
+**4 entities, 32 cases, 6 seeds each. These supersede every earlier table here.**
+
+| Gateway | Fidelity | Leak (1-chunk) | Leak (adv) | DeltaFrag |
+|---|---|---|---|---|
+| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.06 [0.00-0.19] | 0.06 [0.00-0.19] | 0.00 |
+| `llm-shield-proxy-1.6.0` response redaction **off** | **1.00** | **1.00** | **1.00** | 0.00 |
+| `llm-shield-proxy-1.6.0` response redaction **on** | **1.00** | **0.12** | **0.25** | 0.12 |
+| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 |
+| `nemo-guardrails-0.24.0` | 0.00 | 0.06 [0.00-0.17] | 0.06 [0.00-0.17] | 0.00 |
+
+**Two of these rows were wrong until the configuration was fixed, and both errors were
+mine rather than the gateway's.** Adding the `USPHONE` entity made NeMo leak 0.17 and made
+Google Cloud DLP look phone-blind. NeMo's config named three entities and not the fourth;
+the DLP wrapper asked for three infoTypes and not the fourth. **A row that measures the
+harness operator's config file is not a result about the product**, so both were corrected
+and re-run before publishing. NeMo went 0.17 to 0.06 on the fix.
 
 All four are deterministic across 6 seeds (stdev 0.00 on every metric). See
 `seed-sweep-litellm.json`, `seed-sweep-shield-152.json`, `seed-sweep-portkey.json`,

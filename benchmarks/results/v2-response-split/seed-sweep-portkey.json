@@ -6,42 +6,60 @@
     "fidelity_rate": 1.0,
     "leak_single_chunk": 1.0,
     "leak_adversarial": 1.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 24,
+    "cases": 32
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 1.0,
     "leak_single_chunk": 1.0,
     "leak_adversarial": 1.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 24,
+    "cases": 32
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 1.0,
     "leak_single_chunk": 1.0,
     "leak_adversarial": 1.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 24,
+    "cases": 32
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 1.0,
     "leak_single_chunk": 1.0,
     "leak_adversarial": 1.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 24,
+    "cases": 32
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 1.0,
     "leak_single_chunk": 1.0,
     "leak_adversarial": 1.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 24,
+    "cases": 32
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 1.0,
     "leak_single_chunk": 1.0,
     "leak_adversarial": 1.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 24,
+    "cases": 32
    }
   ],
   "summary": {

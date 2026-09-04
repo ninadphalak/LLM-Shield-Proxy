@@ -788,9 +788,15 @@ def _normalize_for_collision(text: str) -> str:
 
 
 COUNT_DELTAS = (
-    "entity-list.md §7 says 26 unsafe to generate and 36 rows carrying an UNVERIFIED "
-    "cell. This registry derives its own figures from the §3 tables cell by cell -- see "
-    "counts() -- and they differ. Both are recorded; neither is silently adjusted to "
-    "match the other. Resolving them is a documentation task on entity-list.md, not a "
-    "reason to edit the registry until the criterion is settled."
+    "RESOLVED 2026-09-04, in favour of the derived figures. entity-list.md §7 previously "
+    "said 26 unsafe to generate and 36 UNVERIFIED; this registry derives 32 and 38 from "
+    "the §3 rows -- see counts(). The difference was a counting criterion, not new "
+    "information: §7 counted only the rows its §5 register names in prose, while the "
+    "registry counts every row with NEITHER a reserved range NOR a computed synthetic "
+    "value. The unnamed rows are jurisdictional schemes (AUPHONE, SGNRIC, NLBSN, PLPESEL, "
+    "FRNIR, ESDNI, ITCF, VATEU and similar) and binary or secret values (CVV, DESTID), "
+    "unsafe to generate for exactly the same reason as the named ones. §7 now states 32 "
+    "and 38 and records the criterion. The registry was not edited to reach agreement; "
+    "the document was, because the registry's numbers are computed from the data and "
+    "asserted in tests while §7's were counted by eye."
 )

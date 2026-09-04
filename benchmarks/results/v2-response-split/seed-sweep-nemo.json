@@ -4,44 +4,62 @@
    {
     "seed": "0000000000000001",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.0,
-    "delta_frag": 0.0
+    "leak_single_chunk": 0.1667,
+    "leak_adversarial": 0.1667,
+    "delta_frag": 0.0,
+    "inconclusive": 8,
+    "echo_observable": 8,
+    "cases": 32
    },
    {
     "seed": "0000000000000002",
     "fidelity_rate": 0.0,
-    "leak_single_chunk": 0.0,
-    "leak_adversarial": 0.0,
-    "delta_frag": 0.0
+    "leak_single_chunk": 0.1667,
+    "leak_adversarial": 0.1667,
+    "delta_frag": 0.0,
+    "inconclusive": 8,
+    "echo_observable": 8,
+    "cases": 32
    },
    {
     "seed": "0000000000000003",
     "fidelity_rate": 0.0,
     "leak_single_chunk": 0.0,
     "leak_adversarial": 0.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 8,
+    "echo_observable": 8,
+    "cases": 32
    },
    {
     "seed": "0000000000000004",
     "fidelity_rate": 0.0,
     "leak_single_chunk": 0.0,
     "leak_adversarial": 0.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 8,
+    "echo_observable": 8,
+    "cases": 32
    },
    {
     "seed": "0000000000000005",
     "fidelity_rate": 0.0,
     "leak_single_chunk": 0.0,
     "leak_adversarial": 0.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 8,
+    "echo_observable": 8,
+    "cases": 32
    },
    {
     "seed": "0000000000000006",
     "fidelity_rate": 0.0,
     "leak_single_chunk": 0.0,
     "leak_adversarial": 0.0,
-    "delta_frag": 0.0
+    "delta_frag": 0.0,
+    "inconclusive": 8,
+    "echo_observable": 8,
+    "cases": 32
    }
   ],
   "summary": {
@@ -52,16 +70,16 @@
     "stdev": 0.0
    },
    "leak_single_chunk": {
-    "mean": 0.0,
+    "mean": 0.0556,
     "min": 0.0,
-    "max": 0.0,
-    "stdev": 0.0
+    "max": 0.1667,
+    "stdev": 0.0861
    },
    "leak_adversarial": {
-    "mean": 0.0,
+    "mean": 0.0556,
     "min": 0.0,
-    "max": 0.0,
-    "stdev": 0.0
+    "max": 0.1667,
+    "stdev": 0.0861
    },
    "delta_frag": {
     "mean": 0.0,

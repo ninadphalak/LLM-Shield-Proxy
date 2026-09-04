@@ -19,10 +19,15 @@ rails:
   config:
     sensitive_data_detection:
       output:
+        # Must list every entity the corpus scores, or the row measures this file rather
+        # than the gateway. USPHONE was added to the corpus after this config was first
+        # written, and omitting PHONE_NUMBER here made NeMo leak 0.17 for a reason that
+        # was mine and not its.
         entities:
           - EMAIL_ADDRESS
           - US_SSN
           - CREDIT_CARD
+          - PHONE_NUMBER
   output:
     flows:
       # "mask sensitive data on output" is UNUSABLE in nemoguardrails 0.24.0. The action
