@@ -69,6 +69,15 @@ dependencies = [
     "cryptography>=41.0.0",
     "google-re2>=1.1.20231101",
     "cachetools>=5.3.0",
+    # Same class of gap as `redis` below, found the same way and one release later:
+    # security/identity.py imports `jwt` at module scope, api/main.py imports
+    # verify_agent_identity from it inside the request handler, and the import is not
+    # gated by a setting. On 1.5.1 installed from PyPI every proxied request therefore
+    # 500s with ModuleNotFoundError: No module named 'jwt'. requirements.txt has had
+    # PyJWT since the feature landed, which is why the container image and CI never saw
+    # it. The wheel-only test now drives a REQUEST rather than only importing the app,
+    # because an import-time check cannot reach a lazily imported module.
+    "PyJWT>=2.13.0",
     # Not optional in practice: security/tool_rbac.py imports redis.asyncio at module
     # scope and api/main.py imports tool_rbac, so `pip install llm-shield-proxy`
     # followed by `llm-shield-proxy --host ...` died with ModuleNotFoundError on a

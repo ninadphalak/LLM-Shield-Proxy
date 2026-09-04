@@ -81,6 +81,29 @@ def test_pypi_cli_happy_path():
         assert serves.returncode == 0, serves.stdout + serves.stderr
         assert "OK" in serves.stdout
 
+        # Importing the app is NOT sufficient. api/main.py imports
+        # security/identity.py from INSIDE the request handler, so a module-scope
+        # `import jwt` there is never executed by an import-time check: the app imports
+        # cleanly and then every proxied request 500s. That is exactly how PyJWT stayed
+        # undeclared through 1.5.1 on PyPI, one release after the same class of gap was
+        # closed for redis. So import every module in the installed package.
+        walked = subprocess.run(
+            [str(bin_dir / f"python{suffix}"),
+             str(Path(__file__).parent / "_import_every_module.py")],
+            capture_output=True, text=True,
+        )
+        assert walked.returncode == 0, (
+            "a module in the published distribution imports something the wheel does "
+            "not declare, so it is missing after pip install llm-shield-proxy:\n"
+            + walked.stdout + walked.stderr
+        )
+        # Guard the guard: a walk that reaches almost nothing passes vacuously.
+        walked_count = int(walked.stdout.split("WALKED")[1].split()[0])
+        assert walked_count >= 40, (
+            f"only {walked_count} modules were imported; the walk is not covering "
+            "the package and would pass even with a broken module"
+        )
+
 
 
 @pytest.fixture
