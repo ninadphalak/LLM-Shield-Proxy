@@ -37,7 +37,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
+import random
 import re
 import sys
 import threading
@@ -47,7 +49,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Iterable
 from urllib.request import Request, urlopen
 
-from .http_profile import _normalize, _normalize_confusable_digits, make_fixture
+from .http_profile import (
+    _FIXTURE_EMAIL_DOMAIN,
+    _FIXTURE_EMAIL_LOCAL_ALPHABET,
+    _FIXTURE_EMAIL_LOCAL_LENGTH,
+    _FIXTURE_SSN_AREA,
+    _FIXTURE_SSN_GROUP,
+    _FIXTURE_SSN_SERIAL,
+    _FIXTURE_TEST_CARDS,
+    _SSN_INVALIDATING_PREFIXES,
+    _ipv4_can_produce,
+    _normalize,
+    _normalize_confusable_digits,
+)
 
 SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.0.0"
 EMITTER_VERSION = "0.1.0-minimal"
@@ -93,15 +107,56 @@ def _remap(fixture: dict[str, str]) -> dict[str, str]:
     return {_v2_id(k): v for k, v in fixture.items()}
 
 
-def build_segments() -> Segments:
-    """Draw two independent fixtures and keep drawing until they are disjoint.
+def make_seeded_fixture(rng: "random.Random") -> dict[str, str]:
+    """One run's protected values, drawn reproducibly from `rng`.
 
-    Disjointness is asserted on NORMALIZED forms in `check_segment_separation`; this only
-    has to produce a candidate pair.
+    v1's `make_fixture` draws from `secrets` on purpose -- a target must not be able to
+    predict the next run's values. v2 needs the opposite property for the corpus block:
+    the seed must reproduce the drawn values, or the `seed` field is decoration.
+
+    Both properties are wanted, so this is a separate generator rather than a change to
+    v1. It imports v1's value spaces and rejection rules instead of restating them, so
+    the two cannot drift: the SSN area/group/serial ranges, the invalidating-prefix list,
+    the IPv4-collision rejection, the email alphabet and length, and the published test
+    card list all come from `http_profile`.
     """
-    echo = _remap(make_fixture())
+    while True:
+        area = rng.randint(*_FIXTURE_SSN_AREA)
+        group = rng.randint(*_FIXTURE_SSN_GROUP)
+        serial = rng.randint(*_FIXTURE_SSN_SERIAL)
+        ssn = f"{area:03d}-{group:02d}-{serial:04d}"
+        digits = ssn.replace("-", "")
+        if any(digits.startswith(prefix) for prefix in _SSN_INVALIDATING_PREFIXES):
+            continue
+        if all(d == digits[0] for d in digits):
+            continue
+        if _ipv4_can_produce(digits):
+            continue
+        break
+
+    local = "".join(
+        rng.choice(_FIXTURE_EMAIL_LOCAL_ALPHABET)
+        for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH)
+    )
+    card = rng.choice(_FIXTURE_TEST_CARDS)
+    return {
+        "EMAIL": f"{local}@{_FIXTURE_EMAIL_DOMAIN}",
+        "SSN": ssn,
+        "CARDPAN": "-".join(card[i : i + 4] for i in range(0, 16, 4)),
+    }
+
+
+def build_segments(seed: str) -> Segments:
+    """Draw two disjoint fixtures reproducibly from `seed`.
+
+    Same seed, same values -- which is what makes the report's `corpus.seed` field mean
+    something. Disjointness is asserted on NORMALIZED forms in `check_segment_separation`;
+    this only has to produce a candidate pair.
+    """
+    rng = random.Random(seed)
+    echo = make_seeded_fixture(rng)
     for _ in range(64):
-        injection = _remap(make_fixture())
+        injection = make_seeded_fixture(rng)
         if _normalized_disjoint(echo, injection):
             return Segments(echo=echo, injection=injection)
     raise RuntimeError("could not draw disjoint echo/injection fixtures in 64 attempts")
@@ -636,8 +691,10 @@ class RunResult:
     latency_ms: list[float]
 
 
-def _serve(handler: type[BaseHTTPRequestHandler]) -> tuple[ThreadingHTTPServer, str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+def _serve(
+    handler: type[BaseHTTPRequestHandler], port: int = 0
+) -> tuple[ThreadingHTTPServer, str]:
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address[:2]
@@ -682,33 +739,50 @@ def _present(value: str, haystacks: list[str]) -> bool:
 
 
 def run_case(
-    segments: Segments, policy_name: str, case: dict[str, str], iterations: int = 3
+    segments: Segments,
+    policy_name: str,
+    case: dict[str, str],
+    iterations: int = 3,
+    gateway_url: str | None = None,
+    upstream_port: int = 0,
+    model: str = "test",
 ) -> RunResult:
-    """Drive one corpus case end to end over loopback HTTP."""
+    """Drive one corpus case end to end over loopback HTTP.
+
+    `gateway_url` points the profile at an EXTERNAL gateway -- a real proxy already
+    running and already configured to use this harness's capture as its upstream. In that
+    mode `policy_name` is only a label for the report; no in-process policy runs, and the
+    masking the gateway does (or fails to do) is entirely its own.
+    """
     state = UpstreamState(segments=segments, case=case)
-    upstream, upstream_url = _serve(_make_upstream(state))
-    gateway, gateway_url = _serve(_make_gateway(upstream_url, policy_name))
+    upstream, upstream_url = _serve(_make_upstream(state), port=upstream_port)
+    gateway = None
+    if gateway_url is None:
+        gateway, gateway_url = _serve(_make_gateway(upstream_url, policy_name))
     latencies: list[float] = []
     sse = ""
     events = 0
     try:
         prompt = "Please review: " + ", ".join(segments.echo.values())
         body = json.dumps(
-            {"model": "test", "stream": True,
+            {"model": model, "stream": True,
              "messages": [{"role": "user", "content": prompt}]}
         ).encode()
         for _ in range(iterations):
             started = time.perf_counter()
-            request = Request(
-                gateway_url, data=body, headers={"Content-Type": "application/json"}
-            )
-            with urlopen(request, timeout=30) as response:  # noqa: S310
+            headers = {"Content-Type": "application/json"}
+            token = os.environ.get("V2_GATEWAY_TOKEN")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            request = Request(gateway_url, data=body, headers=headers)
+            with urlopen(request, timeout=120) as response:  # noqa: S310
                 sse = response.read().decode("utf-8", "replace")
             latencies.append((time.perf_counter() - started) * 1000.0)
             events = sum(1 for line in sse.splitlines() if line.startswith("data: "))
     finally:
         upstream.shutdown()
-        gateway.shutdown()
+        if gateway is not None:
+            gateway.shutdown()
 
     hay = _haystacks(sse)
     return RunResult(
@@ -802,7 +876,11 @@ def build_report(
             "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response",
         },
         "implementation": {
-            "name": "reference-policy:" + results[0].policy,
+            "name": (
+                "reference-policy:" + results[0].policy
+                if results[0].policy in POLICIES
+                else "external-gateway:" + results[0].policy
+            ),
             "version": EMITTER_VERSION,
             "labels_are_operator_supplied": True,
         },
@@ -866,7 +944,11 @@ def build_report(
             "vendor_claims_pii_redaction": "claimed",
             "claim_citation": "pii_leak_benchmark.v2_emitter policy docstrings",
             "configured_for_this_run": True,
-            "configuration_reference": "POLICIES[" + repr(results[0].policy) + "]",
+            "configuration_reference": (
+                "POLICIES[" + repr(results[0].policy) + "]"
+                if results[0].policy in POLICIES
+                else "external gateway configured by the operator; see the run script"
+            ),
             "recorded_by": "operator",
         },
         "outcome": _derive_outcome(leak_overall, fidelity, separation["passed"]),
@@ -1059,16 +1141,40 @@ def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[
     }
 
 
-def run_policy(policy_name: str, iterations: int = 1) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run one policy across the whole covering array and emit its v2 report."""
+def run_policy(
+    policy_name: str,
+    iterations: int = 1,
+    seed: str | None = None,
+    gateway_url: str | None = None,
+    upstream_port: int = 0,
+    model: str = "test",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run one policy across the whole covering array and emit its v2 report.
+
+    `seed` reproduces a previous run exactly. Omitted, a fresh one is drawn from
+    `secrets` so successive runs still vary.
+    """
     import secrets
 
-    seed = secrets.token_hex(8)
-    segments = build_segments()
+    seed = seed or secrets.token_hex(8)
+    if gateway_url is None and policy_name not in POLICIES:
+        raise ValueError(
+            f"{policy_name!r} is not an in-process policy; pass gateway_url to drive an "
+            f"external gateway. Known policies: {sorted(POLICIES)}"
+        )
+    segments = build_segments(seed)
     prompt = "Please review: " + ", ".join(segments.echo.values())
     separation = check_segment_separation(segments, prompt)
     results = [
-        run_case(segments, policy_name, case, iterations=iterations)
+        run_case(
+            segments,
+            policy_name,
+            case,
+            iterations=iterations,
+            gateway_url=gateway_url,
+            upstream_port=upstream_port,
+            model=model,
+        )
         for case in covering_array()
     ]
     report = build_report(segments, results, separation, seed)
@@ -1093,6 +1199,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default="benchmarks/results/v2-response-split")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--only", default="", help="comma-separated policy names")
+    parser.add_argument("--seed", default=None, help="hex seed; reproduces a prior run")
+    parser.add_argument("--gateway-url", default=None, help="external gateway chat-completions URL")
+    parser.add_argument("--upstream-port", type=int, default=0, help="fixed capture port")
+    parser.add_argument("--model", default="test", help="model name the gateway routes on")
     args = parser.parse_args(argv)
 
     import pathlib
@@ -1114,8 +1224,21 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = []
     selected = [n.strip() for n in args.only.split(",") if n.strip()] or list(POLICIES)
+    if args.gateway_url is None:
+        unknown = [n for n in selected if n not in POLICIES]
+        if unknown:
+            parser.error(
+                "unknown policy names %s; without --gateway-url a policy must be one of %s"
+                % (unknown, sorted(POLICIES))
+            )
     for name in selected:
-        report, summary = run_policy(name)
+        report, summary = run_policy(
+            name,
+            seed=args.seed,
+            gateway_url=args.gateway_url,
+            upstream_port=args.upstream_port,
+            model=args.model,
+        )
         errors = validator(report) if validator else []
         path = outdir / f"{name}.json"
         path.write_text(json.dumps(report, indent=1), encoding="utf-8")

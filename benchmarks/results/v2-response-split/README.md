@@ -18,28 +18,91 @@ claim a reviewer could reasonably discount.
 
 ---
 
+## 0. How to read the tables
+
+**What is being tested.** Each row is a *response-path policy* -- a rule for what a gateway
+does to the model's reply on its way back to the user. The profile sends one response
+containing two segments that need **opposite** treatment:
+
+- The **echo** segment is the user's own data coming back. The gateway masked it on the way
+  out, so it must put the real values **back in**. Failing here means the user gets
+  `[EMAIL_1]` instead of their own email address -- a broken product.
+- The **injection** segment is data the user never sent, coming from upstream. The gateway
+  must **take it out**. Failing here means someone else's PII reaches the user -- a leak.
+
+**The four numbers.**
+
+| Column | Question it answers | Good value |
+|---|---|---|
+| **FidelityRate** | Did the user get their own data back? | **1.0** = all of it |
+| **LeakRate (single-chunk)** | When values arrive whole, does anything leak? | **0.0** = nothing |
+| **LeakRate (adversarial)** | When values are split across chunks, does anything leak? | **0.0** = nothing |
+| **DeltaFrag** | How much worse does splitting make it? | **0.0** = splitting changes nothing |
+
+DeltaFrag is just the third column minus the second. It is the headline number because it
+isolates the streaming bug: **a gateway can score perfectly on the second column and still
+fail the third**, and only the gap between them shows it.
+
+**To pass, a row needs FidelityRate 1.0 and both LeakRates 0.0.** One row in seven does.
+
+**Worked example.** `passthrough` forwards bytes untouched:
+- FidelityRate 0.0 -- it never rehydrates, so the user sees placeholders, not their data.
+- LeakRate 1.0 in both conditions -- it never redacts, so injected values always get through.
+- DeltaFrag 0.0 -- it is equally broken whether or not values are split. **A DeltaFrag of
+  0.0 is not good news on its own**; it means fragmentation changed nothing, which is also
+  true of something that was already failing completely. Read it next to the LeakRates.
+
+Contrast `chunk-local`, which does rehydrate and redact but only looks at one chunk at a
+time: FidelityRate 1.0, LeakRate 0.0 when values arrive whole, LeakRate 1.0 when they are
+split. It looks correct until the transport splits a value, which is the entire point of
+the profile.
+
+---
+
 ## 1. Result
+
+**12 seeds per policy.** A single seed is not a result: the fixture values are drawn per
+seed, and whether a detector fires on a fragment depends on the value. The first fixed-seed
+run of this profile moved `presidio-chunk-local` from DeltaFrag 1.00 to 0.33 by changing
+the seed alone. Cells are `mean [min-max]` over 12 seeds; seeds are recorded in
+`seed-sweep.json` and any row reproduces with `--seed`.
 
 **Reference policies** (models, chosen to occupy the corners of the space):
 
-| Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag | Outcome |
-|---|---:|---:|---:|---:|---|
-| `passthrough` | 0.0 | 1.0 | 1.0 | 0.0 | fail |
-| `redact-all` | 0.0 | 0.0 | 1.0 | 1.0 | fail |
-| `chunk-local` | 1.0 | 0.0 | 1.0 | 1.0 | fail |
-| `bounded-retention` | 1.0 | 0.0 | 0.3333 | 0.3333 | fail |
-| `retention-plus-decoding` | 1.0 | 0.0 | 0.0 | 0.0 | **pass** |
+| Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag |
+|---|---|---|---|---|
+| `passthrough` | 0.00 | 1.00 | 1.00 | 0.00 |
+| `redact-all` | 0.00 | 0.00 | 1.00 | 1.00 |
+| `chunk-local` | 1.00 | 0.00 | 1.00 | 1.00 |
+| `bounded-retention` | 1.00 | 0.00 | 0.33 | 0.33 |
+| `retention-plus-decoding` | 1.00 | 0.00 | 0.00 | 0.00 |
+
+All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
 
 **A real detector** — a live `mcr.microsoft.com/presidio-analyzer` container on
 `127.0.0.1:5002`, stock recognizer registry, queried over HTTP per delta:
 
-| Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag | Outcome |
-|---|---:|---:|---:|---:|---|
-| `presidio-chunk-local` | 1.0 | 0.0 | 1.0 | **1.0** | fail |
-| `presidio-retention` | 1.0 | 0.0 | 0.3333 | **0.3333** | fail |
+| Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag |
+|---|---|---|---|---|
+| `presidio-chunk-local` | 1.00 | 0.00 | **0.81 [0.67-1.00]** | **0.81 [0.67-1.00]**, stdev 0.17 |
+| `presidio-retention` | 1.00 | 0.00 | **0.33 [0.33-0.33]** | **0.33 [0.33-0.33]**, stdev 0.00 |
 
-All seven reports validate against `spec/v2.0.0/http-profile.schema.json`
+**The real detector is the only thing here that varies with the seed**, and that is
+informative rather than noise: whether a split leaves a still-detectable fragment depends
+on the actual characters. The models are deterministic because their regexes are.
+
+**The decomposition this gives:** retention removes a *variable* fragmentation penalty of
+0.67-1.00 and leaves a *constant* 0.33 encoding penalty. The two axes separate cleanly, and
+only the encoding one survives bounded retention.
+
+Reports in this directory are single-seed artefacts (`--seed a1b2c3d4e5f60001`) kept as
+schema-validation evidence. **The numbers to cite are the sweep above**, from
+`seed-sweep.json`. All reports validate against `spec/v2.0.0/http-profile.schema.json`
 (`jsonschema` 4.26.0, Draft 2020-12).
+
+Reproduce: `python benchmarks/v2_seed_sweep.py --seeds 12`
+
+---
 
 ## 2. The five findings a reviewer should check
 
@@ -74,12 +137,14 @@ artefact of being tested on unfragmented input.
 container, same recognizer registry, same fixture, same corpus. The only difference between
 the two rows is whether a chunk boundary is allowed to fall inside a value.
 
-**DeltaFrag falls from 1.0 to 0.3333** on that change alone. Both score LeakRate 0.0 under
-the single-chunk condition, so a benchmark that never fragmented would rank them identical.
+**DeltaFrag falls from 0.81 to 0.33** on that change alone (means over 12 seeds). Both
+score LeakRate 0.00 under the single-chunk condition on every seed, so a benchmark that
+never fragmented would rank them identical.
 
 Two things this rules out:
-- **It is not an artefact of a toy detector.** The reference `chunk-local` policy and the
-  real Presidio one produce the same DeltaFrag, 1.0, by the same mechanism.
+- **It is not an artefact of a toy detector.** The reference `chunk-local` policy (1.00)
+  and the real Presidio one (0.81 mean, 0.67-1.00) fail by the same mechanism; the real
+  detector is slightly better and varies, which is what a real detector should do.
 - **It is not a Presidio defect.** Presidio makes no streaming claim; applying it per chunk
   is the integrator's decision, and the property belongs to the integration pattern. The
   rehydration half is the wrapper's, not Presidio's, so FidelityRate here does not describe
@@ -106,9 +171,9 @@ detector never fires however much buffer is held. Per-axis breakdown from
 fragmentation are independent defects requiring independent mitigations**, which is the
 argument for keeping them as separate corpus axes rather than folding them together.
 
-**The real detector has the same blind spot.** `presidio-retention` leaks the identical
-case — `EMAIL / percent / adversarial` — with `encoding=plain` at 0.0 and
-`encoding=percent` at 0.3333. Presidio does not percent-decode before analysing either, so
+**The real detector has the same blind spot, on every seed.** `presidio-retention` sits at
+exactly 0.3333 with stdev 0.00 across all 12 seeds, leaking the identical
+`EMAIL / percent / adversarial` case. Presidio does not percent-decode before analysing either, so
 this is a property of the integration pattern rather than of the model detector, and the
 cross-check is the reason to trust the reference-policy row.
 
