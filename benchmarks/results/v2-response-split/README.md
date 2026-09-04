@@ -72,9 +72,9 @@ the seed alone. Cells are `mean [min-max]` over 12 seeds; seeds are recorded in
 | Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag |
 |---|---|---|---|---|
 | `passthrough` | 0.00 | 1.00 | 1.00 | 0.00 |
-| `redact-all` | 0.00 | 0.00 | 1.00 | 1.00 |
-| `chunk-local` | 1.00 | 0.00 | 1.00 | 1.00 |
-| `bounded-retention` | 1.00 | 0.00 | 0.25 | 0.25 |
+| `redact-all` | 0.00 | 0.12 | 1.00 | 0.88 |
+| `chunk-local` | 1.00 | 0.12 | 1.00 | 0.88 |
+| `bounded-retention` | 1.00 | 0.12 | 0.12 | 0.00 |
 | `retention-plus-decoding` | 1.00 | 0.00 | 0.00 | **0.00 -- the only `pass`** |
 
 All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
@@ -90,8 +90,31 @@ Nothing about any policy changed.**
 
 | Policy | FidelityRate | LeakRate (single-chunk) | LeakRate (adversarial) | DeltaFrag |
 |---|---|---|---|---|
-| `presidio-chunk-local` | 1.00 | 0.00 | **0.81 [0.50-1.00]** | **0.81 [0.50-1.00]** |
-| `presidio-retention` | 1.00 | 0.00 | **0.25 [0.25-0.25]** | **0.25 [0.25-0.25]**, stdev 0.00 |
+| `presidio-chunk-local` | 1.00 | 0.17 [0.12-0.38] | **0.72 [0.25-1.00]** | **0.55 [-0.12-0.88]** |
+| `presidio-retention` | 1.00 | 0.16 [0.12-0.38] | **0.16 [0.12-0.38]** | **0.00** |
+
+### A negative DeltaFrag survives the pairing fix, and it is real
+
+`presidio-chunk-local` reaches **-0.12 on one seed of twelve**: the value leaked more when
+NOT fragmented. Pairing the covering array removed the systematic cause (unequal
+populations). What is left has a different and more interesting one, measured on seed
+`0000000000000001`, entity `USPHONE`, value `590-555-0126`:
+
+```
+"Reference record: 590-555-0126"  ->  not detected, the value leaks
+"590-55"                          ->  not detected
+"5-0126"                          ->  [REDACTED]
+```
+
+Presidio misses the whole number in its carrier sentence, and matches the **fragment**
+`5-0126` for some unrelated reason. Split, the reassembled client text no longer contains
+the complete needle, so the case scores as "did not leak". **The fragmented condition
+passed by accident, on a false positive.**
+
+So `DeltaFrag < 0` must never be read as "fragmentation is safe here". Read it beside
+`LeakRate(single_chunk)` and `detector_blind_entities`: on that seed USPHONE is
+detector-blind, which is the signal that the baseline, not the fragmentation, is what
+moved.
 
 **A real gateway product** -- LiteLLM 1.99 (`ghcr.io/berriai/litellm:main-latest`) in Docker,
 with its own Presidio guardrail (`output_parse_pii: true`) pointed at the same analyzer

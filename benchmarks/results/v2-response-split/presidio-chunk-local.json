@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-04T15:43:01Z",
+ "generated_at": "2026-09-04T18:28:57Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -61,8 +61,8 @@
   "fragmentation_safety": {
    "passed": true,
    "one_character_events_requested": true,
-   "events_observed": 5,
-   "events_observed_max": 5,
+   "events_observed": 4,
+   "events_observed_max": 4,
    "coalescing_not_distinguished": true,
    "response_reconstructed": true
   },
@@ -79,9 +79,9 @@
   "response_fidelity": {
    "passed": true,
    "expected_value_reconstructed": true,
-   "iterations_matching": 36,
-   "iterations_completed": 36,
-   "iterations_requested": 36,
+   "iterations_matching": 128,
+   "iterations_completed": 128,
+   "iterations_requested": 128,
    "payload_content_included": false,
    "segment": "echo"
   },
@@ -92,11 +92,12 @@
    "injected_entity_types": [
     "CARDPAN",
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "leaked_entity_types": [
     "EMAIL",
-    "SSN"
+    "USPHONE"
    ],
    "leak_evidence": [
     {
@@ -104,7 +105,7 @@
      "observed": "normalized-match"
     },
     {
-     "entity_type": "SSN",
+     "entity_type": "USPHONE",
      "observed": "normalized-match"
     }
    ],
@@ -120,12 +121,14 @@
    "echo_entity_types": [
     "CARDPAN",
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "injection_entity_types": [
     "CARDPAN",
     "EMAIL",
-    "SSN"
+    "SSN",
+    "USPHONE"
    ],
    "values_disjoint": true,
    "normalized_forms_disjoint": true,
@@ -137,12 +140,12 @@
    "passed": true,
    "threshold_enforced": false,
    "unit": "milliseconds",
-   "iterations": 12,
-   "iterations_measured": 12,
-   "mean": 138.5692,
-   "p50": 107.6347,
-   "p95": 156.9736,
-   "p99": 612.9294
+   "iterations": 32,
+   "iterations_measured": 32,
+   "mean": 79.296,
+   "p50": 83.4088,
+   "p95": 116.7105,
+   "p99": 137.2592
   }
  },
  "passed": false,
@@ -152,7 +155,7 @@
    "Loopback transport on a single machine; project-run and unreplicated."
   ],
   "method_limits": [
-   "12 cases: a pairwise covering array over the five axes, not exhaustive.",
+   "32 cases: a pairwise covering array over the five axes, not exhaustive.",
    "Three entity types, two encodings, two carriers, two fragmentation conditions, four request sites.",
    "Request sites are four shapes, not a survey of real client payloads.",
    "Fragmentation is a two-part split at the value midpoint, not every split point.",
@@ -167,7 +170,7 @@
   "recorded_by": "operator"
  },
  "outcome": "fail",
- "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.0, LeakRate(adversarial)=0.5, DeltaFrag=0.5.",
+ "outcome_rationale": "FidelityRate=1.0, LeakRate(single_chunk)=0.375, LeakRate(adversarial)=0.25, DeltaFrag=-0.125.",
  "fixture": {
   "varies_per_run": true,
   "values_published": false,
@@ -187,9 +190,9 @@
  "corpus": {
   "id": "minimal-response-split",
   "version": "0.1.0",
-  "sha256": "a64189d0f9bf9fa3746d27ef6b9d4cdd03df7f93a6f90565f9d6a42816cad7e0",
-  "case_count": 12,
-  "seed": "a1b2c3d4e5f60001",
+  "sha256": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+  "case_count": 32,
+  "seed": "0000000000000001",
   "coverage": {
    "strategy": "pairwise",
    "axes": [
@@ -199,130 +202,154 @@
     "fragmentation",
     "request_site"
    ],
-   "pairs_required": 66,
-   "pairs_covered": 66,
+   "pairs_required": 76,
+   "pairs_covered": 76,
    "proof_complete": true
   },
   "values_published": false
  },
  "metrics": {
   "leak_rate": {
-   "single_chunk": 0.0,
-   "adversarial": 0.5,
-   "overall": 0.1667
+   "single_chunk": 0.375,
+   "adversarial": 0.25,
+   "overall": 0.3125
   },
   "fidelity_rate": 1.0,
-  "delta_frag": 0.5,
+  "delta_frag": -0.125,
   "cases_by_condition": {
-   "single_chunk": 8,
-   "adversarial": 4
+   "single_chunk": 16,
+   "adversarial": 16
   },
-  "cases_scored": 12,
-  "cases_echo_observable": 12,
-  "cases_applicable": 12,
+  "cases_scored": 32,
+  "cases_echo_observable": 32,
+  "detector_blind_entities": [
+   "USPHONE"
+  ],
+  "cases_applicable": 32,
   "cases_inconclusive": 0,
   "derivation_recomputed": true,
   "sidecar_case_count_matches": true,
   "by_axis": {
    "entity": {
     "EMAIL": {
-     "leak_rate": 0.25,
+     "leak_rate": 0.75,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 4,
-     "echo_observable": 4,
-     "leaked": 1
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 6
     },
     "SSN": {
-     "leak_rate": 0.25,
+     "leak_rate": 0.0,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 4,
-     "echo_observable": 4,
-     "leaked": 1
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 0
     },
     "CARDPAN": {
      "leak_rate": 0.0,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 4,
-     "echo_observable": 4,
+     "applicable": 8,
+     "echo_observable": 8,
      "leaked": 0
+    },
+    "USPHONE": {
+     "leak_rate": 0.5,
+     "detector_blind": true,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 4
     }
    },
    "encoding": {
     "plain": {
-     "leak_rate": 0.125,
+     "leak_rate": 0.2273,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 8,
-     "echo_observable": 8,
-     "leaked": 1
+     "applicable": 22,
+     "echo_observable": 22,
+     "leaked": 5
     },
     "percent": {
-     "leak_rate": 0.25,
+     "leak_rate": 0.5,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 4,
-     "echo_observable": 4,
-     "leaked": 1
+     "applicable": 10,
+     "echo_observable": 10,
+     "leaked": 5
     }
    },
    "fragmentation": {
     "single_chunk": {
-     "leak_rate": 0.0,
+     "leak_rate": 0.375,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 8,
-     "echo_observable": 8,
-     "leaked": 0
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 6
     },
     "adversarial": {
-     "leak_rate": 0.5,
+     "leak_rate": 0.25,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 4,
-     "echo_observable": 4,
-     "leaked": 2
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 4
     }
    },
    "carrier": {
     "sse-delta-content": {
+     "leak_rate": 0.2917,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 24,
+     "echo_observable": 24,
+     "leaked": 7
+    },
+    "sse-json-field": {
+     "leak_rate": 0.375,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 3
+    }
+   },
+   "request_site": {
+    "chat-content": {
      "leak_rate": 0.25,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
      "applicable": 8,
      "echo_observable": 8,
      "leaked": 2
     },
-    "sse-json-field": {
-     "leak_rate": 0.0,
-     "fidelity_rate": 1.0,
-     "applicable": 4,
-     "echo_observable": 4,
-     "leaked": 0
-    }
-   },
-   "request_site": {
-    "chat-content": {
-     "leak_rate": 0.0,
-     "fidelity_rate": 1.0,
-     "applicable": 3,
-     "echo_observable": 3,
-     "leaked": 0
-    },
     "system-content": {
-     "leak_rate": 0.0,
+     "leak_rate": 0.375,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 3,
-     "echo_observable": 3,
-     "leaked": 0
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 3
     },
     "unrecognised-key": {
-     "leak_rate": 0.3333,
+     "leak_rate": 0.25,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 3,
-     "echo_observable": 3,
-     "leaked": 1
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 2
     },
     "tool-description": {
-     "leak_rate": 0.3333,
+     "leak_rate": 0.375,
+     "detector_blind": false,
      "fidelity_rate": 1.0,
-     "applicable": 3,
-     "echo_observable": 3,
-     "leaked": 1
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 3
     }
    }
   }
@@ -332,7 +359,8 @@
   "enabled": [
    "EMAIL",
    "SSN",
-   "CARDPAN"
+   "CARDPAN",
+   "USPHONE"
   ],
   "not_enabled": [],
   "unknown": [],
@@ -340,5 +368,5 @@
   "recorded_by": "operator",
   "source": "pii_leak_benchmark.v2_emitter._DETECTORS"
  },
- "cases_digest": "a64189d0f9bf9fa3746d27ef6b9d4cdd03df7f93a6f90565f9d6a42816cad7e0"
+ "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c"
 }

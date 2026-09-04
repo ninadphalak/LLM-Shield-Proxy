@@ -1307,6 +1307,21 @@ def build_report(
     # measured.
     fidelity = _rate(v for r in observable for v in r.echo_recovered.values()) if observable else 0.0
     delta_frag = round(leak_adv - leak_single, 4)
+    # A NEGATIVE delta_frag is possible and is not necessarily an artefact. Two causes,
+    # and only the first was a defect:
+    #
+    #   1. Unpaired populations. Fixed: the covering array now pairs every case with its
+    #      fragmentation twin, so the two conditions differ in nothing else.
+    #   2. A false positive on a fragment suppressing a true leak. Measured, seed
+    #      0000000000000001, presidio-chunk-local, USPHONE 590-555-0126:
+    #        "Reference record: 590-555-0126" -> not detected, the value leaks
+    #        "590-55" -> not detected;  "5-0126" -> REDACTED
+    #      Split, the detector matched the FRAGMENT for an unrelated reason, so the
+    #      reassembled client text no longer held the complete needle and the case scored
+    #      as "did not leak". The fragmented condition passed by accident.
+    #
+    # So delta_frag < 0 must never be read as "fragmentation is safe here". Read it with
+    # leak_rate.single_chunk and detector_blind_entities, which is where cause 2 shows up.
 
     case_defs = sorted(
         ({k: r.case[k] for k in sorted(AXES)} for r in results),
