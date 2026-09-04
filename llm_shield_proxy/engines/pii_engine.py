@@ -20,9 +20,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
-from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.core.config_schema import CustomRegexConfig
 from llm_shield_proxy.engines.vault import Vault
+from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.observability.tracing import tracer
 
 try:
@@ -311,6 +312,40 @@ def calculate_shannon_entropy(text: str) -> float:
         entropy -= p * math.log2(p)
 
     return entropy
+
+
+# Keys whose subtrees redact_payload already walks by shape. Deep redaction skips
+# them so a value is never redacted twice; redacting a synthetic placeholder would
+# mint a second token and rehydration would restore the placeholder, not the original.
+_TARGETED_PAYLOAD_KEYS: frozenset[str] = frozenset({"messages", "prompt", "system", "input", "instructions"})
+
+
+class UnmappedBlobError(ValueError):
+    """A blob was found in a field no policy claims, under UNMAPPED_BLOB_POLICY=block.
+
+    Carries the JSON path so the operator can add it to `payload_skip_keys` rather
+    than guessing which field tripped.
+    """
+
+    def __init__(self, json_path: str, size_bytes: int) -> None:
+        self.json_path = json_path
+        self.size_bytes = size_bytes
+        super().__init__(f"Unmapped blob at {json_path} ({size_bytes} bytes)")
+
+
+def _policy_skip_keys() -> frozenset[str]:
+    """Keys the active virtual key's policy claims, so deep redaction leaves them alone.
+
+    JSON is schemaless, so a deployment's proprietary fields cannot be known here.
+    A policy naming them is how an operator says "this one is mine, do not walk it".
+    """
+    policy = request_policy_ctx.get() or {}
+    declared = policy.get("payload_skip_keys")
+    if isinstance(declared, str):
+        declared = [part.strip() for part in declared.split(",")]
+    if not isinstance(declared, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(str(key) for key in declared if str(key).strip())
 
 
 class PIIEngine:
@@ -856,7 +891,97 @@ class PIIEngine:
                     for item in new_payload["input"]
                 ]
 
+        # Everything the shapes above do not cover still reaches the provider
+        # verbatim: metadata, user, tools, response_format, and any field this
+        # gateway has never heard of. Walk those too.
+        if settings.ENABLE_DEEP_PAYLOAD_REDACTION:
+            protected = settings.payload_protected_keys_set | _policy_skip_keys()
+            ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
+            for key in list(new_payload):
+                if key in _TARGETED_PAYLOAD_KEYS or key in protected:
+                    continue
+                new_payload[key] = self._deep_redact(
+                    new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key
+                )
+
         return new_payload
+
+    def _deep_redact(
+        self,
+        node: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        protected: frozenset[str],
+        max_string_length: int,
+        depth: int,
+        max_depth: int,
+        json_path: str = "",
+    ) -> Any:
+        """Redacts every string beneath `node`, skipping structure and opaque blobs.
+
+        Two things are deliberately left alone. Values under a protected key carry
+        structure rather than prose, and rewriting one breaks the request instead of
+        protecting anybody. Strings past `max_string_length`, and any data: URI, are
+        blobs: scanning one base64 image costs more than the whole rest of a payload,
+        and no image is going to be matched by a text detector anyway.
+        """
+        if depth > max_depth:
+            raise ValueError("Maximum payload nesting depth exceeded")
+
+        if isinstance(node, str):
+            if len(node) > max_string_length or node.startswith("data:"):
+                return self._handle_unmapped_blob(node, json_path)
+            return self.redact_text(node, vault, active_profile)
+
+        if isinstance(node, dict):
+            return {
+                key: (
+                    value
+                    if key in protected
+                    else self._deep_redact(
+                        value,
+                        vault,
+                        active_profile,
+                        protected,
+                        max_string_length,
+                        depth + 1,
+                        max_depth,
+                        f"{json_path}.{key}" if json_path else key,
+                    )
+                )
+                for key, value in node.items()
+            }
+
+        if isinstance(node, list):
+            return [
+                self._deep_redact(
+                    item,
+                    vault,
+                    active_profile,
+                    protected,
+                    max_string_length,
+                    depth + 1,
+                    max_depth,
+                    f"{json_path}[{index}]",
+                )
+                for index, item in enumerate(node)
+            ]
+
+        return node
+
+    def _handle_unmapped_blob(self, blob: str, json_path: str) -> str:
+        """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
+
+        A blob here is unexamined either way: no text detector matches base64. The
+        question is only whether an unexamined field is allowed to leave, and that
+        is a deployment decision, not a detection one.
+        """
+        policy = settings.UNMAPPED_BLOB_POLICY
+        if policy == "block":
+            raise UnmappedBlobError(json_path or "<root>", len(blob))
+        if policy == "warn":
+            AuditLogger.log_unmapped_blob(json_path=json_path or "<root>", size_bytes=len(blob))
+        return blob
 
     def _redact_text_blocks(
         self,

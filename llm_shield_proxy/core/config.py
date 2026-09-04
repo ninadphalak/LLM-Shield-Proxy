@@ -22,6 +22,27 @@ _config_reload_lock: threading.Lock = threading.Lock()
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 _ENV_FILE_PATH: str = str(_REPO_ROOT / ".env")
 
+# Keys whose values carry structure rather than prose. Rewriting one does not
+# protect anybody and can break the request: a tool stops routing, a schema stops
+# validating, a model name stops resolving. Operators extend this with
+# PAYLOAD_PROTECTED_KEYS rather than editing it here.
+DEFAULT_PROTECTED_PAYLOAD_KEYS: frozenset[str] = frozenset(
+    {
+        "model",
+        "type",
+        "role",
+        "enum",
+        "format",
+        "object",
+        "index",
+        "finish_reason",
+        "$ref",
+        "$schema",
+        "mime_type",
+        "encoding_format",
+    }
+)
+
 
 class Settings(BaseSettings):
     """Centralized, validated runtime configuration schema for LLM-Shield-Proxy."""
@@ -102,6 +123,43 @@ class Settings(BaseSettings):
 
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
+    ENABLE_DEEP_PAYLOAD_REDACTION: bool = Field(
+        default=True,
+        description=(
+            "Redact strings in request fields outside the known chat shapes: metadata, user, "
+            "tools, response_format, and any provider-specific or unrecognised field. Turning "
+            "this off lets those fields reach the provider unredacted."
+        ),
+    )
+    PAYLOAD_PROTECTED_KEYS: str = Field(
+        default="",
+        description=(
+            "Comma-separated JSON keys deep redaction must never rewrite, added to the built-in "
+            "structural set. Use it when a value has to reach the provider byte for byte, for "
+            "example add 'name' if a tool's function name is ever rewritten."
+        ),
+    )
+    UNMAPPED_BLOB_POLICY: Literal["skip", "warn", "block"] = Field(
+        default="warn",
+        description=(
+            "What to do when a string past PAYLOAD_MAX_REDACT_STRING_LENGTH is found in a field "
+            "no policy claims. 'skip' forwards it silently. 'warn' forwards it and writes a "
+            "signed audit record naming the JSON path, so the security team learns which custom "
+            "paths to add to payload_skip_keys. 'block' rejects the request with 413. Roll out on "
+            "warn, tune payload_skip_keys from the audit trail, then move to block. This and the "
+            "ceiling are both overridable per virtual key in policies.yaml, like any other setting."
+        ),
+    )
+    PAYLOAD_MAX_REDACT_STRING_LENGTH: int = Field(
+        default=8192,
+        ge=0,
+        description=(
+            "Strings longer than this, and any data: URI, are forwarded without inspection. "
+            "Scanning one base64 image costs more than the rest of a payload combined; raising "
+            "this slows every request that carries a blob. Measure the cost on your own traffic "
+            "with benchmarks/payload_walk_latency.py before changing it."
+        ),
+    )
     CORS_ALLOWED_ORIGINS: str = Field(default="", description="Comma-separated allowed CORS origins (empty allows same-origin / configured)")
     ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = Field(
         default=False, description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
@@ -347,6 +405,14 @@ class Settings(BaseSettings):
         if self.AIR_GAPPED_MODE and not self.EGRESS_GATEWAY_URL:
             raise ValueError("EGRESS_GATEWAY_URL must be set if AIR_GAPPED_MODE is True.")
         return self
+
+    @property
+    def payload_protected_keys_set(self) -> frozenset[str]:
+        """Structural keys plus operator additions, never rewritten by deep redaction."""
+        if not self.PAYLOAD_PROTECTED_KEYS:
+            return DEFAULT_PROTECTED_PAYLOAD_KEYS
+        extra = {key.strip() for key in self.PAYLOAD_PROTECTED_KEYS.split(",") if key.strip()}
+        return DEFAULT_PROTECTED_PAYLOAD_KEYS | frozenset(extra)
 
     @property
     def valid_virtual_keys_set(self) -> frozenset[str]:

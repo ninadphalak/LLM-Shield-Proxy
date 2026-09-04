@@ -6,10 +6,11 @@ import os
 import tempfile
 import time
 
+import pytest
 import yaml
 
-from llm_shield_proxy.core.config import settings
-from llm_shield_proxy.engines.pii_engine import PIIEngine, calculate_shannon_entropy
+from llm_shield_proxy.core.config import request_policy_ctx, settings
+from llm_shield_proxy.engines.pii_engine import PIIEngine, UnmappedBlobError, calculate_shannon_entropy
 from llm_shield_proxy.engines.vault import Vault
 
 
@@ -380,3 +381,198 @@ def test_non_text_blocks_and_unknown_items_survive_redaction():
 
     assert redacted["system"][1] == {"type": "image", "source": "s3://x"}
     assert redacted["input"][0] == {"type": "unknown_item", "opaque": 42}
+
+
+def test_fields_outside_the_known_shapes_are_redacted():
+    """A passthrough proxy forwards every field, so every field has to be walked.
+
+    Measured against a capture server: `user`, `metadata`, `tools` descriptions,
+    `response_format` and unrecognised top-level fields all reached the provider
+    with the value intact while the proxy reported redaction as enabled.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "model": "gpt-4o",
+        "user": "jane.doe@example.com",
+        "notes": "unknown field jane.doe@example.com",
+        "metadata": {"user_email": "jane.doe@example.com", "nested": {"deep": "jane.doe@example.com"}},
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "send_mail", "description": "e.g. jane.doe@example.com"},
+            }
+        ],
+        "response_format": {"json_schema": {"schema": {"title": "for jane.doe@example.com"}}},
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_structural_values_survive_deep_redaction():
+    """Redacting structure breaks the request instead of protecting anyone.
+
+    A rewritten function name stops the call routing and a rewritten schema stops
+    it validating, so those keys are never touched.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "model": "gpt-4o",
+        "tools": [{"type": "function", "function": {"name": "send_mail", "description": "hi"}}],
+        "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "object", "enum": ["a", "b"]}}},
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert redacted["model"] == "gpt-4o"
+    assert redacted["tools"][0]["type"] == "function"
+    assert redacted["response_format"]["json_schema"]["schema"]["type"] == "object"
+    assert redacted["response_format"]["json_schema"]["schema"]["enum"] == ["a", "b"]
+
+
+def test_blobs_are_forwarded_without_inspection():
+    """Scanning one base64 image costs more than the rest of the payload combined."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    blob = "data:image/png;base64," + base64.b64encode(b"x" * 200_000).decode()
+    payload = {"attachment": blob, "notes": "about jane.doe@example.com"}
+    redacted = engine.redact_payload(payload, vault)
+
+    assert redacted["attachment"] == blob
+    assert "jane.doe@example.com" not in redacted["notes"]
+
+
+def test_operators_can_protect_additional_keys():
+    """PAYLOAD_PROTECTED_KEYS is the escape hatch when a value must arrive verbatim."""
+    engine = PIIEngine()
+    original = settings.PAYLOAD_PROTECTED_KEYS
+    try:
+        settings.PAYLOAD_PROTECTED_KEYS = "notes"
+        protected = engine.redact_payload({"notes": "jane.doe@example.com"}, Vault())
+        assert protected["notes"] == "jane.doe@example.com"
+
+        settings.PAYLOAD_PROTECTED_KEYS = ""
+        walked = engine.redact_payload({"notes": "jane.doe@example.com"}, Vault())
+        assert walked["notes"] != "jane.doe@example.com"
+    finally:
+        settings.PAYLOAD_PROTECTED_KEYS = original
+
+
+def test_deep_redaction_can_be_turned_off():
+    """The switch exists to reproduce the old behaviour, not because it is safe."""
+    engine = PIIEngine()
+    original = settings.ENABLE_DEEP_PAYLOAD_REDACTION
+    try:
+        settings.ENABLE_DEEP_PAYLOAD_REDACTION = False
+        redacted = engine.redact_payload({"notes": "jane.doe@example.com"}, Vault())
+        assert redacted["notes"] == "jane.doe@example.com"
+    finally:
+        settings.ENABLE_DEEP_PAYLOAD_REDACTION = original
+
+
+def test_a_value_in_two_places_rehydrates_to_itself():
+    """The same value under a walked and a deep-walked field must share one token.
+
+    Minting a second token would make rehydration restore the placeholder rather
+    than the original.
+    """
+    engine = PIIEngine()
+    vault = Vault(synthetic=True)
+
+    payload = {
+        "messages": [{"role": "user", "content": "Email jane.doe@example.com"}],
+        "metadata": {"copy": "jane.doe@example.com"},
+    }
+    egress = json.dumps(engine.redact_payload(payload, vault))
+    assert "jane.doe@example.com" not in egress
+
+    restored = json.loads(vault.rehydrate(egress))
+    assert restored["messages"][0]["content"] == "Email jane.doe@example.com"
+    assert restored["metadata"]["copy"] == "jane.doe@example.com"
+
+
+def test_a_policy_can_claim_a_proprietary_field():
+    """JSON is schemaless, so a deployment's own fields cannot be known in advance.
+
+    A virtual key's policy naming a field is how an operator says the field is
+    theirs: deep redaction leaves it alone and stops paying to walk it.
+    """
+    engine = PIIEngine()
+    token = request_policy_ctx.set({"payload_skip_keys": ["internal_vision_blob"]})
+    try:
+        payload = {"internal_vision_blob": "B" * 20_000, "notes": "about jane.doe@example.com"}
+        redacted = engine.redact_payload(payload, Vault())
+
+        assert redacted["internal_vision_blob"] == "B" * 20_000
+        assert "jane.doe@example.com" not in redacted["notes"]
+    finally:
+        request_policy_ctx.reset(token)
+
+
+def test_unmapped_blob_policy_skip_forwards_silently():
+    engine = PIIEngine()
+    original = settings.UNMAPPED_BLOB_POLICY
+    try:
+        settings.UNMAPPED_BLOB_POLICY = "skip"
+        redacted = engine.redact_payload({"blob": "B" * 20_000}, Vault())
+        assert redacted["blob"] == "B" * 20_000
+    finally:
+        settings.UNMAPPED_BLOB_POLICY = original
+
+
+def test_unmapped_blob_policy_block_rejects_with_the_path():
+    """Block refuses to forward a field it could not inspect.
+
+    The path travels with the error so the operator can declare that field rather
+    than guess which one tripped.
+    """
+    engine = PIIEngine()
+    original = settings.UNMAPPED_BLOB_POLICY
+    try:
+        settings.UNMAPPED_BLOB_POLICY = "block"
+        with pytest.raises(UnmappedBlobError) as excinfo:
+            engine.redact_payload({"attachments": [{"data": "B" * 20_000}]}, Vault())
+
+        assert excinfo.value.json_path == "attachments[0].data"
+        assert excinfo.value.size_bytes == 20_000
+    finally:
+        settings.UNMAPPED_BLOB_POLICY = original
+
+
+def test_a_claimed_field_is_not_rejected_even_when_blocking():
+    """Declaring a field is what turns a rejection into a supported deployment."""
+    engine = PIIEngine()
+    original = settings.UNMAPPED_BLOB_POLICY
+    token = request_policy_ctx.set({"payload_skip_keys": ["internal_vision_blob"]})
+    try:
+        settings.UNMAPPED_BLOB_POLICY = "block"
+        redacted = engine.redact_payload({"internal_vision_blob": "B" * 20_000}, Vault())
+        assert redacted["internal_vision_blob"] == "B" * 20_000
+    finally:
+        settings.UNMAPPED_BLOB_POLICY = original
+        request_policy_ctx.reset(token)
+
+
+def test_the_ceiling_and_policy_are_per_virtual_key():
+    """One tenant can run on `block` while another is still onboarding.
+
+    Settings resolve through the request policy first, so a role naming either of
+    these overrides the global value for that key's traffic only.
+    """
+    engine = PIIEngine()
+    token = request_policy_ctx.set(
+        {"UNMAPPED_BLOB_POLICY": "block", "PAYLOAD_MAX_REDACT_STRING_LENGTH": 100}
+    )
+    try:
+        with pytest.raises(UnmappedBlobError) as excinfo:
+            engine.redact_payload({"blob": "B" * 200}, Vault())
+        assert excinfo.value.size_bytes == 200
+    finally:
+        request_policy_ctx.reset(token)
+
+    # The same payload is fine under the global defaults.
+    assert engine.redact_payload({"blob": "B" * 200}, Vault())["blob"] == "B" * 200

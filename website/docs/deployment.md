@@ -43,6 +43,35 @@ Provide the central API keys the proxy will use to authenticate with upstream pr
 | `CUSTOM_REGEX_PATH` | `None` | Path to `custom_regex.yaml` for Bring-Your-Own-Regex rules. |
 | `ENABLE_SYNTHETIC_SWAPPING` | `True` | Replace detected entities with format-preserving synthetic data. |
 | `SHIELD_DEFAULT_MASKING_MODE` | `SYNTHETIC` | The default masking strategy (`SYNTHETIC`, `SCRUB`, `STATELESS_CRYPTO`). |
+| `ENABLE_DEEP_PAYLOAD_REDACTION` | `True` | Walk fields outside the known chat shapes: `metadata`, `user`, `tools`, `response_format`, and any field this proxy does not know by name. Turning it off lets those fields reach the provider unredacted. |
+| `PAYLOAD_PROTECTED_KEYS` | `""` | Extra JSON keys deep redaction must never rewrite, comma separated, added to the built-in structural set (`model`, `type`, `enum`, `$ref`, and similar). Per-role equivalent: `payload_skip_keys`. |
+| `PAYLOAD_MAX_REDACT_STRING_LENGTH` | `8192` | Strings longer than this, and any `data:` URI, are forwarded without inspection. |
+| `UNMAPPED_BLOB_POLICY` | `warn` | What happens when a string past that ceiling appears in a field no policy claims. `skip` forwards it silently, `warn` forwards it and writes a signed audit record naming the JSON path, `block` rejects the request with `HTTP 413`. |
+
+#### Rolling out deep redaction
+
+Deep redaction is on by default because a passthrough proxy forwards every field, so
+any field left unwalked is egressed. Two settings control what it costs.
+
+Start on `UNMAPPED_BLOB_POLICY=warn`. Every blob in an unclaimed field is forwarded
+and audited as `UNMAPPED_BLOB_FORWARDED` with its JSON path. Collect those paths, add
+them to the owning role's `payload_skip_keys`, then move to `block` once the audit
+trail is quiet.
+
+Both `UNMAPPED_BLOB_POLICY` and `PAYLOAD_MAX_REDACT_STRING_LENGTH` can be set per role
+in `policies.yaml`, so one tenant can run on `block` while another is still onboarding.
+
+Raising `PAYLOAD_MAX_REDACT_STRING_LENGTH` past your largest attachment is the one
+change here that visibly slows the proxy, because the walk then scans base64 that no
+text detector can match. Measure it on your own payload shapes:
+
+```bash
+python benchmarks/payload_walk_latency.py --turns 200 --image-mb 4
+```
+
+The `blob cost` column is what raising the ceiling would cost you. These are local
+microbenchmarks; they exclude network, TLS and model time, so use them to compare
+settings against each other rather than as an end-to-end latency figure.
 
 ### Cryptography & Auditing
 | Environment Variable | Default | Description |

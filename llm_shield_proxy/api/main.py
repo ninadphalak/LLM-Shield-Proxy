@@ -44,7 +44,7 @@ from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.api.mcp_router import mcp_router, warn_if_mcp_policy_is_empty_at_startup
 from llm_shield_proxy.api.webhook import webhook_router
 from llm_shield_proxy.core.config import request_policy_ctx, settings
-from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.engines.pii_engine import UnmappedBlobError, pii_engine
 from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
     ASTDepthExceededException,
     StatelessASTVisitor,
@@ -1009,14 +1009,38 @@ async def _proxy_catch_all_internal(
                     import contextvars
                     ctx = contextvars.copy_context()
 
-                    redacted_payload = await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        ctx.run,  # type: ignore
-                        pii_engine.redact_payload,
-                        payload,
-                        vault,
-                        active_profile,
-                    )  # type: ignore
+                    try:
+                        redacted_payload = await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            ctx.run,  # type: ignore
+                            pii_engine.redact_payload,
+                            payload,
+                            vault,
+                            active_profile,
+                        )  # type: ignore
+                    except UnmappedBlobError as blob_error:
+                        # UNMAPPED_BLOB_POLICY=block. The field is not claimed by any
+                        # policy and the value is too large to inspect, so it leaves
+                        # uninspected or it does not leave at all.
+                        AuditLogger.log_unmapped_blob(
+                            json_path=blob_error.json_path,
+                            size_bytes=blob_error.size_bytes,
+                            virtual_key_id=virtual_key_id,
+                            request_id=request_id,
+                        )
+                        return JSONResponse(
+                            status_code=413,
+                            content={
+                                "error": {
+                                    "message": (
+                                        f"Uninspectable payload at '{blob_error.json_path}'. Declare it in "
+                                        "payload_skip_keys for this key, or raise "
+                                        "PAYLOAD_MAX_REDACT_STRING_LENGTH."
+                                    ),
+                                    "type": "unmapped_blob",
+                                }
+                            },
+                        )
 
                     new_entities_count = sum(vault.type_counters.values())
                     entities_detected = new_entities_count - old_entities_count

@@ -410,6 +410,38 @@ class AuditLogger:
         AuditLogger._enqueue_log("INFO", log_entry)
 
     @staticmethod
+    def log_unmapped_blob(
+        json_path: str,
+        size_bytes: int,
+        virtual_key_id: str = "BYOK",
+        request_id: Optional[str] = None,
+    ) -> None:
+        """Records a blob forwarded without inspection from an unclaimed field.
+
+        This is the onboarding signal for UNMAPPED_BLOB_POLICY=warn: it names the
+        exact JSON path so an operator can add it to that key's `payload_skip_keys`
+        and stop paying to walk it, or investigate why a blob is arriving there.
+        """
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "UNMAPPED_BLOB_FORWARDED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "json_path": json_path,
+            "size_bytes": size_bytes,
+            "severity": "WARNING",
+            "action": "FORWARDED_UNINSPECTED",
+            "message": (
+                "Blob past the inspection ceiling in a field no policy claims. Add this path to "
+                "payload_skip_keys for this key, or set UNMAPPED_BLOB_POLICY=block to reject it."
+            ),
+        }
+        AuditLogger._enqueue_log("WARNING", log_entry)
+
+    @staticmethod
     def log_tripwire_event(
         session_id: Optional[str],
         path: str,
