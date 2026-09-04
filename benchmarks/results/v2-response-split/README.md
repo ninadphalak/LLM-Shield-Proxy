@@ -18,6 +18,16 @@ claim a reviewer could reasonably discount.
 
 ---
 
+**All 16 single-run artefacts in this directory come from one corpus: 32 cases, 5 axes,
+76/76 pairs.** `tests/conformance/test_results_are_comparable.py` fails the build if that
+stops being true, because on 2026-09-04 this directory briefly held artefacts from four
+different corpus generations at once -- individually correct, jointly misleading. A stale
+row is worse than a missing one: a missing row is visibly absent, a stale one looks like
+evidence.
+
+The `seed-sweep-*.json` files are the numbers to cite; the single-run artefacts are kept as
+schema-validation evidence.
+
 ## 0. How to read the tables
 
 **What is being tested.** Each row is a *response-path policy* -- a rule for what a gateway
