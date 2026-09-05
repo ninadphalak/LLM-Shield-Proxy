@@ -142,6 +142,94 @@ def test_pii_tier1_mrn_redaction():
     assert vault.rehydrate(redacted) == sample_text
 
 
+def test_pii_tier1_uk_nino_redaction():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+
+    for secret in ("AB123456C", "AB 12 34 56 C", "AB-12-34-56-C", "JG121212A", "PP 55 66 77 D"):
+        vault = Vault(synthetic=False)
+        sample_text = f"National Insurance number: {secret}"
+
+        redacted = engine.redact_text(sample_text, vault)
+
+        assert "[UK_NINO_1]" in redacted, secret
+        assert secret not in redacted, secret
+        assert vault.rehydrate(redacted) == sample_text, secret
+
+
+def test_pii_tier1_uk_nino_matches_when_glued_to_non_latin_script():
+    """The ASCII boundary assertions are what make this match; `\\b` would not."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    sample_text = "\u90ae\u7bb1\u662fAB123456C\u6ca1\u6709"
+
+    redacted = engine.redact_text(sample_text, vault)
+
+    assert "[UK_NINO_1]" in redacted
+    assert "AB123456C" not in redacted
+    assert vault.rehydrate(redacted) == sample_text
+
+
+def test_pii_tier1_uk_nino_rejects_invalid_shapes():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+
+    rejected = (
+        # The seven prefix pairs HMRC never issues.
+        "GB123456C", "BG123456C", "NK123456C", "KN123456C",
+        "TN123456C", "NT123456C", "ZZ123456C",
+        # D, F, I, Q, U and V are not valid in either prefix position, and O is
+        # not valid in the second.
+        "DA123456C", "FA123456C", "IA123456C", "QA123456C",
+        "UA123456C", "VA123456C", "AO123456C",
+        # The suffix is only A-D.
+        "AB123456E", "AB123456Z",
+        # Six digits exactly.
+        "AB12345C", "AB1234567C",
+        # One separator, used consistently or not at all.
+        "AB 12-34 56C", "AB-12 34-56 C",
+        # HMRC prints a NINO in upper case; lower case here is prose.
+        "ab123456c", "Ab123456C",
+    )
+
+    for candidate in rejected:
+        vault = Vault(synthetic=False)
+        redacted = engine.redact_text(f"value {candidate} end", vault)
+        assert "UK_NINO" not in redacted, candidate
+
+
+def test_pii_tier1_uk_nino_leaves_ordinary_prose_untouched():
+    """A Tier 1 false positive is not free here: the proxy rewrites prompts in flight.
+
+    A case-insensitive NINO pattern whose separators are independently optional matches
+    any two-letter word followed by three 2-digit groups and a letter a-d. Twelve of the
+    twenty-three most common two-letter English words are valid NINO prefixes, so that
+    shape corrupts ordinary conversation rather than redacting an identifier.
+    """
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+
+    prose = (
+        "the meeting is on 10 29 38 c and then we break",
+        "as 12 34 56 a rule we redact everything",
+        "at 09 08 07 a",
+        "we 11 22 33 b",
+        "my 44 55 66 c",
+        "an 77 88 99 d",
+        "or 12 34 56 a",
+        "he 12 34 56 b",
+        "me 12 34 56 c",
+        "by 12 34 56 d",
+        "be 12 34 56 a",
+        "am 12 34 56 b",
+        "on 12 34 56 c",
+    )
+
+    for sentence in prose:
+        vault = Vault(synthetic=False)
+        redacted = engine.redact_text(sentence, vault)
+        # Not merely 'no UK_NINO span': the whole Tier 1 cascade must return the
+        # sentence unchanged, which is the assertion this suite did not have.
+        assert redacted == sentence, sentence
+
+
 def test_pii_tier2_shannon_entropy_redaction():
     """Tests Tier 2 Shannon entropy detection for raw unformatted high-entropy secrets."""
     engine = PIIEngine(enable_tier2=True, enable_tier3=False, entropy_threshold=4.5)

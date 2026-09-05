@@ -192,6 +192,20 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
         ),
     ),
     ("MRN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{2}[A-Za-z0-9]" + _ASCII_RIGHT_BOUNDARY)),
+    # HMRC National Insurance number. The prefix excludes D, F, I, Q, U and V in both
+    # positions and O in the second, then rejects the seven reserved pairs. Uppercase is
+    # required and the separator is captured once and backreferenced: a case-insensitive
+    # pattern with independently optional separators matches ordinary English prose,
+    # because 12 of the 23 most common two-letter words are valid prefixes, so
+    # "the meeting is on 10 29 38 c" would be rewritten mid-conversation.
+    (
+        "UK_NINO",
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"(?!(?:GB|BG|NK|KN|TN|NT|ZZ))[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]([ -]?)\d{2}\1\d{2}\1\d{2}\1[A-D]"
+            + _ASCII_RIGHT_BOUNDARY
+        ),
+    ),
 ]
 
 # ---------------------------------------------------------------------------
