@@ -11,15 +11,53 @@ Nothing here is a verdict on product quality.
 
 ## Measured
 
-| Gateway | Redacts response? | Restores caller's values? | Row |
+| Gateway / library | Redacts response? | Restores caller's values? | Row |
 |---|---|---|---|
 | LiteLLM 1.99 + Presidio guardrail | yes | no | measured |
 | Portkey OSS gateway | no, in the configuration measured | n/a | measured |
 | NeMo Guardrails 0.24.0 | detects and truncates | no | measured |
 | LLM-Shield-Proxy 1.6.0 | opt-in | **yes** | measured, both configurations |
+| **LLM Guard 0.3.16** | **yes** (`Sensitive`, opt-in) | **yes** (`Deanonymize`) | **measured, both integration modes** |
+| **Guardrails AI 0.10.2** | yes, and **accumulates across chunks** | **no such API** | **measured** |
 
 Plus Google Cloud DLP and Google Model Armor as credentialed **detectors** in this
 project's own wrapper, alongside the two Presidio rows.
+
+**The last two are libraries, not gateways**, wrapped in the thinnest possible gateway
+(`../../llm-guard-v2-profile/gateway.py`, `../../guardrails-v2-profile/gateway.py`) the same
+way the `presidio-*` rows wrap the analyzer. Neither needs an account. Both need their own
+Python 3.10-3.12 environment -- LLM Guard pins `torch>=2.4.0` and `transformers==4.51.3` and
+declares `requires_python: <3.13`, so **"free" is not the same as "light"**.
+
+### What the four new rows show together, and it is the whole argument
+
+| policy | restores? | retains? | Fidelity | Leak 1-chunk | Leak adv | DeltaFrag | events |
+|---|---|---|---:|---:|---:|---:|---:|
+| `bounded-retention` (our model) | yes | `L = N-1` | 1.00 | 0.125 | 0.125 | **0.00** | 6 |
+| `guardrails-ai-stream-validate` | **no API** | to next sentence | 0.00 | 0.125 | 0.125 | **0.00** | 6 |
+| `llm-guard-chunk-local` | **yes** | no | **1.00** | 0.17 [0.00-0.25] | 0.75 | **0.58 [0.50-0.75]** | 5 |
+| `llm-guard-buffered` | **yes** | whole response | 1.00 [0.98-1.00] | 0.29 [0.25-0.31] | 0.29 [0.25-0.31] | **0.00** | **3** |
+
+- **Guardrails AI's sentence accumulator reproduces `bounded-retention` exactly** -- same
+  leak rates, same DeltaFrag, same event count, and the same residual `EMAIL / percent /
+  adversarial` case, which is an encoding gap rather than a fragmentation one. A third party
+  with no knowledge of this profile chose retention-before-validation and landed on the same
+  numbers. **It has no restore half, so its FidelityRate 0.00 is a real failure**: the echo
+  segment comes back carrying the caller's own values and the validator redacts them,
+  because nothing tells it whose data it is.
+- **LLM Guard restores.** FidelityRate 1.00 -- the first third-party product in this survey
+  to return the caller's own values. And chunk-local it pays DeltaFrag **0.58 [0.50-0.75]**: the same
+  scanner, on the same corpus, leaks three times as often when the value is split.
+- **Buffering fixes the fragmentation penalty and removes streaming.** DeltaFrag 0.58 to
+  0.00, and `events_observed` 5 to 3. That is E15 reproduced a third time, on a product that
+  gets everything else right.
+
+**And buffering does not quite reach FidelityRate 1.00.** Across six seeds it is 0.9974 [0.9844-1.00]: on one seed a single value is not restored. Small, and worth recording rather than rounding away, because the buffered arm is the configuration in which the restorer always sees whole text and therefore has no excuse.
+
+**So no inspected implementation does all three of restore, retain, and stream.** The one
+that retains cannot restore; the one that restores must choose between retaining and
+streaming. That is a sharper statement than the survey could make before these rows existed,
+and it is made entirely out of other people's software.
 
 ---
 
@@ -43,11 +81,19 @@ FidelityRate of 0.00 is therefore an integration choice rather than a detector l
 the component that could restore the caller's values is already a dependency, already
 running, and is asked only to mask.
 
-### LLM Guard 0.3.10 -- ships both halves by name, on a whole-string API
+### LLM Guard -- ships both halves by name, on a whole-string API
 
 `protectai/llm-guard`, the OSS guardrail library. It is not a gateway; it is the component
 gateways embed, which makes its API the more interesting object. Verified by inspecting the
-wheel (`llm_guard-0.3.10-py3-none-any.whl`, 155 modules), not the documentation:
+wheel, not the documentation.
+
+**Two versions appear below and the difference matters.** The API surface here was read from
+`llm_guard-0.3.10-py3-none-any.whl` (155 modules), which is what `pip download` resolves for
+CPython 3.14. **The measured rows use 0.3.16**, which is the newest release and declares
+`requires_python: <3.13,>=3.10` -- so it cannot be resolved for the harness interpreter at
+all and needs the separate 3.12 environment. The `Anonymize` / `Deanonymize` / `Vault`
+surface described here is unchanged between the two; the dependency pins are not
+(0.3.10 pins `torch==2.0.1`, 0.3.16 `torch>=2.4.0`).
 
 ```
 llm_guard/input_scanners/anonymize.py     class Anonymize(Scanner)

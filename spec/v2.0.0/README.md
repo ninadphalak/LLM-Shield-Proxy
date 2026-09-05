@@ -1,8 +1,34 @@
 # Streaming Privacy Gateway Conformance Specification v2.0.0
 
-**Status: draft, and amended once since first publication (2026-09-04, `request_site`,
-§3a).** The schema is published and tested, and
-`pii_leak_benchmark.v2_emitter` now emits it. The Axis C fragmentation harness is written
+**Status: draft, amended twice since first publication.** The schema is published and
+tested, and `pii_leak_benchmark.v2_emitter` now emits it.
+
+| date | change |
+|---|---|
+| 2026-09-04 | `request_site` axis and the `echo_observable` denominators (§3a) |
+| 2026-09-05 | the request path stopped being a rubber stamp (below) |
+
+**The 2026-09-05 amendment, and why a schema change was needed for it.**
+`configured_upstream_boundary` is v1's entire measurement -- did a protected value reach the
+gateway's configured upstream -- and in the v2 emitter it was a hardcoded pass. Making it
+real forced three schema changes:
+
+- **`inspection_scope`** for that check is now GENERATED from a capability registry with a
+  test per clause, so the enum holds the generated sentence rather than a hand-written one.
+  The client-side scope was converted the same way on 2026-09-04; this is the half that was
+  left behind.
+- **`correlation_mechanism`** (`marker-words` | `in-process-capture`). A passing boundary
+  check must have observed at least three marker words, which is v1's device for a capture
+  that may receive unrelated traffic. An in-process capture records each body itself, which
+  is a **stronger** proof and not a waiver -- so a profile claiming it must report
+  `marker_words_observed_max: 0`, and the marker fields cannot be fabricated to satisfy a
+  rule that no longer applies.
+- **`redaction_claim.request_path_redaction_configured`** (`configured` |
+  `not-configured` | `unknown`). Once the boundary check can fail, a request-path egress has
+  to be attributable: a gateway configured with response-side guardrails only was never
+  asked to mask the request, and publishing its egress as a coverage defect would be
+  measuring the operator's config file rather than the product. Both still count as a
+  measured leak for `outcome`; this field says who to attribute it to. The Axis C fragmentation harness is written
 against this document, not the other way round — that ordering is the point of publishing
 the schema first.
 

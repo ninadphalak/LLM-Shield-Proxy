@@ -19,6 +19,11 @@
 > hardcoded pass, and **the Higress row, which was withdrawn** because its plugin config was
 > not valid YAML and had never loaded. Both are covered below.
 >
+> **Three rows were then added**: LLM Guard 0.3.16 in two integration modes and Guardrails
+> AI 0.10.2. Both are OSS libraries needing no account, and between them they state the
+> whole argument out of other people's software -- the one that retains cannot restore, and
+> the one that restores must choose between retaining and streaming.
+>
 > `tests/conformance/test_results_are_comparable.py` now fails the build when a published
 > row's `inspection_scope` is not the one the current emitter generates, and when a sweep
 > file carries no `instrument` block. The existing corpus guards compare case definitions
@@ -41,7 +46,7 @@ claim a reviewer could reasonably discount.
 
 ---
 
-**All 16 single-run artefacts in this directory come from one corpus: 32 cases, 5 axes,
+**All 19 single-run artefacts in this directory come from one corpus: 32 cases, 5 axes,
 76/76 pairs.** `tests/conformance/test_results_are_comparable.py` fails the build if that
 stops being true, because on 2026-09-04 this directory briefly held artefacts from four
 different corpus generations at once -- individually correct, jointly misleading. A stale
@@ -244,6 +249,54 @@ for four months nothing could report it because the check that would have was a 
 response-off and `portkey-gateway-oss` are still identical on all four response metrics
 (1.00 / 1.00 / 1.00 / 0.00). They are no longer identical in the report: Shield masks the
 request path and Portkey does not. Until now that distinction lived only in prose here.
+
+### Two OSS libraries, added 2026-09-05, and together they are the argument
+
+LLM Guard 0.3.16 and Guardrails AI 0.10.2 are libraries rather than gateways, wrapped in the
+thinnest possible gateway the same way the `presidio-*` rows wrap the analyzer. Neither
+needs an account. Both need their own Python 3.10-3.12 environment, so **"free" is not the
+same as "light"**: LLM Guard pins `torch>=2.4.0` and `transformers==4.51.3`.
+
+| policy | restores? | retains? | Fidelity | Leak 1-chunk | Leak adv | DeltaFrag | events |
+|---|---|---|---:|---:|---:|---:|---:|
+| `bounded-retention` (reference model) | yes | `L = N-1` | 1.00 | 0.125 | 0.125 | **0.00** | 6 |
+| `guardrails-ai-stream-validate` | **no such API** | to next sentence | 0.00 | 0.125 | 0.125 | **0.00** | 6 |
+| `llm-guard-chunk-local` | **yes** | no | **1.00** | 0.17 [0.00-0.25] | 0.75 | **0.58 [0.50-0.75]** | 5 |
+| `llm-guard-buffered` | **yes** | whole response | 1.00 [0.98-1.00] | 0.29 [0.25-0.31] | 0.29 [0.25-0.31] | **0.00** | **3** |
+
+**Guardrails AI reproduces `bounded-retention` exactly.** Same leak rates, same DeltaFrag,
+same event count, and the same residual case (`EMAIL / percent / adversarial`, an encoding
+gap rather than a fragmentation one). Its `Validator.validate_stream` accumulates chunks to
+the next sentence boundary before validating -- retention across chunk boundaries, shipping,
+in OSS, from a project with no knowledge of this profile. **That is the strongest external
+corroboration of the retention result in this repository.**
+
+**And it cannot restore.** There is no `reidentify`, `deanonymize` or `unredact` in its 178
+modules. Its FidelityRate 0.00 is a real failure and not a vacuous one: the request is
+forwarded unmasked, so the echo segment returns carrying the caller's own values, and the
+validator redacts them -- because nothing tells it whose data it is. **That is the response
+split's central claim demonstrated by a product instead of by a model.** It is not scored
+for failing to rehydrate; it is scored for what one global policy does to two segments that
+need opposite treatment.
+
+**LLM Guard restores, and it is the first third-party product here to do so.** FidelityRate
+1.00 from `Anonymize` + `Vault` + `Deanonymize`. Applied per delta it pays **DeltaFrag
+0.50** -- the same scanner on the same corpus leaks three times as often when the value is
+split (DeltaFrag 0.58 [0.50-0.75] over six seeds). Buffering the whole response removes
+that penalty entirely (to 0.00 on every seed) and takes
+`events_observed` from 5 to 3. **E15, reproduced a third time, on the product that gets
+everything else right.**
+
+Two more observations, both about defaults and neither a defect report:
+
+- **`Sensitive(redact: bool = False)`.** On the default LLM Guard's output scanner detects,
+  logs `Found sensitive data in the output`, returns `is_valid=False` -- and returns the
+  text **unchanged**. Verified before any row was run. `gateway.py` passes `redact=True`; a
+  row on the default would have measured this repository's wrapper.
+- **The two request-path failures are different in kind, and the axes separate them.**
+  LiteLLM leaks **all four entities at two of four sites** -- a payload-walk gap. LLM Guard
+  leaks **one entity (USPHONE) at all four sites** -- a detector-coverage gap. `request_site`
+  finds the first; `detector_blind_entities` finds the second. Neither axis finds both.
 
 **Two of these rows were wrong until the configuration was fixed, and both errors were
 mine rather than the gateway's.** Adding the `USPHONE` entity made NeMo leak 0.17 and made

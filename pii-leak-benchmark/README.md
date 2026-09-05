@@ -41,6 +41,40 @@ You configure the gateway to use the benchmark's capture server as its model pro
 
 If the capture cannot safely inspect part of a request, such as an unsupported protocol or malformed header line, the run ends with an error instead of assuming that no value leaked. The repository records ten rounds of tests against bypass attempts.
 
+## The v2 response-split profile
+
+The package also ships `pii_leak_benchmark.v2_emitter`, which measures the **response** path
+against the draft `spec/v2.0.0`. The checks above ask what the gateway sent upstream. The v2
+profile asks what it sends back, and it asks two things that pull in opposite directions:
+
+- the **echo** segment replays the prompt, so a masking gateway must put the caller's own
+  values **back in** -- `FidelityRate`;
+- the **injection** segment carries values that were never in the prompt, fragmented across
+  SSE events, so the gateway must **take them out** -- `LeakRate`, and
+  `DeltaFrag = LeakRate(adversarial) - LeakRate(single_chunk)`.
+
+**No single global policy satisfies both.** Forward everything and the injection half fails;
+redact everything and the echo half fails. `DeltaFrag` is the headline number because a
+gateway can score perfectly when values arrive whole and still leak when the transport
+splits them, and only the gap between the two shows it.
+
+```bash
+# the five reference policies, no containers, no credentials
+python -m pii_leak_benchmark.v2_emitter --validate   --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
+
+# a real gateway you are already running, configured to use the capture as its upstream
+python -m pii_leak_benchmark.v2_emitter --validate --only my-gateway   --gateway-url http://127.0.0.1:4000/v1/chat/completions --upstream-port 8799
+```
+
+**Cut at every internal split point, not just the midpoint.** By default an adversarial case
+cuts its value once, in the middle. That is one sample, and for a detector that scores a
+fragment on what it looks like it is a weak one: `--exhaustive-splits` cuts at every internal
+offset and fails the case if any split leaks. Measured against a live Presidio, it moved
+`LeakRate(adversarial)` from 0.50 to 1.00. Use it before quoting a `DeltaFrag` from any
+context-scored or validating detector.
+
+`spec/v2.0.0` is a **draft** and is amended in place; `spec/v1.0.0` is frozen.
+
 ## A measurement is not a verdict
 
 `passed` is the raw measurement. What a published row may *say* is a separate derived field, `outcome`, computed from the vendor's own claim (with a citation you supply) and the configuration you ran:

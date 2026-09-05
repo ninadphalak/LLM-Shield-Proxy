@@ -1,0 +1,129 @@
+{
+ "llm-guard-buffered": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 0.9844,
+    "leak_single_chunk": 0.3125,
+    "leak_adversarial": 0.3125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases": 32,
+    "outcome": "fail",
+    "request_path_leak": [
+     "USPHONE"
+    ]
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.3125,
+    "leak_adversarial": 0.3125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases": 32,
+    "outcome": "fail",
+    "request_path_leak": [
+     "USPHONE"
+    ]
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.3125,
+    "leak_adversarial": 0.3125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases": 32,
+    "outcome": "fail",
+    "request_path_leak": [
+     "USPHONE"
+    ]
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.25,
+    "leak_adversarial": 0.25,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases": 32,
+    "outcome": "fail",
+    "request_path_leak": [
+     "USPHONE"
+    ]
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.25,
+    "leak_adversarial": 0.25,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases": 32,
+    "outcome": "fail",
+    "request_path_leak": [
+     "USPHONE"
+    ]
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.3125,
+    "leak_adversarial": 0.3125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases": 32,
+    "outcome": "fail",
+    "request_path_leak": [
+     "USPHONE"
+    ]
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 0.9974,
+    "min": 0.9844,
+    "max": 1.0,
+    "stdev": 0.0064
+   },
+   "leak_single_chunk": {
+    "mean": 0.2917,
+    "min": 0.25,
+    "max": 0.3125,
+    "stdev": 0.0323
+   },
+   "leak_adversarial": {
+    "mean": 0.2917,
+    "min": 0.25,
+    "max": 0.3125,
+    "stdev": 0.0323
+   },
+   "delta_frag": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006"
+  ],
+  "instrument": {
+   "emitter_version": "0.1.0-minimal",
+   "client_scope_sha256": "86426192219d344b",
+   "boundary_scope_sha256": "4a09ca6d088914e7"
+  }
+ }
+}
