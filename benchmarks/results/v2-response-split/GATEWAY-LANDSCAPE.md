@@ -43,6 +43,43 @@ FidelityRate of 0.00 is therefore an integration choice rather than a detector l
 the component that could restore the caller's values is already a dependency, already
 running, and is asked only to mask.
 
+### LLM Guard 0.3.10 -- ships both halves by name, on a whole-string API
+
+`protectai/llm-guard`, the OSS guardrail library. It is not a gateway; it is the component
+gateways embed, which makes its API the more interesting object. Verified by inspecting the
+wheel (`llm_guard-0.3.10-py3-none-any.whl`, 155 modules), not the documentation:
+
+```
+llm_guard/input_scanners/anonymize.py     class Anonymize(Scanner)
+                                          def scan(self, prompt: str)
+llm_guard/output_scanners/deanonymize.py  class Deanonymize(Scanner)
+                                          def scan(self, prompt: str, output: str)
+llm_guard/vault.py                        the mapping carried between them
+```
+
+**Both halves, named, with a vault between them, and four `MatchingStrategy` values
+(`EXACT`, `CASE_INSENSITIVE`, `FUZZY`, `COMBINED_EXACT_FUZZY`) for finding placeholders in
+the model's reply.** This is the strongest confirmation available that the primitive is not
+scarce.
+
+**And `Deanonymize.scan` takes the complete output string.** Across all 155 modules,
+`delta`, `buffer` and `incremental` do not occur; the two `stream` matches are a logging
+handler in `util.py` and a transformers recognizer; the `chunk` matches are `chunk_text()`
+and `chunk_text_by_sentences()`, which split *a string you already hold* to fit a model's
+input limit. That is the opposite of response chunking.
+
+**So the restore half of the only OSS both-halves implementation found has a whole-string
+signature.** That is this paper's thesis stated by a third party's type annotation, and it
+is the response-side counterpart of the NeMo `context_size: 0` finding: there, a vendor's
+validator forbids retention on a rewriting rail; here, a vendor's API never offered the
+caller a way to restore incrementally at all. Neither is a defect report -- neither project
+claims to be a streaming scanner -- and both are evidence for the same gap.
+
+**It is measurable and it should be measured.** It is pip-installable and self-hosted, so a
+row costs no credentials: wrap `Anonymize`/`Deanonymize` around the capture the way the
+`presidio-*` rows wrap the analyzer, and the reference `chunk-local` and `bounded-retention`
+policies become the two ways an integrator could drive it. That row is not in this paper.
+
 So the accurate statement for the paper is **not** "restoring is rare because it is hard".
 It is:
 
@@ -197,6 +234,44 @@ about Azure's detector rather than about anyone's streaming behaviour.
 No SDK or published API model was available locally to inspect, and no claim is made here
 either way. **Do not cite this line as evidence that Cloudflare lacks the capability**; it
 records only that this project did not check.
+
+---
+
+## Not checked -- named so the survey has a stated boundary
+
+**Nothing below has been inspected.** These are candidates, recorded so a reader can see
+what this survey did not reach rather than inferring the list was exhaustive. Following the
+Cloudflare precedent above: **do not cite any line here as evidence that a product does or
+does not have the capability.** It records only that this project did not check.
+
+They are grouped by why they might matter, and the first group is the one that would change
+a claim in the paper.
+
+**Claim to do both halves -- would test "the primitive is free, the wiring is scarce":**
+
+- **Skyflow LLM Privacy Vault** -- markets de-identify before the model and re-identify
+  after. If it does that on a stream it is the first product to.
+- **Private AI** -- self-hostable container, markets de-identify plus re-identify.
+- **Pangea Redact** -- format-preserving encryption is reversible by construction, and
+  Pangea is already one of the six guardrail namespaces in Portkey's shipped bundle.
+- **Tokenization proxies** (VGS, Basis Theory, Evervault) -- alias-out / reveal-back is the
+  same shape as the response split, arrived at from payments rather than from LLMs. Whether
+  any applies it to a token stream is exactly the open question.
+- **Prompt Security**, **Nightfall AI** -- both market redaction for LLM traffic; whether
+  either restores is unchecked.
+
+**AI gateways whose response-path behaviour is unknown here:**
+
+Envoy AI Gateway, Solo.io Gloo AI Gateway / kgateway, Apache APISIX (`ai-prompt-guard`),
+Cloudflare AI Gateway (see above), Vercel AI Gateway, Helicone, TrueFoundry, Bifrost,
+Arch / katanemo, OpenRouter.
+
+**Guardrail libraries and services rather than gateways** -- they would be detector rows
+like Cloud DLP, not gateway rows: Guardrails AI, Lakera Guard, Cisco AI Defense (Robust
+Intelligence), Aporia / Coralogix, Arthur, Fiddler, IBM Granite Guardian.
+
+**The cheapest next row by a wide margin is LLM Guard**, above: pip-installable, no
+credentials, and its `Anonymize`/`Deanonymize` pair is already verified to exist.
 
 ---
 
