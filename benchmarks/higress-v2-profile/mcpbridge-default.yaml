@@ -1,0 +1,18 @@
+apiVersion: networking.higress.io/v1
+kind: McpBridge
+metadata:
+  name: default
+  namespace: higress-system
+  creationTimestamp: "2000-01-01T00:00:00Z"
+  resourceVersion: "2"
+spec:
+  registries:
+  - domain: 127.0.0.1:8001
+    name: higress-console
+    port: 80
+    type: static
+  - domain: host.docker.internal
+    name: capture
+    port: 8799
+    type: dns
+status: {}

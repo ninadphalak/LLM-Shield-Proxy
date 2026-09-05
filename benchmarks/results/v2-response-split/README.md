@@ -2,6 +2,29 @@
 
 **Run:** 2026-09-04, project-run, single machine. **Not independently reproduced.**
 
+> ### Re-measured 2026-09-05 on a fixed instrument. Nothing here is stale.
+>
+> The leak inspector was fixed for the ninth and tenth time -- a `startswith("data: ")`
+> response parser, and ordered joins keyed by key name rather than by JSON path (see
+> §2.7) -- and `configured_upstream_boundary`, `sse_validity` and `capture.self_probe`
+> stopped being literals. **Every row in this directory was then re-run against live
+> containers and a real Google Cloud project.**
+>
+> **Not one response-path number moved.** Five reference policies, both Presidio rows, all
+> four Google rows, and all four gateway rows reproduce their previous values to the digit.
+> That is the evidence the fix closed blind spots rather than changing arithmetic, and it
+> is the only reason the older tables below can still be read next to the new ones.
+>
+> **What did change is the request path**, which no report could see while the check was a
+> hardcoded pass, and **the Higress row, which was withdrawn** because its plugin config was
+> not valid YAML and had never loaded. Both are covered below.
+>
+> `tests/conformance/test_results_are_comparable.py` now fails the build when a published
+> row's `inspection_scope` is not the one the current emitter generates, and when a sweep
+> file carries no `instrument` block. The existing corpus guards compare case definitions
+> and could not see an inspector change underneath them, which is exactly how a row scored
+> by a walk with six blind spots came to sit next to one scored without them.
+
 - Emitter: `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py` (committed)
 - Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate`
 - Schema: `spec/v2.0.0/http-profile.schema.json`
@@ -90,10 +113,12 @@ the seed alone. Cells are `mean [min-max]` over 12 seeds; seeds are recorded in
 All five are **deterministic across all 12 seeds** (stdev 0.00 on every metric).
 
 **These are five-axis numbers and they are not comparable case-for-case with anything
-published here before 2026-09-04.** Adding `request_site` took a run from 6 cases to 12, so
-the denominators moved: `bounded-retention` reads 0.25 rather than 0.33 because it leaks one
-case out of four adversarial cases instead of one out of three. **The same single case leaks.
-Nothing about any policy changed.**
+published here before 2026-09-04.** Adding `request_site` and then the `USPHONE` entity took
+a run from 6 cases to 32, so the denominators moved twice: `bounded-retention` reads **0.125**
+because it leaks two cases out of sixteen adversarial ones -- it was 0.33 (one of three) on the
+four-axis corpus and 0.25 (one of four) on the first five-axis one. **The same case leaks.
+Nothing about any policy changed.** (The 0.25/0.33 wording here survived the entity-axis
+change and was corrected 2026-09-05.)
 
 **A real detector** -- a live `mcr.microsoft.com/presidio-analyzer` container on
 `127.0.0.1:5002`, stock recognizer registry, queried over HTTP per delta:
@@ -135,7 +160,11 @@ applies its own return path. Nothing here is modelled. 6 seeds:
 |---|---|---|---|---|---|
 | `litellm-presidio` | **0.00** | 0.00 | 0.00 | 0.00 | **no-leak-profile-not-met** |
 
-Identical on all 6 seeds (stdev 0.00 everywhere). See `seed-sweep-litellm.json`.
+**Correction (2026-09-05):** this said "identical on all 6 seeds (stdev 0.00 everywhere)"
+and `seed-sweep-litellm.json` does not support it. Across the six seeds LiteLLM's leak rate
+is **mean 0.06, range 0.00-0.19, stdev 0.097** in both conditions; two of the six seeds leak
+and four do not. The single-seed `0.00` above is one draw, not the distribution. Only
+FidelityRate and DeltaFrag are actually constant at 0.00.
 
 **This is the `redact-all` quadrant, reached by a shipping product.** LiteLLM scores a
 perfect leak rate and returns none of the user's own data: 0 of 18 echo values recovered.
@@ -160,13 +189,61 @@ is only meaningful read next to FidelityRate and the LeakRates.
 
 **4 entities, 32 cases, 6 seeds each. These supersede every earlier table here.**
 
-| Gateway | Fidelity | Leak (1-chunk) | Leak (adv) | DeltaFrag |
-|---|---|---|---|---|
-| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.06 [0.00-0.19] | 0.06 [0.00-0.19] | 0.00 |
-| `llm-shield-proxy-1.6.0` response redaction **off** | **1.00** | **1.00** | **1.00** | 0.00 |
-| `llm-shield-proxy-1.6.0` response redaction **on** | **1.00** | **0.12** | **0.25** | 0.12 |
-| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 |
-| `nemo-guardrails-0.24.0` | 0.00 | 0.06 [0.00-0.17] | 0.06 [0.00-0.17] | 0.00 |
+| Gateway | Fidelity | Leak (1-chunk) | Leak (adv) | DeltaFrag | Req-path config | **Req-path egress** | Outcome |
+|---|---|---|---|---|---|---|---|
+| `litellm-presidio` (LiteLLM 1.99) | 0.00 | 0.06 [0.00-0.19] | 0.06 [0.00-0.19] | 0.00 | **configured** | **all 4** | `fail` |
+| `llm-shield-proxy-1.6.0` response redaction **off** | **1.00** | **1.00** | **1.00** | 0.00 | configured | none | `fail` |
+| `llm-shield-proxy-1.6.0` response redaction **on** | **1.00** | **0.12** | **0.25** | 0.12 | configured | none | `fail` |
+| `portkey-gateway-oss` | **1.00** | **1.00** | **1.00** | 0.00 | not configured | all 4 | `fail` |
+| `nemo-guardrails-0.24.0` | 0.00 | 0.06 [0.00-0.17] | 0.06 [0.00-0.17] | 0.00 | not configured | all 4 | `fail` |
+
+### The request-path columns are new, and only one of the three positives is a finding
+
+**Added 2026-09-05.** `checks.configured_upstream_boundary` used to be a hardcoded pass, so
+the request path was reported clean for every gateway ever measured and `outcome` was
+derived from the response path alone. It is now measured: every body the capture recorded,
+across all 32 cases, walked and matched the same way the client-side inspector works, with
+the provenance the schema demands (`channel`, `scope`, `match`) rather than a bare entity
+name. All three positives are **`match: literal`, `scope: per-request`** -- the raw value,
+verbatim, inside one body the gateway sent. Not a normalized coincidence.
+
+**Read the two request-path columns together, and read the config one first.**
+`redaction_claim.request_path_redaction_configured` exists because the egress column alone
+would repeat this file's own recorded mistake -- measuring the config in this repository
+and publishing it as a property of a product:
+
+- **Portkey and NeMo were configured with response-side guardrails only** (Portkey with an
+  `output_guardrails` header, NeMo with `detect sensitive data on output`). Neither was ever
+  asked to mask the request. Their egress is a consequence of how this harness configured
+  them, **not a coverage defect**, and must not be reported as one. Both still fail on the
+  response path, which is what their rows are about.
+- **LiteLLM was configured to mask the request** -- `mode: pre_call` in
+  `../../litellm-v2-profile/config.docker.yaml` -- and egressed all four anyway. That one is
+  a finding about the product.
+
+`outcome` is `fail` for all three, because a measured egress of a protected value is what
+v1 reserves `fail` for regardless of intent. The attribution field is how a reader tells the
+three apart, and it is why the field had to exist before this table could be published.
+
+**LiteLLM's is the finding, and it is site-specific.** Its Presidio guardrail masks
+`messages[*].content` correctly. Measured per site, same run, same fixture:
+
+| `request_site` | reached the upstream |
+|---|---|
+| `chat-content` | masked (`<EMAIL_ADDRESS_1>` etc.) |
+| `system-content` | masked |
+| `unrecognised-key` | **EMAIL, SSN, CARDPAN, USPHONE verbatim** |
+| `tool-description` | **EMAIL, SSN, CARDPAN, USPHONE verbatim** |
+
+So the finding is scoped: **the guardrail covers the chat message shapes it knows by name,
+and the same text in a tool description or an unrecognised top-level key goes upstream
+untouched.** That is exactly the blindness the `request_site` axis was added to expose, and
+for four months nothing could report it because the check that would have was a constant.
+
+**And it is what finally separates the two identical rows.** `llm-shield-proxy-1.6.0`
+response-off and `portkey-gateway-oss` are still identical on all four response metrics
+(1.00 / 1.00 / 1.00 / 0.00). They are no longer identical in the report: Shield masks the
+request path and Portkey does not. Until now that distinction lived only in prose here.
 
 **Two of these rows were wrong until the configuration was fixed, and both errors were
 mine rather than the gateway's.** Adding the `USPHONE` entity made NeMo leak 0.17 and made
@@ -175,9 +252,21 @@ the DLP wrapper asked for three infoTypes and not the fourth. **A row that measu
 harness operator's config file is not a result about the product**, so both were corrected
 and re-run before publishing. NeMo went 0.17 to 0.06 on the fix.
 
-All four are deterministic across 6 seeds (stdev 0.00 on every metric). See
-`seed-sweep-litellm.json`, `seed-sweep-shield-152.json`, `seed-sweep-portkey.json`,
-`seed-sweep-nemo.json`.
+**Corrected 2026-09-05. Two of these four are NOT deterministic, and the intervals in the
+table above are the reason the point estimates must not be quoted alone.** Recomputed from
+the committed sweeps:
+
+| Row | leak, 6 seeds | stdev |
+|---|---|---:|
+| `portkey-gateway-oss` | 1.00 on every seed | 0.000 |
+| `llm-shield-proxy-1.6.0` off / on | 1.00 / 0.125 on every seed | 0.000 |
+| `litellm-presidio` | mean 0.06, range 0.00-0.19 | **0.097** |
+| `nemo-guardrails-0.24.0` | mean 0.06, range 0.00-0.17 | **0.086** |
+
+See `seed-sweep-litellm.json`, `seed-sweep-shield-160-off.json`,
+`seed-sweep-shield-160-on.json`, `seed-sweep-portkey.json`, `seed-sweep-nemo.json`.
+(`seed-sweep-shield-152.json` was cited here and has never existed; the 1.5.2 sweep was
+superseded by the two 1.6.0 files before it was committed.)
 
 **Read the last two columns before the first four.** "Echo observable" is the denominator
 behind FidelityRate: a gateway that never forwarded the field had nothing to restore, so
@@ -411,9 +500,12 @@ detector never fires however much buffer is held. Per-axis breakdown from
 fragmentation are independent defects requiring independent mitigations**, which is the
 argument for keeping them as separate corpus axes rather than folding them together.
 
-**The real detector has the same blind spot, on every seed.** `presidio-retention` sits at
-exactly 0.3333 with stdev 0.00 across all 12 seeds, leaking the identical
-`EMAIL / percent / adversarial` case. Presidio does not percent-decode before analysing either, so
+**The real detector has the same blind spot.** `presidio-retention` leaks the
+`EMAIL / percent / adversarial` case on every seed. **Corrected 2026-09-05:** this said
+"exactly 0.3333 with stdev 0.00 across all 12 seeds", which was a three-entity number left
+behind when the corpus went to four. `seed-sweep.json` gives mean **0.1615**, range
+0.125-0.375 -- it is the *identical* case every time, and the rate varies only because
+Presidio occasionally catches a second one. Presidio does not percent-decode before analysing either, so
 this is a property of the integration pattern rather than of the model detector, and the
 cross-check is the reason to trust the reference-policy row.
 
@@ -445,13 +537,91 @@ and so had no socket to reuse. No number in this file predates the fix.
 
 ### 2.5 The v2 corpus block cannot be satisfied by a partial run
 
-`corpus.coverage.axes` has `minItems: 4` and the enum is exactly
-`entity, encoding, fragmentation, carrier`. A single-axis sweep cannot produce a valid v2
-report. That is the schema working as designed, and it is why this emitter carries a real
-pairwise covering array rather than a fragmentation-only sweep.
+`corpus.coverage.axes` requires all five axes --
+`entity, encoding, fragmentation, carrier, request_site`. A single-axis sweep cannot
+produce a valid v2 report. That is the schema working as designed, and it is why this
+emitter carries a real pairwise covering array rather than a fragmentation-only sweep.
 
-Generated array: **6 cases, 30 of 30 pairs covered, `proof_complete: true`**, recomputed
-from the emitted cases rather than asserted.
+Generated array: **32 cases, 76 of 76 pairs covered, `proof_complete: true`**, recomputed
+from the emitted cases rather than asserted. (This section said "6 cases, 30 of 30" until
+2026-09-05 -- a four-axis, three-entity number that outlived two corpus extensions.)
+
+Verified independently of the report: the array is **twinned**, so DeltaFrag is a
+within-case difference. 16 cases in each fragmentation condition, identical populations on
+the other four axes, no duplicates. A greedy pairwise array alone gave 8 against 4 and
+DeltaFrag was then attributing a composition difference to fragmentation.
+
+---
+
+### 2.7 The instrument had two more false passes, and both flattered the target
+
+Found 2026-09-05 by an adversarial review told to assume the instrument was wrong.
+Ninth and tenth in this series; both demonstrated end to end before being fixed.
+
+**(a) The response parser was a `startswith("data: ")` test.** Every other byte of the
+response was discarded. `data:` *without* the space is legal SSE -- WHATWG HTML 9.2.6 says
+"if the value starts with a U+0020 SPACE, remove it", so the space is optional, not
+required. A multi-line `data` payload is one event joined with U+000A, not several. And a
+gateway may answer a 200 that is not a stream at all. Measured: a relay that redacted
+nothing and re-emitted with `data:` scored **LeakRate 0.00/0.00**; the identical relay
+with `data: ` scored 1.00/1.00. Replaced with a real parser (`_parse_sse`). Everything it
+does not dispatch -- comments, unknown fields, an unterminated trailing event -- is still
+scanned, because the spec tells a *client* to ignore those, not an *inspector*.
+
+**(b) The ordered joins were keyed by key NAME.** `delta.content` had a stream,
+"everything else" had another, and any key called `content` or `text`, at any depth, was
+skipped from the second to keep it out of the first. So a value split across two events
+under `delta.raw.text` was in neither ordered stream -- and the fallback join interleaves
+object keys between the halves, so it did not reassemble there either. **The same policy
+was run twice, changing nothing but the JSON key its text came out under:**
+
+| policy | envelope | Fidelity | Leak (1-chunk) | Leak (adv) | DeltaFrag | Outcome |
+|---|---|---:|---:|---:|---:|---|
+| `chunk-local` as published | `delta.content` | 1.00 | 0.125 | 1.00 | **0.875** | `fail` |
+| `chunk-local` as published | `delta.raw.text` | 1.00 | 0.125 | **0.00** | **-0.125** | `fail` |
+| `chunk-local` + percent-decoding | `delta.content` | 1.00 | 0.00 | 1.00 | **1.00** | `fail` |
+| `chunk-local` + percent-decoding | `delta.raw.text` | 1.00 | 0.00 | **0.00** | **0.00** | **`pass`** |
+
+The last two rows are the full false pass, and the fourth row is why the third exists:
+`chunk-local` as published leaks the percent-encoded case even unfragmented, so its
+`leak_single` of 0.125 keeps the outcome at `fail` no matter what the envelope hides. Give
+it a detector that also percent-decodes -- still chunk-local, still holding no state across
+deltas, which is exactly the defect this profile exists to measure -- and the nested
+envelope takes it to a clean `pass`. `delivery_confirmed: true` and
+`detector_blind: []` in every row; the needle arrived in two consecutive events and
+reassembled the way any client reassembles a field.
+
+**The corpus escaped only because its own sibling carrier happens to be called
+`record_field`.** Channels are now keyed by JSON path, so two fragments join if and only if
+they arrived the same way, and no key name is special.
+
+**Also closed in the same pass**, all of them claims the code did not implement:
+
+- `configured_upstream_boundary` was a **literal**. It never opened `upstream_bodies`. A
+  relay forwarding all four protected values verbatim to the capture was certified
+  `passed: true, leaked_entity_types: []` under sixty words of recursive-decoding prose.
+  It now inspects every captured body across every case, and its scope sentence is
+  generated from a capability registry with a test per clause -- the same mechanism the
+  client-side scope already had, applied to the half that had been left behind.
+- `sse_validity` was a literal: `content_type_valid: true, status_codes: [200],
+  invalid_events: 0, errors: []`, emitted by a run whose gateway answered
+  `application/json` with no events.
+- `events_observed_max` was a **minimum**: both event fields were read off the leaking
+  case with the *fewest* events. `chunk-local` runs 16 cases at 4 events and 16 at 5, and
+  the report said max 4.
+- `fragmentation_strategy` was the constant `"exhaustive-2-part"` while the code cut once
+  at the value midpoint and `limitations.method_limits` in the same report said "not
+  every split point". The label is now derived from the splits actually run, and
+  `--exhaustive-splits` makes it true (see §3).
+- `limitations.method_limits` said "Three entity types" for as long as there have been
+  four. It is derived from `AXES` now.
+
+**Still fabricated, and not fixed here:** `capture.self_probe` reports
+`performed: true, recorded: true, round_trip_ms: 0.0` and no self-probe is performed;
+`target.base_url`, `target.model`, `capture.port` and `capture.authentication_required`
+are hardcoded to the in-process defaults in every external-gateway row, and
+`redaction_claim.claim_citation` cites this emitter's own policy docstrings as the source
+of a third-party vendor's redaction claim.
 
 ---
 
@@ -478,6 +648,73 @@ jsonschema.Draft202012Validator(schema).validate(report)
 print('valid')
 "
 ```
+
+### 3.1 The midpoint split is one sample. Take all of them.
+
+Default `fragmentation: adversarial` cuts the value once, at its midpoint. That is one
+draw from the thing being measured, and whether a split defeats a detector depends on what
+the two halves *look like*, not on where the middle is -- which is how a fragment can match
+for an unrelated reason, suppress the leak, and score the fragmented condition as safe
+(the negative DeltaFrag in §1).
+
+**Sampling is the wrong instinct here, because the space is tiny.** A value of N characters
+has exactly N−1 internal two-part splits: about 20 for an email, 11 for an SSN. Enumerating
+it is both cheaper and strictly stronger than drawing from it, which is the bounded
+exhaustive testing tradition rather than fuzzing. `benchmarks/presidio_partition_probe.py`
+already applies this oracle to a stock Presidio (47 split points, none of which protect the
+value); `--exhaustive-splits` brings it to the scored corpus:
+
+```bash
+python -m pii_leak_benchmark.v2_emitter --only chunk-local --exhaustive-splits \
+  --out /tmp/exhaustive
+```
+
+A case then leaks if **any** of its split points leaks, and the report says which oracle
+ran: `fragmentation_strategy` is `across-sse-events` for the midpoint and
+`exhaustive-2-part` for the full enumeration, with the split count in
+`limitations.method_limits`.
+
+**Measured on every row it could be, seed `a1b2c3d4e5f60001`, 252 splits over 16
+adversarial cases:**
+
+| Policy | midpoint adv / DeltaFrag | exhaustive adv / DeltaFrag |
+|---|---|---|
+| `chunk-local` | 1.00 / 0.875 | 1.00 / 0.875 |
+| `bounded-retention` | 0.125 / 0.00 | 0.125 / 0.00 |
+| `retention-plus-decoding` | 0.00 / 0.00 | 0.00 / 0.00 |
+| **`presidio-chunk-local`** | 0.50 / 0.375 | **1.00 / 0.875** |
+| `presidio-retention` | 0.125 / 0.00 | 0.125 / 0.00 |
+| `gcp-dlp-chunk-local` | 1.00 / 0.50 | 1.00 / 0.50 |
+| `gcp-dlp-retention` | 0.50 / 0.00 | 0.50 / 0.00 |
+| `gcp-model-armor-chunk-local` | 1.00 / 0.25 | 1.00 / 0.25 |
+| `gcp-model-armor-retention` | 0.75 / 0.00 | 0.75 / 0.00 |
+
+**One row moves, and it is the one that should.** `presidio-chunk-local` nearly doubles:
+LeakRate(adversarial) 0.50 to **1.00**, DeltaFrag 0.375 to **0.875**. Every adversarial case
+leaks at *some* split point; the midpoint happened to land on cuts Presidio still caught in
+half of them. **The midpoint was under-reporting a real detector's fragmentation failure by
+half**, and that number was published.
+
+**Everything else is unchanged, which is the more valuable half of the result.** The three
+modelled policies are deterministic regexes with no per-fragment behaviour, so the midpoint
+is a sufficient statistic for them. And the retention rows -- `bounded-retention`,
+`presidio-retention`, `gcp-dlp-retention` -- hold their DeltaFrag at exactly 0.00 across
+**every internal split point of every value**, not merely at the one the midpoint picked.
+Since the same oracle demonstrably moves `presidio-chunk-local`, that is a real result and
+not an insensitive instrument: **bounded retention is not merely surviving the sample, it is
+surviving the enumeration.**
+
+**Practical rule: do not quote a DeltaFrag from a context-scored or validating detector
+without `--exhaustive-splits`.** Presidio, Cloud DLP and Model Armor all score a fragment on
+what it looks like, so where you cut changes the answer. A regex does not.
+
+**What this axis still does not do:** it fragments the VALUE across SSE events. It does not
+fragment the SSE framing itself -- a `data:` line cut across TCP segments, a `\r\n` split
+between chunks. That is not an oversight and it is not measurable from here: the WHATWG
+byte-stream parser is defined to reassemble across arbitrary byte boundaries, so a
+conformant gateway is immune to it by construction, and this harness does not control where
+the gateway's own client chunks its reads. Value-level fragmentation across events is an
+application-protocol property, and it is the one no spec makes safe.
 
 **Adversarial checks worth running** -- each targets a way this result could be hollow:
 

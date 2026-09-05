@@ -99,10 +99,24 @@ The plugin ships **in the OSS image** and needs no external registry:
 `higress/all-in-one:latest`. Both the gateway (container port 8080) and the console
 (container port 8001) start.
 
-**Not measured**: attaching a WASM plugin to a route requires the console API, which
-answers `AuthException: Login required` and whose initialisation endpoint was not found
-from outside the image. This is an incomplete configuration on my side, not a limitation
-of Higress, and it is the most likely candidate for a fifth measured row.
+**Not measured**, and it stayed not-measured after an attempt that briefly published a row.
+
+The console API answers `AuthException: Login required` from outside the image, so the
+three resources were written into the container's file-backed config store directly. A row
+was published on 2026-09-04 (`higress-ai-data-masking.json`, FidelityRate 1.00, LeakRate
+1.00 / 1.00, "does nothing at all"). **It was withdrawn on 2026-09-05: the plugin had never
+loaded.** The `WasmPlugin` config used YAML double-quoted scalars for its regexes, and a
+double-quoted YAML scalar processes backslash escapes, so `\.` and `\d` made the document
+unparseable. The row measured a config file that never took effect and reported it as a
+property of the product.
+
+With a config that parses (single-quoted, committed at
+`../../higress-v2-profile/ai-data-masking.yaml`) the plugin loads, Higress answers HTTP 500
+and forwards an empty body upstream, and all 32 cases score `inconclusive`. Nothing is
+measurable in either direction yet. See `../../higress-v2-profile/STATUS.md`.
+
+This is still the most likely candidate for a fifth measured row, and the reason it is not
+one is still an incomplete configuration on my side rather than a limitation of Higress.
 
 ---
 

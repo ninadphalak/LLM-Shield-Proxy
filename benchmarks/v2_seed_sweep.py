@@ -54,6 +54,13 @@ def sweep(
                 "inconclusive": summary["inconclusive"],
                 "echo_observable": summary["echo_observable"],
                 "cases": summary["cases"],
+                # The four rates do not say whether the run PASSED. A request-path leak
+                # produces `fail` with all four response rates at 0.00, which is what
+                # LiteLLM does, so a sweep that records only the rates hides it.
+                "outcome": _report["outcome"],
+                "request_path_leak": _report["checks"]["configured_upstream_boundary"][
+                    "leaked_entity_types"
+                ],
             })
             if summary["inconclusive"] >= summary["cases"]:
                 # Every case refused. The four rates are all 0.00, which reads as a
@@ -82,8 +89,34 @@ def sweep(
                 for m in METRICS
             },
             "seeds": seeds,
+            # WHICH INSTRUMENT PRODUCED THESE NUMBERS. The README calls the sweep files
+            # "the numbers to cite", and until now they carried no way to tell that the
+            # leak inspector had changed underneath them -- the single-run artefacts have
+            # `inspection_scope` and are guarded on it, the sweeps had nothing. Both
+            # scopes are generated from capability registries, so these digests change
+            # exactly when the inspector's declared reach does.
+            "instrument": _instrument(),
         }
     return out
+
+
+def _instrument() -> dict[str, str]:
+    import hashlib
+
+    from pii_leak_benchmark.v2_emitter import (
+        BOUNDARY_INSPECTION_SCOPE,
+        CLIENT_INSPECTION_SCOPE,
+        EMITTER_VERSION,
+    )
+
+    def digest(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+    return {
+        "emitter_version": EMITTER_VERSION,
+        "client_scope_sha256": digest(CLIENT_INSPECTION_SCOPE),
+        "boundary_scope_sha256": digest(BOUNDARY_INSPECTION_SCOPE),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
