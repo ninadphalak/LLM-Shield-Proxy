@@ -237,6 +237,80 @@ records only that this project did not check.
 
 ---
 
+## Who has which half, from eight published SDKs
+
+Inspected 2026-09-05 by downloading each wheel and reading its API surface, the same method
+used for `botocore` and `azure-ai-textanalytics` above. **No product was run and no account
+was created**, so this says what each vendor's client library exposes, not how well it works.
+
+| SDK | Restore half? | Symbol | Stream-aware validation? |
+|---|---|---|---|
+| `privateai-client` 4.2.1 | **yes** | `reidentify_text` | no |
+| `skyflow` 2.1.3 | **yes** | `reidentify_string`, `detokenize` | no -- `stream` is its HTTP client only |
+| `pangea-sdk` 6.13.0 | **yes** | `unredact(redacted_data, fpe_context)` | no -- `log_stream` is the audit service |
+| `basistheory` 3.0.0 | **yes** | `detokenize` | no |
+| `llm-guard` 0.3.10 | **yes** | `Deanonymize.scan(prompt, output)` | no |
+| `guardrails-ai` 0.10.2 | no | -- | **yes -- `validate_stream`, 39 stream functions** |
+| `nightfall` 1.4.1 | no symbol found | -- | no |
+| `evervault` 5.1.3 | n/a -- `encrypt`/`decrypt`, not PII redaction | -- | no |
+
+### The result, and it is better than "the primitive is free"
+
+**Five of eight ship a restore half. Every one of them takes the whole string.** Private
+AI's `reidentify_text` takes a request object, Skyflow's `reidentify_string` takes
+`text: str`, Pangea's `unredact` takes `redacted_data` plus an FPE context, LLM Guard's
+`Deanonymize.scan` takes `prompt` and `output`. Not one of them offers the caller a way to
+restore incrementally, and in three of the five the word `stream` appears only in the HTTP
+client or an audit-log API.
+
+**And the one library that does understand streams has no restore half.** Guardrails AI
+0.10.2 ships `Validator.validate_stream`, and it is not a token-by-token scan -- it
+**accumulates**:
+
+```python
+accumulated_chunks.append(chunk)
+accumulated_text = "".join(accumulated_chunks)
+split_contents = self._chunking_function(accumulated_text)
+# "If the LLM chunk is smaller than the validator's chunking strategy, it will be
+#  accumulated until it reaches the desired size. In the meantime, the validator
+#  will return None."
+```
+
+That is retention across chunk boundaries, shipping, in OSS, from a project that is not
+this one. **It is a counter-example to "nobody retains" and it strengthens the argument
+rather than weakening it**: the fix is known and implementable, and the projects that
+implement it are not the projects that restore.
+
+**What bounds the retention is the interesting difference.** Guardrails AI's default
+`_chunking_function` is `split_sentence_word_tokenizers_jl_separator` -- it holds text to
+the next **sentence** boundary. So three shipping approaches bound the same buffer three
+ways:
+
+| | what is retained | bounded by |
+|---|---|---|
+| Guardrails AI | text to the next sentence boundary | the data -- unbounded in principle for text with no terminator |
+| LLM-Shield-Proxy | `L = N-1` characters | the longest placeholder, a compile-time property |
+| Hyperscan streaming mode | automaton state | the pattern database, a compile-time property |
+
+**So the accurate landscape claim for the paper is:**
+
+> Of eight published SDKs, five restore and one accumulates across chunk boundaries, and
+> they are not the same one. The two halves of a correct streaming gateway are both free
+> and both open source, and no inspected library ships them together.
+
+That is narrower, verifiable, and considerably more useful than a claim about scarcity.
+
+### What this costs to turn into rows
+
+- **LLM Guard and Guardrails AI need nothing.** Both are pip-installable and self-hosted.
+  They are the two rows that should exist next, and together they are the whole argument:
+  one restores on a whole string, the other accumulates but has nothing to restore.
+- **Private AI** ships a container; a row needs a licence key.
+- **Skyflow, Pangea, Basis Theory, Nightfall** are SaaS. A row needs an account each, and
+  each would measure a vendor's hosted detector rather than a streaming path.
+
+---
+
 ## Not checked -- named so the survey has a stated boundary
 
 **Nothing below has been inspected.** These are candidates, recorded so a reader can see
