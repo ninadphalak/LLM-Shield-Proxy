@@ -2,7 +2,10 @@
 
 **Run:** 2026-09-04, project-run, single machine. **Not independently reproduced.**
 
-> ### Re-measured 2026-09-05 on a fixed instrument. Nothing here is stale.
+> ### Re-measured 2026-09-05 on a fixed instrument.
+>
+> *(Superseded in part -- see the round 2 box below. This directory now holds thirteen rows
+> from the current instrument and twenty-four that predate it, and the build says so.)*
 >
 > The leak inspector was fixed for the ninth and tenth time -- a `startswith("data: ")`
 > response parser, and ordered joins keyed by key name rather than by JSON path (see
@@ -10,10 +13,22 @@
 > stopped being literals. **Every row in this directory was then re-run against live
 > containers and a real Google Cloud project.**
 >
-> **Not one response-path number moved.** Five reference policies, both Presidio rows, all
-> four Google rows, and all four gateway rows reproduce their previous values to the digit.
+> **Not one response-path RATE moved.** Five reference policies, both Presidio rows, all
+> four Google rows, and all four gateway rows reproduce their previous rates to the digit.
 > That is the evidence the fix closed blind spots rather than changing arithmetic, and it
 > is the only reason the older tables below can still be read next to the new ones.
+>
+> **Correction, 2026-09-05, from the round 2 review of these repairs.** This paragraph
+> originally said "not one response-path NUMBER moved", and that was false as written.
+> Recomputed mechanically over every leaf of every artefact:
+> `checks.fragmentation_safety.events_observed_max` moved in **15 of 16 rows** (the
+> intended `worst`-to-`max` fix, but it is a published number and it is the `events`
+> column of the tables below); `portkey-gateway-oss`'s
+> `checks.response_fidelity.passed` flipped **false to true** and its denominator went
+> 128 to 96, undocumented; and `nemo-guardrails`'s `checks.sse_validity.passed` went
+> **true to false**. What is true, and is the claim worth making, is that
+> `metrics.leak_rate.*`, `metrics.fidelity_rate` and `metrics.delta_frag` are byte-identical
+> in all 16 rows.
 >
 > **What did change is the request path**, which no report could see while the check was a
 > hardcoded pass, and **the Higress row, which was withdrawn** because its plugin config was
@@ -29,6 +44,42 @@
 > file carries no `instrument` block. The existing corpus guards compare case definitions
 > and could not see an inspector change underneath them, which is exactly how a row scored
 > by a walk with six blind spots came to sit next to one scored without them.
+
+> ### Round 2, 2026-09-05: the repairs above were reviewed, and seven more defects found
+>
+> **Three of the seven were introduced BY a repair**, and one by the repair for the closest
+> neighbouring defect: `_fidelity_check` was narrowed to the measurable cases to fix a
+> denominator, and the narrowing made `response_fidelity.passed` vacuously **true** on
+> zero of them. Full list, demonstrations and directions:
+> `.llm/research/ieee-software/` review notes; regression tests in
+> `tests/conformance/test_v2_round_two_repairs.py`.
+>
+> **13 of 37 artefacts have been re-run on the twice-fixed instrument and NOTHING MOVED**
+> -- not a rate, not an outcome, not a check verdict. The seven single-run rows and the
+> five `exhaustive-splits/` rows I could reach at Tier 0 and Tier 1 differ from what was
+> published only by *added* fields: `instrument`, `data_events_observed`, the regenerated
+> `inspection_scope`, and `leak_evidence` gaining a recovery tier. `passthrough` still
+> leaks 1.00/1.00, `retention-plus-decoding` is still the only `pass`, and
+> `presidio-chunk-local` under `--exhaustive-splits` is still 1.00 / DeltaFrag 0.875.
+>
+> **`seed-sweep.json` -- the file this README calls "the numbers to cite" -- was re-run
+> in full: 7 policies x 12 seeds = 84 corpus runs, 2,688 cases. Mean, min, max and stdev
+> of all four metrics: 0 of 112 summary statistics moved.** That is the strongest control
+> available without a container or a billed project.
+>
+> **Worth reading in the re-run rows**: `leak_evidence[].observed` used to be the constant
+> `normalized-match` for every leak. It now reports HOW the value was recovered, and in
+> every re-run row every leak is `literal`, `same-path-join` or `single-field`. **Not one
+> published leak rests on a cross-field concatenation** -- which is the tier a coincidence
+> can reach, and the tier the round 7 IPv4 false positive lived in.
+>
+> **24 artefacts are STALE and `test_every_artefact_records_the_instrument_that_produced_it`
+> is RED because of them**, correctly. They are the four Google rows, the six external
+> gateway rows (LiteLLM, Portkey, NeMo, both Shield configs, plus LLM Guard ×2 and
+> Guardrails), the four Google `exhaustive-splits/` rows, and the eight per-target
+> `seed-sweep-<target>.json` files that cover them. Each needs a container, a billed cloud
+> project or a separate 3.12 venv. **Do not read them beside the thirteen fresh rows, and
+> do not weaken the guard to make the build green.** Re-run them or move them out.
 
 - Emitter: `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py` (committed)
 - Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate`

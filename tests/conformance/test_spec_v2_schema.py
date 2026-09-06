@@ -159,6 +159,29 @@ def _v2_exemplar():
         "source": "config/policies.yaml, region profile 'us'",
     }
     document["cases_digest"] = "b" * 64
+    # WHICH INSTRUMENT PRODUCED THE ROW, required since the 2026-09-05 amendment. The two
+    # scope digests move when the inspector's declared REACH changes; `inspector_sha256`
+    # moves when its BEHAVIOUR does, which is what a staleness guard actually needs -- a
+    # published row's `response_fidelity.passed` was flipped by a one-word change that
+    # left both scope strings identical.
+    document["instrument"] = {
+        "emitter_version": "0.1.0-minimal",
+        "client_scope_sha256": "0" * 16,
+        "boundary_scope_sha256": "1" * 16,
+        "inspector_sha256": "2" * 16,
+    }
+    # Both denominators. `iterations_requested` counts the echo assertions the run set
+    # out to make; `iterations_completed` counts the measurable ones. They were the same
+    # number by construction and could not report an incomplete run.
+    document["checks"]["response_fidelity"]["iterations_requested"] = 2000
+    document["checks"]["response_fidelity"]["iterations_completed"] = 2000
+    document["checks"]["response_fidelity"]["iterations_matching"] = 2000
+    # Data-bearing events, i.e. not counting the [DONE] sentinel. `events_observed >= 2`
+    # was satisfied by one chunk plus [DONE], so a fully buffered gateway passed the
+    # fragmentation check.
+    document["checks"]["fragmentation_safety"]["data_events_observed"] = (
+        document["checks"]["fragmentation_safety"]["events_observed"] - 1
+    )
     return document
 
 

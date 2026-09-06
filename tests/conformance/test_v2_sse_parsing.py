@@ -47,6 +47,10 @@ from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     injection_split_points,
 )
 
+# `_fragmentation_check` derives `one_character_events_requested` from the pieces the
+# harness would actually emit, so it needs the fixture the case was drawn from.
+_SEGMENTS = build_segments("a1b2c3d4e5f60001")
+
 NEEDLE = "nuwpcbba@example.com"
 
 
@@ -245,7 +249,7 @@ def test_events_observed_max_is_a_maximum() -> None:
     `events_observed_max: 4`.
     """
     results = [_result(events_observed=4), _result(events_observed=5)]
-    check = _fragmentation_check(results[0], results)
+    check = _fragmentation_check(results[0], results, _SEGMENTS)
     assert check["events_observed"] == 4
     assert check["events_observed_max"] == 5
 
@@ -400,17 +404,54 @@ def test_the_derivation_assertions_are_checked_not_asserted() -> None:
     """`derivation_recomputed` and `sidecar_case_count_matches` were hardcoded `True`.
 
     The schema pins both `const: true` and its descriptions say what the harness is
-    promising by setting them -- that DeltaFrag was recomputed from the two rates beside it
-    and the run refused to emit on a mismatch. A field that says "I checked" and is a
-    literal is worth less than no field, because a reader spends trust on it.
+    promising by setting them. A field that says "I checked" and is a literal is worth
+    less than no field, because a reader spends trust on it.
+
+    The FIRST repair was not enough, and this test passed against it. It took the already
+    computed `leak_single`, `leak_adv` and `delta_frag` as arguments and recomputed
+    `leak_adv - leak_single` -- the same expression the caller had just evaluated, from
+    the same two variables -- and compared `cases_scored` (which was `len(results)`) with
+    `len(case_defs)`, where `case_defs` is a comprehension over `results`. That second
+    comparison is identically true for every possible input, so the field it backed was
+    still a literal in effect. Both halves now rebuild from `results`.
     """
-    from pii_leak_benchmark.v2_emitter import _assert_derivations
+    from pii_leak_benchmark.v2_emitter import _assert_derivations, build_report
 
-    cases = [{"entity": "EMAIL"}, {"entity": "SSN"}]
-    assert _assert_derivations(0.125, 1.0, 0.875, 2, cases) is True
+    results = [
+        _result(case={**_result().case, "fragmentation": "single_chunk"}, injection_leaked=False,
+                echo_recovered={"EMAIL": True}),
+        _result(case={**_result().case, "fragmentation": "adversarial"}, injection_leaked=True,
+                echo_recovered={"EMAIL": True}),
+    ]
+    separation = {"passed": True, "echo_entity_types": [], "injection_entity_types": [],
+                  "values_disjoint": True, "normalized_forms_disjoint": True,
+                  "injection_absent_from_request": True, "shared_substring_max": 0,
+                  "shortest_needle_length": 9}
+    report = build_report(build_segments("a1b2c3d4e5f60001"), results, separation, "seed")
+    assert report["metrics"]["derivation_recomputed"] is True
+    assert report["metrics"]["sidecar_case_count_matches"] is True
 
-    with pytest.raises(RuntimeError, match="does not follow from the rates"):
-        _assert_derivations(0.125, 1.0, 0.5, 2, cases)
+    # EVERY published metric is now rebuilt from the results, not just delta_frag.
+    for path, wrong in [
+        ("leak_rate.adversarial", 0.0),
+        ("leak_rate.single_chunk", 1.0),
+        ("leak_rate.overall", 0.9),
+        ("fidelity_rate", 0.0),
+        ("delta_frag", 0.5),
+        ("cases_scored", 3),
+        ("cases_applicable", 3),
+        ("cases_inconclusive", 7),
+        ("cases_echo_observable", 0),
+    ]:
+        tampered = json.loads(json.dumps(report["metrics"]))
+        node = tampered
+        keys = path.split(".")
+        for key in keys[:-1]:
+            node = node[key]
+        node[keys[-1]] = wrong
+        with pytest.raises(RuntimeError, match="does not follow from"):
+            _assert_derivations(results, tampered, report["cases_digest"])
 
-    with pytest.raises(RuntimeError, match="case definitions behind cases_digest"):
-        _assert_derivations(0.125, 1.0, 0.875, 3, cases)
+    # And the digest half can fail, which it could not before.
+    with pytest.raises(RuntimeError, match="cases_digest does not match"):
+        _assert_derivations(results, report["metrics"], "0" * 64)

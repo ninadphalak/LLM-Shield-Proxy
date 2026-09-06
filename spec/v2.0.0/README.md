@@ -1,12 +1,38 @@
 # Streaming Privacy Gateway Conformance Specification v2.0.0
 
-**Status: draft, amended twice since first publication.** The schema is published and
+**Status: draft, amended three times since first publication.** The schema is published and
 tested, and `pii_leak_benchmark.v2_emitter` now emits it.
 
 | date | change |
 |---|---|
 | 2026-09-04 | `request_site` axis and the `echo_observable` denominators (§3a) |
 | 2026-09-05 | the request path stopped being a rubber stamp (below) |
+| 2026-09-05 | `instrument`, `data_events_observed`, `iterations_requested` (below) |
+
+**The second 2026-09-05 amendment: three fields that came out of reviewing the first one.**
+An adversarial review of the repairs above found seven further defects in the flattering
+direction, three of them introduced BY those repairs. Three needed schema support:
+
+- **`instrument`** (required). `inspection_scope` is generated from the capability
+  registries, so it tracks the inspector's declared REACH and not its BEHAVIOUR. A one-word
+  change to `_fidelity_check` flipped a published row's `response_fidelity.passed` from
+  false to true with both scope strings identical and 411 tests green, and ten of nineteen
+  published artefacts turned out to have been emitted by a build that predated a schema
+  field they lack. `instrument.inspector_sha256` digests the source of every function that
+  decides a number, normalised through the AST so comments do not move it and behaviour
+  does. It over-invalidates rather than under-invalidating, which is the safe direction for
+  a staleness anchor.
+- **`checks.fragmentation_safety.data_events_observed`**. `events_observed` counts the
+  `[DONE]` sentinel, so the old `events_observed >= 2` rule for a passing fragmentation
+  check was satisfied by one content chunk plus `[DONE]`. Two published rows that the
+  write-up cites as "buffers the whole response and re-emits one chunk" were certified
+  `fragmentation_safety: passed: true`. The verdict now uses data-bearing events;
+  `events_observed` keeps its meaning so the published column stays comparable.
+- **`checks.response_fidelity.iterations_requested`** (now required, and documented).
+  It was assigned the same variable as `iterations_completed`, so the pair could not report
+  an incomplete run; and when the check was narrowed to the measurable cases to fix the
+  denominator, zero of them made `passed` vacuously true. Requested counts what the run set
+  out to measure, completed counts what was measurable, and nothing passes on zero.
 
 **The 2026-09-05 amendment, and why a schema change was needed for it.**
 `configured_upstream_boundary` is v1's entire measurement -- did a protected value reach the

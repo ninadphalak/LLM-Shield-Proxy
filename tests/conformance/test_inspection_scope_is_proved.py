@@ -76,8 +76,57 @@ PROOFS = {
             {"choices": [{"delta": {"content": "", "r": EMAIL[9:]}}]},
         ),
     ),
+    # A value split with one half in `delta.content` and the other in ANY other field was
+    # in no haystack: the per-path channels need the same path, and the legacy
+    # non-content join excludes exactly the channel the first half sits in. Both of these
+    # were measured as MISSES while the value reached the client whole.
+    "ordered_whole_document_join": lambda: (
+        _seen(
+            EMAIL,
+            _sse(
+                {"choices": [{"delta": {"content": EMAIL[:9]}}]},
+                {"choices": [{"delta": {"raw": {"text": EMAIL[9:]}}}]},
+            ),
+        )
+        and _seen(
+            EMAIL,
+            _sse(
+                {"choices": [{"delta": {"content": EMAIL[:9]}}]},
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "",
+                                "tool_calls": [{"function": {"arguments": EMAIL[9:]}}],
+                            }
+                        }
+                    ]
+                },
+            ),
+        )
+    ),
+    # `content` is a string in the chat-completions shape and a list of parts in the
+    # multimodal one, and a stream may use both. The part's `type` discriminator splices
+    # between the halves in the whole-document join, so that one does not reach it.
+    "renderable_subtree_join": lambda: _seen(
+        EMAIL,
+        _sse(
+            {"choices": [{"delta": {"content": EMAIL[:9]}}]},
+            {"choices": [{"delta": {"content": [{"type": "text", "text": EMAIL[9:]}]}}]},
+        ),
+    ),
     "unparseable_events": lambda: _seen(
         EMAIL, "data: not-json but carries " + EMAIL + "\n\ndata: [DONE]\n\n"
+    ),
+    # `json.loads` keeps the LAST of duplicate names and discards the rest, so a value in
+    # a shadowed key entered NEITHER the parsed event nor the parser's residue -- it was
+    # scanned nowhere while reaching the client verbatim. RFC 8259 permits duplicate
+    # names and does not say which wins, so a client may see either.
+    "shadowed_duplicate_keys": lambda: _seen(
+        EMAIL,
+        'data: {"choices":[{"delta":{"content":"'
+        + EMAIL
+        + '","content":"[REDACTED]"}}]}\n\ndata: [DONE]\n\n',
     ),
     "base64": lambda: (
         _seen(EMAIL, _field(base64.b64encode(EMAIL.encode()).decode()))

@@ -26,9 +26,16 @@ Three strategies, one detector, one corpus. `tests/conformance/test_guardrails_d
 fails if these patterns drift from the harness's.
 
 **The request path is deliberately not masked**, because there is nothing to restore it
-with. FidelityRate will therefore be 1.00 for the same vacuous reason Portkey's is -- the
-absence of a transformation, not a successful restoration -- and the run must be recorded
-with `V2_REQUEST_PATH_REDACTION=not-configured` so the report says which.
+with, and the run must be recorded with `V2_REQUEST_PATH_REDACTION=not-configured` so the
+report says so.
+
+**MEASURED FidelityRate: 0.00, and this paragraph predicted 1.00.** The prediction was
+that the absence of a transformation would score vacuously well, the way Portkey's does.
+It does not, and the reason is the point of the row: the unmasked echo comes back, the
+validator has no way to know it is the caller's own data, and it redacts it. Restoring is
+not the absence of redacting. The prediction was written before the run and left standing
+after it -- which is the same class of error as everything else this profile records, one
+level down, so it is corrected here rather than deleted.
 
 RUNNING IT. Guardrails AI pulls `litellm`, `openai` and `langchain-core`, so it does not go
 in the harness environment either -- and note it would install the very gateway that is

@@ -84,7 +84,16 @@ from .http_profile import (
 )
 
 SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.0.0"
-EMITTER_VERSION = "0.1.0-minimal"
+# BUMP THIS WHEN BEHAVIOUR THAT DECIDES A NUMBER CHANGES. It read "0.1.0-minimal" through
+# two rounds of repair that gave the module a conformant SSE parser, path-keyed joins, five
+# checks that can now fail, a real capture self-probe and an exhaustive split oracle -- so
+# every report claimed a harness_revision that had stopped being true. "Minimal" in
+# particular was no longer a description of anything.
+#
+# It is a LABEL, not a staleness anchor: `instrument.inspector_sha256` is the anchor,
+# because it is derived and cannot be forgotten. This exists so a reader can tell two
+# generations of report apart at a glance without hashing anything.
+EMITTER_VERSION = "0.2.0"
 
 # Detector for the injection segment. Deliberately simple and deliberately NOT given the
 # fixture values: a gateway that was handed the needles would be measuring nothing.
@@ -925,11 +934,27 @@ def _sse(events: Iterable[dict[str, Any]]) -> bytes:
     return body + b"data: [DONE]\n\n"
 
 
+# WHETHER THE CAPTURE AUTHENTICATES, stated once next to the handler that decides it.
+#
+# `capture.authentication_required` was reported as `bool(V2_GATEWAY_TOKEN)` -- the bearer
+# token the harness sends TO THE GATEWAY. That is a fact about the target, published as a
+# fact about the capture, and it read `true` in four gateway rows. `_make_upstream` reads
+# no headers and rejects nothing, so the honest value is False, and
+# `test_the_capture_answers_without_credentials` demonstrates it rather than asserting it.
+# It matters because an unauthenticated capture is exactly the condition `_self_probe`
+# exists to guard: anything that can reach the port can answer for it.
+CAPTURE_REQUIRES_AUTHENTICATION = False
+
+
 @dataclass
 class UpstreamState:
     segments: Segments
     case: dict[str, str]
     received_bodies: list[str] = field(default_factory=list)
+    # Every request-target the capture was actually asked for. `upstream_paths_observed`
+    # was the literal `["/v1/chat/completions"]` and the handler recorded no path, so a
+    # gateway calling any other route was reported as calling that one.
+    received_paths: list[str] = field(default_factory=list)
     # Where to cut the injected value for the attempt currently in flight. 0 means
     # "do not cut". Set by `run_case` before each request.
     split_at: int = 0
@@ -1018,6 +1043,7 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", "replace")
             state.received_bodies.append(raw)
+            state.received_paths.append(self.path)
             # Echo back whatever arrived AT THE CASE'S SITE, not a fixed field. Echoing
             # messages[0].content regardless of site would report "not restored" for every
             # case that put its values somewhere else, which says nothing about the gateway.
@@ -1143,6 +1169,20 @@ class RunResult:
     content_types: list[str] = field(default_factory=list)
     invalid_events: int = 0
     done_marker: bool = False
+    # HOW the injected value was recovered, or None if it was not. See `_leak_tier`.
+    # `injection_leaked` alone is an accusation with no way to check it, which is the
+    # objection the boundary check answered and this one had not.
+    leak_tier: str | None = None
+    # Largest event count over the case's split points. `events_observed` is the FIRST
+    # split point, so it agrees with `client_text` and `echo_recovered`, which are also
+    # read from the first attempt.
+    events_observed_max: int = 0
+    # Events carrying data, i.e. excluding the `[DONE]` sentinel. `events_observed`
+    # counts `[DONE]`, so `events_observed > 1` -- the old fragmentation_safety test --
+    # was satisfied by a gateway that emitted the entire response as ONE chunk.
+    data_events_observed: int = 0
+    # Every request-target the capture was actually asked for, for this case.
+    upstream_paths: list[str] = field(default_factory=list)
     # Which internal split points of the value were tried, and which of them leaked.
     # One midpoint split by default; every internal split under --exhaustive-splits.
     split_points_tried: int = 1
@@ -1314,19 +1354,26 @@ def _ordered_channels(node: Any, flat: list[tuple[str, str]], path: str = "") ->
         flat.append((path, repr(node)))
 
 
-def _haystacks(sse: str) -> list[str]:
-    """Everything the client could see, over the WHOLE body, decodings included.
+def _haystack_groups(sse: str) -> dict[str, list[str]]:
+    """Everything the client could see, over the WHOLE body, decodings included,
+    grouped by HOW STRONG a match in each group is.
 
-    Three kinds of haystack, and the separation is load-bearing:
+    Three kinds of haystack, and the separation is load-bearing twice -- once for what
+    gets found, and once for what the report is then entitled to claim:
 
-      PER-PATH ORDERED -- strings joined in arrival order within one JSON path, so a
-        value split across events reassembles. Nothing from another path may enter a
-        channel: splicing other text between two halves stops the join from working.
-      NON-CONTENT ORDERED -- the legacy mixed stream, kept so a value split across two
-        DIFFERENT sibling keys still joins. Strictly additive to the per-path channels.
-      EVERYTHING ELSE -- each event walked recursively by v1's `_collect` (nested
-        objects, lists, numbers, keys, base64/hex/percent runs, character-code arrays),
-        plus every byte the SSE parser did not dispatch.
+      SAME-PATH JOIN -- strings joined in arrival order within one JSON path, so a value
+        split across events reassembles. Nothing from another path may enter a channel:
+        splicing other text between two halves stops the join from working. A match here
+        is a value the client could read off one field.
+      CROSS-FIELD JOIN -- the legacy non-content stream, the whole-document join, and the
+        `_collect` sibling join. These reassemble a value split across DIFFERENT keys,
+        and they are also the only place this inspector can manufacture a value nothing
+        sent. Kept, because dropping them is a false pass; ranked, because reporting a
+        concatenation of two unrelated fields as the same fact as a verbatim leak is how
+        a harness turns a coincidence into a vendor defect.
+      SINGLE FIELD -- each event walked recursively by v1's `_collect` (nested objects,
+        lists, numbers, keys, base64/hex/percent runs, character-code arrays), plus every
+        byte the SSE parser did not dispatch.
     """
     from pii_leak_benchmark.http_profile import _Inspection, _collect
 
@@ -1336,8 +1383,26 @@ def _haystacks(sse: str) -> list[str]:
     for payload in parsed.events:
         if payload == "[DONE]":
             continue
+        shadowed = False
+
+        def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+            # `json.loads` keeps the LAST of duplicate keys and silently discards the
+            # rest, so a value carried in a shadowed key reached the client and entered
+            # NEITHER `events` (it is gone from the parsed object) NOR `residue` (the
+            # parse succeeded). Demonstrated: `{"content":"<email>","content":"[REDACTED]"}`
+            # scored as no leak. RFC 8259 permits duplicate names and says nothing about
+            # which wins, so this is a shape a client may legitimately receive.
+            nonlocal shadowed
+            seen: set[str] = set()
+            for key, _value in items:
+                if key in seen:
+                    shadowed = True
+                    break
+                seen.add(key)
+            return dict(items)
+
         try:
-            event = json.loads(payload)
+            event = json.loads(payload, object_pairs_hook=_pairs)
         except json.JSONDecodeError:
             # Not JSON, but it still reached the client. Scanning the raw text is the
             # only safe answer; skipping it would be a false pass.
@@ -1345,6 +1410,10 @@ def _haystacks(sse: str) -> list[str]:
             continue
         _ordered_channels(event, flat)
         _collect(event, found)
+        if shadowed:
+            # The parsed object is lossy for this event. Scan the bytes as well, the
+            # same answer already given to an event that did not parse at all.
+            _collect(payload, found)
     for text in parsed.residue:
         _collect(text, found)
 
@@ -1352,19 +1421,112 @@ def _haystacks(sse: str) -> list[str]:
     for path, value in flat:
         channels.setdefault(path, []).append(value)
 
+    # RENDERABLE-TEXT SUBTREES. `content` is a string in the chat-completions shape and a
+    # list of `{"type": ..., "text": ...}` parts in the multimodal one, and a stream may
+    # use both. A value split with one half in the string form and the other in a part
+    # was in no channel: the paths differ, and the whole-document join splices the part's
+    # `type` discriminator between the halves.
+    #
+    # This is NOT the skip-list that was removed. That one EXCLUDED any key called
+    # `content` or `text` from a stream, so a value could fall out of every haystack.
+    # This is strictly ADDITIVE -- an extra channel that can only turn a miss into a
+    # find -- and it is keyed on the two names the wire formats define as renderable
+    # rather than on where the harness happens to put its own fixture.
+    renderable: dict[str, list[str]] = {}
+    for path, value in flat:
+        segments = path.split(".")
+        for index, segment in enumerate(segments):
+            if segment.rstrip("[]") not in ("content", "text"):
+                continue
+            rest = segments[index + 1:]
+            if all(s.rstrip("[]") in ("content", "text", "") for s in rest):
+                # `content` and `content[]` are the SAME subtree -- the string form and
+                # the list-of-parts form of one field -- so the key drops the brackets.
+                key = ".".join([*segments[:index], segment.rstrip("[]")])
+                renderable.setdefault(key, []).append(value)
+            break
+
     siblings: list[str] = list(found.strings) + list(found.decoded_strings)
-    out = [
-        # hay[0] IS `client_text`. Its meaning must not drift: `delivery_confirmed` and
-        # every published row depend on it.
-        "".join(value for path, value in flat if path == CONTENT_CHANNEL),
-        "".join(value for path, value in flat if path != CONTENT_CHANNEL),
-        *("".join(values) for path, values in channels.items() if path != CONTENT_CHANNEL),
-        "".join(siblings),
-        *siblings,
-    ]
     from urllib.parse import unquote
 
-    return out + [unquote(h) for h in out]
+    def _with_unquoted(values: list[str]) -> list[str]:
+        return values + [unquote(v) for v in values]
+
+    # ONE source of truth for both "did it leak" and "how was it recovered". Building
+    # the tiers separately from the detection would let the two disagree, which is the
+    # class of defect this module keeps finding.
+    return {
+        # groups[0][0] IS `client_text`. Its meaning must not drift: `delivery_confirmed`
+        # and every published row depend on it.
+        "same-path-join": _with_unquoted(
+            ["".join(value for path, value in flat if path == CONTENT_CHANNEL)]
+            + ["".join(values) for path, values in channels.items() if path != CONTENT_CHANNEL]
+        ),
+        # Joins that concatenate text from DIFFERENT paths with no separator. They close
+        # real blind spots and they are also the only place this inspector can
+        # manufacture a value nothing sent, so a match found only here is reported as the
+        # weaker claim rather than as the same fact.
+        #
+        # The whole-document join is the one added after `content` + `raw.text`,
+        # `content` + `tool_calls[].function.arguments` and a `content` string followed
+        # by a `content` list-of-parts were all measured as MISSES while the value
+        # reached the client whole.
+        "cross-field-join": _with_unquoted(
+            [
+                "".join(value for path, value in flat if path != CONTENT_CHANNEL),
+                "".join(value for _, value in flat),
+                "".join(siblings),
+                *("".join(values) for values in renderable.values()),
+            ]
+        ),
+        # Individual strings as they arrived, plus everything `_collect` decoded and
+        # every byte the SSE parser did not dispatch.
+        "single-field": _with_unquoted(siblings),
+    }
+
+
+# Order is weakest-claim-last, and `_leak_tier` returns the first group that matches.
+_HAYSTACK_TIERS = ("single-field", "same-path-join", "cross-field-join")
+
+# Strongest first. A reader should discount `cross-field-join` before anything else: it
+# is the only tier a coincidence can reach.
+_LEAK_TIER_RANK = {
+    "literal": 0,
+    "single-field": 1,
+    "same-path-join": 2,
+    "cross-field-join": 3,
+}
+
+
+def _haystacks(sse: str) -> list[str]:
+    """Flattened `_haystack_groups`, `client_text` first. The detection surface."""
+    groups = _haystack_groups(sse)
+    return [*groups["same-path-join"], *groups["cross-field-join"], *groups["single-field"]]
+
+
+def _leak_tier(value: str, sse: str) -> str | None:
+    """HOW a value was recovered from the response, or None if it was not.
+
+    The boundary check has said this since it stopped being a literal -- "a bare entity
+    name is an accusation with no way for the accused to check it" -- and the response
+    check did not: every entry in `leak_evidence` read `observed: normalized-match`
+    whether the value arrived verbatim in one event or was assembled by concatenating two
+    unrelated fields. Constructed and measured, all three found:
+
+        trace_id "4242-4242-" + span_id "4242-4242"  -> a test PAN
+        id "chatcmpl-590-"    + model "555-0126"     -> a USPHONE
+        author "ozvqklmr@"    + host "example.com"   -> an EMAIL
+
+    Those are real recoveries of a value the client could reconstruct, so suppressing
+    them would be a false pass. Ranking them is the answer, not dropping them.
+    """
+    if value and value in sse:
+        return "literal"
+    groups = _haystack_groups(sse)
+    for tier in _HAYSTACK_TIERS:
+        if _present(value, groups[tier]):
+            return tier
+    return None
 
 
 def _present(value: str, haystacks: list[str]) -> bool:
@@ -1473,9 +1635,18 @@ def run_case(
     latencies: list[float] = []
     first_sse = ""
     leaked_points = 0
-    events = 0
+    # THESE ACCUMULATE ACROSS SPLIT POINTS. They used to be plain assignments inside the
+    # loop, so they described only the LAST split point while `leaked_points` accumulated
+    # over all of them -- which made `--exhaustive-splits`, the STRONGER oracle, report
+    # LESS framing than the midpoint. Measured with a relay that ships one malformed
+    # event on every split point but the last: midpoint reported `invalid_events: 32`,
+    # exhaustive reported 16 for the identical traffic, and `events_observed_max` came
+    # out 5 against the midpoint's 6.
+    events_first = 0
+    events_max = 0
     invalid_events = 0
-    done_marker = False
+    done_marker = True
+    leak_tier: str | None = None
     statuses: list[int] = []
     content_types: list[str] = []
     transport_error: str | None = None
@@ -1517,13 +1688,21 @@ def run_case(
             if transport_error is not None:
                 break
             parsed = _parse_sse(sse)
-            events = len(parsed.events)
-            done_marker = "[DONE]" in parsed.events
-            invalid_events = _count_invalid_events(parsed)
+            observed = len(parsed.events)
+            events_max = max(events_max, observed)
+            done_marker = done_marker and "[DONE]" in parsed.events
+            invalid_events += _count_invalid_events(parsed)
             if index == 0:
                 first_sse = sse
-            if _present(needle, _haystacks(sse)):
+                events_first = observed
+            tier = _leak_tier(needle, sse)
+            if tier is not None:
                 leaked_points += 1
+                # Keep the STRONGEST evidence seen across split points, so a case that
+                # leaked verbatim at one offset is not reported as a concatenation
+                # because a later offset only matched a cross-field join.
+                if leak_tier is None or _LEAK_TIER_RANK[tier] < _LEAK_TIER_RANK[leak_tier]:
+                    leak_tier = tier
     finally:
         _stop(upstream)
         if gateway is not None:
@@ -1556,8 +1735,12 @@ def run_case(
         echo_observable=bool(site_text) and transport_error is None,
         transport_error=transport_error,
         injection_leaked=leaked_points > 0,
-        events_observed=events,
+        leak_tier=leak_tier,
+        events_observed=events_first,
+        events_observed_max=events_max,
+        data_events_observed=max(0, events_first - (1 if done_marker else 0)),
         upstream_bodies=list(state.received_bodies),
+        upstream_paths=sorted(set(state.received_paths)),
         latency_ms=latencies,
         status_codes=statuses,
         content_types=content_types,
@@ -1602,30 +1785,84 @@ def _percentile(values: list[float], q: float) -> float:
 
 
 def _assert_derivations(
-    leak_single: float,
-    leak_adv: float,
-    delta_frag: float,
-    cases_scored: int,
-    case_defs: list[dict[str, str]],
+    results: list[RunResult],
+    published: dict[str, Any],
+    published_digest: str,
 ) -> bool:
-    """Recompute what the report is about to claim, and refuse to emit on a mismatch.
+    """Recompute the published metrics FROM THE RESULTS, and refuse to emit on a mismatch.
 
     `derivation_recomputed` and `sidecar_case_count_matches` are `const: true` in the
     schema, and the schema's own words are what the harness is promising by setting them.
-    They were hardcoded `True`. A field that says "I checked" and is a literal is worth
-    less than no field, because a reader spends trust on it.
+    They were hardcoded `True`, which is worth less than no field because a reader spends
+    trust on it.
+
+    The first repair was not enough. It took `leak_single`, `leak_adv` and `delta_frag`
+    as arguments and recomputed `leak_adv - leak_single` -- the same expression, from the
+    same variables the caller had just used -- so it could only catch an edit to one
+    line. And its second half compared `cases_scored` (which was `len(results)`) with
+    `len(case_defs)`, where `case_defs` is a comprehension over `results`: identically
+    equal, for every input, so `sidecar_case_count_matches` stayed a literal in effect.
+
+    This version takes the RESULTS and the FINISHED metrics block, rebuilds every
+    published number from the raw run, and rebuilds the digest too. Nothing it compares
+    shares a variable with what produced it.
     """
-    recomputed = round(leak_adv - leak_single, 4)
-    if recomputed != delta_frag:
+    scored = [r for r in results if r.transport_error is None]
+    single = [r for r in scored if r.case["fragmentation"] == "single_chunk"]
+    adversarial = [r for r in scored if r.case["fragmentation"] == "adversarial"]
+    observable = [r for r in scored if r.echo_observable]
+
+    expected = {
+        "leak_rate.single_chunk": _rate(r.injection_leaked for r in single),
+        "leak_rate.adversarial": _rate(r.injection_leaked for r in adversarial),
+        "leak_rate.overall": _rate(r.injection_leaked for r in scored),
+        "fidelity_rate": (
+            _rate(v for r in observable for v in r.echo_recovered.values())
+            if observable
+            else 0.0
+        ),
+        "cases_scored": len(results),
+        "cases_applicable": len(scored),
+        "cases_inconclusive": len(results) - len(scored),
+        "cases_echo_observable": len(observable),
+    }
+    expected["delta_frag"] = round(
+        expected["leak_rate.adversarial"] - expected["leak_rate.single_chunk"], 4
+    )
+
+    def _get(path: str) -> Any:
+        node: Any = published
+        for key in path.split("."):
+            node = node[key]
+        return node
+
+    for path, want in expected.items():
+        got = _get(path)
+        if got != want:
+            raise RuntimeError(
+                f"published {path}={got!r} does not follow from the {len(results)} run "
+                f"results, which give {want!r}; refusing to emit a report whose numbers "
+                "do not come from the measurement beside them"
+            )
+
+    # The sidecar half: rebuild the case records and their digest independently of the
+    # ones the report carries.
+    rebuilt = sorted(
+        ({k: r.case[k] for k in sorted(AXES)} for r in results),
+        key=lambda c: tuple(sorted(c.items())),
+    )
+    rebuilt_digest = hashlib.sha256(
+        json.dumps(rebuilt, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if rebuilt_digest != published_digest:
         raise RuntimeError(
-            f"delta_frag {delta_frag} is not LeakRate(adversarial) - LeakRate(single_chunk) "
-            f"= {recomputed}; refusing to emit a report whose headline metric does not "
-            "follow from the rates beside it"
+            "cases_digest does not match a digest recomputed from the run results; the "
+            "published case records are not the cases that were measured"
         )
-    if cases_scored != len(case_defs):
+    if len(rebuilt) != published["cases_scored"]:
         raise RuntimeError(
-            f"cases_scored {cases_scored} does not match the {len(case_defs)} case "
-            "definitions behind cases_digest"
+            f"cases_scored {published['cases_scored']} does not match the {len(rebuilt)} "
+            "case records behind cases_digest"
         )
     return True
 
@@ -1753,7 +1990,7 @@ def build_report(
             }
         return out
 
-    return {
+    report = {
         "schema": SCHEMA_ID,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "profile": {
@@ -1791,7 +2028,13 @@ def build_report(
             # 0 means an ephemeral port per case. An external-gateway run pins it, and
             # every such row used to publish 0 regardless.
             "port": context.get("capture_port", 0),
-            "authentication_required": context.get("authentication_required", False),
+            # THE CAPTURE'S OWN BEHAVIOUR, not the target's. This was
+            # `bool(V2_GATEWAY_TOKEN)` -- the bearer token the harness sends TO THE
+            # GATEWAY -- and it read `true` in four gateway rows for a capture that reads
+            # no headers and rejects nothing. It matters: an unauthenticated capture is
+            # the condition `_self_probe` exists to guard, so overstating it hides the
+            # very risk the probe was added for.
+            "authentication_required": CAPTURE_REQUIRES_AUTHENTICATION,
             "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
             # Measured. `_self_probe` sends a nonce to the capture before any target
             # traffic and aborts the run if this run's capture did not record it, which
@@ -1805,9 +2048,9 @@ def build_report(
         },
         "checks": {
             "configured_upstream_boundary": boundary,
-            "fragmentation_safety": _fragmentation_check(worst, results),
+            "fragmentation_safety": _fragmentation_check(worst, results, segments),
             "sse_validity": _sse_check(results),
-            "response_fidelity": _fidelity_check(observable),
+            "response_fidelity": _fidelity_check(observable, results),
             "response_injection_containment": _injection_check(scored, leaked_types),
             "segment_separation": separation,
             "client_observed_latency": {
@@ -1942,16 +2185,13 @@ def build_report(
         "detector_blind_entities": sorted(k for k, v in detector_blind.items() if v),
             "cases_applicable": len(scored),
             "cases_inconclusive": len(inconclusive),
-            # BOTH OF THESE ARE ASSERTIONS, and both used to be literals. The schema
-            # pins them `const: true` and describes what the harness is promising:
-            # "recomputed delta_frag from the two leak rates it published and refused to
-            # emit on a mismatch", and "cases_scored equals the number of case records
-            # behind cases_digest". Neither was done. `_assert_derivations` does them and
-            # raises, so the value can only be True because it was checked.
-            "derivation_recomputed": _assert_derivations(
-                leak_single, leak_adv, delta_frag, len(results), case_defs
-            ),
-            "sidecar_case_count_matches": True,
+            # Set below, from `_assert_derivations`, AFTER this block exists -- because
+            # what they promise is a check of this block, and a check that runs on the
+            # values it is about to publish has to be able to see them. Assigning them
+            # inline is how the first repair ended up recomputing `leak_adv -
+            # leak_single` from the caller's own two variables.
+            "derivation_recomputed": False,
+            "sidecar_case_count_matches": False,
             "by_axis": {axis: _axis_slice(axis) for axis in AXES},
         },
         "entity_scope": {
@@ -1964,7 +2204,18 @@ def build_report(
             "source": "pii_leak_benchmark.v2_emitter._DETECTORS",
         },
         "cases_digest": digest,
+        # WHICH INSTRUMENT PRODUCED THIS ROW. See `inspector_digest`.
+        "instrument": instrument_block(),
     }
+
+    # THE CHECK RUNS ON THE FINISHED BLOCK. `_assert_derivations` rebuilds every
+    # published metric from `results` and rebuilds `cases_digest` too, so nothing it
+    # compares shares a variable with what produced it. It raises rather than returning
+    # False, so these two can only be True because the recomputation agreed.
+    verified = _assert_derivations(results, report["metrics"], digest)
+    report["metrics"]["derivation_recomputed"] = verified
+    report["metrics"]["sidecar_case_count_matches"] = verified
+    return report
 
 
 def _value_space() -> dict[str, int]:
@@ -2051,7 +2302,22 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
         "separate from delta content",
     ),
     InspectionCapability(
+        "ordered_whole_document_join",
+        "every string value reassembled in document order, so a value split between "
+        "delta content and any other field is recovered",
+    ),
+    InspectionCapability(
+        "renderable_subtree_join",
+        "content and text members of one content subtree reassembled together, so a "
+        "value split between a content string and a content list of parts is recovered",
+    ),
+    InspectionCapability(
         "unparseable_events", "events that do not parse as JSON scanned as raw text"
+    ),
+    InspectionCapability(
+        "shadowed_duplicate_keys",
+        "events carrying duplicate JSON object names also scanned as raw text, because "
+        "parsing discards every value but the last",
     ),
     InspectionCapability("base64", "base64-encoded runs decoded, over multiple rounds"),
     InspectionCapability("hex", "hex-encoded runs decoded"),
@@ -2120,6 +2386,107 @@ BOUNDARY_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
 )
 
 BOUNDARY_INSPECTION_SCOPE = "; ".join(c.clause for c in BOUNDARY_INSPECTION_CAPABILITIES)
+
+
+# --------------------------------------------------------------------------------------
+# WHAT THE INSTRUMENT ACTUALLY DOES, as a digest of the code that decides every number.
+#
+# `inspection_scope` is generated from the capability registries, which is what makes it
+# a good anchor for a CLAIM -- and a bad one for BEHAVIOUR. The two registries describe
+# declared reach, so an emitter can change what it measures without either string moving.
+# Demonstrated three ways against the staleness guard that keys on them:
+#
+#   * `_fidelity_check(results)` -> `_fidelity_check(observable)` flipped a published
+#     row's `response_fidelity.passed` from false to true. 411 tests passed either way
+#     and both scope strings were identical.
+#   * Ten of the nineteen published artefacts were emitted by a build that did not yet
+#     have `redaction_claim.request_path_redaction_configured`, so the directory held two
+#     emitter builds at once. The guard was green.
+#   * Deleting the residue scan, which is a false pass, left both scope strings unchanged
+#     (that one is caught by test_v2_sse_parsing.py, not by the guard).
+#
+# So the report carries a digest of the SOURCE of every function that decides a number,
+# normalised through the AST so that reformatting, comments and docstrings do not move it
+# but behaviour does. It over-invalidates rather than under-invalidating: a refactor that
+# changes nothing observable still marks rows stale, which is the safe direction for a
+# field whose whole job is to say "these numbers came from a different instrument".
+# --------------------------------------------------------------------------------------
+
+_INSTRUMENTED = (
+    "_parse_sse",
+    "_ordered_channels",
+    "_haystack_groups",
+    "_haystacks",
+    "_leak_tier",
+    "_present",
+    "_boundary_haystacks",
+    "_boundary_evidence",
+    "_boundary_check",
+    "_fidelity_check",
+    "_sse_check",
+    "_fragmentation_check",
+    "_injection_check",
+    "_injection_evidence",
+    "_derive_outcome",
+    "_assert_derivations",
+    "_count_invalid_events",
+    "_rate",
+    "injection_split_points",
+    "run_case",
+    "build_report",
+)
+
+
+def _behaviour_source(function: Any) -> str:
+    """One function's source with comments, docstrings and formatting normalised away."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list) or not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))
+            and isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            body.pop(0)
+            if not body:
+                body.append(ast.Pass())
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
+def inspector_digest() -> str:
+    """Digest of every function that decides a published number. 16 hex characters."""
+    from pii_leak_benchmark import http_profile
+
+    parts = [_behaviour_source(globals()[name]) for name in _INSTRUMENTED]
+    # The decoding and folding walk lives in v1 and is just as load-bearing.
+    parts += [
+        _behaviour_source(getattr(http_profile, name))
+        for name in ("_collect", "_normalize", "_normalize_confusable_digits")
+    ]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def instrument_block() -> dict[str, str]:
+    """The provenance block every artefact carries, single-run and sweep alike."""
+
+    def digest(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+    return {
+        "emitter_version": EMITTER_VERSION,
+        "client_scope_sha256": digest(CLIENT_INSPECTION_SCOPE),
+        "boundary_scope_sha256": digest(BOUNDARY_INSPECTION_SCOPE),
+        # The one that moves when behaviour moves rather than when the claim does.
+        "inspector_sha256": inspector_digest(),
+    }
 
 
 def _boundary_haystacks(bodies: Iterable[str]) -> list[str]:
@@ -2240,7 +2607,10 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
         "uninspectable_requests": unparseable,
         "uninspectable_reasons": (["body did not parse as JSON"] if unparseable else []),
         "leaked_entity_types": leaked,
-        "upstream_paths_observed": ["/v1/chat/completions"],
+        # Recorded by the capture handler, not asserted. This was the literal
+        # `["/v1/chat/completions"]` while `_make_upstream` kept no note of `self.path`,
+        # so a gateway calling any other route was reported as calling that one.
+        "upstream_paths_observed": sorted({p for r in results for p in r.upstream_paths}),
         "marker_words_required": 3,
         "marker_words_total": 5,
         # Zero BY CONSTRUCTION, not by failure. See `boundary_correlation` above: the
@@ -2261,7 +2631,34 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
     }
 
 
-def _fragmentation_check(worst: RunResult, results: list[RunResult]) -> dict[str, Any]:
+def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
+    """Did the harness actually emit single-character data events?
+
+    Derived rather than asserted. `_injection_events` splits a rendered value into two
+    pieces at `split_at`, so a piece is one character only if the harness chose an offset
+    one away from an end of a value that is itself two characters long. No corpus entity is
+    shorter than six bytes, so this is False for this emitter -- but it is False because it
+    was computed, not because a line says so.
+    """
+    for result in results:
+        if result.case.get("fragmentation") != "adversarial":
+            continue
+        rendered = _encode(
+            segments.injection[result.case["entity"]], result.case["encoding"]
+        )
+        for split_at in injection_split_points(
+            segments, result.case, exhaustive=result.split_points_tried > 1
+        ):
+            if not split_at:
+                continue
+            if len(rendered[:split_at]) > 1 or len(rendered[split_at:]) > 1:
+                return False
+    return bool(results)
+
+
+def _fragmentation_check(
+    worst: RunResult, results: list[RunResult], segments: Segments
+) -> dict[str, Any]:
     """Event counts, with `events_observed_max` actually being a maximum.
 
     It was not. Both fields were read off `worst`, which `build_report` selects as the
@@ -2270,12 +2667,26 @@ def _fragmentation_check(worst: RunResult, results: list[RunResult]) -> dict[str
     max 4. The manuscript's "`events_observed: 2` regardless of how many events the
     upstream emitted" is the E15 reproduction and it rests on this field.
     """
-    counts = [r.events_observed for r in results] or [0]
+    counts = [max(r.events_observed, r.events_observed_max) for r in results] or [0]
     return {
-        "passed": worst.events_observed > 1,
-        "one_character_events_requested": True,
+        # `events_observed` COUNTS THE `[DONE]` SENTINEL, so `> 1` was satisfied by a
+        # gateway that emitted the whole response as a single chunk followed by `[DONE]`.
+        # Both `litellm-presidio` and `llm-guard-buffered` -- the two rows the write-up
+        # cites as "buffers everything and re-emits one chunk, E15" -- were certified
+        # `fragmentation_safety: passed: true` by that test. The decision now uses
+        # data-bearing events only; `events_observed` keeps the published convention so
+        # the E15 column stays comparable with what is already in print.
+        "passed": worst.data_events_observed > 1 and bool(worst.client_text),
+        # DERIVED, not asserted. This was the literal `True` the schema forced, and it
+        # was false of every v2 report: v1 asks the TARGET for one-character events
+        # because it does not control the response; v2 IS the upstream and places the
+        # split itself. Computed from the pieces actually emitted so a future harness
+        # that really does emit single-character events reports true without editing
+        # this line, and this one cannot claim it.
+        "one_character_events_requested": _one_character_events(segments, results),
         "events_observed": worst.events_observed,
         "events_observed_max": max(counts),
+        "data_events_observed": worst.data_events_observed,
         "coalescing_not_distinguished": True,
         "response_reconstructed": bool(worst.client_text),
     }
@@ -2296,6 +2707,13 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
         {t for t in types if not t.split(";")[0].strip().lower() == "text/event-stream"}
     )
     missing_done = [r.case for r in scored if not r.done_marker]
+    # A case that never returned has no framing to validate, and it contributed no
+    # status code either -- a timeout or a reset appends nothing to `status_codes`, and
+    # it is excluded from `missing_done` because it is not in `scored`. So a run in which
+    # cases died in transport came out `passed: true, status_codes: [200], errors: []`.
+    # Measured: one good case beside one timed-out case passed this check. Fail closed;
+    # "we could not look" is not "we looked and it was fine".
+    unanswered = [r for r in results if r.transport_error is not None]
     errors: list[str] = []
     if bad_types:
         errors.append("content type not text/event-stream: " + ", ".join(bad_types))
@@ -2303,6 +2721,13 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
         errors.append(f"{len(missing_done)} scored cases ended without a [DONE] event")
     if invalid:
         errors.append(f"{invalid} dispatched events did not parse as JSON")
+    if unanswered:
+        errors.append(
+            f"{len(unanswered)} cases produced no complete response, so their framing "
+            "was never observed"
+        )
+    if not results:
+        errors.append("no cases were run")
     return {
         "passed": not errors and statuses == [200],
         "invalid_events": invalid,
@@ -2313,18 +2738,66 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
     }
 
 
-def _fidelity_check(results: list[RunResult]) -> dict[str, Any]:
-    matching = sum(1 for r in results for v in r.echo_recovered.values() if v)
-    total = sum(len(r.echo_recovered) for r in results)
+def _fidelity_check(observable: list[RunResult], attempted: list[RunResult]) -> dict[str, Any]:
+    """Echo fidelity over the cases where the echo was MEASURABLE, with both denominators.
+
+    Two defects, and they are the same defect at two strengths.
+
+    This check used to be handed the full result list, so `iterations_requested` and
+    `iterations_completed` were the same number by construction and the pair could never
+    say that a run was incomplete. Narrowing it to `observable` fixed the denominator and
+    broke something worse: `observable` CAN be empty, and `matching == total` is
+    `0 == 0`, so a gateway that reconstructed nothing was published as
+    `passed: true, expected_value_reconstructed: true` beside `fidelity_rate: 0.0`.
+    Measured end to end against a relay that canonicalises the request and forwards none
+    of the four request sites -- pre-change `passed: false`, post-change `passed: true`.
+
+    `manuscript-v3.md` C6 states the rule this violated: a rate without its denominator
+    is not a measurement, and the failure is asymmetric. Removing the unmeasurable cases
+    from the numerator AND the denominator of a BOOLEAN turns missing data into a pass,
+    which is that asymmetry pointed the other way.
+
+    So: requested counts every echo assertion the run set out to make, completed counts
+    the ones that were measurable, and nothing is a pass on zero measurements.
+    """
+    matching = sum(1 for r in observable for v in r.echo_recovered.values() if v)
+    completed = sum(len(r.echo_recovered) for r in observable)
+    requested = sum(len(r.echo_recovered) for r in attempted)
     return {
-        "passed": matching == total,
-        "expected_value_reconstructed": matching == total,
+        "passed": completed > 0 and matching == completed,
+        "expected_value_reconstructed": completed > 0 and matching == completed,
         "iterations_matching": matching,
-        "iterations_completed": total,
-        "iterations_requested": total,
+        "iterations_completed": completed,
+        "iterations_requested": requested,
         "payload_content_included": False,
         "segment": "echo",
     }
+
+
+def _injection_evidence(
+    results: list[RunResult], leaked_types: list[str]
+) -> list[dict[str, str]]:
+    """Strongest recovery tier per leaked entity, and how many cases reached it."""
+    evidence: list[dict[str, str]] = []
+    for entity in leaked_types:
+        tiers = [
+            r.leak_tier
+            for r in results
+            if r.case["entity"] == entity and r.injection_leaked and r.leak_tier
+        ]
+        best = min(tiers, key=lambda t: _LEAK_TIER_RANK[t]) if tiers else "unrecorded"
+        evidence.append(
+            {
+                "entity_type": entity,
+                "observed": best,
+                "cases_leaked": str(len(tiers)),
+                # Named so a reader can act on the distinction without reading this file.
+                "weakest_tier_is_a_concatenation": str(
+                    all(t == "cross-field-join" for t in tiers) if tiers else False
+                ).lower(),
+            }
+        )
+    return evidence
 
 
 def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[str, Any]:
@@ -2346,9 +2819,13 @@ def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[
         ),
         "injected_entity_types": sorted({r.case["entity"] for r in results}),
         "leaked_entity_types": leaked_types,
-        "leak_evidence": [
-            {"entity_type": t, "observed": "normalized-match"} for t in leaked_types
-        ],
+        # HOW each value was recovered, strongest claim per entity. Every entry used to
+        # read `observed: normalized-match` whether the value arrived verbatim in one
+        # event or was assembled by concatenating two unrelated fields -- the same
+        # objection `_boundary_evidence` answers on the request path and this check did
+        # not. `cross-field-join` is the tier a coincidence can reach; it is the one a
+        # reader should discount first.
+        "leak_evidence": _injection_evidence(results, leaked_types),
         "needle_proximity": {},
         "needle_lengths": {},
         "delivery_confirmed": delivery_confirmed,
@@ -2414,7 +2891,6 @@ def run_policy(
             "base_url": gateway_url or "in-process loopback reference policy",
             "model": model,
             "capture_port": upstream_port,
-            "authentication_required": bool(os.environ.get("V2_GATEWAY_TOKEN")),
         },
     )
     summary = {

@@ -101,22 +101,15 @@ def sweep(
 
 
 def _instrument() -> dict[str, str]:
-    import hashlib
+    """The emitter's own provenance block, not a second copy of it.
 
-    from pii_leak_benchmark.v2_emitter import (
-        BOUNDARY_INSPECTION_SCOPE,
-        CLIENT_INSPECTION_SCOPE,
-        EMITTER_VERSION,
-    )
+    This used to rebuild the digests here from the two scope strings. A sweep and a
+    single-run artefact could therefore disagree about what "the current instrument"
+    means, which is the drift the block exists to detect, one level up.
+    """
+    from pii_leak_benchmark.v2_emitter import instrument_block
 
-    def digest(text: str) -> str:
-        return hashlib.sha256(text.encode()).hexdigest()[:16]
-
-    return {
-        "emitter_version": EMITTER_VERSION,
-        "client_scope_sha256": digest(CLIENT_INSPECTION_SCOPE),
-        "boundary_scope_sha256": digest(BOUNDARY_INSPECTION_SCOPE),
-    }
+    return instrument_block()
 
 
 def main(argv: list[str] | None = None) -> int:

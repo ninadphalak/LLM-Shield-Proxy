@@ -14,6 +14,7 @@
     "generated_at",
     "harness_revision",
     "implementation",
+    "instrument",
     "limitations",
     "metrics",
     "outcome",
@@ -352,6 +353,36 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
       "description": "Digest of the per-case result sidecar. Per-case results do NOT go in the report body: 500 cases inline makes the report unreadable and therefore unreviewable, and an unreviewable artifact is not a citable one. The report carries aggregates plus this digest; the sidecar carries the cases."
+    },
+    "instrument": {
+      "type": "object",
+      "required": [
+        "emitter_version",
+        "client_scope_sha256",
+        "boundary_scope_sha256",
+        "inspector_sha256"
+      ],
+      "properties": {
+        "emitter_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client_scope_sha256": {
+          "type": "string",
+          "minLength": 8
+        },
+        "boundary_scope_sha256": {
+          "type": "string",
+          "minLength": 8
+        },
+        "inspector_sha256": {
+          "type": "string",
+          "minLength": 8,
+          "description": "Digest of the SOURCE of every function that decides a published number, normalised through the AST. The two scope digests move when the instrument's declared REACH changes; this one moves when its BEHAVIOUR does. Rows whose digests differ were produced by different instruments and must not be read side by side."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Which instrument produced this row. See inspector_sha256."
     }
   },
   "allOf": [
@@ -657,7 +688,8 @@
           "type": "boolean"
         },
         "one_character_events_requested": {
-          "const": true
+          "type": "boolean",
+          "description": "Whether the harness asked for one-character SSE events. This is a v1 device and it was `const: true` here until 2026-09-05, which was false of every v2 report ever emitted. v1 does not control the response, so it asks the TARGET to emit one-character events to maximise the chance of splitting a value. v2 IS the upstream: it places the split itself, at the value's midpoint by default and at every internal offset under --exhaustive-splits, so it never makes that request and reports false. What the run actually did is in response_injection_containment.fragmentation_strategy. Kept as a boolean rather than removed because a future v2 harness may legitimately do it; a profile that reports true must actually have emitted single-character pieces."
         },
         "events_observed": {
           "type": "integer",
@@ -671,7 +703,13 @@
           "type": "boolean"
         },
         "coalescing_not_distinguished": {
-          "const": true
+          "const": true,
+          "description": "A LIMITATION DISCLOSURE, not a capability claim, which is why a const is defensible here and was not for its neighbour above. The profile counts the events the client received and cannot distinguish a gateway that coalesced several upstream events from one that emitted fewer. Every profile built this way has the limitation, so every report must admit it."
+        },
+        "data_events_observed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Dispatched events carrying data, i.e. excluding the [DONE] sentinel. `events_observed` counts [DONE], so `events_observed >= 2` was satisfied by a gateway that emitted the entire response as ONE chunk followed by [DONE]. The fragmentation verdict is taken from this field instead."
         }
       },
       "if": {
@@ -691,6 +729,9 @@
           },
           "response_reconstructed": {
             "const": true
+          },
+          "data_events_observed": {
+            "minimum": 2
           }
         }
       },
@@ -774,6 +815,7 @@
         "expected_value_reconstructed",
         "iterations_completed",
         "iterations_matching",
+        "iterations_requested",
         "passed",
         "payload_content_included",
         "segment"
@@ -795,7 +837,8 @@
         },
         "iterations_requested": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "Echo assertions the run SET OUT to make, over every case. `iterations_completed` counts the ones that were measurable -- a gateway may drop a request site, and that case is unmeasurable rather than failed. The two were the same number by construction, so the pair could not report an incomplete run; and when the check was narrowed to measurable cases alone, zero of them made `passed` vacuously true. Publish both, and never pass on zero measurements."
         },
         "payload_content_included": {
           "const": false
@@ -1902,7 +1945,7 @@
         },
         "inspection_scope": {
           "enum": [
-            "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; events that do not parse as JSON scanned as raw text; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39"
+            "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; every string value reassembled in document order, so a value split between delta content and any other field is recovered; content and text members of one content subtree reassembled together, so a value split between a content string and a content list of parts is recovered; events that do not parse as JSON scanned as raw text; events carrying duplicate JSON object names also scanned as raw text, because parsing discards every value but the last; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39"
           ],
           "description": "Generated from the emitter's CLIENT_INSPECTION_CAPABILITIES list, never hand-written. Each clause has a test that demonstrates it; a claim without a proof fails the build."
         },

@@ -1,13 +1,13 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-05T12:52:55Z",
+ "generated_at": "2026-09-06T03:25:22Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
  },
  "implementation": {
   "name": "reference-policy:presidio-retention",
-  "version": "0.1.0-minimal",
+  "version": "0.2.0",
   "labels_are_operator_supplied": true
  },
  "target": {
@@ -15,7 +15,7 @@
   "model": "test",
   "raw_pass_through_baseline": false
  },
- "harness_revision": "0.1.0-minimal",
+ "harness_revision": "0.2.0",
  "environment": {
   "python": "3.14.7",
   "implementation": "CPython",
@@ -29,9 +29,9 @@
   "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
   "self_probe": {
    "performed": true,
-   "url": "http://127.0.0.1:59417/v1/chat/completions",
+   "url": "http://127.0.0.1:58720/v1/chat/completions",
    "recorded": true,
-   "round_trip_ms": 18.8342
+   "round_trip_ms": 21.6908
   }
  },
  "checks": {
@@ -62,9 +62,10 @@
   },
   "fragmentation_safety": {
    "passed": true,
-   "one_character_events_requested": true,
+   "one_character_events_requested": false,
    "events_observed": 5,
    "events_observed_max": 6,
+   "data_events_observed": 4,
    "coalescing_not_distinguished": true,
    "response_reconstructed": true
   },
@@ -103,14 +104,16 @@
    "leak_evidence": [
     {
      "entity_type": "EMAIL",
-     "observed": "normalized-match"
+     "observed": "single-field",
+     "cases_leaked": "4",
+     "weakest_tier_is_a_concatenation": "false"
     }
    ],
    "needle_proximity": {},
    "needle_lengths": {},
    "delivery_confirmed": true,
    "client_capture_inspectable": true,
-   "inspection_scope": "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; events that do not parse as JSON scanned as raw text; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
+   "inspection_scope": "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; every string value reassembled in document order, so a value split between delta content and any other field is recovered; content and text members of one content subtree reassembled together, so a value split between a content string and a content list of parts is recovered; events that do not parse as JSON scanned as raw text; events carrying duplicate JSON object names also scanned as raw text, because parsing discards every value but the last; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
    "payload_content_included": false
   },
   "segment_separation": {
@@ -139,10 +142,10 @@
    "unit": "milliseconds",
    "iterations": 32,
    "iterations_measured": 32,
-   "mean": 81.4988,
-   "p50": 83.13,
-   "p95": 121.011,
-   "p99": 139.7449
+   "mean": 81.4467,
+   "p50": 72.5572,
+   "p95": 128.6809,
+   "p99": 150.8004
   }
  },
  "passed": false,
@@ -364,5 +367,11 @@
   "recorded_by": "operator",
   "source": "pii_leak_benchmark.v2_emitter._DETECTORS"
  },
- "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c"
+ "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+ "instrument": {
+  "emitter_version": "0.2.0",
+  "client_scope_sha256": "c15a0522954fb64f",
+  "boundary_scope_sha256": "4a09ca6d088914e7",
+  "inspector_sha256": "dc29426b52203953"
+ }
 }

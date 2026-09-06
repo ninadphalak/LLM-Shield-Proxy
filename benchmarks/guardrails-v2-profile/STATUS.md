@@ -57,6 +57,43 @@ model.** One global policy cannot satisfy both segments. Guardrails AI redacts e
 and lands in the `redact-all` quadrant beside LiteLLM, for a different reason: LiteLLM has a
 restore primitive as a dependency and does not call it; Guardrails AI has none to call.
 
+## Two wrapper concerns the round-2 review raised and could not run. Both executed.
+
+The review flagged these by reading, without the environment to test them. Both were run.
+
+**1. `_emit()` could silently drop text and look like perfect redaction.** Real, and
+narrower than the concern. The accumulator does lose characters, and every one is
+inter-sentence whitespace consumed by `split_sentence_word_tokenizers_jl_separator`. Over
+nine shapes -- the two the corpus emits plus seven chosen to break a sentence tokenizer --
+**no non-whitespace was ever dropped**:
+
+```
+$ venv-guardrails/Scripts/python benchmarks/guardrails-v2-profile/check_no_text_lost.py
+PASS -- only whitespace is lost, so no needle can be hidden by the accumulator.
+```
+
+**Whitespace loss is benign here and the distinction is the whole point.** The inspector
+matches on `_normalize`d text, which strips non-alphanumerics, so a lost space cannot hide
+a needle. A lost *character* could: the client's text would be shorter than what was sent,
+a needle spanning the drop would score as contained, and **the row would understate its
+leak rate and look like better redaction than it is.** `check_no_text_lost.py` asserts the
+property that actually matters -- *nothing but whitespace is lost* -- and must be re-run
+whenever the pinned Guardrails version changes.
+
+**2. The flush loop re-keys the sibling tail to the literal `record_field`.** True, and
+harmless for this corpus only. Verified by enumerating every event the covering array can
+produce:
+
+```
+sibling keys emitted across the whole covering array: ['record_field']
+```
+
+`record_field` is the harness's own carrier and the only sibling key it emits, so the
+re-keying is a no-op today. **It is wrong for any other sibling key** and would move a
+tail from its own channel into `record_field`'s, which the path-keyed joins would then
+reassemble in the wrong place. If the carrier axis ever grows a second sibling name, fix
+this first.
+
 ## Configuration, and why the request path is not masked
 
 `V2_REQUEST_PATH_REDACTION=not-configured`. Masking the request here would guarantee a
