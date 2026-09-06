@@ -1,6 +1,6 @@
 # Streaming Privacy Gateway Conformance Specification v2.0.0
 
-**Status: draft, amended three times since first publication.** The schema is published and
+**Status: draft, amended four times since first publication.** The schema is published and
 tested, and `pii_leak_benchmark.v2_emitter` now emits it.
 
 | date | change |
@@ -8,6 +8,44 @@ tested, and `pii_leak_benchmark.v2_emitter` now emits it.
 | 2026-09-04 | `request_site` axis and the `echo_observable` denominators (§3a) |
 | 2026-09-05 | the request path stopped being a rubber stamp (below) |
 | 2026-09-05 | `instrument`, `data_events_observed`, `iterations_requested` (below) |
+| 2026-09-06 | two `const: true` fields that were not true of this profile (below) |
+
+**The 2026-09-06 amendment: two constants that could not fail, and the second one had
+already survived a round of review.**
+
+A third adversarial review, this time of the *verification pass* that produced the
+amendment below, found that both fields in `fragmentation_safety` that were pinned
+`const: true` were false of this profile -- and that the repair for the first one had
+replaced a constant that could not fail with a function that could not succeed.
+
+- **`one_character_events_requested`** is now a plain boolean that is genuinely derived.
+  It was `const: true`, which was false of every v2 report. The 2026-09-05 repair made it a
+  derivation, and **the derivation could only return `false`**: it asked whether *both*
+  halves of a split were one character, which requires a two-character value, and the
+  shortest rendered corpus value is eleven. Its test pinned the `true` branch with a
+  two-character fixture no corpus can produce. Meanwhile `--exhaustive-splits` enumerates
+  `range(1, len(rendered))` -- offset 1 included -- and `_injection_events` writes a piece
+  of exactly one character there. The rule is "either end", not "both ends". Five published
+  rows said `false` while the emitter was demonstrably emitting one-character events.
+- **`coalescing_not_distinguished`** is now a plain boolean and v2 reports `false`. It was
+  kept as a const on 2026-09-05 on the argument that a *limitation disclosure* is not a
+  *capability claim*. The distinction is real. It does not rescue this field, because the
+  disclosed limitation is not true here: v1 cannot separate "the gateway coalesced several
+  upstream events" from "the upstream emitted fewer" **because v1 does not control the
+  upstream**. v2 IS the upstream and writes a known number of data events per case, so the
+  competing hypothesis is excluded by construction. A const is defensible when the
+  proposition is necessarily true; this one was necessarily false for a harness that owns
+  its own upstream.
+- **`upstream_data_events_emitted`** and **`coalescing_observed`** (both optional) publish
+  the comparison the field above spent two revisions disclaiming. They are optional rather
+  than required only so the stale rows keep validating; a fresh row should carry both.
+
+**The lesson, stated once.** Round 1's was "a check that cannot fail is not a check". This
+amendment adds the corollary: **a derivation that cannot return one of its values is still
+a constant, and it is harder to see.** Both new fields are pinned by tests that assert both
+outcomes on the real corpus, and both deciding functions are now in `_INSTRUMENTED`, which
+neither was -- `_one_character_events` decided a published field and could have been
+rewritten without marking a single row stale.
 
 **The second 2026-09-05 amendment: three fields that came out of reviewing the first one.**
 An adversarial review of the repairs above found seven further defects in the flattering

@@ -689,7 +689,7 @@
         },
         "one_character_events_requested": {
           "type": "boolean",
-          "description": "Whether the harness asked for one-character SSE events. This is a v1 device and it was `const: true` here until 2026-09-05, which was false of every v2 report ever emitted. v1 does not control the response, so it asks the TARGET to emit one-character events to maximise the chance of splitting a value. v2 IS the upstream: it places the split itself, at the value's midpoint by default and at every internal offset under --exhaustive-splits, so it never makes that request and reports false. What the run actually did is in response_injection_containment.fragmentation_strategy. Kept as a boolean rather than removed because a future v2 harness may legitimately do it; a profile that reports true must actually have emitted single-character pieces."
+          "description": "Whether the harness actually emitted a data event carrying exactly one character. A v1 device: v1 does not control the response, so it ASKS the target for one-character events to maximise the chance of splitting a value. v2 is the upstream and places the split itself, so the field became a measurement of what v2 emitted. It was `const: true` until 2026-09-05 and then a derivation that could only return false until 2026-09-06: that derivation required BOTH pieces of a split to be one character, which needs a two-character value, and the shortest rendered corpus value is eleven. Under --exhaustive-splits the internal offsets are range(1, len), which includes 1, so the emitter does write a one-character piece and the field must report true; the midpoint default reports false for any value longer than three. What the run did is also in response_injection_containment.fragmentation_strategy."
         },
         "events_observed": {
           "type": "integer",
@@ -703,8 +703,17 @@
           "type": "boolean"
         },
         "coalescing_not_distinguished": {
-          "const": true,
-          "description": "A LIMITATION DISCLOSURE, not a capability claim, which is why a const is defensible here and was not for its neighbour above. The profile counts the events the client received and cannot distinguish a gateway that coalesced several upstream events from one that emitted fewer. Every profile built this way has the limitation, so every report must admit it."
+          "type": "boolean",
+          "description": "Whether this profile is unable to tell a gateway that coalesced several upstream events from an upstream that emitted fewer. It was `const: true` until 2026-09-06, defended as a limitation disclosure rather than a capability claim. The category distinction is real; the disclosure was not true of v2. v1 has the limitation because it does not control the upstream. v2 IS the upstream and writes a known number of data events per case (upstream_data_events_emitted), so the competing hypothesis is excluded by construction and the comparison is available. v2 reports false; a profile that genuinely cannot make the comparison reports true."
+        },
+        "upstream_data_events_emitted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Data events the harness's own capture wrote for the case that decided this block, excluding [DONE]. Fixed by construction: 3 for a single-chunk case, 4 for a split one. Compare with data_events_observed to establish coalescing directly."
+        },
+        "coalescing_observed": {
+          "type": "boolean",
+          "description": "True when the client received FEWER data events than the capture sent, which is coalescing proved rather than inferred from a low absolute event count. Requires a positive observation: a run that received no data events reports false here because it observed nothing, and sse_validity and response_reconstructed carry that failure."
         },
         "data_events_observed": {
           "type": "integer",

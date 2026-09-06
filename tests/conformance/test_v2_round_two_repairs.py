@@ -515,25 +515,124 @@ def test_one_character_events_requested_is_derived_not_asserted() -> None:
     actually emitted, so an emitter that really did fragment to single characters would
     report true without anyone editing the line, and this one cannot claim it.
 
-    Its neighbour `coalescing_not_distinguished` stays a const on purpose: that one is a
-    limitation disclosure and is true of any profile built this way.
+    ROUND 3: that fix was itself a constant. It asked whether BOTH pieces of a split were
+    one character, which needs a two-character value, and the shortest rendered corpus
+    value is eleven -- so it returned False by arithmetic on the first case, always. Its
+    `True` branch was pinned with a two-character fixture no corpus can produce, and its
+    `False` branch only ever exercised the midpoint path.
+
+    Meanwhile `--exhaustive-splits` cuts at `range(1, len(rendered))`, which includes 1,
+    and `_injection_events` then emits a piece of exactly one character. So the emitter
+    DOES emit one-character events under that flag and five published rows said it did
+    not. This test now pins the real corpus on both paths.
     """
     from pii_leak_benchmark.v2_emitter import (
-        Segments,
         _encode,
+        _injection_events,
         _one_character_events,
         build_segments,
+        injection_split_points,
     )
 
     segments = build_segments("a1b2c3d4e5f60001")
     case = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
             "carrier": "sse-delta-content", "request_site": "chat-content"}
 
-    real = _result(case=case, split_points_tried=1)
-    assert _one_character_events(segments, [real]) is False
+    # The midpoint cuts a 20-character email into 10 and 10. No one-character event.
+    assert _one_character_events(segments, [_result(case=case, split_points_tried=1)]) is False
 
-    # A value the harness COULD cut into two single characters. The helper must say so,
-    # or it is a constant wearing a function's clothes.
-    tiny = Segments(echo={"EMAIL": "ab"}, injection={"EMAIL": "ab"})
-    assert len(_encode(tiny.injection["EMAIL"], "plain")) == 2
-    assert _one_character_events(tiny, [_result(case=case, split_points_tried=1)]) is True
+    # Exhaustive enumerates offset 1, and the harness really does write a single character
+    # there. Proved from the events themselves, not from the helper's own arithmetic.
+    points = injection_split_points(segments, case, exhaustive=True)
+    assert points[0] == 1, points[:3]
+    emitted = _injection_events(segments, case, split_at=1)
+    payloads = [e.get("content") or e.get("record_field") for e in emitted]
+    assert any(len(p) == 1 for p in payloads), payloads
+
+    # ...so the field must say so. This is the assertion the old version could not make
+    # for any input, on the REAL corpus rather than a two-character fixture.
+    assert _one_character_events(
+        segments, [_result(case=case, split_points_tried=len(points))]
+    ) is True
+
+    # A single-chunk case is never split, so it contributes no one-character event.
+    single = {**case, "fragmentation": "single_chunk"}
+    assert _one_character_events(segments, [_result(case=single, split_points_tried=1)]) is False
+    assert len(_encode(segments.injection["EMAIL"], "plain")) == 20
+
+
+def test_the_published_field_follows_the_derivation_not_a_literal() -> None:
+    """R2: nothing asserted this field THROUGH `_fragmentation_check`.
+
+    The derivation had one test and it called `_one_character_events` directly, so putting
+    the literal `True` back in the check body changed no test result at all -- the suite
+    reported the same `3 failed, 435 passed` either way, because the only thing that
+    noticed was `inspector_sha256`, and that guard is already red for the stale rows. A
+    guard that is red for another reason cannot report this one.
+    """
+    segments = build_segments("a1b2c3d4e5f60001")
+    case = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
+            "carrier": "sse-delta-content", "request_site": "chat-content"}
+
+    midpoint = _result(case=case, split_points_tried=1, data_events_observed=4, client_text="x")
+    exhaustive = _result(case=case, split_points_tried=19, data_events_observed=4, client_text="x")
+
+    assert _fragmentation_check(midpoint, [midpoint], segments)[
+        "one_character_events_requested"] is False
+    assert _fragmentation_check(exhaustive, [exhaustive], segments)[
+        "one_character_events_requested"] is True
+
+
+def test_coalescing_is_distinguishable_because_v2_owns_the_upstream() -> None:
+    """R3: `coalescing_not_distinguished` was `const: true`, defended as a limitation.
+
+    The defence was that a limitation disclosure is not a capability claim. The category
+    is real and the disclosure was still false: v1 cannot tell "the gateway merged events"
+    from "the upstream sent fewer" because v1 does not control the upstream. v2 IS the
+    upstream and writes a known number of data events per case, so the second hypothesis
+    is excluded by construction.
+    """
+    from pii_leak_benchmark.v2_emitter import _upstream_data_events
+
+    segments = build_segments("a1b2c3d4e5f60001")
+    split = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
+             "carrier": "sse-delta-content", "request_site": "chat-content"}
+    whole = {**split, "fragmentation": "single_chunk"}
+
+    # Fixed by construction: one preamble + one carrier preamble + one or two pieces.
+    assert _upstream_data_events(segments, _result(case=split)) == 4
+    assert _upstream_data_events(segments, _result(case=whole)) == 3
+
+    # A gateway that forwarded every event is not coalescing.
+    faithful = _result(case=split, data_events_observed=4, client_text="all of it")
+    check = _fragmentation_check(faithful, [faithful], segments)
+    assert check["coalescing_not_distinguished"] is False
+    assert check["upstream_data_events_emitted"] == 4
+    assert check["coalescing_observed"] is False
+
+    # A gateway that buffered the whole response into one chunk IS, and the profile can
+    # now prove it instead of inferring it from a low absolute event count. This is the
+    # shape of `llm-guard-buffered` and `litellm-presidio`, the two E15 rows.
+    buffered = _result(case=split, data_events_observed=1, client_text="all of it")
+    assert _fragmentation_check(buffered, [buffered], segments)["coalescing_observed"] is True
+
+    # Nothing received is not "no coalescing observed" by accident -- it is a run that
+    # observed nothing, and `passed` and `response_reconstructed` carry that.
+    dead = _result(case=split, data_events_observed=0, client_text="")
+    dead_check = _fragmentation_check(dead, [dead], segments)
+    assert dead_check["coalescing_observed"] is False
+    assert dead_check["passed"] is False
+    assert dead_check["response_reconstructed"] is False
+
+
+def test_both_new_deciders_are_in_the_instrument_digest() -> None:
+    """R2/R5: `_one_character_events` decided a published field and was not digested.
+
+    It could be rewritten -- or reverted to a literal -- without marking one row stale,
+    which is the exact hole `inspector_sha256` exists to close. `_upstream_data_events`
+    now decides two more fields and must not repeat it.
+    """
+    from pii_leak_benchmark.v2_emitter import _INSTRUMENTED
+
+    assert "_one_character_events" in _INSTRUMENTED
+    assert "_upstream_data_events" in _INSTRUMENTED

@@ -24,8 +24,21 @@ RESULTS = Path(__file__).resolve().parents[2] / "benchmarks" / "results" / "v2-r
 
 
 def _artefacts() -> list[Path]:
-    """Single-run reports only. Sweep files aggregate many runs and have another shape."""
-    return sorted(p for p in RESULTS.glob("*.json") if not p.name.startswith("seed-sweep"))
+    """Single-run reports only. Sweep files aggregate many runs and have another shape.
+
+    RECURSIVE, and it was not until 2026-09-06. `glob` stops at the top level, so
+    `exhaustive-splits/` -- nine published rows, four of them carrying no `instrument`
+    block at all -- was covered by none of the six tests that call this. Those four sat
+    beside five fresh rows and the suite was green about them, which is exactly the
+    "a stale row looks like evidence" failure this file's docstring is about. The word
+    "exhaustive" did not appear in this file.
+    """
+    return sorted(p for p in RESULTS.rglob("*.json") if not p.name.startswith("seed-sweep"))
+
+
+def _label(path: Path) -> str:
+    """Name to print. Bare `.name` collides: chunk-local.json exists in both directories."""
+    return path.relative_to(RESULTS).as_posix()
 
 
 def _corpus(path: Path) -> dict:
@@ -36,7 +49,7 @@ def _corpus(path: Path) -> dict:
 def test_every_artefact_used_the_same_case_count() -> None:
     by_count: dict[int, list[str]] = {}
     for path in _artefacts():
-        by_count.setdefault(_corpus(path)["case_count"], []).append(path.name)
+        by_count.setdefault(_corpus(path)["case_count"], []).append(_label(path))
 
     assert len(by_count) <= 1, (
         "artefacts from different corpus generations are sitting in one directory and "
@@ -50,7 +63,7 @@ def test_every_artefact_used_the_same_case_count() -> None:
 def test_every_artefact_used_the_same_axes() -> None:
     by_axes: dict[tuple, list[str]] = {}
     for path in _artefacts():
-        by_axes.setdefault(tuple(sorted(_corpus(path)["coverage"]["axes"])), []).append(path.name)
+        by_axes.setdefault(tuple(sorted(_corpus(path)["coverage"]["axes"])), []).append(_label(path))
 
     assert len(by_axes) <= 1, (
         "artefacts measured over different axis sets:\n"
@@ -62,7 +75,7 @@ def test_every_artefact_used_the_same_axes() -> None:
 def test_every_artefact_proved_its_coverage() -> None:
     """A row whose pairwise proof is incomplete cannot be compared with one whose is."""
     incomplete = [
-        path.name for path in _artefacts() if not _corpus(path)["coverage"]["proof_complete"]
+        _label(path) for path in _artefacts() if not _corpus(path)["coverage"]["proof_complete"]
     ]
     assert not incomplete, f"coverage proof incomplete: {incomplete}"
 
@@ -121,7 +134,7 @@ def test_every_artefact_was_scored_by_the_current_inspector(path_in_report: tupl
         for key in path_in_report:
             node = node.get(key, {}) if isinstance(node, dict) else {}
         if node != expected:
-            stale.append(path.name)
+            stale.append(_label(path))
 
     assert not stale, (
         "these rows were produced by an inspector that no longer exists, and their "
@@ -158,9 +171,22 @@ def test_every_sweep_records_which_instrument_produced_it() -> None:
     def digest(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:16]
 
+    # `inspector_sha256` IS CHECKED HERE, and it was not until 2026-09-06. This dict held
+    # only the two scope digests -- which are generated from the CAPABILITY REGISTRIES, so
+    # they track declared reach and not behaviour. That is the exact anchor the comment
+    # below this test calls "the wrong anchor on its own", and this guard was still relying
+    # on it alone. Measured: after `_one_character_events` and `coalescing_not_distinguished`
+    # were fixed, `seed-sweep.json` -- the file the README calls "the numbers to cite" --
+    # carried a stale `inspector_sha256` with both scope digests current, and this test was
+    # GREEN. The eight per-target sweeps were caught only because their scope digests also
+    # happened to be old.
+    from pii_leak_benchmark.v2_emitter import instrument_block
+
+    current = instrument_block()
     expected = {
         "client_scope_sha256": digest(CLIENT_INSPECTION_SCOPE),
         "boundary_scope_sha256": digest(BOUNDARY_INSPECTION_SCOPE),
+        "inspector_sha256": current["inspector_sha256"],
     }
 
     stale: list[str] = []
@@ -207,10 +233,10 @@ def test_every_artefact_records_the_instrument_that_produced_it() -> None:
     for path in _artefacts():
         block = json.loads(path.read_text(encoding="utf-8")).get("instrument")
         if block is None:
-            stale.append(f"{path.name} (no instrument block)")
+            stale.append(f"{_label(path)} (no instrument block)")
         elif block != expected:
             differing = sorted(k for k, v in expected.items() if block.get(k) != v)
-            stale.append(f"{path.name} (differs at {', '.join(differing)})")
+            stale.append(f"{_label(path)} (differs at {', '.join(differing)})")
 
     assert not stale, (
         "these rows were produced by an instrument that is not the current one, so "

@@ -2425,6 +2425,11 @@ _INSTRUMENTED = (
     "_fidelity_check",
     "_sse_check",
     "_fragmentation_check",
+    # Both decide a published field and NEITHER was digested. `_one_character_events` was
+    # added as the fix for a const that could not fail and could itself be rewritten
+    # without marking a single row stale -- the exact hole the digest exists to close.
+    "_one_character_events",
+    "_upstream_data_events",
     "_injection_check",
     "_injection_evidence",
     "_derive_outcome",
@@ -2632,13 +2637,20 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
 
 
 def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
-    """Did the harness actually emit single-character data events?
+    """Did the harness actually emit a single-character data event?
 
-    Derived rather than asserted. `_injection_events` splits a rendered value into two
-    pieces at `split_at`, so a piece is one character only if the harness chose an offset
-    one away from an end of a value that is itself two characters long. No corpus entity is
-    shorter than six bytes, so this is False for this emitter -- but it is False because it
-    was computed, not because a line says so.
+    Derived rather than asserted, and the FIRST derivation was wrong in a way that made it
+    a constant again. It asked whether BOTH pieces of a split were one character, which is
+    possible only for a value of two characters; the shortest rendered corpus value is
+    eleven. So it returned False by arithmetic on the first adversarial case it looked at,
+    for every input this harness can produce -- the same defect as the `const: true` it
+    replaced, pointing the other way, and its own docstring stated the wrong rule ("a value
+    that is itself two characters long").
+
+    A piece is one character whenever the split lands one away from EITHER end, for a value
+    of any length. `--exhaustive-splits` enumerates `range(1, len(rendered))`, which
+    includes 1, so under that flag this emitter really does emit a one-character data event
+    and must report true. The midpoint default does not, for any value longer than three.
     """
     for result in results:
         if result.case.get("fragmentation") != "adversarial":
@@ -2651,9 +2663,24 @@ def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
         ):
             if not split_at:
                 continue
-            if len(rendered[:split_at]) > 1 or len(rendered[split_at:]) > 1:
-                return False
-    return bool(results)
+            if len(rendered[:split_at]) == 1 or len(rendered[split_at:]) == 1:
+                return True
+    return False
+
+
+def _upstream_data_events(segments: Segments, result: RunResult) -> int:
+    """How many data events the CAPTURE wrote for this case. Known, not inferred.
+
+    `_respond` writes one preamble event and then `_injection_events`, which is one
+    carrier preamble plus one or two value pieces. So the count is 3 for a single-chunk
+    case and 4 for a split one, fixed by construction. `events_observed` is read from the
+    FIRST split point, so this reads the first split point too.
+    """
+    points = injection_split_points(
+        segments, result.case, exhaustive=result.split_points_tried > 1
+    )
+    split_at = points[0] if points else 0
+    return 1 + len(_injection_events(segments, result.case, split_at))
 
 
 def _fragmentation_check(
@@ -2668,6 +2695,7 @@ def _fragmentation_check(
     upstream emitted" is the E15 reproduction and it rests on this field.
     """
     counts = [max(r.events_observed, r.events_observed_max) for r in results] or [0]
+    upstream = _upstream_data_events(segments, worst)
     return {
         # `events_observed` COUNTS THE `[DONE]` SENTINEL, so `> 1` was satisfied by a
         # gateway that emitted the whole response as a single chunk followed by `[DONE]`.
@@ -2677,17 +2705,32 @@ def _fragmentation_check(
         # data-bearing events only; `events_observed` keeps the published convention so
         # the E15 column stays comparable with what is already in print.
         "passed": worst.data_events_observed > 1 and bool(worst.client_text),
-        # DERIVED, not asserted. This was the literal `True` the schema forced, and it
-        # was false of every v2 report: v1 asks the TARGET for one-character events
-        # because it does not control the response; v2 IS the upstream and places the
-        # split itself. Computed from the pieces actually emitted so a future harness
-        # that really does emit single-character events reports true without editing
-        # this line, and this one cannot claim it.
+        # DERIVED, not asserted -- and the first derivation was still a constant. See
+        # `_one_character_events`: it tested for BOTH pieces being one character, which no
+        # corpus value can satisfy, so it answered False by arithmetic while the emitter
+        # was demonstrably writing a one-character event at split point 1 under
+        # `--exhaustive-splits`. It now answers the question it asks.
         "one_character_events_requested": _one_character_events(segments, results),
         "events_observed": worst.events_observed,
         "events_observed_max": max(counts),
         "data_events_observed": worst.data_events_observed,
-        "coalescing_not_distinguished": True,
+        # NOT a limitation of this profile, though it was published as `const: true` until
+        # 2026-09-06 on the argument that a limitation disclosure is not a capability
+        # claim. The category is real; the disclosure is not true HERE. v1 cannot tell a
+        # gateway that coalesced several upstream events from an upstream that emitted
+        # fewer, because v1 does not control the upstream. v2 IS the upstream and writes a
+        # known number of data events per case, so the second hypothesis is excluded by
+        # construction and the comparison below is available. Kept as a boolean rather
+        # than deleted so a profile that genuinely cannot make it can still say so.
+        "coalescing_not_distinguished": False,
+        "upstream_data_events_emitted": upstream,
+        # The comparison the field above spent two rounds disclaiming. `llm-guard-buffered`
+        # and `litellm-presidio` -- the E15 rows -- received 1 data event against 3 or 4
+        # sent, which is coalescing PROVED rather than inferred from a low event count.
+        # Requires a positive observation: a run that received nothing did not observe
+        # coalescing, it observed nothing, and `sse_validity` and `response_reconstructed`
+        # carry that failure.
+        "coalescing_observed": 0 < worst.data_events_observed < upstream,
         "response_reconstructed": bool(worst.client_text),
     }
 

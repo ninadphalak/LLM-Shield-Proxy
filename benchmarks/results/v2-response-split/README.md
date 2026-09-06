@@ -73,6 +73,38 @@
 > published leak rests on a cross-field concatenation** -- which is the tier a coincidence
 > can reach, and the tier the round 7 IPv4 false positive lived in.
 >
+> **Round 3 (2026-09-06) -- two published fields in this directory were wrong, and neither
+> was a rate.** `one_character_events_requested` was `const: true`, then a derivation that
+> could only return `false`: it required BOTH halves of a split to be one character, which
+> needs a two-character value, and the shortest rendered corpus value is 11. Meanwhile
+> `--exhaustive-splits` cuts at offset 1 and the harness really does emit a one-character
+> event there. **The five `exhaustive-splits/` rows now report `true` and the seven midpoint
+> rows report `false`** -- the field discriminates between the two run modes for the first
+> time; before this it was `true` for everything, then `false` for everything.
+>
+> `coalescing_not_distinguished` was `const: true`, defended as a limitation disclosure
+> rather than a capability claim. The category is real and the disclosure was false here:
+> v1 cannot tell "the gateway merged events" from "the upstream sent fewer" because v1 does
+> not control the upstream, but **v2 IS the upstream** and writes a known 3 or 4 data events
+> per case. All 12 fresh rows now report `false`, with `upstream_data_events_emitted` and
+> `coalescing_observed` beside it. This **strengthens the E15 reading**: `llm-guard-buffered`
+> and `litellm-presidio` received one data event against 3-4 sent, which is coalescing
+> *proved* rather than inferred from a low absolute event count. (Both are stale; the claim
+> is checkable once they are re-run.)
+>
+> **Nothing else moved.** Every leaf of all 12 re-run rows, diffed against `31c1a21`:
+> **1,314 critical leaves compared -- rates, `passed` verdicts, outcomes, case counts -- and
+> 0 moved.** The only non-noise differences are the two fields above (12 rows and 5 rows
+> respectively) plus the two added fields. Known-answer controls hold: `passthrough`
+> 1.00/1.00, `retention-plus-decoding` the only `pass`, `presidio-chunk-local` still
+> 0.50 -> 1.00 under `--exhaustive-splits`.
+>
+> **A guard that was covering nothing.** `test_results_are_comparable.py` selected artefacts
+> with `RESULTS.glob("*.json")`, which is not recursive, so `exhaustive-splits/` -- nine
+> rows, **four with no `instrument` block at all** -- was checked by none of the six tests
+> that use it. Those four sat beside five fresh rows and the suite was green about them.
+> It is `rglob` now, and the stale count below rises from 24 to include them explicitly.
+
 > **24 artefacts are STALE and `test_every_artefact_records_the_instrument_that_produced_it`
 > is RED because of them**, correctly. They are the four Google rows, the six external
 > gateway rows (LiteLLM, Portkey, NeMo, both Shield configs, plus LLM Guard ×2 and

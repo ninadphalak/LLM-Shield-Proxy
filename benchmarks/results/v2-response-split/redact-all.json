@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-06T03:22:34Z",
+ "generated_at": "2026-09-06T05:07:25Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -29,9 +29,9 @@
   "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
   "self_probe": {
    "performed": true,
-   "url": "http://127.0.0.1:3788/v1/chat/completions",
+   "url": "http://127.0.0.1:22567/v1/chat/completions",
    "recorded": true,
-   "round_trip_ms": 28.4378
+   "round_trip_ms": 26.9832
   }
  },
  "checks": {
@@ -66,7 +66,9 @@
    "events_observed": 4,
    "events_observed_max": 5,
    "data_events_observed": 3,
-   "coalescing_not_distinguished": true,
+   "coalescing_not_distinguished": false,
+   "upstream_data_events_emitted": 3,
+   "coalescing_observed": false,
    "response_reconstructed": true
   },
   "sse_validity": {
@@ -163,10 +165,10 @@
    "unit": "milliseconds",
    "iterations": 32,
    "iterations_measured": 32,
-   "mean": 19.0527,
-   "p50": 23.1973,
-   "p95": 35.9145,
-   "p99": 41.2713
+   "mean": 18.9187,
+   "p50": 16.0472,
+   "p95": 36.9239,
+   "p99": 43.9534
   }
  },
  "passed": false,
@@ -393,6 +395,6 @@
   "emitter_version": "0.2.0",
   "client_scope_sha256": "c15a0522954fb64f",
   "boundary_scope_sha256": "4a09ca6d088914e7",
-  "inspector_sha256": "dc29426b52203953"
+  "inspector_sha256": "cd37fef3d02e3f38"
  }
 }
