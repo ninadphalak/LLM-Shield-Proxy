@@ -105,20 +105,68 @@
 > that use it. Those four sat beside five fresh rows and the suite was green about them.
 > It is `rglob` now, and the stale count below rises from 24 to include them explicitly.
 
-> **24 artefacts are STALE and `test_every_artefact_records_the_instrument_that_produced_it`
-> is RED because of them**, correctly. They are the four Google rows, the six external
-> gateway rows (LiteLLM, Portkey, NeMo, both Shield configs, plus LLM Guard ×2 and
-> Guardrails), the four Google `exhaustive-splits/` rows, and the eight per-target
-> `seed-sweep-<target>.json` files that cover them. Each needs a container, a billed cloud
-> project or a separate 3.12 venv. **Do not read them beside the thirteen fresh rows, and
-> do not weaken the guard to make the build green.** Re-run them or move them out.
+> **Round 4 (2026-09-06): the billed calls had no deadline, no retry and no clock, and a
+> rate was published without its denominator.** `_gcp_post` was `urlopen(..., timeout=60)`
+> -- a literal, so the only two calls in this harness that cross the public internet were
+> the only two `--connect-timeout` / `--read-timeout` could not reach, and `urllib` takes
+> ONE number where connect and read need two. Nothing retried, against APIs quota'd per
+> project per minute that this profile calls once per delta. And the access-token cache had
+> no clock at all, against a token Google issues for one hour, so any run longer than an
+> hour got a 401 for every remaining case. None of the three is a measurement error; each
+> ends a BILLED run partway through and writes nothing. Separately,
+> `outcome_rationale` -- the field that states the result -- carried four rates and no
+> denominator while `method_limits` three fields away said "32 cases". **The denominator is
+> `cases_applicable`, never `cases_scored`** (which counts the cases ATTEMPTED), and the
+> three rates have three different denominators: fidelity over the echo-observable cases,
+> each leak rate over its own fragmentation arm. All four now say so.
+>
+> **16 artefacts re-measured on the resulting instrument (`inspector_sha256`
+> `955edd079f406e13`) and NOT ONE MEASURED NUMBER MOVED.** Seven single-run rows, five
+> `exhaustive-splits/` rows and all four Google rows, at the published seed
+> `a1b2c3d4e5f60001`: **2,482 measured leaves compared -- rates, `passed` verdicts,
+> outcomes, corpus and case digests -- and 0 moved.** The 24 leaves that did move are
+> `outcome_rationale` in all 16 rows (the denominator now appears in it) plus, in the four
+> Google rows only, `coalescing_not_distinguished` and `one_character_events_requested`
+> going `true` -> `false`. Both of those are the round 3 repairs landing on rows that
+> predated them, and both are now correct: the Google rows are midpoint runs, and no half
+> of an 11-character value is one character. Known-answer controls hold: `passthrough`
+> 1.00/1.00, `retention-plus-decoding` the only `pass`, `presidio-chunk-local` 0.50 ->
+> 1.00 under `--exhaustive-splits`, Google DLP 0.5/1.0/0.5 and 0.5/0.5/0.0, Model Armor
+> 0.75/1.0/0.25 and 0.75/0.75/0.0.
+>
+> **Read against the previous note: the four Google rows now carry a coalescing RATE.**
+> They were the rows with no `instrument` block at all, so they had never been scored by
+> the round 3 instrument; they are now on the same footing as every other row here.
+> All 16 share one `instrument` block and one `fragmentation_safety` shape.
+
+> **21 artefacts are STALE and `test_every_artefact_records_the_instrument_that_produced_it`
+> is RED because of them**, correctly. They are the eight external gateway rows (LiteLLM,
+> Portkey, NeMo, both Shield configs, LLM Guard × 2 and Guardrails), the four Google
+> `exhaustive-splits/` rows, and the nine `seed-sweep*.json` files -- **including
+> `seed-sweep.json` itself, the file this README calls "the numbers to cite"**. Each needs a
+> container, a billed cloud project or a separate 3.10-3.12 venv. **Do not read them beside
+> the sixteen fresh rows, and do not weaken the guard to make the build green.** Re-run them
+> or move them out.
+>
+> **The Google `exhaustive-splits/` rows are the sharpest of these**, because the rule three
+> sections down is *quote no DeltaFrag from Presidio, DLP or Model Armor without
+> `--exhaustive-splits`* -- so the DeltaFrag figures for both Google products currently rest
+> on rows measured by an instrument three digests old. The midpoint rows beside them are
+> fresh; the exhaustive ones are not.
 
 - Emitter: `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py` (committed)
-- Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate`
+- Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate --out <scratch-dir>`
+  **`--validate` WRITES.** It is not a dry run: it emits each policy's report to the
+  output directory like a normal run, and `--out` defaults to *this directory*, so
+  invoking it without one overwrites the published artefacts in place. This line used to
+  omit `--out` and was measured doing exactly that. Run it from the repo root; the schema
+  path is CWD-relative.
 - Schema: `spec/v2.0.0/http-profile.schema.json`
-- Reports: `passthrough.json`, `redact-all.json`, `chunk-local.json`,
-  `bounded-retention.json`, `retention-plus-decoding.json`,
-  `presidio-chunk-local.json`, `presidio-retention.json`
+- Reports on the current instrument (16): `passthrough.json`, `redact-all.json`,
+  `chunk-local.json`, `bounded-retention.json`, `retention-plus-decoding.json`,
+  `presidio-chunk-local.json`, `presidio-retention.json`, the four `gcp-*.json`, and five
+  `exhaustive-splits/` rows (`bounded-retention`, `chunk-local`, `retention-plus-decoding`,
+  `presidio-chunk-local`, `presidio-retention`)
 - The two `presidio-*` policies require a live analyzer on `127.0.0.1:5002`. Select a
   subset with `--only`, e.g. `--only chunk-local,bounded-retention`.
 
