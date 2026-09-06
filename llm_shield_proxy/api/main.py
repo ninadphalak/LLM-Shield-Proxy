@@ -725,6 +725,13 @@ async def _proxy_catch_all_internal(
             port_str = f":{parsed.port}" if parsed.port else ""
             upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
 
+    # The effective upstream hostname for this request, captured before the
+    # SSRF pinning above swaps `upstream_base` for a validated IP literal.
+    # resolve_provider() keys the Anthropic adapter off this rather than off the
+    # model name, so it has to survive both the air-gapped and client-override
+    # rewrites; `sni_hostname` is set precisely when one of them fired.
+    upstream_host = sni_hostname or urlparse(upstream_base).hostname
+
     target_url = build_target_url(upstream_base, path)
 
     # Prepare forwarding headers
@@ -759,11 +766,14 @@ async def _proxy_catch_all_internal(
     if matched_key:
         is_virtual_key = True
         virtual_key_id = get_virtual_key_id(matched_key)
-    elif settings.ENABLE_OPEN_BYOK_PASSTHROUGH and client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
+    elif settings.ENABLE_OPEN_BYOK_PASSTHROUGH and client_auth.startswith(settings.byok_key_prefixes):
         # Direct genuine BYOK provider key passthrough. Gated behind ENABLE_OPEN_BYOK_PASSTHROUGH
         # (default False): a prefix match alone doesn't authenticate the caller as an entitled
         # proxy user -- without this flag, an unrecognized key falls through to the 401 below
         # instead of being routed through the DLP pipeline and forwarded upstream.
+        # The accepted prefixes are BYOK_KEY_PREFIXES, not a literal here: which providers a
+        # deployment fronts is a deployment fact, and hardcoding it meant every new upstream
+        # (OpenRouter being the case that surfaced it) was a source change and a release.
         is_virtual_key = False
     elif settings.OVERRIDE_CLIENT_AUTH:
         # Bypass strict prefix checks if enterprise secret injection is active
@@ -1088,11 +1098,18 @@ async def _proxy_catch_all_internal(
                                 redacted_payload["system"].append({"type": "text", "text": directive})
 
                 # target_provider is refined with payload
-                target_provider = resolve_provider(dict(request.headers), redacted_payload)
+                target_provider = resolve_provider(dict(request.headers), redacted_payload, upstream_host)
                 if target_provider == "anthropic":
                     anthropic_payload = AnthropicAdapter.transform_request(redacted_payload)
                     redacted_bytes = orjson.dumps(anthropic_payload)
-                    target_url = "https://api.anthropic.com/v1/messages"
+                    # Swap the path, never the destination. This used to hardcode
+                    # https://api.anthropic.com/v1/messages, which discarded the
+                    # operator's configured upstream: it bypassed the air-gapped
+                    # egress gateway and the SSRF IP pinning, and forwarded
+                    # whichever credential had been injected for the *configured*
+                    # upstream to Anthropic instead. Deriving the URL keeps
+                    # "traffic goes where UPSTREAM_BASE_URL says" absolute.
+                    target_url = build_target_url(upstream_base, "v1/messages")
                     headers["anthropic-version"] = settings.ANTHROPIC_API_VERSION
                     headers["x-api-key"] = headers.get("authorization", "").replace("Bearer ", "").strip()
                     headers.pop("authorization", None)

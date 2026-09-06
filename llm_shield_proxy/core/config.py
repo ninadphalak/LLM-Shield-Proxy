@@ -22,6 +22,18 @@ _config_reload_lock: threading.Lock = threading.Lock()
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 _ENV_FILE_PATH: str = str(_REPO_ROOT / ".env")
 
+# Key prefixes that look enough like a real provider credential to be forwarded as
+# BYOK when ENABLE_OPEN_BYOK_PASSTHROUGH is on. This is a shape check, never an
+# authentication decision -- see that flag's description. Operators override the
+# list with BYOK_KEY_PREFIXES rather than editing it here, because the set of
+# providers a deployment fronts is a deployment fact, not a property of the proxy.
+DEFAULT_BYOK_KEY_PREFIXES: tuple[str, ...] = (
+    "sk-proj-",  # OpenAI
+    "sk-ant-",  # Anthropic
+    "AIza",  # Google AI Studio / Gemini
+    "sk-or-v1-",  # OpenRouter
+)
+
 # Keys whose values carry structure rather than prose. Rewriting one does not
 # protect anybody and can break the request: a tool stops routing, a schema stops
 # validating, a model name stops resolving. Operators extend this with
@@ -169,8 +181,17 @@ class Settings(BaseSettings):
         default=False,
         description=(
             "Allow callers presenting an unrecognized key that merely looks like a provider key "
-            "(sk-proj-/sk-ant-/AIza prefix) to pass through as BYOK without matching VALID_VIRTUAL_KEYS. "
+            "(see BYOK_KEY_PREFIXES) to pass through as BYOK without matching VALID_VIRTUAL_KEYS. "
             "Disabled by default: unauthenticated callers are rejected with 401 unless this is explicitly enabled."
+        ),
+    )
+    BYOK_KEY_PREFIXES: str = Field(
+        default="",
+        description=(
+            "Comma-separated key prefixes accepted by ENABLE_OPEN_BYOK_PASSTHROUGH. Empty uses the built-in "
+            "list (OpenAI, Anthropic, Google, OpenRouter). Setting it REPLACES that list rather than extending "
+            "it, so a deployment fronting a single provider can narrow the surface. Blank entries are dropped: "
+            "an empty prefix would match every key and turn the gate into allow-all."
         ),
     )
 
@@ -427,6 +448,19 @@ class Settings(BaseSettings):
         if self.AIR_GAPPED_MODE and not self.EGRESS_GATEWAY_URL:
             raise ValueError("EGRESS_GATEWAY_URL must be set if AIR_GAPPED_MODE is True.")
         return self
+
+    @property
+    def byok_key_prefixes(self) -> tuple[str, ...]:
+        """Prefixes accepted as BYOK-shaped, fail-closed on a malformed override.
+
+        Blank entries are dropped because ``"anything".startswith("")`` is True, so a
+        stray trailing comma would otherwise widen the gate to every key ever
+        presented. An override that parses to nothing yields an empty tuple, and
+        ``str.startswith(())`` is False, so the gate denies rather than admits.
+        """
+        if not self.BYOK_KEY_PREFIXES:
+            return DEFAULT_BYOK_KEY_PREFIXES
+        return tuple(p.strip() for p in self.BYOK_KEY_PREFIXES.split(",") if p.strip())
 
     @property
     def payload_protected_keys_set(self) -> frozenset[str]:
