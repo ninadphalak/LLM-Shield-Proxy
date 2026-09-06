@@ -53,7 +53,14 @@ def sweep(
                 **{m: summary[m] for m in METRICS},
                 "inconclusive": summary["inconclusive"],
                 "echo_observable": summary["echo_observable"],
-                "cases": summary["cases"],
+                # THE DENOMINATOR OF THE FOUR RATES ABOVE. This row used to carry
+                # `"cases": summary["cases"]`, which was `metrics.cases_scored`, which is
+                # `len(results)` -- the cases ATTEMPTED. A reader of `seed-sweep.json`
+                # reconstructing a leak count from `leak_adversarial x cases` got the
+                # wrong number by exactly the inconclusive count, and this file is the one
+                # the README calls "the numbers to cite".
+                "cases_applicable": summary["cases_applicable"],
+                "cases_attempted": summary["cases_attempted"],
                 # The four rates do not say whether the run PASSED. A request-path leak
                 # produces `fail` with all four response rates at 0.00, which is what
                 # LiteLLM does, so a sweep that records only the rates hides it.
@@ -62,13 +69,20 @@ def sweep(
                     "leaked_entity_types"
                 ],
             })
-            if summary["inconclusive"] >= summary["cases"]:
+            if summary["inconclusive"] >= summary["cases_attempted"]:
                 # Every case refused. The four rates are all 0.00, which reads as a
                 # flawless gateway, so refuse to record it as a result at all.
+                #
+                # Compared against cases_ATTEMPTED, deliberately. Against
+                # `cases_applicable` this reads `inconclusive >= applicable`, which the
+                # two numbers satisfy whenever HALF the array dies -- 16 >= 16 -- and the
+                # sweep would abort on a partially-degraded target that still produced a
+                # publishable row. The guard's question is "did anything come back at
+                # all", and only the attempted total can answer it.
                 raise SystemExit(
-                    f"{name} seed={seed}: all {summary['cases']} cases inconclusive -- "
-                    "the target answered nothing. Check the container is running and "
-                    "owns the port before trusting any row."
+                    f"{name} seed={seed}: all {summary['cases_attempted']} cases "
+                    "inconclusive -- the target answered nothing. Check the container is "
+                    "running and owns the port before trusting any row."
                 )
             print(
                 f"  {name:24} seed={seed}  "

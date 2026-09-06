@@ -66,6 +66,7 @@ import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Iterable
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import httpx
@@ -555,39 +556,206 @@ class PresidioRetaining(Retaining):
 # missing header.
 # --------------------------------------------------------------------------------------
 
-_GCP_TOKEN_CACHE: dict[str, str] = {}
+# THE CLOUD DEADLINE AND RETRY BUDGET, and it is not the client one.
+#
+# `CLIENT_CONNECT_TIMEOUT` / `CLIENT_READ_TIMEOUT` bound the sockets this harness opens to
+# a gateway on loopback or in a container next door, where five and ten seconds are
+# generous. These two are a commercial SaaS across the public internet under a real
+# billing account, and the deadline here was the literal `timeout=60` -- so the ONE pair
+# of sockets in this harness that crosses a network was the one pair `--connect-timeout`
+# and `--read-timeout` could not reach. Both now route here.
+#
+# They are SEPARATE globals with their own defaults rather than an alias for the client
+# pair, because the client read default is 10s and a DLP call on a cold project exceeds
+# it: aliasing them would have turned "route the flags" into a silent 60s -> 10s
+# regression on the only calls that are billed. Unset, these reproduce the old 60s read.
+GCP_CONNECT_TIMEOUT = float(os.environ.get("V2_GCP_CONNECT_TIMEOUT", "5"))
+GCP_READ_TIMEOUT = float(os.environ.get("V2_GCP_READ_TIMEOUT", "60"))
+
+# THE RETRY BUDGET. DLP and Model Armor are quota'd per project per minute, and this
+# profile calls them once per DELTA -- 32 cases x several deltas x every split point under
+# `--exhaustive-splits` -- which is precisely the shape that meets a quota wall. An
+# unretried 429 propagates out of `feed()`, through the gateway handler, and ends a billed
+# multi-hour run at whichever case happened to be in flight. 503 is the same story from
+# the backend's side. Neither says anything about the DETECTOR, so neither may become a
+# measurement: the run either completes or it stops, but a transport refusal from the
+# vendor must never be scored as a redaction result.
+GCP_MAX_ATTEMPTS = int(os.environ.get("V2_GCP_MAX_ATTEMPTS", "6"))
+GCP_BACKOFF_BASE = float(os.environ.get("V2_GCP_BACKOFF_BASE", "1.0"))
+GCP_BACKOFF_CAP = float(os.environ.get("V2_GCP_BACKOFF_CAP", "60"))
+GCP_RETRY_STATUS = frozenset({429, 503})
+
+# Access tokens from `gcloud auth print-access-token` are one-hour bearer tokens. The
+# cache had no clock, so a run longer than an hour -- which the four GCP rows are, and
+# which `--exhaustive-splits` guarantees -- carried an expired token from the moment it
+# expired and answered 401 for every remaining case. Refresh well inside the hour.
+GCP_TOKEN_TTL_SECONDS = float(os.environ.get("V2_GCP_TOKEN_TTL_SECONDS", "3000"))
+
+# Backoff jitter, from a dedicated generator rather than the `random` module. The corpus
+# is drawn from `random.Random(seed)` instances and a seeded run must reproduce; touching
+# global `random` state from a retry path would make reproducibility depend on how many
+# times Google rate-limited us.
+_GCP_JITTER = random.Random()
+
+_GCP_TOKEN_CACHE: dict[str, Any] = {}
+_GCP_TOKEN_LOCK = threading.Lock()
+
+
+def _gcloud(argv: list[str], what: str) -> str:
+    import subprocess  # noqa: S404
+
+    done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602
+    value = done.stdout.strip()
+    if done.returncode != 0 or not value:
+        raise RuntimeError(f"gcloud {what} unavailable: {done.stderr.strip()[:200]}")
+    return value
 
 
 def _gcp_context() -> tuple[str, str]:
-    """(access token, project id) from the local gcloud install, cached per process."""
-    import subprocess  # noqa: S404
+    """(access token, project id) from the local gcloud install, token refreshed on age.
 
-    if not _GCP_TOKEN_CACHE:
-        for key, argv in (
-            ("token", ["gcloud", "auth", "print-access-token"]),
-            ("project", ["gcloud", "config", "get-value", "project"]),
-        ):
-            done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602
-            value = done.stdout.strip()
-            if done.returncode != 0 or not value:
-                raise RuntimeError(f"gcloud {key} unavailable: {done.stderr.strip()[:200]}")
-            _GCP_TOKEN_CACHE[key] = value
-    return _GCP_TOKEN_CACHE["token"], _GCP_TOKEN_CACHE["project"]
+    The predecessor was `if not _GCP_TOKEN_CACHE:` -- fetch once, hold forever. Google's
+    access tokens live one hour. The GCP rows take longer than that, so the failure was
+    not hypothetical: every case after the 60-minute mark gets a 401, which no retry rule
+    here treats as retryable, and the run dies with most of the corpus measured and
+    nothing written.
+
+    The project id does NOT expire and is cached unconditionally; only the token carries a
+    clock. `time.monotonic` and not `time.time`, because a wall-clock step must not either
+    expire a live token or extend a dead one.
+    """
+    with _GCP_TOKEN_LOCK:
+        if "project" not in _GCP_TOKEN_CACHE:
+            _GCP_TOKEN_CACHE["project"] = _gcloud(
+                ["gcloud", "config", "get-value", "project"], "project"
+            )
+        issued = _GCP_TOKEN_CACHE.get("issued_at")
+        if issued is None or (time.monotonic() - issued) >= GCP_TOKEN_TTL_SECONDS:
+            _GCP_TOKEN_CACHE["token"] = _gcloud(
+                ["gcloud", "auth", "print-access-token"], "token"
+            )
+            _GCP_TOKEN_CACHE["issued_at"] = time.monotonic()
+        return _GCP_TOKEN_CACHE["token"], _GCP_TOKEN_CACHE["project"]
+
+
+_GCP_OPENERS: dict[tuple[float, float], Any] = {}
+
+
+def _gcp_opener(connect_timeout: float, read_timeout: float) -> Any:
+    """An opener whose connect and read deadlines are two numbers, not one.
+
+    `urlopen(request, timeout=T)` hands T to the socket as a per-operation timeout, so it
+    cannot express "connecting may take five seconds but a silent response may not stall
+    for sixty" -- the same limitation the client path already solves with `httpx.Timeout`
+    and documents at length above `CLIENT_CONNECT_TIMEOUT`. urllib has no `httpx.Timeout`,
+    so the phases are separated where urllib actually applies them: the connection is made
+    under the connect deadline and the socket is re-armed with the read deadline the
+    moment it is up.
+
+    Cached per (connect, read) pair rather than rebuilt per call, because the sweep may
+    rewrite the globals between policies and a per-call rebuild would define two classes
+    for every delta of every case.
+    """
+    key = (connect_timeout, read_timeout)
+    cached = _GCP_OPENERS.get(key)
+    if cached is not None:
+        return cached
+
+    import http.client
+    import urllib.request
+
+    class _PhasedHTTPSConnection(http.client.HTTPSConnection):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            # `do_open` passes `timeout=req.timeout`; the connect deadline wins here.
+            kwargs["timeout"] = connect_timeout
+            super().__init__(*args, **kwargs)
+
+        def connect(self) -> None:
+            super().connect()
+            # AFTER the TLS handshake, so this re-arms the wrapped SSL socket and every
+            # subsequent read is bounded by the read deadline rather than the connect one.
+            if self.sock is not None:
+                self.sock.settimeout(read_timeout)
+
+    class _PhasedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req: Any) -> Any:
+            return self.do_open(_PhasedHTTPSConnection, req, context=self._context)
+
+    opener = urllib.request.build_opener(_PhasedHTTPSHandler)
+    _GCP_OPENERS[key] = opener
+    return opener
+
+
+def _gcp_retry_delay(error: HTTPError, attempt: int) -> float:
+    """How long to wait before retrying, preferring what the service asked for.
+
+    `Retry-After` is seconds or an HTTP-date (RFC 9110 10.2.3). Google sends the seconds
+    form; the date form is parsed rather than ignored, because ignoring it falls back to a
+    backoff shorter than the one the service asked for, which is how a retry loop turns a
+    rate limit into a longer rate limit.
+    """
+    import datetime
+
+    header = ((error.headers.get("Retry-After") if error.headers else None) or "").strip()
+    if header:
+        try:
+            return max(0.0, float(int(header)))
+        except ValueError:
+            from email.utils import parsedate_to_datetime
+
+            try:
+                when = parsedate_to_datetime(header)
+            except (TypeError, ValueError):
+                when = None
+            if when is not None:
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=datetime.timezone.utc)
+                now = datetime.datetime.now(datetime.timezone.utc)
+                return max(0.0, (when - now).total_seconds())
+    # Exponential, with full jitter. Without jitter the per-delta call pattern
+    # re-synchronises on the quota window and every retry collides with the last.
+    return _GCP_JITTER.uniform(0.0, GCP_BACKOFF_BASE * (2 ** (attempt - 1)))
 
 
 def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    token, project = _gcp_context()
-    request = Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "x-goog-user-project": project,
-        },
-    )
-    with urlopen(request, timeout=60) as response:  # noqa: S310
-        return json.loads(response.read().decode("utf-8"))
+    """POST to a Google API under a phased deadline and a bounded retry budget.
+
+    The token is re-read from `_gcp_context()` on EVERY attempt rather than captured once
+    before the loop: a retry that sleeps a minute may cross the refresh boundary, and a
+    loop that re-sent the token it captured before sleeping would defeat the refresh it
+    had just waited through.
+    """
+    data = json.dumps(payload).encode()
+    for attempt in range(1, GCP_MAX_ATTEMPTS + 1):
+        token, project = _gcp_context()
+        request = Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "x-goog-user-project": project,
+            },
+        )
+        try:
+            opener = _gcp_opener(GCP_CONNECT_TIMEOUT, GCP_READ_TIMEOUT)
+            with opener.open(request) as response:  # noqa: S310
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            if error.code not in GCP_RETRY_STATUS or attempt == GCP_MAX_ATTEMPTS:
+                # Out of budget, or a status that says something about the REQUEST rather
+                # than the service's load. Raise: a case that could not be measured has to
+                # surface as a transport error, never be scored as a redaction result.
+                raise
+            wait = min(GCP_BACKOFF_CAP, _gcp_retry_delay(error, attempt))
+            print(
+                f"    gcp {error.code} on {url.rsplit('/', 1)[-1]}; "
+                f"retry {attempt}/{GCP_MAX_ATTEMPTS - 1} in {wait:.1f}s",
+                flush=True,
+            )
+            time.sleep(wait)
+    # Unreachable: the final attempt either returns or re-raises.
+    raise RuntimeError(f"gcp request to {url} exhausted {GCP_MAX_ATTEMPTS} attempts")
 
 
 def _dlp_redact(text: str) -> str:
@@ -2219,6 +2387,16 @@ def build_report(
             ],
             "method_limits": [
                 str(len(results)) + " cases: a pairwise covering array over the five axes, not exhaustive.",
+                # THE DENOMINATOR, stated where the case count is stated. The line above
+                # describes the ARRAY and was the only case count in this block, so a
+                # reader had one number to divide by and it was the wrong one whenever
+                # any case died in transport.
+                (
+                    "Every rate is over cases_applicable=" + str(len(scored))
+                    + " of the " + str(len(results)) + " cases attempted; "
+                    + str(len(inconclusive)) + " were inconclusive and are excluded from "
+                    "the denominator rather than counted as no-leak."
+                ),
                 # DERIVED. This said "Three entity types" for as long as the corpus has
                 # had four -- USPHONE was added to the entity axis and the sentence
                 # describing the axes was not. A limitations block that describes a
@@ -2270,14 +2448,37 @@ def build_report(
         "outcome": _derive_outcome(
             leak_overall, fidelity, separation["passed"], boundary_leaked
         ),
+        # EVERY RATE CARRIES ITS OWN DENOMINATOR, and the denominator is
+        # `cases_applicable` -- never `cases_scored`, which is `len(results)`, the number
+        # of cases ATTEMPTED including the ones that died in transport.
+        #
+        # This line is the report's human-readable summary and the one a reader quotes,
+        # and it published four rates with no denominator at all while the same report's
+        # `method_limits` said "32 cases" three fields away. A run in which eight cases
+        # were refused divides by 24 and announces 32, so a gateway that refuses the
+        # cases it handles worst reads as a gateway that handled them. `manuscript-v3.md`
+        # C6 states the rule this violated -- a rate without its denominator is not a
+        # measurement -- and it was being violated by the field that states the result.
+        #
+        # The three rates have three DIFFERENT denominators and saying so is the point:
+        # fidelity is over the echo-observable cases (a gateway that drops the field
+        # presented nothing to restore), and the two leak rates are over their own
+        # fragmentation arm, not over the whole array.
         "outcome_rationale": (
             "FidelityRate=" + str(fidelity)
+            + " over " + str(len(observable)) + " echo-observable"
             + ", LeakRate(single_chunk)=" + str(leak_single)
+            + " over " + str(len(by_frag["single_chunk"]))
             + ", LeakRate(adversarial)=" + str(leak_adv)
+            + " over " + str(len(by_frag["adversarial"]))
             + ", DeltaFrag=" + str(delta_frag)
             + ", request-path leak=" + (
                 ",".join(boundary["leaked_entity_types"]) or "none"
-            ) + "."
+            )
+            + ". Rates are over cases_applicable=" + str(len(scored))
+            + " of " + str(len(results)) + " attempted ("
+            + str(len(inconclusive)) + " inconclusive, excluded from every denominator "
+            "rather than counted as no-leak)."
         ),
         "fixture": {
             "varies_per_run": True,
@@ -3138,7 +3339,17 @@ def run_policy(
         "leak_single_chunk": report["metrics"]["leak_rate"]["single_chunk"],
         "leak_adversarial": report["metrics"]["leak_rate"]["adversarial"],
         "delta_frag": report["metrics"]["delta_frag"],
-        "cases": report["metrics"]["cases_scored"],
+        # THE DENOMINATOR FIRST, and named so it cannot be mistaken for the run size.
+        # This key was `cases` = `cases_scored` = `len(results)`, and it is what the
+        # sweep writes into every row of `seed-sweep.json` -- the file the README calls
+        # "the numbers to cite". Four rates over the applicable cases, published beside a
+        # case count that is the attempted cases, is the same defect as the rationale
+        # line: the reader is handed a denominator that is not the one used.
+        "cases_applicable": report["metrics"]["cases_applicable"],
+        # The run size, kept because the all-cases-refused guard below needs the total
+        # and because "24 of 32" is more informative than either number alone. NOT a
+        # denominator, and no longer spelled in a way that invites use as one.
+        "cases_attempted": report["metrics"]["cases_scored"],
         # Without these a run in which EVERY case failed is indistinguishable from a
         # perfect one: all four rates come back 0.00 and the row reads as clean. That is
         # not hypothetical -- a container that failed to start produced exactly such a
@@ -3223,6 +3434,10 @@ def main(argv: list[str] | None = None) -> int:
             f"leak_single={summary['leak_single_chunk']:<6} "
             f"leak_adv={summary['leak_adversarial']:<6} "
             f"DeltaFrag={summary['delta_frag']:<7} "
+            # n= is cases_applicable, the denominator of the four rates to its left, over
+            # the cases attempted. A console line carrying rates and no denominator is
+            # the same trap as the report field that carried rates and no denominator.
+            f"n={summary['cases_applicable']}/{summary['cases_attempted']:<6} "
             f"outcome={report['outcome']:<24} schema={status}"
         )
         for err in errors[:6]:
