@@ -120,7 +120,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gateway-url", default=None)
     parser.add_argument("--upstream-port", type=int, default=0)
     parser.add_argument("--model", default="test")
+    # THE CLIENT DEADLINE, exposed because the right value depends on the target. The
+    # harness bounds every request at connect=5s / read=10s so a stalled socket costs one
+    # case instead of the sweep -- 12 seeds x 32 cases x the old `urlopen(timeout=120)` is
+    # long enough that one stalled seed is indistinguishable from a hang. A gateway that
+    # loads a transformer model on its first request (LLM Guard, NeMo) can legitimately
+    # exceed ten seconds; raise it for those rather than letting the sweep record a
+    # container that was merely slow as an inconclusive case.
+    parser.add_argument("--connect-timeout", type=float, default=None)
+    parser.add_argument("--read-timeout", type=float, default=None)
     args = parser.parse_args(argv)
+
+    from pii_leak_benchmark import v2_emitter
+
+    if args.connect_timeout is not None:
+        v2_emitter.CLIENT_CONNECT_TIMEOUT = args.connect_timeout
+    if args.read_timeout is not None:
+        v2_emitter.CLIENT_READ_TIMEOUT = args.read_timeout
+    print(
+        f"client deadline: connect={v2_emitter.CLIENT_CONNECT_TIMEOUT}s "
+        f"read={v2_emitter.CLIENT_READ_TIMEOUT}s",
+        flush=True,
+    )
 
     # Local policies only unless asked by name: the cloud rows are billed per delta.
     policies = [n.strip() for n in args.only.split(",") if n.strip()] or list(DEFAULT_POLICIES)

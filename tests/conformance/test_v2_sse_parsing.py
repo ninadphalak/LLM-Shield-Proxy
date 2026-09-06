@@ -249,7 +249,7 @@ def test_events_observed_max_is_a_maximum() -> None:
     `events_observed_max: 4`.
     """
     results = [_result(events_observed=4), _result(events_observed=5)]
-    check = _fragmentation_check(results[0], results, _SEGMENTS)
+    check = _fragmentation_check(results, _SEGMENTS)
     assert check["events_observed"] == 4
     assert check["events_observed_max"] == 5
 

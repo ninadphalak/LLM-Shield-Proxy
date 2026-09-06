@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -39,6 +40,7 @@ from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     _sse_check,
     _stop,
     build_report,
+    build_request,
     build_segments,
 )
 
@@ -183,17 +185,17 @@ def test_fragmentation_safety_fails_for_a_single_chunk_response() -> None:
     buffered = _result(events_observed=2, data_events_observed=1, client_text="all of it")
     streamed = _result(events_observed=5, data_events_observed=4, client_text="a bit")
 
-    assert _fragmentation_check(buffered, [buffered], _SEGMENTS)["passed"] is False
-    assert _fragmentation_check(streamed, [streamed], _SEGMENTS)["passed"] is True
+    assert _fragmentation_check([buffered], _SEGMENTS)["passed"] is False
+    assert _fragmentation_check([streamed], _SEGMENTS)["passed"] is True
 
     # `events_observed` keeps its published meaning, so the E15 column stays comparable
     # with what is already in print. Only the VERDICT moved to data-bearing events.
-    check = _fragmentation_check(buffered, [buffered], _SEGMENTS)
+    check = _fragmentation_check([buffered], _SEGMENTS)
     assert check["events_observed"] == 2
     assert check["data_events_observed"] == 1
 
     silent = _result(events_observed=9, data_events_observed=8, client_text="")
-    assert _fragmentation_check(silent, [silent], _SEGMENTS)["passed"] is False
+    assert _fragmentation_check([silent], _SEGMENTS)["passed"] is False
 
 
 # --------------------------------------------------------------------------------------
@@ -213,7 +215,7 @@ def test_event_counts_cover_every_split_point_not_just_the_last() -> None:
     # `events_observed` is the FIRST split point, so it agrees with `client_text` and
     # `echo_recovered`, which are also read from the first attempt. The max is a max.
     case = _result(events_observed=4, events_observed_max=7, data_events_observed=3)
-    check = _fragmentation_check(case, [case], _SEGMENTS)
+    check = _fragmentation_check([case], _SEGMENTS)
     assert check["events_observed"] == 4
     assert check["events_observed_max"] == 7
 
@@ -577,9 +579,9 @@ def test_the_published_field_follows_the_derivation_not_a_literal() -> None:
     midpoint = _result(case=case, split_points_tried=1, data_events_observed=4, client_text="x")
     exhaustive = _result(case=case, split_points_tried=19, data_events_observed=4, client_text="x")
 
-    assert _fragmentation_check(midpoint, [midpoint], segments)[
+    assert _fragmentation_check([midpoint], segments)[
         "one_character_events_requested"] is False
-    assert _fragmentation_check(exhaustive, [exhaustive], segments)[
+    assert _fragmentation_check([exhaustive], segments)[
         "one_character_events_requested"] is True
 
 
@@ -589,50 +591,142 @@ def test_coalescing_is_distinguishable_because_v2_owns_the_upstream() -> None:
     The defence was that a limitation disclosure is not a capability claim. The category
     is real and the disclosure was still false: v1 cannot tell "the gateway merged events"
     from "the upstream sent fewer" because v1 does not control the upstream. v2 IS the
-    upstream and writes a known number of data events per case, so the second hypothesis
-    is excluded by construction.
+    upstream and COUNTS what it wrote, so the second hypothesis is excluded by
+    measurement rather than by construction.
     """
-    from pii_leak_benchmark.v2_emitter import _upstream_data_events
+    segments = build_segments("a1b2c3d4e5f60001")
+    split = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
+             "carrier": "sse-delta-content", "request_site": "chat-content"}
 
+    # A gateway that forwarded every event is not coalescing.
+    faithful = _result(
+        case=split, data_events_observed=4, upstream_data_events=4, client_text="all of it"
+    )
+    check = _fragmentation_check([faithful], segments)
+    assert check["coalescing_not_distinguished"] is False
+    assert check["upstream_data_events_emitted_total"] == 4
+    assert check["coalescing_rate"] == 0.0
+    assert check["coalescing_cases"] == 0
+    assert check["coalescing_cases_compared"] == 1
+
+    # A gateway that buffered the whole response into one chunk IS, and the profile can
+    # prove it instead of inferring it from a low absolute event count. This is the shape
+    # of `llm-guard-buffered` and `litellm-presidio`, the two E15 rows.
+    buffered = _result(
+        case=split, data_events_observed=1, upstream_data_events=4, client_text="all of it"
+    )
+    assert _fragmentation_check([buffered], segments)["coalescing_rate"] == 1.0
+
+
+def test_the_upstream_count_is_measured_at_the_socket_not_recomputed() -> None:
+    """The deleted `_upstream_data_events` derived the count from the case definition.
+
+    "One preamble plus `_injection_events`, so 3 for a single-chunk case and 4 for a
+    split one, fixed by construction" -- a claim about what the capture SHOULD write,
+    published in the field that says what it DID. It agreed with itself by construction,
+    so it could not have caught the capture writing anything else.
+
+    `_respond` now increments a counter per frame it puts on the socket. Demonstrated
+    against a live capture: the counter and the frames that actually arrived agree, which
+    is a check a recomputation cannot perform on itself.
+    """
     segments = build_segments("a1b2c3d4e5f60001")
     split = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
              "carrier": "sse-delta-content", "request_site": "chat-content"}
     whole = {**split, "fragmentation": "single_chunk"}
 
-    # Fixed by construction: one preamble + one carrier preamble + one or two pieces.
-    assert _upstream_data_events(segments, _result(case=split)) == 4
-    assert _upstream_data_events(segments, _result(case=whole)) == 3
+    for case, split_at, expected in ((whole, 0, 3), (split, 5, 4)):
+        state = UpstreamState(segments=segments, case=case)
+        state.split_at = split_at
+        server, url = _serve(_make_upstream(state))
+        try:
+            request = Request(
+                url,
+                data=json.dumps(build_request(segments, case)).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request, timeout=15) as response:
+                body = response.read().decode()
+        finally:
+            _stop(server)
 
-    # A gateway that forwarded every event is not coalescing.
-    faithful = _result(case=split, data_events_observed=4, client_text="all of it")
-    check = _fragmentation_check(faithful, [faithful], segments)
-    assert check["coalescing_not_distinguished"] is False
-    assert check["upstream_data_events_emitted"] == 4
-    assert check["coalescing_observed"] is False
+        assert state.data_events_written == [expected]
+        assert body.count("data: ") - body.count("data: [DONE]") == expected
 
-    # A gateway that buffered the whole response into one chunk IS, and the profile can
-    # now prove it instead of inferring it from a low absolute event count. This is the
-    # shape of `llm-guard-buffered` and `litellm-presidio`, the two E15 rows.
-    buffered = _result(case=split, data_events_observed=1, client_text="all of it")
-    assert _fragmentation_check(buffered, [buffered], segments)["coalescing_observed"] is True
 
-    # Nothing received is not "no coalescing observed" by accident -- it is a run that
-    # observed nothing, and `passed` and `response_reconstructed` carry that.
-    dead = _result(case=split, data_events_observed=0, client_text="")
-    dead_check = _fragmentation_check(dead, [dead], segments)
-    assert dead_check["coalescing_observed"] is False
-    assert dead_check["passed"] is False
-    assert dead_check["response_reconstructed"] is False
+def test_a_dropped_stream_is_not_reported_as_absence_of_coalescing() -> None:
+    """THE FAIL-OPEN. `coalescing_observed` was `0 < observed < upstream`.
+
+    A gateway that truncated the stream entirely -- `data_events_observed == 0` -- made
+    the left-hand comparison false, so the field published `false`: "no coalescing
+    observed", about a gateway that delivered nothing. That reads as an exoneration.
+    NeMo Guardrails 0.24.0 truncates the stream at the point PII appears, so this is a
+    measured behaviour of a target in the manuscript, not a hypothetical.
+
+    Zero received is now `coalesced: null` plus an explicit `stream_failure`, and the case
+    leaves the rate's denominator rather than voting in it.
+    """
+    segments = build_segments("a1b2c3d4e5f60001")
+    split = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
+             "carrier": "sse-delta-content", "request_site": "chat-content"}
+
+    dead = _result(
+        case=split, data_events_observed=0, upstream_data_events=4, client_text=""
+    )
+    check = _fragmentation_check([dead], segments)
+
+    assert check["stream_failure"] is True
+    assert check["stream_failure_cases"] == 1
+    assert check["coalescing_per_case"][0]["coalesced"] is None
+    # Not 0.0 either: no case was comparable, so nothing was measured. 0.0 asserts a
+    # measured absence of coalescing, which is the same false exoneration one level up.
+    assert check["coalescing_rate"] is None
+    assert check["coalescing_cases_compared"] == 0
+    assert check["passed"] is False
+    assert check["response_reconstructed"] is False
+
+
+def test_one_short_case_in_an_array_does_not_brand_the_whole_gateway() -> None:
+    """Coalescing was a boolean read off ONE adversarially-selected case.
+
+    `build_report` picked `max(results, key=lambda r: (r.injection_leaked,
+    -r.events_observed))` -- the leaking case with the fewest events -- and read this
+    whole block off it. One case in 32 arriving a frame short, for any reason a socket
+    can produce, published `coalescing_observed: true` for the entire target. An
+    adversarial selector is right for a leak, where one leak is a leak. It is wrong for a
+    transport property, where the question is how often.
+    """
+    segments = build_segments("a1b2c3d4e5f60001")
+    split = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
+             "carrier": "sse-delta-content", "request_site": "chat-content"}
+
+    faithful = [
+        _result(case=split, data_events_observed=4, upstream_data_events=4,
+                client_text="all of it", injection_leaked=False)
+        for _ in range(31)
+    ]
+    # Exactly the case the old selector would have picked: it leaked AND it is short.
+    jitter = _result(case=split, data_events_observed=3, upstream_data_events=4,
+                     client_text="all of it", injection_leaked=True)
+
+    check = _fragmentation_check([*faithful, jitter], segments)
+    assert check["coalescing_cases"] == 1
+    assert check["coalescing_cases_compared"] == 32
+    assert check["coalescing_rate"] == round(1 / 32, 4)
+    # The detail is in the report too, so a reader can see WHICH case rather than taking
+    # the rate on trust.
+    assert sum(1 for row in check["coalescing_per_case"] if row["coalesced"]) == 1
 
 
 def test_both_new_deciders_are_in_the_instrument_digest() -> None:
     """R2/R5: `_one_character_events` decided a published field and was not digested.
 
     It could be rewritten -- or reverted to a literal -- without marking one row stale,
-    which is the exact hole `inspector_sha256` exists to close. `_upstream_data_events`
-    now decides two more fields and must not repeat it.
+    which is the exact hole `inspector_sha256` exists to close. `_coalescing_rows` -- the
+    replacement for the deleted `_upstream_data_events` -- decides the coalescing rate,
+    the per-case verdicts and `stream_failure`, and must not repeat it.
     """
     from pii_leak_benchmark.v2_emitter import _INSTRUMENTED
 
     assert "_one_character_events" in _INSTRUMENTED
-    assert "_upstream_data_events" in _INSTRUMENTED
+    assert "_coalescing_rows" in _INSTRUMENTED

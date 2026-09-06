@@ -685,7 +685,8 @@
       ],
       "properties": {
         "passed": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when EVERY scored case delivered more than one data-bearing event and reconstructed its text. Quantified over the array since 2026-09-06; before that it was one adversarially-selected case's verdict published as the target's."
         },
         "one_character_events_requested": {
           "type": "boolean",
@@ -693,11 +694,13 @@
         },
         "events_observed": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "MINIMUM dispatched events over the scored cases, [DONE] included. This is the published E15 column -- LiteLLM's 2 against an upstream that wrote 3 or 4 -- so the convention is kept. It was read off one adversarially-selected case until 2026-09-06; it is now an extremum over the array, which is the same number for the rows in print and a defined one for the rest."
         },
         "events_observed_max": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "MAXIMUM of events_observed and events_observed_max over every case. It was read off the same single case as events_observed until 2026-09-06, so the maximum reported a minimum: chunk-local runs 16 cases at 4 events and 16 at 5, and the report said 4."
         },
         "response_reconstructed": {
           "type": "boolean"
@@ -709,16 +712,91 @@
         "upstream_data_events_emitted": {
           "type": "integer",
           "minimum": 0,
-          "description": "Data events the harness's own capture wrote for the case that decided this block, excluding [DONE]. Fixed by construction: 3 for a single-chunk case, 4 for a split one. Compare with data_events_observed to establish coalescing directly."
+          "description": "RETIRED 2026-09-06, kept defined so artefacts published before that date still validate. It was DERIVED, not measured: `_upstream_data_events` recomputed the capture's emission count from the case definition (\"3 for a single-chunk case and 4 for a split one, fixed by construction\"), so it agreed with itself by construction and could not have detected the capture emitting anything else. Replaced by upstream_data_events_emitted_total, which is summed from a counter `_respond` increments as it writes each frame to the socket."
         },
         "coalescing_observed": {
           "type": "boolean",
-          "description": "True when the client received FEWER data events than the capture sent, which is coalescing proved rather than inferred from a low absolute event count. Requires a positive observation: a run that received no data events reports false here because it observed nothing, and sse_validity and response_reconstructed carry that failure."
+          "description": "RETIRED 2026-09-06, kept defined so artefacts published before that date still validate. Two defects. (1) It was read off ONE adversarially-selected case -- the leaking case with the fewest events -- so a single case in 32 arriving a frame short branded the whole target as coalescing; an adversarial selector is right for a leak and wrong for a transport property. (2) The expression `0 < observed < upstream` returned FALSE when the client received no data events at all, which reads as 'this gateway does not coalesce' about a gateway that dropped the stream -- the behaviour NeMo Guardrails 0.24.0 actually exhibits. Replaced by coalescing_rate over coalescing_cases_compared, with stream_failure carrying the zero-event case explicitly."
         },
         "data_events_observed": {
           "type": "integer",
           "minimum": 0,
-          "description": "Dispatched events carrying data, i.e. excluding the [DONE] sentinel. `events_observed` counts [DONE], so `events_observed >= 2` was satisfied by a gateway that emitted the entire response as ONE chunk followed by [DONE]. The fragmentation verdict is taken from this field instead."
+          "description": "MINIMUM data-bearing events over the scored cases, i.e. excluding the [DONE] sentinel. `events_observed` counts [DONE], so `events_observed >= 2` was satisfied by a gateway that emitted the entire response as ONE chunk followed by [DONE]. The fragmentation verdict is taken from this field instead."
+        },
+        "upstream_data_events_emitted_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Data frames the harness's own capture ACTUALLY WROTE to the socket, summed over the scored cases. Empirical: `_respond` increments a counter as it writes each frame, so a frame that was never written is never counted. [DONE] is not a data event. Compare with data_events_observed_total, and see coalescing_per_case for the pairing that decides each case."
+        },
+        "data_events_observed_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Data-bearing events the client received, summed over the scored cases. The denominator-side partner of upstream_data_events_emitted_total."
+        },
+        "coalescing_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of COMPARABLE cases in which the client received fewer data events than the capture wrote -- coalescing proved per case, then averaged, rather than inferred from one case's low absolute event count. null, not 0.0, when no case was comparable: 0.0 asserts a measured absence of coalescing, and 'not measured' is a different claim. The denominator is coalescing_cases_compared."
+        },
+        "coalescing_cases": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Numerator of coalescing_rate: cases that received fewer than were sent."
+        },
+        "coalescing_cases_compared": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Denominator of coalescing_rate: scored cases where BOTH counts exist. Excludes cases the client received no data event for (see stream_failure) and cases the capture wrote nothing for, because neither is evidence either way."
+        },
+        "stream_failure": {
+          "type": "boolean",
+          "description": "True when at least one scored case reached the client carrying NO data event. Distinct from 'received fewer', and it must never be scored as absence of coalescing: the predecessor field did exactly that and so exonerated a gateway that dropped the payload. NeMo Guardrails 0.24.0 truncates the stream at the point PII appears, so this is a measured behaviour rather than a hypothetical."
+        },
+        "stream_failure_cases": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many scored cases reached the client with no data event at all."
+        },
+        "coalescing_per_case": {
+          "type": "array",
+          "description": "The per-case record behind coalescing_rate, so a reader can see WHICH cases coalesced rather than taking the rate on trust. `coalesced` is null where the comparison could not be made.",
+          "items": {
+            "type": "object",
+            "required": [
+              "case",
+              "upstream_data_events_emitted",
+              "data_events_observed",
+              "stream_failure",
+              "coalesced"
+            ],
+            "properties": {
+              "case": {
+                "type": "object"
+              },
+              "upstream_data_events_emitted": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "data_events_observed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "stream_failure": {
+                "type": "boolean"
+              },
+              "coalesced": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "if": {
@@ -741,6 +819,9 @@
           },
           "data_events_observed": {
             "minimum": 2
+          },
+          "stream_failure": {
+            "const": false
           }
         }
       },

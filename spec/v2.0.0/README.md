@@ -9,6 +9,7 @@ tested, and `pii_leak_benchmark.v2_emitter` now emits it.
 | 2026-09-05 | the request path stopped being a rubber stamp (below) |
 | 2026-09-05 | `instrument`, `data_events_observed`, `iterations_requested` (below) |
 | 2026-09-06 | two `const: true` fields that were not true of this profile (below) |
+| 2026-09-06 | coalescing became a measured *rate*, not a single case's boolean (below) |
 
 **The 2026-09-06 amendment: two constants that could not fail, and the second one had
 already survived a round of review.**
@@ -36,9 +37,10 @@ replaced a constant that could not fail with a function that could not succeed.
   competing hypothesis is excluded by construction. A const is defensible when the
   proposition is necessarily true; this one was necessarily false for a harness that owns
   its own upstream.
-- **`upstream_data_events_emitted`** and **`coalescing_observed`** (both optional) publish
-  the comparison the field above spent two revisions disclaiming. They are optional rather
-  than required only so the stale rows keep validating; a fresh row should carry both.
+- **`upstream_data_events_emitted`** and **`coalescing_observed`** (both optional) published
+  the comparison the field above spent two revisions disclaiming. **Both are retired by the
+  second 2026-09-06 amendment below** and are kept defined only so rows published before
+  that date still validate. A fresh row must not carry either.
 
 **The lesson, stated once.** Round 1's was "a check that cannot fail is not a check". This
 amendment adds the corollary: **a derivation that cannot return one of its values is still
@@ -46,6 +48,46 @@ a constant, and it is harder to see.** Both new fields are pinned by tests that 
 outcomes on the real corpus, and both deciding functions are now in `_INSTRUMENTED`, which
 neither was -- `_one_character_events` decided a published field and could have been
 rewritten without marking a single row stale.
+
+**The second 2026-09-06 amendment: the coalescing comparison was real, and it was measured
+in the two wrong ways.** The amendment above was right that v2 can prove coalescing. It got
+both halves of *how* wrong, and a fourth review of the same block found it.
+
+- **`upstream_data_events_emitted` was derived, not measured.** `_upstream_data_events`
+  recomputed the capture's emission count from the case definition — "one preamble plus
+  `_injection_events`, so 3 for a single-chunk case and 4 for a split one, **fixed by
+  construction**". That is a statement about what `_respond` *should* write, published in
+  the slot reserved for what it *did*. It agreed with itself by construction and could not
+  have caught the capture emitting anything else. `_respond` now serialises one frame per
+  event and increments a counter as it writes each one to the socket, so
+  **`upstream_data_events_emitted_total`** is an observation. `_upstream_data_events` is
+  deleted; `_coalescing_rows` replaces it in `_INSTRUMENTED`.
+- **`coalescing_observed` was one adversarially-selected case's boolean.** `build_report`
+  picked `max(results, key=lambda r: (r.injection_leaked, -r.events_observed))` — the
+  leaking case with the fewest events — and read the *entire* block off it. One case in 32
+  arriving a frame short, for any reason a socket can produce, branded the whole target as
+  buffering. An adversarial selector is right for a leak, where one leak is a leak; it is
+  wrong for a transport property, where the question is *how often*. Replaced by
+  **`coalescing_rate`** over **`coalescing_cases_compared`**, with **`coalescing_per_case`**
+  carrying the per-case record so a reader can check the rate rather than trust it.
+- **And it failed open on a dropped stream.** The expression was `0 < observed < upstream`,
+  which returns `false` when the client received **no** data events at all — publishing "no
+  coalescing observed" about a gateway that dropped the payload. NeMo Guardrails 0.24.0
+  truncates the stream at the point PII appears, so this is a measured behaviour of a
+  target in the write-up, not a hypothetical. Zero received is now `coalesced: null` plus an
+  explicit **`stream_failure`**, and the case leaves the rate's denominator instead of
+  voting in it. `coalescing_rate` is `null`, not `0.0`, when nothing was comparable: `0.0`
+  asserts a measured absence of coalescing, and "not measured" is a different claim.
+- **The scalars became extrema over the array.** `events_observed`, `events_observed_max`
+  and `data_events_observed` were all read off that same single case, which is how a field
+  named `_max` came to report a minimum. `events_observed` keeps its published meaning (the
+  minimum) so the E15 column stays comparable with what is in print.
+
+**The lesson, stated once.** Round 3's was "a derivation that cannot return one of its
+values is still a constant". This one adds two more: **a derivation of what the instrument
+should have done is not a measurement of what it did**, and **an adversarial selector
+belongs on the axis where one instance is the finding, not on one where the finding is a
+rate.**
 
 **The second 2026-09-05 amendment: three fields that came out of reviewing the first one.**
 An adversarial review of the repairs above found seven further defects in the flattering
