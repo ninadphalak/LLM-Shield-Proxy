@@ -9,7 +9,8 @@
     "delta_frag": 0.0,
     "inconclusive": 8,
     "echo_observable": 8,
-    "cases": 32,
+    "cases_applicable": 24,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
      "CARDPAN",
@@ -26,7 +27,8 @@
     "delta_frag": 0.0,
     "inconclusive": 8,
     "echo_observable": 8,
-    "cases": 32,
+    "cases_applicable": 24,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
      "CARDPAN",
@@ -43,7 +45,8 @@
     "delta_frag": 0.0,
     "inconclusive": 8,
     "echo_observable": 8,
-    "cases": 32,
+    "cases_applicable": 24,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
      "CARDPAN",
@@ -60,7 +63,8 @@
     "delta_frag": 0.0,
     "inconclusive": 8,
     "echo_observable": 8,
-    "cases": 32,
+    "cases_applicable": 24,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
      "CARDPAN",
@@ -77,7 +81,8 @@
     "delta_frag": 0.0,
     "inconclusive": 8,
     "echo_observable": 8,
-    "cases": 32,
+    "cases_applicable": 24,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
      "CARDPAN",
@@ -94,7 +99,8 @@
     "delta_frag": 0.0,
     "inconclusive": 8,
     "echo_observable": 8,
-    "cases": 32,
+    "cases_applicable": 24,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
      "CARDPAN",
@@ -139,9 +145,10 @@
    "0000000000000006"
   ],
   "instrument": {
-   "emitter_version": "0.1.0-minimal",
-   "client_scope_sha256": "86426192219d344b",
-   "boundary_scope_sha256": "4a09ca6d088914e7"
+   "emitter_version": "0.2.0",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "955edd079f406e13"
   }
  }
 }

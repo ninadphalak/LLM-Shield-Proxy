@@ -9,7 +9,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -21,7 +22,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -33,7 +35,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -45,7 +48,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -57,7 +61,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -69,7 +74,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -81,7 +87,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -93,7 +100,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -105,7 +113,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -117,7 +126,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -129,7 +139,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -141,7 +152,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    }
@@ -190,7 +202,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  },
  "redact-all": {
@@ -203,7 +215,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -215,7 +228,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -227,7 +241,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -239,7 +254,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -251,7 +267,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -263,7 +280,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -275,7 +293,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -287,7 +306,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -299,7 +319,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -311,7 +332,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -323,7 +345,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -335,7 +358,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    }
@@ -384,7 +408,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  },
  "chunk-local": {
@@ -397,7 +421,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -409,7 +434,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -421,7 +447,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -433,7 +460,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -445,7 +473,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -457,7 +486,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -469,7 +499,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -481,7 +512,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -493,7 +525,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -505,7 +538,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -517,7 +551,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -529,7 +564,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    }
@@ -578,7 +614,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  },
  "bounded-retention": {
@@ -591,7 +627,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -603,7 +640,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -615,7 +653,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -627,7 +666,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -639,7 +679,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -651,7 +692,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -663,7 +705,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -675,7 +718,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -687,7 +731,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -699,7 +744,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -711,7 +757,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -723,7 +770,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    }
@@ -772,7 +820,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  },
  "retention-plus-decoding": {
@@ -785,7 +833,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -797,7 +846,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -809,7 +859,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -821,7 +872,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -833,7 +885,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -845,7 +898,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -857,7 +911,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -869,7 +924,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -881,7 +937,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -893,7 +950,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -905,7 +963,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    },
@@ -917,7 +976,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "pass",
     "request_path_leak": []
    }
@@ -966,7 +1026,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  },
  "presidio-chunk-local": {
@@ -979,7 +1039,8 @@
     "delta_frag": -0.125,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -991,7 +1052,8 @@
     "delta_frag": 0.375,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1003,7 +1065,8 @@
     "delta_frag": 0.75,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1015,7 +1078,8 @@
     "delta_frag": 0.625,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1027,7 +1091,8 @@
     "delta_frag": 0.625,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1039,7 +1104,8 @@
     "delta_frag": 0.625,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1051,7 +1117,8 @@
     "delta_frag": 0.75,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1063,7 +1130,8 @@
     "delta_frag": 0.625,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1075,7 +1143,8 @@
     "delta_frag": 0.875,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1087,7 +1156,8 @@
     "delta_frag": 0.625,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1099,7 +1169,8 @@
     "delta_frag": 0.5,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1111,7 +1182,8 @@
     "delta_frag": 0.375,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    }
@@ -1160,7 +1232,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  },
  "presidio-retention": {
@@ -1173,7 +1245,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1185,7 +1258,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1197,7 +1271,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1209,7 +1284,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1221,7 +1297,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1233,7 +1310,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1245,7 +1323,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1257,7 +1336,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1269,7 +1349,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1281,7 +1362,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1293,7 +1375,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    },
@@ -1305,7 +1388,8 @@
     "delta_frag": 0.0,
     "inconclusive": 0,
     "echo_observable": 32,
-    "cases": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": []
    }
@@ -1354,7 +1438,7 @@
    "emitter_version": "0.2.0",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "dc29426b52203953"
+   "inspector_sha256": "955edd079f406e13"
   }
  }
 }

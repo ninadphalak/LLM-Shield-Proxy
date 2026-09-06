@@ -139,20 +139,35 @@
 > the round 3 instrument; they are now on the same footing as every other row here.
 > All 16 share one `instrument` block and one `fragmentation_safety` shape.
 
-> **21 artefacts are STALE and `test_every_artefact_records_the_instrument_that_produced_it`
-> is RED because of them**, correctly. They are the eight external gateway rows (LiteLLM,
-> Portkey, NeMo, both Shield configs, LLM Guard × 2 and Guardrails), the four Google
-> `exhaustive-splits/` rows, and the nine `seed-sweep*.json` files -- **including
-> `seed-sweep.json` itself, the file this README calls "the numbers to cite"**. Each needs a
-> container, a billed cloud project or a separate 3.10-3.12 venv. **Do not read them beside
-> the sixteen fresh rows, and do not weaken the guard to make the build green.** Re-run them
-> or move them out.
+> **8 artefacts are STALE and `test_every_artefact_records_the_instrument_that_produced_it`
+> is RED because of them**, correctly. They are the eight external gateway rows -- LiteLLM,
+> Portkey, NeMo, both Shield 1.6.0 configs, LLM Guard x 2 and Guardrails -- and they are the
+> last artefacts here carrying no `instrument` block at all. The commands to re-measure them
+> are staged in `benchmarks/rerun-external-gateway-rows.sh`, each with the bearer token,
+> header block and `V2_REQUEST_PATH_REDACTION` the published row was measured under. **Do
+> not read them beside the fresh rows, and do not weaken the guard to make the build
+> green.** Re-run them or move them out.
 >
-> **The Google `exhaustive-splits/` rows are the sharpest of these**, because the rule three
-> sections down is *quote no DeltaFrag from Presidio, DLP or Model Armor without
-> `--exhaustive-splits`* -- so the DeltaFrag figures for both Google products currently rest
-> on rows measured by an instrument three digests old. The midpoint rows beside them are
-> fresh; the exhaustive ones are not.
+> **All nine `seed-sweep*.json` files were regenerated on the current instrument and every
+> summary statistic reproduced.** `seed-sweep.json` -- 7 policies x 12 seeds, 84 corpus runs,
+> 2,688 cases, the file this README calls "the numbers to cite" -- came back with **700
+> statistics identical and 0 moved**. Across all nine, 1,138 statistics compared and the only
+> movement was transport, not measurement:
+>
+> * **Portkey seed 3 got CLEANER**: `inconclusive` 2 -> 0, `echo_observable` 23 -> 24, all
+>   four rates unchanged. The published row had two cases die and reported `cases: 32` beside
+>   rates computed over 30 -- which is precisely the denominator defect fixed this round. The
+>   regenerated row carries `cases_applicable` and `cases_attempted` separately, so the next
+>   occurrence is visible instead of silent.
+> * **Both LLM Guard sweeps lost 1-2 cases on the first attempt** and their rates moved with
+>   the denominator; `llm-guard-buffered`'s `delta_frag` went 0.0 to **-0.0458** purely from
+>   losing one adversarial case, which is the unpaired-population artefact this README warns
+>   about, arriving by transport rather than by design. Re-run ONCE (not until clean): both
+>   came back 0 inconclusive on all six seeds and reproduced every published statistic
+>   exactly. **The flakiness is recorded rather than hidden** -- LLM Guard loads transformer
+>   models per request and its own STATUS.md already documents a run dying partway through
+>   the fourth seed. Treat a `delta_frag` that is slightly negative on this target as a
+>   dropped case until proven otherwise.
 
 - Emitter: `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py` (committed)
 - Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate --out <scratch-dir>`
