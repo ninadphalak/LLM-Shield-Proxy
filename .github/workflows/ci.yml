@@ -156,7 +156,7 @@ jobs:
 
       - name: Restore cached NER model
         id: onnx-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.onnx-ner
           key: onnx-ner-${{ env.ONNX_REVISION }}-quantized
