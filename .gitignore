@@ -9,6 +9,10 @@ __pycache__/
 env/
 venv/
 ENV/
+# Per-target venvs for gateways under test. `llm-guard` and `guardrails-ai` pin torch and
+# cannot share the harness interpreter, so each profile builds its own multi-GB venv at the
+# repo root (venv-llmguard, venv-guardrails). Software under test is never committed.
+venv-*/
 build/
 dist/
 *.egg-info/
