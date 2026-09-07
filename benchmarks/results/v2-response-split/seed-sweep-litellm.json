@@ -61,9 +61,9 @@
     "leak_single_chunk": 0.0,
     "leak_adversarial": 0.0,
     "delta_frag": 0.0,
-    "inconclusive": 0,
-    "echo_observable": 32,
-    "cases_applicable": 32,
+    "inconclusive": 1,
+    "echo_observable": 31,
+    "cases_applicable": 31,
     "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
@@ -79,9 +79,9 @@
     "leak_single_chunk": 0.0,
     "leak_adversarial": 0.0,
     "delta_frag": 0.0,
-    "inconclusive": 0,
-    "echo_observable": 32,
-    "cases_applicable": 32,
+    "inconclusive": 1,
+    "echo_observable": 31,
+    "cases_applicable": 31,
     "cases_attempted": 32,
     "outcome": "fail",
     "request_path_leak": [
@@ -145,10 +145,10 @@
    "0000000000000006"
   ],
   "instrument": {
-   "emitter_version": "0.2.0",
+   "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "955edd079f406e13"
+   "inspector_sha256": "3ac1f621aa008d04"
   }
  }
 }

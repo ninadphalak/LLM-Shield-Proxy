@@ -121,11 +121,14 @@
 > each leak rate over its own fragmentation arm. All four now say so.
 >
 > **16 artefacts re-measured on the resulting instrument (`inspector_sha256`
-> `955edd079f406e13`) and NOT ONE MEASURED NUMBER MOVED.** Seven single-run rows, five
+> `955edd079f406e13`) and every headline rate and outcome reproduced.** Seven single-run rows, five
 > `exhaustive-splits/` rows and all four Google rows, at the published seed
-> `a1b2c3d4e5f60001`: **2,482 measured leaves compared -- rates, `passed` verdicts,
-> outcomes, corpus and case digests -- and 0 moved.** The 24 leaves that did move are
-> `outcome_rationale` in all 16 rows (the denominator now appears in it) plus, in the four
+> `a1b2c3d4e5f60001`: LeakRate, FidelityRate, DeltaFrag, outcomes, corpus digests and
+> case digests were identical. That narrower claim matters: a later leaf-by-leaf audit
+> found 237 changed common leaves, including 80 naturally variable timing measurements
+> (`capture.self_probe.round_trip_ms` and `client_observed_latency`). Other expected
+> movements included `outcome_rationale` in all 16 rows (the denominator now appears in
+> it) plus, in the four
 > Google rows only, `coalescing_not_distinguished` and `one_character_events_requested`
 > going `true` -> `false`. Both of those are the round 3 repairs landing on rows that
 > predated them, and both are now correct: the Google rows are midpoint runs, and no half
@@ -163,11 +166,41 @@
 >   the denominator; `llm-guard-buffered`'s `delta_frag` went 0.0 to **-0.0458** purely from
 >   losing one adversarial case, which is the unpaired-population artefact this README warns
 >   about, arriving by transport rather than by design. Re-run ONCE (not until clean): both
->   came back 0 inconclusive on all six seeds and reproduced every published statistic
->   exactly. **The flakiness is recorded rather than hidden** -- LLM Guard loads transformer
+>   came back 0 inconclusive on all six seeds and reproduced every published sweep summary
+>   statistic exactly. Per-case wall-clock timings are not part of the sweep summaries and
+>   naturally vary. **The flakiness is recorded rather than hidden** -- LLM Guard loads transformer
 >   models per request and its own STATUS.md already documents a run dying partway through
 >   the fourth seed. Treat a `delta_frag` that is slightly negative on this target as a
 >   dropped case until proven otherwise.
+
+> ### Round 5, 2026-09-07: coalescing evidence now follows the response attempt
+>
+> Five instrument defects were repaired together. The capture records each upstream
+> response incrementally, including partially written responses; `run_case` pairs the
+> client result with the records created by that same gateway attempt; zero or multiple
+> upstream responses are retained as empirical observations but excluded from the
+> coalescing comparison; transport-error cases remain in the per-case table as stream
+> failures; and first-split event accounting uses the first split's own `[DONE]` fact.
+> The per-case evidence now includes `upstream_responses_observed`. The capture producer
+> and frame generators are also part of `_INSTRUMENTED`, moving `inspector_sha256` to
+> **`3ac1f621aa008d04`**.
+>
+> **All 28 single-run artefacts and all nine sweep files were regenerated. Every headline
+> rate, outcome, corpus digest, case digest, and sweep summary statistic reproduced.** The
+> sweeps cover 132 corpus runs (84 local and 48 external). Individual per-case timings
+> varied naturally and are not part of that reproducibility claim.
+> Three external sweep attempts were transiently inconclusive on the retained re-run:
+> one case in each of LiteLLM seeds 4 and 5, and one in Portkey seed 6. The prior sweeps
+> had zero for those seeds. Their rate rows and every sweep summary statistic still
+> reproduced; the case-count movement is recorded here rather than hidden by re-running
+> until clean.
+>
+> The intended non-headline correction appears in NeMo. Its eight documented HTTP 422
+> cases still leave 24 applicable cases and a 24-case coalescing denominator, but now
+> report `stream_failure_cases: 8` instead of 0. No other framing aggregate moved. The
+> external rerun script also now exports the repository package path and exits on the
+> first failed emitter invocation; previously eight import failures could still lead to a
+> misleading success footer.
 
 - Emitter: `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py` (committed)
 - Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate --out <scratch-dir>`
@@ -177,11 +210,9 @@
   omit `--out` and was measured doing exactly that. Run it from the repo root; the schema
   path is CWD-relative.
 - Schema: `spec/v2.0.0/http-profile.schema.json`
-- Reports on the current instrument (16): `passthrough.json`, `redact-all.json`,
-  `chunk-local.json`, `bounded-retention.json`, `retention-plus-decoding.json`,
-  `presidio-chunk-local.json`, `presidio-retention.json`, the four `gcp-*.json`, and five
-  `exhaustive-splits/` rows (`bounded-retention`, `chunk-local`, `retention-plus-decoding`,
-  `presidio-chunk-local`, `presidio-retention`)
+- Reports on the current instrument (28): all 19 single-seed JSON reports in this
+  directory and all nine reports under `exhaustive-splits/`. All nine `seed-sweep*.json`
+  files carry the same instrument block.
 - The two `presidio-*` policies require a live analyzer on `127.0.0.1:5002`. Select a
   subset with `--only`, e.g. `--only chunk-local,bounded-retention`.
 

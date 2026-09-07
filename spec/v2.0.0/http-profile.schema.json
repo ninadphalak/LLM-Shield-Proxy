@@ -726,12 +726,12 @@
         "upstream_data_events_emitted_total": {
           "type": "integer",
           "minimum": 0,
-          "description": "Data frames the harness's own capture ACTUALLY WROTE to the socket, summed over the scored cases. Empirical: `_respond` increments a counter as it writes each frame, so a frame that was never written is never counted. [DONE] is not a data event. Compare with data_events_observed_total, and see coalescing_per_case for the pairing that decides each case."
+          "description": "Data frames the harness's own capture ACTUALLY WROTE to the socket, summed over all attempted cases, including partial and transport-errored responses. Empirical: `_respond` installs a response record before writing and increments it after each successful frame write, so frames preceding a reset remain counted and a frame whose write raised is not counted. [DONE] is not a data event. Compare with data_events_observed_total, and see coalescing_per_case for the pairing that decides each case."
         },
         "data_events_observed_total": {
           "type": "integer",
           "minimum": 0,
-          "description": "Data-bearing events the client received, summed over the scored cases. The denominator-side partner of upstream_data_events_emitted_total."
+          "description": "Data-bearing events the client received, summed over all attempted cases. The denominator-side partner of upstream_data_events_emitted_total."
         },
         "coalescing_rate": {
           "type": [
@@ -750,16 +750,16 @@
         "coalescing_cases_compared": {
           "type": "integer",
           "minimum": 0,
-          "description": "Denominator of coalescing_rate: scored cases where BOTH counts exist. Excludes cases the client received no data event for (see stream_failure) and cases the capture wrote nothing for, because neither is evidence either way."
+          "description": "Denominator of coalescing_rate: cases with one complete client response, at least one data event on each side, and exactly one capture response correlated to the gateway attempt. Excludes stream failures, zero-response cases and multi-response cases because the harness cannot infer which of several upstream responses produced the client response."
         },
         "stream_failure": {
           "type": "boolean",
-          "description": "True when at least one scored case reached the client carrying NO data event. Distinct from 'received fewer', and it must never be scored as absence of coalescing: the predecessor field did exactly that and so exonerated a gateway that dropped the payload. NeMo Guardrails 0.24.0 truncates the stream at the point PII appears, so this is a measured behaviour rather than a hypothetical."
+          "description": "True when at least one attempted case produced a transport error or reached the client carrying no data event. Distinct from 'received fewer', and it must never be scored as absence of coalescing: the predecessor field did exactly that and so exonerated a gateway that dropped the payload."
         },
         "stream_failure_cases": {
           "type": "integer",
           "minimum": 0,
-          "description": "How many scored cases reached the client with no data event at all."
+          "description": "How many attempted cases produced a transport error or reached the client with no data event at all."
         },
         "coalescing_per_case": {
           "type": "array",
@@ -769,6 +769,7 @@
             "required": [
               "case",
               "upstream_data_events_emitted",
+              "upstream_responses_observed",
               "data_events_observed",
               "stream_failure",
               "coalesced"
@@ -780,6 +781,11 @@
               "upstream_data_events_emitted": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "upstream_responses_observed": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Capture responses observed during the gateway attempt paired with this client response. Exactly one is required for coalescing to be comparable."
               },
               "data_events_observed": {
                 "type": "integer",

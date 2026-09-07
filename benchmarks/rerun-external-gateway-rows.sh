@@ -2,16 +2,15 @@
 #
 # Re-measure the eight external-gateway rows on the CURRENT instrument.
 #
-# STAGED, NOT RUN. Trigger it yourself: `bash benchmarks/rerun-external-gateway-rows.sh`
+# The round-5 refresh was run through this script on 2026-09-07. Re-run it with
+# `bash benchmarks/rerun-external-gateway-rows.sh`
 # for all eight, or pass names to select -- e.g.
 #   bash benchmarks/rerun-external-gateway-rows.sh litellm portkey
 #
 # WHY THIS FILE EXISTS
-# These eight rows carry no `instrument` block at all and are the last artefacts in
-# benchmarks/results/v2-response-split/ that predate the current inspector
-# (inspector_sha256 955edd079f406e13). `test_every_artefact_records_the_instrument_that_
-# produced_it` is RED because of them, correctly. Re-run them or move them out; do not
-# weaken the guard.
+# These eight rows use live gateway processes and therefore need an explicit, repeatable
+# route back to the capture. The current published rows carry inspector_sha256
+# 3ac1f621aa008d04.
 #
 # TWO RULES THIS SCRIPT ENFORCES, both of them things that have gone wrong before:
 #
@@ -30,8 +29,14 @@
 #
 # The seed is the published one, so every row is directly comparable to what it replaces.
 #
-set -uo pipefail
+set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
+
+# The repository is not installed into every shell that may invoke this script. Make the
+# package import explicit; otherwise all eight emitter commands can fail before measuring
+# anything. `-e` above makes any future emitter failure fail the script rather than print
+# a misleading "Done" footer.
+export PYTHONPATH="$PWD/pii-leak-benchmark${PYTHONPATH:+:$PYTHONPATH}"
 
 SEED=a1b2c3d4e5f60001
 OUT=${OUT:-benchmarks/results/staging-external}          # never the published directory

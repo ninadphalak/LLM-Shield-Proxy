@@ -1,6 +1,6 @@
 # Streaming Privacy Gateway Conformance Specification v2.0.0
 
-**Status: draft, amended four times since first publication.** The schema is published and
+**Status: draft, amended through 2026-09-07.** The schema is published and
 tested, and `pii_leak_benchmark.v2_emitter` now emits it.
 
 | date | change |
@@ -10,6 +10,31 @@ tested, and `pii_leak_benchmark.v2_emitter` now emits it.
 | 2026-09-05 | `instrument`, `data_events_observed`, `iterations_requested` (below) |
 | 2026-09-06 | two `const: true` fields that were not true of this profile (below) |
 | 2026-09-06 | coalescing became a measured *rate*, not a single case's boolean (below) |
+| 2026-09-07 | response-correlated frame counts and transport failures (below) |
+
+**The 2026-09-07 amendment: count each successful write, correlate the response, and keep
+failed cases visible.** A fifth adversarial review found five defects in the coalescing
+rewrite:
+
+- The capture appended a response-level count only after the entire body flushed. A reset
+  after three successful frame writes therefore recorded zero. It now installs an
+  `UpstreamResponseRecord` before writing and increments it after each successful frame.
+- `run_case` read `data_events_written[-1]`. A gateway making more than one upstream
+  request could pair its client response with a different request's count. Each gateway
+  attempt now snapshots its own capture-response records. Exactly one response is needed
+  for a coalescing comparison; zero or multiple responses are empirical but incomparable.
+  `coalescing_per_case.upstream_responses_observed` exposes that denominator fact.
+- Transport-errored cases were omitted from `coalescing_per_case`, so a half-dead run could
+  still report `stream_failure: false`. Every attempted case now gets a row; a transport
+  error is a stream failure with `coalesced: null`.
+- `[DONE]` validity was aggregated across every exhaustive split and then subtracted from
+  the first split's event count. A later missing sentinel could turn the first split's
+  sentinel into a data event and hide coalescing. The first response now carries its own
+  termination fact while the all-splits AND remains the SSE-validity result.
+- The frame producer lived in `_make_upstream`'s nested `_respond`, but the instrument
+  digest included only `_coalescing_rows`. `_make_upstream`, `_sse_frames`, and
+  `_injection_events` are now in `_INSTRUMENTED`, so changing either side invalidates the
+  evidence.
 
 **The 2026-09-06 amendment: two constants that could not fail, and the second one had
 already survived a round of review.**

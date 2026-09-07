@@ -1,13 +1,13 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-06T23:18:50Z",
+ "generated_at": "2026-09-07T18:42:14Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
  },
  "implementation": {
   "name": "external-gateway:nemo-guardrails-0.24.0",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "labels_are_operator_supplied": true
  },
  "target": {
@@ -15,7 +15,7 @@
   "model": "config",
   "raw_pass_through_baseline": false
  },
- "harness_revision": "0.2.0",
+ "harness_revision": "0.2.1",
  "environment": {
   "python": "3.14.7",
   "implementation": "CPython",
@@ -31,7 +31,7 @@
    "performed": true,
    "url": "http://127.0.0.1:8799/v1/chat/completions",
    "recorded": true,
-   "round_trip_ms": 138.4668
+   "round_trip_ms": 197.4888
   }
  },
  "checks": {
@@ -102,8 +102,8 @@
    "coalescing_rate": 1.0,
    "coalescing_cases": 24,
    "coalescing_cases_compared": 24,
-   "stream_failure": false,
-   "stream_failure_cases": 0,
+   "stream_failure": true,
+   "stream_failure_cases": 8,
    "coalescing_per_case": [
     {
      "case": {
@@ -114,6 +114,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -127,6 +128,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 2,
      "stream_failure": false,
      "coalesced": true
@@ -140,6 +142,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 2,
      "stream_failure": false,
      "coalesced": true
@@ -147,12 +150,27 @@
     {
      "case": {
       "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "SSN",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
       "encoding": "plain",
       "entity": "CARDPAN",
       "fragmentation": "single_chunk",
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -166,9 +184,24 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -179,6 +212,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -192,9 +226,24 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "EMAIL",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -205,6 +254,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -218,6 +268,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -231,9 +282,24 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -244,6 +310,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -257,6 +324,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -270,6 +338,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -283,6 +352,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 2,
      "stream_failure": false,
      "coalesced": true
@@ -296,9 +366,24 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 2,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "SSN",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -309,6 +394,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -322,9 +408,24 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -335,6 +436,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -348,9 +450,24 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "EMAIL",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -361,6 +478,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -374,6 +492,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -387,9 +506,24 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 0,
+     "upstream_responses_observed": 0,
+     "data_events_observed": 0,
+     "stream_failure": true,
+     "coalesced": null
     },
     {
      "case": {
@@ -400,6 +534,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -413,6 +548,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 1,
      "stream_failure": false,
      "coalesced": true
@@ -487,10 +623,10 @@
    "unit": "milliseconds",
    "iterations": 24,
    "iterations_measured": 24,
-   "mean": 100.2041,
-   "p50": 78.2078,
-   "p95": 115.1701,
-   "p99": 604.487
+   "mean": 200.3788,
+   "p50": 142.6073,
+   "p95": 632.0732,
+   "p99": 1104.01
   }
  },
  "passed": false,
@@ -707,9 +843,9 @@
  },
  "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
  "instrument": {
-  "emitter_version": "0.2.0",
+  "emitter_version": "0.2.1",
   "client_scope_sha256": "c15a0522954fb64f",
   "boundary_scope_sha256": "4a09ca6d088914e7",
-  "inspector_sha256": "955edd079f406e13"
+  "inspector_sha256": "3ac1f621aa008d04"
  }
 }

@@ -77,6 +77,7 @@ def _result(**kwargs) -> RunResult:
         done_marker=True,
         events_observed_max=5,
         data_events_observed=4,
+        upstream_responses_observed=1,
         upstream_paths=["/v1/chat/completions"],
     )
     base.update(kwargs)
@@ -650,7 +651,8 @@ def test_the_upstream_count_is_measured_at_the_socket_not_recomputed() -> None:
         finally:
             _stop(server)
 
-        assert state.data_events_written == [expected]
+        assert [r.data_events_written for r in state.response_records] == [expected]
+        assert all(r.completed for r in state.response_records)
         assert body.count("data: ") - body.count("data: [DONE]") == expected
 
 

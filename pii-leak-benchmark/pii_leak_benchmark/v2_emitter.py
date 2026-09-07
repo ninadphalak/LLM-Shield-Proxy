@@ -95,7 +95,7 @@ SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.0.0"
 # It is a LABEL, not a staleness anchor: `instrument.inspector_sha256` is the anchor,
 # because it is derived and cannot be forgotten. This exists so a reader can tell two
 # generations of report apart at a glance without hashing anything.
-EMITTER_VERSION = "0.2.0"
+EMITTER_VERSION = "0.2.1"
 
 # Detector for the injection segment. Deliberately simple and deliberately NOT given the
 # fixture values: a gateway that was handed the needles would be measuring nothing.
@@ -1170,6 +1170,19 @@ def _client_timeout() -> httpx.Timeout:
 
 
 @dataclass
+class UpstreamResponseRecord:
+    """Empirical socket-write facts for one capture response.
+
+    The record is installed before the first data frame is written and updated after
+    every successful ``wfile.write``.  It therefore survives a reset or another
+    mid-response exception instead of losing all frames that preceded the failure.
+    """
+
+    data_events_written: int = 0
+    completed: bool = False
+
+
+@dataclass
 class UpstreamState:
     segments: Segments
     case: dict[str, str]
@@ -1178,13 +1191,13 @@ class UpstreamState:
     # was the literal `["/v1/chat/completions"]` and the handler recorded no path, so a
     # gateway calling any other route was reported as calling that one.
     received_paths: list[str] = field(default_factory=list)
-    # ONE ENTRY PER RESPONSE the capture wrote, holding the number of data frames it
-    # actually put on the socket. Empirical: `_respond` increments it as it writes, so a
-    # frame that was never written is never counted. This replaces `_upstream_data_events`,
-    # which recomputed the count from the case definition and so could only ever agree
-    # with itself. `_self_probe` clears it along with `received_bodies`, because the probe
-    # is not one of the case's responses.
-    data_events_written: list[int] = field(default_factory=list)
+    # ONE RECORD PER RESPONSE the capture started. The record is appended before any
+    # frame write and incremented after each successful write, so a response reset after
+    # frame N still records N rather than disappearing. `run_case` snapshots this list
+    # around each gateway request; zero or multiple upstream responses are not guessed
+    # into a one-response coalescing comparison.
+    response_records: list[UpstreamResponseRecord] = field(default_factory=list)
+    response_records_lock: threading.Lock = field(default_factory=threading.Lock)
     # Where to cut the injected value for the attempt currently in flight. 0 means
     # "do not cut". Set by `run_case` before each request.
     split_at: int = 0
@@ -1270,6 +1283,13 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
                 self.close_connection = True
 
         def _respond(self) -> None:
+            # Record the response attempt before parsing the request or constructing a
+            # frame. A malformed second upstream request still matters for correlation:
+            # without this record `run_case` would silently pair the gateway's response
+            # with the preceding successful request.
+            record = UpstreamResponseRecord()
+            with state.response_records_lock:
+                state.response_records.append(record)
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", "replace")
             state.received_bodies.append(raw)
@@ -1296,13 +1316,13 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             # TCP handshake per case and buys per-case independence.
             self.send_header("Connection", "close")
             self.end_headers()
-            # COUNT THE WRITES, one frame at a time. The counter is incremented after
-            # `write` returns for that frame, so a frame that raised mid-body is not
-            # counted -- which is the whole point of measuring instead of deriving.
-            written = 0
+            # Install the record BEFORE the first write, then update it after every
+            # successful frame. The old local counter was appended only after the whole
+            # response flushed, so a reset after three frames recorded zero.
             for frame in frames:
                 self.wfile.write(frame)
-                written += 1
+                with state.response_records_lock:
+                    record.data_events_written += 1
             self.wfile.write(SSE_DONE_FRAME)
             # A CLEAN EOF, explicitly. `wfile` is a buffered writer and `close_connection`
             # alone does not promise the buffer reached the socket before the handler
@@ -1310,7 +1330,8 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             # on a read for a body the server considers sent. Flush, then let
             # `close_connection` do the FIN.
             self.wfile.flush()
-            state.data_events_written.append(written)
+            with state.response_records_lock:
+                record.completed = True
             self.close_connection = True
 
     return Handler
@@ -1441,6 +1462,10 @@ class RunResult:
     # 0 means the capture wrote nothing for this case, so there is nothing to compare and
     # the case is not evidence either way.
     upstream_data_events: int = 0
+    # Capture responses observed during the gateway request paired with the client
+    # response. Exactly one is required for a coalescing comparison; with multiple
+    # responses there is no protocol-level evidence of which one the gateway returned.
+    upstream_responses_observed: int = 0
     # Every request-target the capture was actually asked for, for this case.
     upstream_paths: list[str] = field(default_factory=list)
     # Which internal split points of the value were tried, and which of them leaked.
@@ -1635,7 +1660,7 @@ def _haystack_groups(sse: str) -> dict[str, list[str]]:
         lists, numbers, keys, base64/hex/percent runs, character-code arrays), plus every
         byte the SSE parser did not dispatch.
     """
-    from pii_leak_benchmark.http_profile import _Inspection, _collect
+    from pii_leak_benchmark.http_profile import _Inspection, _collect  # noqa: I001
 
     parsed = _parse_sse(sse)
     flat: list[tuple[str, str]] = []
@@ -1850,10 +1875,10 @@ def _self_probe(url: str, state: UpstreamState) -> float:
     elapsed = (time.perf_counter() - started) * 1000.0
     seen = any(nonce in body for body in state.received_bodies)
     state.received_bodies.clear()
-    # The probe is a response the capture wrote, and it is not one of the case's. Leaving
-    # its frame count in the list would make `data_events_written[-1]` right only by
-    # accident of ordering.
-    state.data_events_written.clear()
+    # The probe is a response the capture wrote, and it is not one of the case's. Remove
+    # its response record before target traffic starts.
+    with state.response_records_lock:
+        state.response_records.clear()
     if not seen:
         raise RuntimeError(
             f"capture self-probe failed: {url} answered but this run's capture did not "
@@ -1908,8 +1933,10 @@ def run_case(
     events_first = 0
     events_max = 0
     upstream_events_first = 0
+    upstream_responses_first = 0
     invalid_events = 0
     done_marker = True
+    done_marker_first = False
     leak_tier: str | None = None
     statuses: list[int] = []
     content_types: list[str] = []
@@ -1931,6 +1958,11 @@ def run_case(
             state.split_at = split_at
             sse = ""
             for _ in range(iterations):
+                # Correlate capture responses to THIS gateway request by a bounded
+                # before/after slice. The old `[-1]` silently paired the client response
+                # with whichever upstream response happened to append last.
+                with state.response_records_lock:
+                    response_record_start = len(state.response_records)
                 started = time.perf_counter()
                 headers = {"Content-Type": "application/json"}
                 token = os.environ.get("V2_GATEWAY_TOKEN")
@@ -1983,6 +2015,21 @@ def run_case(
                     # the defect this module keeps finding elsewhere.
                     transport_error = f"{type(exc).__name__}: {exc}"
                     sse = ""
+                with state.response_records_lock:
+                    attempt_records = list(
+                        state.response_records[response_record_start:]
+                    )
+                    attempt_upstream_events = sum(
+                        record.data_events_written for record in attempt_records
+                    )
+                # `sse` is the last iteration's response, so overwrite these on every
+                # iteration at the first split point as well. Exactly one response is
+                # required for a pairwise coalescing comparison; totals remain empirical
+                # when there are zero or several.
+                if index == 0:
+                    upstream_events_first = attempt_upstream_events
+                    upstream_responses_first = len(attempt_records)
+                if transport_error is not None:
                     break
                 latencies.append((time.perf_counter() - started) * 1000.0)
             if transport_error is not None:
@@ -1995,14 +2042,11 @@ def run_case(
             if index == 0:
                 first_sse = sse
                 events_first = observed
-                # The capture's own count for the response just parsed. `sse` holds the
-                # LAST iteration at this split point, and `data_events_written[-1]` is
-                # the last response the capture wrote, so the two describe one exchange.
-                # Empty means the capture wrote nothing -- an external gateway that never
-                # called upstream, or a transport failure before the body.
-                upstream_events_first = (
-                    state.data_events_written[-1] if state.data_events_written else 0
-                )
+                # Keep the termination fact paired with `events_first`. `done_marker`
+                # above is deliberately an AND over every split for SSE validity; using
+                # that aggregate to classify the first response made a later malformed
+                # split turn the first response's [DONE] sentinel into a data event.
+                done_marker_first = "[DONE]" in parsed.events
             tier = _leak_tier(needle, sse)
             if tier is not None:
                 leaked_points += 1
@@ -2047,8 +2091,9 @@ def run_case(
         leak_tier=leak_tier,
         events_observed=events_first,
         events_observed_max=events_max,
-        data_events_observed=max(0, events_first - (1 if done_marker else 0)),
+        data_events_observed=max(0, events_first - (1 if done_marker_first else 0)),
         upstream_data_events=upstream_events_first,
+        upstream_responses_observed=upstream_responses_first,
         upstream_bodies=list(state.received_bodies),
         upstream_paths=sorted(set(state.received_paths)),
         latency_ms=latencies,
@@ -2756,6 +2801,9 @@ BOUNDARY_INSPECTION_SCOPE = "; ".join(c.clause for c in BOUNDARY_INSPECTION_CAPA
 
 _INSTRUMENTED = (
     "_parse_sse",
+    "_sse_frames",
+    "_injection_events",
+    "_make_upstream",
     "_ordered_channels",
     "_haystack_groups",
     "_haystacks",
@@ -2772,9 +2820,10 @@ _INSTRUMENTED = (
     # without marking a single row stale -- the exact hole the digest exists to close.
     "_one_character_events",
     # `_upstream_data_events` was here and is gone: it derived the capture's emission
-    # count from the case definition instead of measuring it. `_respond` now counts the
-    # frames it writes, and `_coalescing_rows` turns those counts into the per-case
-    # verdict, so the digest follows the function that actually decides the field.
+    # count from the case definition instead of measuring it. `_make_upstream` contains
+    # the nested `_respond` method that now records each successful socket write;
+    # `_coalescing_rows` turns those records into the per-case verdict. Both producer and
+    # consumer must move the digest when their behaviour changes.
     "_coalescing_rows",
     "_injection_check",
     "_injection_evidence",
@@ -2842,7 +2891,7 @@ def instrument_block() -> dict[str, str]:
 
 def _boundary_haystacks(bodies: Iterable[str]) -> list[str]:
     """The request-path equivalent of `_haystacks`, over every captured body."""
-    from pii_leak_benchmark.http_profile import _Inspection, _collect
+    from pii_leak_benchmark.http_profile import _Inspection, _collect  # noqa: I001
 
     found = _Inspection()
     flat: list[tuple[str, str]] = []
@@ -3023,8 +3072,9 @@ def _coalescing_rows(results: list[RunResult]) -> list[dict[str, Any]]:
       * `coalesced: true`  -- the client received FEWER data events than the capture
         wrote. Coalescing proved, not inferred from a low absolute count.
       * `coalesced: false` -- it received at least as many. Nothing was merged.
-      * `coalesced: null`  -- there is nothing to compare. Either the client received NO
-        data events at all (`stream_failure`), or the capture wrote none. The old
+      * `coalesced: null`  -- there is nothing to compare. Either the case failed, the
+        client received NO data events at all (`stream_failure`), the capture wrote none,
+        or the gateway made other than one upstream request. The old
         expression `0 < observed < upstream` returned **false** for the first of these,
         which reads as "this gateway does not coalesce" about a gateway that dropped the
         payload on the floor. NeMo Guardrails truncates the stream when it sees PII, so
@@ -3032,18 +3082,23 @@ def _coalescing_rows(results: list[RunResult]) -> list[dict[str, Any]]:
     """
     rows: list[dict[str, Any]] = []
     for result in results:
-        if result.transport_error is not None:
-            continue
         upstream = result.upstream_data_events
         observed = result.data_events_observed
-        failed = observed == 0
+        failed = result.transport_error is not None or observed == 0
+        comparison_available = (
+            not failed
+            and upstream > 0
+            and result.upstream_responses_observed == 1
+        )
         rows.append({
             "case": {k: result.case[k] for k in sorted(AXES)},
             "upstream_data_events_emitted": upstream,
+            "upstream_responses_observed": result.upstream_responses_observed,
             "data_events_observed": observed,
-            # The stream carried no data event at all. Distinct from "carried fewer".
+            # A transport-errored case produced no complete stream measurement even if
+            # an earlier split point delivered data. Distinct from "carried fewer".
             "stream_failure": failed,
-            "coalesced": None if (failed or upstream <= 0) else observed < upstream,
+            "coalesced": observed < upstream if comparison_available else None,
         })
     return rows
 
@@ -3069,7 +3124,7 @@ def _fragmentation_check(results: list[RunResult], segments: Segments) -> dict[s
     that wrote 3 or 4 -- and `coalescing_per_case` carries the full detail beside it.
     """
     scored = [r for r in results if r.transport_error is None]
-    counts = [max(r.events_observed, r.events_observed_max) for r in results] or [0]
+    counts = [max(r.events_observed, r.events_observed_max) for r in scored] or [0]
     rows = _coalescing_rows(results)
     comparable = [r for r in rows if r["coalesced"] is not None]
     coalesced = [r for r in comparable if r["coalesced"]]

@@ -1,13 +1,13 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-06T23:18:31Z",
+ "generated_at": "2026-09-07T18:41:52Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
  },
  "implementation": {
   "name": "external-gateway:portkey-gateway-oss",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "labels_are_operator_supplied": true
  },
  "target": {
@@ -15,7 +15,7 @@
   "model": "capture",
   "raw_pass_through_baseline": false
  },
- "harness_revision": "0.2.0",
+ "harness_revision": "0.2.1",
  "environment": {
   "python": "3.14.7",
   "implementation": "CPython",
@@ -31,7 +31,7 @@
    "performed": true,
    "url": "http://127.0.0.1:8799/v1/chat/completions",
    "recorded": true,
-   "round_trip_ms": 141.5819
+   "round_trip_ms": 150.8258
   }
  },
  "checks": {
@@ -114,6 +114,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -127,6 +128,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -140,6 +142,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -153,6 +156,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -166,6 +170,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -179,6 +184,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -192,6 +198,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -205,6 +212,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -218,6 +226,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -231,6 +240,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -244,6 +254,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -257,6 +268,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -270,6 +282,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -283,6 +296,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -296,6 +310,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -309,6 +324,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -322,6 +338,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -335,6 +352,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -348,6 +366,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -361,6 +380,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -374,6 +394,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -387,6 +408,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -400,6 +422,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -413,6 +436,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -426,6 +450,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
      "data_events_observed": 3,
      "stream_failure": false,
      "coalesced": false
@@ -439,6 +464,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -452,6 +478,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -465,6 +492,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -478,6 +506,7 @@
       "request_site": "unrecognised-key"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -491,6 +520,7 @@
       "request_site": "tool-description"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -504,6 +534,7 @@
       "request_site": "chat-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -517,6 +548,7 @@
       "request_site": "system-content"
      },
      "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
      "data_events_observed": 4,
      "stream_failure": false,
      "coalesced": false
@@ -618,10 +650,10 @@
    "unit": "milliseconds",
    "iterations": 32,
    "iterations_measured": 32,
-   "mean": 54.3806,
-   "p50": 51.0764,
-   "p95": 59.8383,
-   "p99": 261.5692
+   "mean": 63.9466,
+   "p50": 52.4114,
+   "p95": 72.3635,
+   "p99": 436.5949
   }
  },
  "passed": false,
@@ -851,9 +883,9 @@
  },
  "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
  "instrument": {
-  "emitter_version": "0.2.0",
+  "emitter_version": "0.2.1",
   "client_scope_sha256": "c15a0522954fb64f",
   "boundary_scope_sha256": "4a09ca6d088914e7",
-  "inspector_sha256": "955edd079f406e13"
+  "inspector_sha256": "3ac1f621aa008d04"
  }
 }
