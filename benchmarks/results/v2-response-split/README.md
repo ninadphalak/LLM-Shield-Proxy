@@ -536,9 +536,11 @@ the absence of any transformation at all.
 **This is a finding about the metric, not only about the gateways.** FidelityRate and
 LeakRate are response-path measurements, and on their own they rank a gateway that does
 nothing equal to one that protects the request path completely. A profile that reports them
-without also recording what the upstream received is rankable in the wrong direction. The
-v2 reports carry `capture.upstream_bodies` for exactly this reason, and any leaderboard
-built on this profile has to publish that column too.
+without also recording what crossed the upstream boundary is rankable in the wrong direction.
+The v2 reports carry `checks.configured_upstream_boundary`, including per-entity evidence,
+for this reason; they do **not** retain the raw request bodies under `capture`. The exact
+prompt table below came from a separate side probe. Any comparison built on this profile has
+to publish the boundary check and its request-path-configuration field beside the rates.
 
 ### LLM-Shield-Proxy 1.5.2
 
