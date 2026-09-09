@@ -173,6 +173,21 @@
 >   the fourth seed. Treat a `delta_frag` that is slightly negative on this target as a
 >   dropped case until proven otherwise.
 
+> ### Round 6, 2026-09-08: the Presidio exhaustive result is now a 12-seed result
+>
+> The 24 reports under `exhaustive-presidio-seed-sweep/0000000000000001/` through
+> `000000000000000c/` enumerate every internal two-part split for both Presidio wrappers
+> over the same generated values as the midpoint sweep. Two more reports re-run the
+> published seed. All 26 carry inspector digest **`3ac1f621aa008d04`**, FidelityRate 1.00,
+> `fragmentation_strategy: exhaustive-2-part`, and zero inconclusive cases.
+>
+> Across the twelve sweep seeds, chunk-local LeakRate(adversarial) is **1.00 on every
+> seed** and DeltaFrag is mean **0.8333**, range **0.625-0.875**. The matching midpoint
+> ranges are 0.25-1.00 and -0.125-0.875. Enumeration therefore removes the adversarial
+> LeakRate's seed variation rather than merely selecting a favourable seed. Retention
+> keeps DeltaFrag at **0.00 on every seed**. Tag `v2-evidence-round-6` preserves the
+> reports; the directory README gives the complete summary and reproduction command.
+
 > ### Round 5, 2026-09-07: coalescing evidence now follows the response attempt
 >
 > Five instrument defects were repaired together. The capture records each upstream
@@ -210,9 +225,10 @@
   omit `--out` and was measured doing exactly that. Run it from the repo root; the schema
   path is CWD-relative.
 - Schema: `spec/v2.0.0/http-profile.schema.json`
-- Reports on the current instrument (28): all 19 single-seed JSON reports in this
-  directory and all nine reports under `exhaustive-splits/`. All nine `seed-sweep*.json`
-  files carry the same instrument block.
+- Reports on the current instrument (54): all 19 single-seed JSON reports in this
+  directory, all nine reports under `exhaustive-splits/`, and the 26 archived Presidio
+  reports under `exhaustive-presidio-seed-sweep/`. All nine `seed-sweep*.json` files
+  carry the same instrument block.
 - The two `presidio-*` policies require a live analyzer on `127.0.0.1:5002`. Select a
   subset with `--only`, e.g. `--only chunk-local,bounded-retention`.
 
@@ -223,15 +239,17 @@ claim a reviewer could reasonably discount.
 
 ---
 
-**All 19 single-run artefacts in this directory come from one corpus: 32 cases, 5 axes,
-76/76 pairs.** `tests/conformance/test_results_are_comparable.py` fails the build if that
-stops being true, because on 2026-09-04 this directory briefly held artefacts from four
-different corpus generations at once -- individually correct, jointly misleading. A stale
-row is worse than a missing one: a missing row is visibly absent, a stale one looks like
-evidence.
+**All 54 single-run artefacts in this tree come from one corpus definition: 32 cases, 5
+axes, 76/76 pairs.** `tests/conformance/test_results_are_comparable.py` walks the tree
+recursively and fails the build if that stops being true, because on 2026-09-04 this
+directory briefly held artefacts from four different corpus generations at once --
+individually correct, jointly misleading. A stale row is worse than a missing one: a
+missing row is visibly absent, a stale one looks like evidence.
 
-The `seed-sweep-*.json` files are the numbers to cite; the single-run artefacts are kept as
-schema-validation evidence.
+The top-level `seed-sweep*.json` files are the midpoint numbers to cite. The exhaustive
+Presidio distribution is recomputed from the twelve numbered directories under
+`exhaustive-presidio-seed-sweep/`; the extra published-seed directory is a reproduction,
+not a thirteenth sweep seed.
 
 ## 0. How to read the tables
 
@@ -456,13 +474,13 @@ split's central claim demonstrated by a product instead of by a model.** It is n
 for failing to rehydrate; it is scored for what one global policy does to two segments that
 need opposite treatment.
 
-**LLM Guard restores, and it is the first third-party product here to do so.** FidelityRate
+**LLM Guard restores, and it is the first third-party integration here to do so.** FidelityRate
 1.00 from `Anonymize` + `Vault` + `Deanonymize`. Applied per delta it pays **DeltaFrag
 0.50** -- the same scanner on the same corpus leaks three times as often when the value is
 split (DeltaFrag 0.58 [0.50-0.75] over six seeds). Buffering the whole response removes
-that penalty entirely (to 0.00 on every seed) and takes
-`events_observed` from 5 to 3. **E15, reproduced a third time, on the product that gets
-everything else right.**
+that penalty entirely (to 0.00 on every seed). In the representative reports,
+`data_events_observed` falls from 3 to 1 and `coalescing_rate` rises from 0.00 to 1.00.
+**E15, reproduced a third time, on an integration that restores the echo.**
 
 Two more observations, both about defaults and neither a defect report:
 
@@ -906,8 +924,8 @@ ran: `fragmentation_strategy` is `across-sse-events` for the midpoint and
 `exhaustive-2-part` for the full enumeration, with the split count in
 `limitations.method_limits`.
 
-**Measured on every row it could be, seed `a1b2c3d4e5f60001`, 252 splits over 16
-adversarial cases:**
+**Measured on every row it could be, seed `a1b2c3d4e5f60001`, 236 internal splits over
+16 adversarial cases (plus 16 uncut single-chunk requests, 252 requests total):**
 
 | Policy | midpoint adv / DeltaFrag | exhaustive adv / DeltaFrag |
 |---|---|---|
@@ -921,20 +939,20 @@ adversarial cases:**
 | `gcp-model-armor-chunk-local` | 1.00 / 0.25 | 1.00 / 0.25 |
 | `gcp-model-armor-retention` | 0.75 / 0.00 | 0.75 / 0.00 |
 
-**One row moves, and it is the one that should.** `presidio-chunk-local` nearly doubles:
-LeakRate(adversarial) 0.50 to **1.00**, DeltaFrag 0.375 to **0.875**. Every adversarial case
-leaks at *some* split point; the midpoint happened to land on cuts Presidio still caught in
-half of them. **The midpoint was under-reporting a real detector's fragmentation failure by
-half**, and that number was published.
+**Across the same twelve Presidio seeds, enumeration removes the varying arm's variance.**
+Midpoint `presidio-chunk-local` has LeakRate(adversarial) mean 0.7188, range 0.25-1.00,
+and DeltaFrag mean 0.5521, range -0.125-0.875. Under every internal split, adversarial
+LeakRate is **1.00 at all twelve seeds** and DeltaFrag is mean **0.8333**, range
+0.625-0.875. This separates the oracle effect from value variation: every generated
+value set has a leaking split even though the midpoint misses some of them.
 
-**Everything else is unchanged, which is the more valuable half of the result.** The three
-modelled policies are deterministic regexes with no per-fragment behaviour, so the midpoint
-is a sufficient statistic for them. And the retention rows -- `bounded-retention`,
-`presidio-retention`, `gcp-dlp-retention` -- hold their DeltaFrag at exactly 0.00 across
-**every internal split point of every value**, not merely at the one the midpoint picked.
-Since the same oracle demonstrably moves `presidio-chunk-local`, that is a real result and
-not an insensitive instrument: **bounded retention is not merely surviving the sample, it is
-surviving the enumeration.**
+**The retention controls are unchanged, which is the other half of the result.** Presidio
+retention holds DeltaFrag at 0.00 for every one of the same twelve seeds. The modelled
+policies are deterministic regexes with no per-fragment behaviour, so the midpoint is a
+sufficient statistic for them. At the published seed, the Cloud DLP and Model Armor
+retention rows likewise remain at their single-chunk baselines. Since the same oracle
+consistently moves `presidio-chunk-local`, retention is not merely surviving an insensitive
+instrument.
 
 **Practical rule: do not quote a DeltaFrag from a context-scored or validating detector
 without `--exhaustive-splits`.** Presidio, Cloud DLP and Model Armor all score a fragment on

@@ -3,12 +3,16 @@
 Produced with `--exhaustive-splits`, which cuts each adversarial value at **every internal
 offset** instead of once at its midpoint, and fails the case if **any** split leaks. Same
 corpus, same seed (`a1b2c3d4e5f60001`), same inspector as the rows one directory up. The
-only variable is where the value is cut: 252 splits over 16 adversarial cases.
+only variable is where the value is cut: 236 internal splits over 16 adversarial cases,
+plus 16 uncut single-chunk requests (252 requests total).
 
-These are in a subdirectory on purpose. The guards in
-`tests/conformance/test_results_are_comparable.py` glob the parent directory
-non-recursively, so these rows are not compared case-for-case with the midpoint rows, which
-is right: they are the same policies under a different oracle, not different policies.
+These are in a subdirectory on purpose, so the fixed published-seed oracle comparison is
+visibly distinct from the midpoint rows. The guards in
+`tests/conformance/test_results_are_comparable.py` walk the parent tree recursively and
+verify that both oracle directories use the current corpus and inspector.
+
+The twelve-seed Presidio exhaustive result is archived separately under
+`../exhaustive-presidio-seed-sweep/`.
 
 Reproduce any of them:
 
@@ -46,5 +50,8 @@ property of bounded retention rather than an instrument too blunt to see a diffe
 looks like, so the cut position changes the answer. A regex does not.
 
 `fragmentation_strategy` in each report reads `exhaustive-2-part`, and
-`limitations.method_limits` carries the split count, so a row states which oracle produced
-it rather than leaving a reader to infer it.
+the reports therefore state which oracle produced them rather than leaving a reader to
+infer it. **Known erratum:** `limitations.method_limits[4]` incorrectly calls all 252
+requests "splits"; the correct count is 236 internal adversarial splits plus 16 uncut
+single-chunk requests. Correcting that emitter string moves the inspector digest and must
+be batched with a complete evidence refresh.
