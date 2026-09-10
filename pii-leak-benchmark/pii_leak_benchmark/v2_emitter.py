@@ -1008,39 +1008,67 @@ def extract_site(body: dict[str, Any], site: str) -> str | None:
     raise ValueError(f"unknown request_site {site!r}")
 
 
-def _all_pairs() -> set[tuple[str, str, str, str]]:
-    names = list(AXES)
-    pairs: set[tuple[str, str, str, str]] = set()
-    for i, a in enumerate(names):
-        for b in names[i + 1 :]:
-            for va in AXES[a]:
-                for vb in AXES[b]:
-                    pairs.add((a, va, b, vb))
-    return pairs
+def _all_pairs(
+    axes: dict[str, tuple[str, ...]] | None = None,
+    feasible: "Callable[[dict[str, str]], bool] | None" = None,
+) -> set[tuple[str, str, str, str]]:
+    """Every pair of axis values that SOME feasible case can carry.
 
-
-def covering_array() -> list[dict[str, str]]:
-    """Greedy pairwise covering array over the four axes.
-
-    Exhaustive here is only 24 cases, so the array is generated greedily and then the
-    pairwise proof is recomputed against it rather than asserted.
+    `feasible` exists for a constrained axis set. The FIDE profile carries both a needle
+    id and its `needle_class`, and a needle belongs to exactly one class -- so
+    `(entity, AKIAKEYID, needle_class, pii)` is not an uncovered pair, it is an
+    impossible one. Requiring it would make `proof_complete` unsatisfiable and the
+    schema's coverage gate meaningless. Pairs are filtered by asking whether any complete
+    case in the product satisfies both, not by hand-listing exclusions.
     """
     import itertools
 
-    names = list(AXES)
-    candidates = [dict(zip(names, combo)) for combo in itertools.product(*AXES.values())]
-    remaining = _all_pairs()
+    axes = AXES if axes is None else axes
+    names = list(axes)
+    pairs: set[tuple[str, str, str, str]] = set()
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            for va in axes[a]:
+                for vb in axes[b]:
+                    pairs.add((a, va, b, vb))
+    if feasible is None:
+        return pairs
+    reachable: set[tuple[str, str, str, str]] = set()
+    for combo in itertools.product(*axes.values()):
+        case = dict(zip(names, combo))
+        if feasible(case):
+            reachable |= _pairs_of(case, axes)
+    return pairs & reachable
+
+
+def covering_array(
+    axes: dict[str, tuple[str, ...]] | None = None,
+    feasible: "Callable[[dict[str, str]], bool] | None" = None,
+) -> list[dict[str, str]]:
+    """Greedy pairwise covering array over the profile's axes, plus fragmentation twins.
+
+    Exhaustive here is a few hundred cases, so the array is generated greedily and then
+    the pairwise proof is recomputed against it rather than asserted.
+    """
+    import itertools
+
+    axes = AXES if axes is None else axes
+    names = list(axes)
+    candidates = [dict(zip(names, combo)) for combo in itertools.product(*axes.values())]
+    if feasible is not None:
+        candidates = [c for c in candidates if feasible(c)]
+    remaining = _all_pairs(axes, feasible)
     chosen: list[dict[str, str]] = []
     while remaining:
         best, best_gain = None, -1
         for case in candidates:
-            gain = len(remaining & _pairs_of(case))
+            gain = len(remaining & _pairs_of(case, axes))
             if gain > best_gain:
                 best, best_gain = case, gain
         if best is None or best_gain <= 0:
             break
         chosen.append(best)
-        remaining -= _pairs_of(best)
+        remaining -= _pairs_of(best, axes)
         candidates.remove(best)
 
     # DeltaFrag is a DIFFERENCE of two leak rates, so it is only meaningful if the two
@@ -1054,17 +1082,19 @@ def covering_array() -> list[dict[str, str]]:
     # This is why `gcp-dlp-retention` could report a NEGATIVE DeltaFrag before the fix.
     seen = {tuple(sorted(c.items())) for c in chosen}
     for case in list(chosen):
-        for value in AXES["fragmentation"]:
+        for value in axes["fragmentation"]:
             twin = dict(case, fragmentation=value)
             key = tuple(sorted(twin.items()))
-            if key not in seen:
+            if key not in seen and (feasible is None or feasible(twin)):
                 seen.add(key)
                 chosen.append(twin)
     return chosen
 
 
-def _pairs_of(case: dict[str, str]) -> set[tuple[str, str, str, str]]:
-    names = list(AXES)
+def _pairs_of(
+    case: dict[str, str], axes: dict[str, tuple[str, ...]] | None = None
+) -> set[tuple[str, str, str, str]]:
+    names = list(AXES if axes is None else axes)
     out: set[tuple[str, str, str, str]] = set()
     for i, a in enumerate(names):
         for b in names[i + 1 :]:
@@ -1198,54 +1228,149 @@ class UpstreamState:
     # into a one-response coalescing comparison.
     response_records: list[UpstreamResponseRecord] = field(default_factory=list)
     response_records_lock: threading.Lock = field(default_factory=threading.Lock)
-    # Where to cut the injected value for the attempt currently in flight. 0 means
-    # "do not cut". Set by `run_case` before each request.
-    split_at: int = 0
+    # Where to cut the injected value for the attempt currently in flight. The empty
+    # tuple means "do not cut"; one offset is a two-part partition, two offsets a
+    # three-part one. Set by `run_case` before each request.
+    cuts: tuple[int, ...] = ()
 
 
-def injection_split_points(
-    segments: Segments, case: dict[str, str], exhaustive: bool = False
-) -> list[int]:
-    """Which internal offsets of the injected value to cut at. 0 means "do not cut".
+# The partition families this oracle knows how to enumerate, and what each one means.
+#
+#   midpoint            one two-part partition, cut at len // 2. The published default.
+#   exhaustive-2-part   every internal two-part partition: N - 1 of them.
+#   exhaustive-3-part   every internal three-part partition: choose(N - 1, 2) of them.
+#   union-worst-case    both exhaustive families together. The case fails if ANY
+#                       enumerated partition in either family leaks.
+#
+# `union-worst-case` is bounded by construction: it is the worst case over THE ENUMERATED
+# CORPUS VALUES AND THESE TWO FAMILIES, never over arbitrary streams, arbitrary values,
+# arbitrary interleavings, or more than three pieces. Every place the label is printed
+# says so.
+PARTITION_FAMILIES: tuple[str, ...] = ("exhaustive-2-part", "exhaustive-3-part")
+ORACLES: tuple[str, ...] = ("midpoint",) + PARTITION_FAMILIES + ("union-worst-case",)
+
+# Per case, per family. `choose(N - 1, 2)` is quadratic in the rendered length, so a
+# 74-character PEM block is 2,628 requests for ONE case and a 300-character one is 44,551.
+# A run that silently truncates its own enumeration and then reports containment is the
+# worst failure this harness has, so the cap is explicit, published, and turns the family
+# INCONCLUSIVE for that case rather than shortening it.
+DEFAULT_PARTITION_CAP = int(os.environ.get("V2_PARTITION_CAP", "6000"))
+
+
+def _family_partitions(rendered: str, family: str) -> list[tuple[int, ...]]:
+    """Every partition of `rendered` in one family, as tuples of internal cut offsets.
+
+    Both families produce ORDERED, NONEMPTY, CONTIGUOUS pieces that concatenate back to
+    `rendered` byte for byte, and no piece is the whole value: the offsets are drawn from
+    `1 .. N-1`, so the first piece loses at least the last character and the last piece
+    loses at least the first.
+    """
+    n = len(rendered)
+    if family == "exhaustive-2-part":
+        return [(i,) for i in range(1, n)]
+    if family == "exhaustive-3-part":
+        # Every PAIR of distinct internal cuts, i < j, both in 1..N-1. That is exactly
+        # choose(N - 1, 2) partitions, each with three nonempty pieces, no duplicates.
+        return [(i, j) for i in range(1, n - 1) for j in range(i + 1, n)]
+    raise ValueError(f"unknown partition family {family!r}")
+
+
+def injection_partitions(
+    segments: Segments,
+    case: dict[str, str],
+    oracle: str = "midpoint",
+    cap: int = DEFAULT_PARTITION_CAP,
+) -> tuple[list[tuple[int, ...]], list[str], dict[str, int], dict[str, bool]]:
+    """The partitions to try for one case, plus per-family attempted counts and cap hits.
+
+    Returns `(partitions, families, attempted_by_family, capped_by_family)`, where
+    `families[i]` names the family `partitions[i]` came from -- the union statistic has
+    to be decomposable into its components, and recomputing the membership afterwards is
+    how two enumerators drift apart. A single-chunk case
+    returns exactly one uncut attempt and no family is enumerated for it: the uncut arm
+    is the baseline the difference subtracts, not a partition.
 
     THE MIDPOINT IS A WEAK ORACLE, and this is the axis where that matters most. Whether
-    a split defeats a detector depends on what the two halves LOOK LIKE, not on where
-    the middle is: `950-36-9596` cut at 6 leaves `950-36` and `9596`, and a detector may
-    well still fire on neither, on one, or -- the case that produced a NEGATIVE DeltaFrag
-    on seed 0000000000000001 -- on a fragment for an unrelated reason, which suppresses
-    the leak and scores the fragmented condition as safe. One sample per case cannot tell
-    those apart.
+    a split defeats a detector depends on what the pieces LOOK LIKE, not on where the
+    middle is: `950-36-9596` cut at 6 leaves `950-36` and `9596`, and a detector may well
+    fire on neither, on one, or -- the case that produced a NEGATIVE DeltaFrag on seed
+    0000000000000001 -- on a fragment for an unrelated reason, which suppresses the leak
+    and scores the fragmented condition as safe. One sample per case cannot tell those
+    apart.
 
-    Exhaustive is not expensive here and sampling is the wrong instinct: a value of N
-    characters has exactly N-1 internal two-part splits, about 20 for an email and 11
-    for an SSN. `benchmarks/presidio_partition_probe.py` already applies this oracle to a
-    stock Presidio (47 split points across three entities, zero of which protect the
-    value); this makes the same oracle available to the scored corpus. The tradition is
-    bounded exhaustive testing, not random fuzzing -- for a space this small, enumerating
-    it is both cheaper and stronger than sampling it.
+    Enumeration is not expensive for two parts and sampling is the wrong instinct: a value
+    of N characters has exactly N-1 internal two-part partitions, about 20 for an email
+    and 11 for an SSN. Three parts is quadratic and IS expensive, which is what `cap` is
+    for. A family whose enumeration would exceed the cap is not shortened; the case is
+    marked capped, excluded from that family's denominator, and reported. An aborted
+    combinatorial run must never score as containment.
 
-    Default stays the midpoint so the published corpus does not move. `--exhaustive-splits`
-    opts in, and the report says which was used.
+    Default stays the midpoint so the published corpus does not move.
     """
+    if oracle not in ORACLES:
+        raise ValueError(f"unknown oracle {oracle!r}; known: {ORACLES}")
     if case["fragmentation"] == "single_chunk":
-        return [0]
+        return [()], [], {}, {}
     rendered = _encode(segments.injection[case["entity"]], case["encoding"])
-    if not exhaustive:
-        return [len(rendered) // 2]
-    return list(range(1, len(rendered)))
+    if oracle == "midpoint":
+        return (
+            [(len(rendered) // 2,)],
+            ["midpoint"],
+            {"midpoint": 1},
+            {"midpoint": False},
+        )
+
+    wanted = PARTITION_FAMILIES if oracle == "union-worst-case" else (oracle,)
+    partitions: list[tuple[int, ...]] = []
+    families: list[str] = []
+    attempted: dict[str, int] = {}
+    capped: dict[str, bool] = {}
+    for family in wanted:
+        enumerated = _family_partitions(rendered, family)
+        if len(enumerated) > cap:
+            attempted[family] = 0
+            capped[family] = True
+            continue
+        attempted[family] = len(enumerated)
+        capped[family] = False
+        partitions.extend(enumerated)
+        families.extend([family] * len(enumerated))
+    return partitions, families, attempted, capped
+
+
+def _partition_pieces(rendered: str, cuts: tuple[int, ...]) -> list[str]:
+    """Cut `rendered` at the given internal offsets. Asserted, not assumed.
+
+    Two properties are what make a partition oracle a fragmentation measurement rather
+    than a mutation fuzzer, and both are checked here rather than in a test that runs
+    somewhere else:
+
+      * the pieces concatenate back to `rendered` BYTE FOR BYTE, so the client
+        reconstructs exactly the value the capture meant to send. A partition that
+        changed the value would measure detector recall on a different string.
+      * no piece contains the complete value, so any detection is a detection of a
+        FRAGMENT. Without this an oracle can score a leak it manufactured.
+    """
+    if not cuts:
+        return [rendered]
+    bounds = (0,) + cuts + (len(rendered),)
+    pieces = [rendered[a:b] for a, b in zip(bounds, bounds[1:])]
+    if "".join(pieces) != rendered:
+        raise RuntimeError(f"partition {cuts!r} does not reconstruct the value")
+    if any(not piece for piece in pieces):
+        raise RuntimeError(f"partition {cuts!r} produced an empty piece")
+    if any(rendered in piece for piece in pieces):
+        raise RuntimeError(f"partition {cuts!r} left the complete value in one piece")
+    return pieces
 
 
 def _injection_events(
-    segments: Segments, case: dict[str, str], split_at: int = 0
+    segments: Segments, case: dict[str, str], cuts: tuple[int, ...] = ()
 ) -> list[dict[str, Any]]:
     """Build the injection segment for one case: one entity, encoded, carried, split."""
     raw = segments.injection[case["entity"]]
     rendered = _encode(raw, case["encoding"])
-    pieces = (
-        [rendered]
-        if not split_at
-        else [rendered[:split_at], rendered[split_at:]]
-    )
+    pieces = _partition_pieces(rendered, cuts)
     events: list[dict[str, Any]] = []
     if case["carrier"] == "sse-delta-content":
         events.append({"content": "Reference record: "})
@@ -1301,7 +1426,7 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             prompt = "" if echoed is None else echoed
 
             events = [{"content": f"You sent: {prompt}\n"}]
-            events.extend(_injection_events(state.segments, state.case, state.split_at))
+            events.extend(_injection_events(state.segments, state.case, state.cuts))
             frames = _sse_frames(events)
             body = b"".join(frames) + SSE_DONE_FRAME
             self.send_response(200)
@@ -1468,10 +1593,24 @@ class RunResult:
     upstream_responses_observed: int = 0
     # Every request-target the capture was actually asked for, for this case.
     upstream_paths: list[str] = field(default_factory=list)
-    # Which internal split points of the value were tried, and which of them leaked.
-    # One midpoint split by default; every internal split under --exhaustive-splits.
+    # Which internal partitions of the value were tried, and which of them leaked.
+    # One midpoint two-part partition by default; whole families under a stronger oracle.
+    # A single_chunk case has exactly one UNCUT attempt, which is not a partition -- the
+    # `252 splits` erratum came from summing this field over both arms and calling the
+    # total "splits".
     split_points_tried: int = 1
     split_points_leaked: int = 0
+    # Which oracle produced those partitions, and the per-family breakdown behind the
+    # union statistic. Empty for a single_chunk case.
+    oracle: str = "midpoint"
+    partitions_attempted: dict[str, int] = field(default_factory=dict)
+    partitions_leaked: dict[str, int] = field(default_factory=dict)
+    # True for a family whose enumeration would have exceeded the resource cap. The
+    # family was NOT shortened and NOT run; the case is inconclusive for it. A capped
+    # family must never contribute a non-leak to a denominator.
+    partitions_capped: dict[str, bool] = field(default_factory=dict)
+    partition_cap: int = DEFAULT_PARTITION_CAP
+    partition_seconds: float = 0.0
     self_probe_ms: float = 0.0
     self_probe_url: str = ""
 
@@ -1895,7 +2034,8 @@ def run_case(
     gateway_url: str | None = None,
     upstream_port: int = 0,
     model: str = "test",
-    exhaustive_splits: bool = False,
+    oracle: str = "midpoint",
+    partition_cap: int = DEFAULT_PARTITION_CAP,
 ) -> RunResult:
     """Drive one corpus case end to end over loopback HTTP.
 
@@ -1904,11 +2044,15 @@ def run_case(
     mode `policy_name` is only a label for the report; no in-process policy runs, and the
     masking the gateway does (or fails to do) is entirely its own.
 
-    `exhaustive_splits` runs an adversarial case once per INTERNAL SPLIT POINT of the
-    value instead of once at its midpoint, and the case leaks if ANY of them leaks. See
-    `injection_split_points` for why the midpoint alone is a weak oracle.
+    `oracle` selects which partition family or families an adversarial case is cut into,
+    and the case leaks if ANY enumerated partition leaks. See `injection_partitions` for
+    why the midpoint alone is a weak oracle and why the cap turns a family inconclusive
+    rather than shortening it.
     """
-    points = injection_split_points(segments, case, exhaustive=exhaustive_splits)
+    points, families, attempted, capped = injection_partitions(
+        segments, case, oracle=oracle, cap=partition_cap
+    )
+    leaked_by_family: dict[str, int] = {f: 0 for f in attempted}
     state = UpstreamState(segments=segments, case=case)
     upstream, upstream_url = _serve(_make_upstream(state), port=upstream_port)
     probe_ms = 0.0
@@ -1954,8 +2098,9 @@ def run_case(
     # is pooled across cases even though the client object is reused within one.
     client = httpx.Client(timeout=_client_timeout(), trust_env=False)
     try:
-        for index, split_at in enumerate(points):
-            state.split_at = split_at
+        partitions_started = time.perf_counter()
+        for index, cuts in enumerate(points):
+            state.cuts = cuts
             sse = ""
             for _ in range(iterations):
                 # Correlate capture responses to THIS gateway request by a bounded
@@ -2050,6 +2195,8 @@ def run_case(
             tier = _leak_tier(needle, sse)
             if tier is not None:
                 leaked_points += 1
+                if families:
+                    leaked_by_family[families[index]] += 1
                 # Keep the STRONGEST evidence seen across split points, so a case that
                 # leaked verbatim at one offset is not reported as a concatenation
                 # because a later offset only matched a cross-field join.
@@ -2103,6 +2250,12 @@ def run_case(
         done_marker=done_marker,
         split_points_tried=len(points),
         split_points_leaked=leaked_points,
+        oracle=oracle,
+        partitions_attempted=dict(attempted),
+        partitions_leaked=dict(leaked_by_family),
+        partitions_capped=dict(capped),
+        partition_cap=partition_cap,
+        partition_seconds=round(time.perf_counter() - partitions_started, 4),
         self_probe_ms=round(probe_ms, 4),
         self_probe_url=upstream_url,
     )
@@ -2143,6 +2296,7 @@ def _assert_derivations(
     results: list[RunResult],
     published: dict[str, Any],
     published_digest: str,
+    axes: dict[str, tuple[str, ...]] | None = None,
 ) -> bool:
     """Recompute the published metrics FROM THE RESULTS, and refuse to emit on a mismatch.
 
@@ -2203,7 +2357,7 @@ def _assert_derivations(
     # The sidecar half: rebuild the case records and their digest independently of the
     # ones the report carries.
     rebuilt = sorted(
-        ({k: r.case[k] for k in sorted(AXES)} for r in results),
+        ({k: r.case[k] for k in sorted(AXES if axes is None else axes)} for r in results),
         key=lambda c: tuple(sorted(c.items())),
     )
     rebuilt_digest = hashlib.sha256(
@@ -2222,15 +2376,332 @@ def _assert_derivations(
     return True
 
 
+def _discordance(results: list[RunResult]) -> dict[str, Any]:
+    """The PAIRED 2x2 table behind DeltaFrag, which the difference of rates discards.
+
+    Every adversarial case has exactly one single-chunk twin differing only in
+    fragmentation, so the run is a matched-pairs design and DeltaFrag is exactly
+    `(adversarial_only - single_only) / pairs`. Publishing only the difference throws
+    away which pairs disagree, and the discordant counts are what a paired test needs:
+    a run with 8 pairs disagreeing each way and a run with 0 disagreeing both report
+    DeltaFrag 0.00 and are not the same evidence.
+
+    A pair is INCLUDED only if both twins were scored. A case that died in transport
+    removes its twin from the table too -- half a pair is not a pair, and keeping the
+    survivor would put an unmatched observation into a matched-pairs statistic.
+    """
+    scored = {
+        (_twin_key(r.case), r.case["fragmentation"]): r
+        for r in results
+        if r.transport_error is None
+    }
+    keys = sorted({k for k, arm in scored if (k, "single_chunk") in scored
+                   and (k, "adversarial") in scored})
+    both = adv_only = single_only = neither = 0
+    for key in keys:
+        s = scored[(key, "single_chunk")].injection_leaked
+        a = scored[(key, "adversarial")].injection_leaked
+        if s and a:
+            both += 1
+        elif a:
+            adv_only += 1
+        elif s:
+            single_only += 1
+        else:
+            neither += 1
+    pairs = len(keys)
+    return {
+        "pairs_complete": pairs,
+        "pairs_incomplete": len(
+            {k for k, _arm in scored}
+        ) - pairs,
+        "both_arms_leaked": both,
+        "adversarial_only": adv_only,
+        "single_chunk_only": single_only,
+        "neither_arm_leaked": neither,
+        # The identity that makes the difference of marginal rates a paired statistic
+        # on this design. Recomputed and published so a reader can check it rather than
+        # take the emitter's word for the pairing.
+        "delta_frag_from_discordance": (
+            round((adv_only - single_only) / pairs, 4) if pairs else 0.0
+        ),
+    }
+
+
+def _axis_arms(
+    results: list[RunResult], axes: dict[str, tuple[str, ...]]
+) -> dict[str, dict[str, Any]]:
+    """Per axis value, the TWO ARMS separately, and the DeltaFrag between them.
+
+    `by_axis` publishes one leak rate per axis value over both arms pooled. That is the
+    wrong statistic for every question this profile is for: pooling the fragmented and
+    unfragmented cases of one entity hides exactly the contrast the profile measures, so
+    a reader wanting per-entity DeltaFrag had to reconstruct it and could not.
+
+    It also carries the denominators, because the arms of a slice can be uneven even
+    though the array is paired -- a case that died in transport is removed from one arm
+    and not the other, and a difference of two rates over different populations is the
+    defect the fragmentation twin was added to fix.
+    """
+    scored = [r for r in results if r.transport_error is None]
+    out: dict[str, dict[str, Any]] = {}
+    for axis in axes:
+        if axis == "fragmentation":
+            continue
+        slice_out: dict[str, Any] = {}
+        for value in axes[axis]:
+            rows = [r for r in scored if r.case[axis] == value]
+            if not rows:
+                continue
+            single = [r for r in rows if r.case["fragmentation"] == "single_chunk"]
+            adv = [r for r in rows if r.case["fragmentation"] == "adversarial"]
+            paired = len(
+                {_twin_key(r.case) for r in single} & {_twin_key(r.case) for r in adv}
+            )
+            s_rate = _rate(r.injection_leaked for r in single)
+            a_rate = _rate(r.injection_leaked for r in adv)
+            slice_out[value] = {
+                "single_chunk": {
+                    "applicable": len(single),
+                    "leaked": sum(1 for r in single if r.injection_leaked),
+                    "leak_rate": s_rate,
+                },
+                "adversarial": {
+                    "applicable": len(adv),
+                    "leaked": sum(1 for r in adv if r.injection_leaked),
+                    "leak_rate": a_rate,
+                },
+                "paired_cases": paired,
+                "delta_frag": round(a_rate - s_rate, 4),
+            }
+        if slice_out:
+            out[axis] = slice_out
+    return out
+
+
+def _twin_key(case: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    """A case's identity with fragmentation removed: its pair partner's address."""
+    return tuple(sorted((k, v) for k, v in case.items() if k != "fragmentation"))
+
+
+def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
+    """What was enumerated, what leaked, and the union-based worst case over it.
+
+    THREE THINGS THIS EXISTS TO STOP.
+
+    1. **An aborted combinatorial run scoring as containment.** A family whose
+       enumeration exceeded the resource cap was not shortened and not run. Its cases are
+       counted in `cases_capped` and are excluded from that family's denominator. They
+       are never a non-leak.
+
+    2. **The `252 splits` erratum.** Internal adversarial partitions, uncut single-chunk
+       requests, and captured requests total are three different numbers. The published
+       tree reported the third under the name of the first for every exhaustive row.
+
+    3. **An unbounded "worst case".** The union statistic is the case rate under the
+       union of the ENUMERATED two- and three-part families over THE MEASURED CORPUS
+       VALUES. It is not a worst case over arbitrary streams, arbitrary values, arbitrary
+       interleavings, or partitions into more than three pieces, and the block says so in
+       the field a reader quotes.
+
+    Per-family DeltaFrag is computed against the PAIRED single-chunk twins of exactly the
+    adversarial cases that family enumerated, not against the whole baseline arm. When a
+    family is capped on some cases the two arms would otherwise be different populations
+    again -- the defect the fragmentation twin was added to fix.
+    """
+    scored = [r for r in results if r.transport_error is None]
+    adversarial = [r for r in scored if r.case["fragmentation"] == "adversarial"]
+    single = {_twin_key(r.case): r for r in scored if r.case["fragmentation"] == "single_chunk"}
+    # READ FROM EVERY RESULT, not from the surviving adversarial ones. `run_case` records
+    # the oracle on every case including the single-chunk arm, and a run whose adversarial
+    # cases ALL died in transport would otherwise report `midpoint` -- a report
+    # contradicting its own method, which is the exact defect `fragmentation_strategy` had
+    # when it said `exhaustive-2-part` about a midpoint cut.
+    oracles = {r.oracle for r in results} or {"midpoint"}
+    oracle = oracles.pop() if len(oracles) == 1 else "mixed"
+    caps = {r.partition_cap for r in results}
+
+    def _arm(rows: list[RunResult], leaked: list[bool]) -> dict[str, Any]:
+        twins = [single[_twin_key(r.case)] for r in rows if _twin_key(r.case) in single]
+        adv_rate = _rate(leaked)
+        base_rate = _rate(t.injection_leaked for t in twins)
+        return {
+            "cases_enumerated": len(rows),
+            "cases_leaked": sum(1 for f in leaked if f),
+            "paired_single_chunk_cases": len(twins),
+            "leak_rate_adversarial": adv_rate,
+            "leak_rate_single_chunk_paired": base_rate,
+            "delta_frag": round(adv_rate - base_rate, 4),
+        }
+
+    families: dict[str, dict[str, Any]] = {}
+    for family in PARTITION_FAMILIES:
+        enumerated = [r for r in adversarial if r.partitions_attempted.get(family)]
+        capped = [r for r in adversarial if r.partitions_capped.get(family)]
+        # A family present in the request but empty for this value -- `choose(N-1,2)` is
+        # zero for a value shorter than three characters -- is neither enumerated nor
+        # capped. Recorded rather than dropped: silently absent would be indistinguishable
+        # from never asked for.
+        too_short = [
+            r for r in adversarial
+            if family in r.partitions_attempted
+            and not r.partitions_attempted[family]
+            and not r.partitions_capped.get(family)
+        ]
+        if not enumerated and not capped and not too_short:
+            continue
+        block = _arm(enumerated, [r.partitions_leaked.get(family, 0) > 0 for r in enumerated])
+        block.update(
+            {
+                "enumerated": bool(enumerated),
+                "partitions_attempted": sum(
+                    r.partitions_attempted.get(family, 0) for r in enumerated
+                ),
+                "partitions_leaked": sum(
+                    r.partitions_leaked.get(family, 0) for r in enumerated
+                ),
+                "cases_capped": len(capped),
+                "cases_value_too_short": len(too_short),
+            }
+        )
+        families[family] = block
+
+    union_families = sorted(f for f in families if families[f]["enumerated"])
+    union_rows = [
+        r
+        for r in adversarial
+        if any(r.partitions_attempted.get(f) for f in union_families)
+        and not any(r.partitions_capped.get(f) for f in union_families)
+    ]
+    if union_families:
+        worst = _arm(union_rows, [r.injection_leaked for r in union_rows])
+        # THE COMPARISON DENOMINATOR MUST BE THE UNION'S, not each family's own. A family
+        # capped on some cases has a different case set from the union, and a component
+        # rate over a different population can legitimately exceed the union rate -- which
+        # would make `never_below_components` false for a run in which nothing is wrong.
+        # Restricting the components to `union_rows` is what makes the inequality a real
+        # arithmetic check rather than a denominator artefact.
+        on_union = {
+            family: _rate(r.partitions_leaked.get(family, 0) > 0 for r in union_rows)
+            for family in union_families
+        }
+        worst["component_leak_rates_on_union_denominator"] = on_union
+        worst["never_below_components"] = all(
+            worst["leak_rate_adversarial"] >= rate for rate in on_union.values()
+        )
+    else:
+        # NO FAMILY WAS ENUMERATED, so there is no worst case. Publishing 0.0 here would
+        # assert that the union statistic was measured and came out zero, and 46 of the
+        # rows in the published tree are midpoint rows for which it was never computed.
+        # `null` is the same answer `coalescing_rate` already gives when nothing was
+        # comparable: "never observed" and "measured at zero" are different claims and
+        # 0.0 asserts the second.
+        worst = {
+            "cases_enumerated": 0,
+            "cases_leaked": 0,
+            "paired_single_chunk_cases": 0,
+            "leak_rate_adversarial": None,
+            "leak_rate_single_chunk_paired": None,
+            "delta_frag": None,
+            "component_leak_rates_on_union_denominator": {},
+            "never_below_components": True,
+        }
+    worst.update(
+        {
+            "definition": (
+                "case rate under the union of the enumerated partition families over the "
+                "measured corpus values; NOT a worst case over arbitrary streams, values, "
+                "interleavings, or partitions into more than three pieces"
+                if union_families
+                else "no partition family was enumerated by this oracle, so no "
+                "union-based worst-case statistic is defined for this run; the rates are "
+                "null rather than zero because they were not measured, and NOT a worst "
+                "case over arbitrary streams"
+            ),
+            "families_in_union": union_families,
+            "cases_excluded_by_cap": len(adversarial) - len(union_rows) if union_families else 0,
+        }
+    )
+
+    adversarial_partitions = sum(
+        r.split_points_tried for r in results if r.case["fragmentation"] == "adversarial"
+    )
+    uncut = sum(1 for r in results if r.case["fragmentation"] == "single_chunk")
+    total = sum(r.split_points_tried for r in results)
+
+    if oracle == "midpoint":
+        sentence = (
+            "Fragmentation is a two-part split at the value midpoint, not every split "
+            "point (" + str(adversarial_partitions) + " midpoint partitions over "
+            + str(uncut) + " uncut single-chunk requests; "
+            + str(total) + " captured requests total)."
+        )
+    else:
+        what = {
+            "exhaustive-2-part": "every internal two-part split of the value",
+            "exhaustive-3-part": "every internal three-part partition of the value",
+            "union-worst-case": (
+                "the union of every internal two-part split and every internal "
+                "three-part partition of the value"
+            ),
+        }[oracle]
+        sentence = (
+            "Fragmentation is " + what + " ("
+            + str(adversarial_partitions) + " internal adversarial partitions over "
+            + str(len([r for r in results if r.case["fragmentation"] == "adversarial"]))
+            + " adversarial cases, plus " + str(uncut) + " uncut single-chunk requests = "
+            + str(total) + " captured requests total); a case leaks if any enumerated "
+            "partition leaks. Bounded to these corpus values and these partition "
+            "families, not to arbitrary streams."
+        )
+
+    return {
+        "oracle": oracle,
+        # From EVERY result, for the same reason `oracle` is: a run whose adversarial arm
+        # died entirely must not report the default as though it were the cap in force.
+        "resource_cap_per_case_per_family": (
+            caps.pop() if len(caps) == 1 else max(caps, default=DEFAULT_PARTITION_CAP)
+        ),
+        "families": families,
+        "worst_case": worst,
+        "adversarial_partitions": adversarial_partitions,
+        "uncut_single_chunk_requests": uncut,
+        "captured_requests_total": total,
+        "partition_seconds_total": round(sum(r.partition_seconds for r in results), 4),
+        "cases_inconclusive_by_cap": sum(
+            1 for r in adversarial if any(r.partitions_capped.values())
+        ),
+        "cases_inconclusive_in_transport": sum(
+            1 for r in results if r.transport_error is not None
+        ),
+        "method_limit_sentence": sentence,
+    }
+
+
 def build_report(
     segments: Segments,
     results: list[RunResult],
     separation: dict[str, Any],
     seed: str,
     context: dict[str, Any] | None = None,
+    axes: dict[str, tuple[str, ...]] | None = None,
+    corpus: dict[str, Any] | None = None,
+    scope: dict[str, Any] | None = None,
+    fixture: dict[str, Any] | None = None,
+    claim: dict[str, Any] | None = None,
+    schema_id: str = SCHEMA_ID,
 ) -> dict[str, Any]:
-    """Assemble a v2.0.0 http-profile report from the full covering array."""
+    """Assemble an http-profile report from the full covering array.
+
+    `axes`, `corpus`, `scope` and `schema_id` are what make one instrument serve two
+    profiles. They are ARGUMENTS rather than module globals on purpose: the FIDE profile
+    adds a sixth axis, and a global would mean importing that profile silently changed
+    what a v2 run measures. The functions that decide numbers are shared, so both
+    profiles carry the same `inspector_sha256` -- which is the evidence that a PII row
+    and a secret row were scored by identical code.
+    """
     context = context or {}
+    axes = AXES if axes is None else axes
     by_frag: dict[str, list[RunResult]] = {"single_chunk": [], "adversarial": []}
     for r in results:
         by_frag[r.case["fragmentation"]].append(r)
@@ -2266,7 +2737,7 @@ def build_report(
     # leak_rate.single_chunk and detector_blind_entities, which is where cause 2 shows up.
 
     case_defs = sorted(
-        ({k: r.case[k] for k in sorted(AXES)} for r in results),
+        ({k: r.case[k] for k in sorted(axes)} for r in results),
         key=lambda c: tuple(sorted(c.items())),
     )
     digest = hashlib.sha256(
@@ -2275,8 +2746,12 @@ def build_report(
 
     covered: set[tuple[str, str, str, str]] = set()
     for r in results:
-        covered |= _pairs_of(r.case)
-    required = _all_pairs()
+        covered |= _pairs_of(r.case, axes)
+    # A pair that no case in the axis product could ever carry is not an uncovered pair,
+    # it is an impossible one, and requiring it makes `proof_complete` unsatisfiable. The
+    # profile supplies its own feasibility predicate; the v2 axes are unconstrained and
+    # pass None, which reproduces the previous behaviour exactly.
+    required = _all_pairs(axes, context.get("feasible"))
 
     # An entity the target never catches EVEN UNFRAGMENTED is outside its detectable
     # set, and its leak rate is not a fragmentation result. Reporting the two together
@@ -2297,7 +2772,7 @@ def build_report(
     # against that sentence rather than in general. A carrier-context axis is the fix and
     # is not built.
     detector_blind = {}
-    for entity in AXES["entity"]:
+    for entity in axes["entity"]:
         baseline = [
             r for r in scored
             if r.case["entity"] == entity and r.case["fragmentation"] == "single_chunk"
@@ -2307,6 +2782,7 @@ def build_report(
     leaked_types = sorted({r.case["entity"] for r in results if r.injection_leaked})
     latencies = [ms for r in results for ms in r.latency_ms]
     boundary = _boundary_check(results, segments)
+    partition_oracle = _partition_oracle_block(results)
     boundary_leaked = bool(
         boundary["leaked_entity_types"] or boundary["unattributed_leaked_entity_types"]
     )
@@ -2318,7 +2794,7 @@ def build_report(
         is not checkable, which is why the schema demands both.
         """
         out: dict[str, dict[str, Any]] = {}
-        for value in AXES[axis]:
+        for value in axes[axis]:
             rows = [r for r in scored if r.case[axis] == value]
             if not rows:
                 continue
@@ -2345,7 +2821,7 @@ def build_report(
         return out
 
     report = {
-        "schema": SCHEMA_ID,
+        "schema": schema_id,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "profile": {
             "name": "OpenAI-compatible HTTP gateway profile",
@@ -2402,7 +2878,7 @@ def build_report(
         },
         "checks": {
             "configured_upstream_boundary": boundary,
-            "fragmentation_safety": _fragmentation_check(results, segments),
+            "fragmentation_safety": _fragmentation_check(results, segments, axes),
             "sse_validity": _sse_check(results),
             "response_fidelity": _fidelity_check(observable, results),
             "response_injection_containment": _injection_check(scored, leaked_types),
@@ -2448,21 +2924,29 @@ def build_report(
                 # narrower run than the one performed is the same defect as one that
                 # describes a wider one; both are the report disagreeing with itself.
                 ", ".join(
-                    f"{len(values)} {axis}" for axis, values in AXES.items()
+                    f"{len(values)} {axis}" for axis, values in axes.items()
                 ) + ".",
                 "Request sites are four shapes, not a survey of real client payloads.",
-                (
-                    "Fragmentation is every internal two-part split of the value "
-                    "(" + str(sum(r.split_points_tried for r in results)) + " splits over "
-                    + str(len(by_frag["adversarial"])) + " adversarial cases); a case leaks "
-                    "if any split leaks."
-                    if any(r.split_points_tried > 1 for r in results)
-                    else "Fragmentation is a two-part split at the value midpoint, not every split point."
-                ),
+                # THREE NUMBERS, NOT ONE, AND THEY ARE NOT INTERCHANGEABLE. This field
+                # read "252 splits over 16 adversarial cases" for every exhaustive row in
+                # the published tree. 252 is the CAPTURED REQUEST count: 236 internal
+                # adversarial partitions plus the 16 uncut single-chunk requests, which
+                # are the baseline arm and are not splits of anything. The total came from
+                # summing `split_points_tried` over BOTH arms, where a single-chunk case
+                # contributes its one uncut attempt. The manuscript carried the correct
+                # decomposition and the instrument contradicted it, which is a report
+                # disagreeing with itself about its own method -- the same defect class as
+                # `fragmentation_strategy` saying `exhaustive-2-part` while the code cut
+                # once at the midpoint.
+                partition_oracle["method_limit_sentence"],
                 "Latency is loopback and in-process; it is not gateway overhead on a network.",
             ],
         },
-        "redaction_claim": {
+        # OVERRIDABLE for the same reason. `claim_citation` names where a claim came
+        # from, and a row for a policy defined in another module cited THIS module's
+        # docstrings -- the same defect that was fixed once already when a third-party
+        # gateway row cited these docstrings as the source of a vendor's claim.
+        "redaction_claim": claim or {
             "vendor_claims_pii_redaction": "claimed",
             # A row for a third-party gateway used to cite THIS MODULE'S OWN policy
             # docstrings as the source of that vendor's redaction claim. The emitter
@@ -2525,7 +3009,12 @@ def build_report(
             + str(len(inconclusive)) + " inconclusive, excluded from every denominator "
             "rather than counted as no-leak)."
         ),
-        "fixture": {
+        # OVERRIDABLE, because a profile with a different needle set has a different
+        # fixture and this block would otherwise describe half of it. The FIDE corpus
+        # carries four fixed secret literals alongside the four generated PII values;
+        # publishing the PII description alone would say the run drew from a value space
+        # it did not use and would omit four of its eight needles entirely.
+        "fixture": fixture or {
             "varies_per_run": True,
             "values_published": False,
             "formats": {
@@ -2538,14 +3027,14 @@ def build_report(
             "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only",
         },
         "corpus": {
-            "id": "minimal-response-split",
-            "version": "0.1.0",
+            "id": (corpus or {}).get("id", "minimal-response-split"),
+            "version": (corpus or {}).get("version", "0.1.0"),
             "sha256": digest,
             "case_count": len(results),
             "seed": seed,
             "coverage": {
                 "strategy": "pairwise",
-                "axes": sorted(AXES),
+                "axes": sorted(axes),
                 "pairs_required": len(required),
                 "pairs_covered": len(required & covered),
                 "proof_complete": required <= covered,
@@ -2579,9 +3068,22 @@ def build_report(
             # leak_single` from the caller's own two variables.
             "derivation_recomputed": False,
             "sidecar_case_count_matches": False,
-            "by_axis": {axis: _axis_slice(axis) for axis in AXES},
+            "by_axis": {axis: _axis_slice(axis) for axis in axes},
+            # WHAT THE ORACLE ACTUALLY ENUMERATED, beside the rates it produced. A
+            # DeltaFrag quoted without the partition family it came from is the same
+            # defect as a rate quoted without its denominator: the midpoint and the
+            # union statistic are different estimands and this block is what tells them
+            # apart in the file a reader cites.
+            "partition_oracle": partition_oracle,
+            # PER AXIS VALUE, THE TWO ARMS SEPARATELY. `by_axis` pools them, which hides
+            # the only contrast this profile measures. See `_axis_arms`.
+            "by_axis_arm": _axis_arms(results, axes),
+            # THE PAIRED 2x2 TABLE. DeltaFrag is a difference of marginal rates over a
+            # matched-pairs design, and the difference alone cannot distinguish "no pair
+            # disagreed" from "equally many disagreed each way". See `_discordance`.
+            "discordance": _discordance(results),
         },
-        "entity_scope": {
+        "entity_scope": scope or {
             "mechanism": "reference-policy detector set",
             "enabled": [name for name, _ in _DETECTORS],
             "not_enabled": [],
@@ -2599,14 +3101,26 @@ def build_report(
     # published metric from `results` and rebuilds `cases_digest` too, so nothing it
     # compares shares a variable with what produced it. It raises rather than returning
     # False, so these two can only be True because the recomputation agreed.
-    verified = _assert_derivations(results, report["metrics"], digest)
+    verified = _assert_derivations(results, report["metrics"], digest, axes)
     report["metrics"]["derivation_recomputed"] = verified
     report["metrics"]["sidecar_case_count_matches"] = verified
     return report
 
 
 def _value_space() -> dict[str, int]:
-    """Distinct values each entity draws from, from the v1 fixture generator."""
+    """Distinct values each entity draws from, from the v1 fixture generator.
+
+    USPHONE IS ADDED HERE BECAUSE v1 DOES NOT HAVE IT. The v2 corpus gained a fourth
+    entity and this block kept describing three, so every published report has been
+    stating a value space for three quarters of its own corpus. Same defect as the
+    `method_limits` line that said "Three entity types" for as long as the corpus had
+    four: a block that describes a narrower run than the one performed.
+
+    The count is derived from `make_seeded_fixture`'s own draw -- `randint(2, 9)` for the
+    area hundreds digit, `randint(0, 99)` for the rest of the area code, `randint(0, 99)`
+    for the line number inside the 555-01xx block -- rather than written down, so it
+    cannot drift from the generator.
+    """
     from .http_profile import fixture_value_space
 
     space = fixture_value_space()
@@ -2618,6 +3132,10 @@ def _value_space() -> dict[str, int]:
             continue
         if count >= 1:
             out[_v2_id(key)] = count
+    # The three factors `make_seeded_fixture` draws for USPHONE: 8 hundreds digits
+    # (2..9), 100 remainders (0..99) for the area code, and 100 line numbers (0..99)
+    # inside 555-01xx.
+    out["USPHONE"] = 8 * 100 * 100
     return out or {"EMAIL": 1}
 
 
@@ -2831,7 +3349,23 @@ _INSTRUMENTED = (
     "_assert_derivations",
     "_count_invalid_events",
     "_rate",
-    "injection_split_points",
+    # The partition oracle. All five decide which bytes reach the target and how the
+    # result is scored, so all five must move the digest.
+    "_family_partitions",
+    "injection_partitions",
+    "_partition_pieces",
+    "_partition_oracle_block",
+    "_fragmentation_strategy_label",
+    "_twin_key",
+    "_axis_arms",
+    "_discordance",
+    # Decides `fixture.value_space_nominal`, a PUBLISHED field, and was not digested.
+    # Found 2026-09-09 while correcting it: v1 has no phone entity, so the block had been
+    # describing three of the corpus's four entities since USPHONE was added, and the
+    # correction would have landed with every existing row still reading "current". A
+    # published field whose producer is outside the digest is a row that can change
+    # meaning without going stale.
+    "_value_space",
     "run_case",
     "build_report",
 )
@@ -3042,10 +3576,14 @@ def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
     replaced, pointing the other way, and its own docstring stated the wrong rule ("a value
     that is itself two characters long").
 
-    A piece is one character whenever the split lands one away from EITHER end, for a value
-    of any length. `--exhaustive-splits` enumerates `range(1, len(rendered))`, which
-    includes 1, so under that flag this emitter really does emit a one-character data event
-    and must report true. The midpoint default does not, for any value longer than three.
+    A piece is one character whenever a cut lands one away from EITHER end, or two cuts
+    land one apart, for a value of any length. Every exhaustive family enumerates offsets
+    from `1`, so under any of them this emitter really does emit a one-character data
+    event and must report true. The midpoint default does not, for any value longer than
+    three.
+
+    It reads the partitions back from the SAME enumerator `run_case` drove, at the same
+    oracle and cap the case recorded, rather than guessing from a count.
     """
     for result in results:
         if result.case.get("fragmentation") != "adversarial":
@@ -3053,17 +3591,20 @@ def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
         rendered = _encode(
             segments.injection[result.case["entity"]], result.case["encoding"]
         )
-        for split_at in injection_split_points(
-            segments, result.case, exhaustive=result.split_points_tried > 1
-        ):
-            if not split_at:
+        points, _families, _attempted, _capped = injection_partitions(
+            segments, result.case, oracle=result.oracle, cap=result.partition_cap
+        )
+        for cuts in points:
+            if not cuts:
                 continue
-            if len(rendered[:split_at]) == 1 or len(rendered[split_at:]) == 1:
+            if any(len(piece) == 1 for piece in _partition_pieces(rendered, cuts)):
                 return True
     return False
 
 
-def _coalescing_rows(results: list[RunResult]) -> list[dict[str, Any]]:
+def _coalescing_rows(
+    results: list[RunResult], axes: dict[str, tuple[str, ...]] | None = None
+) -> list[dict[str, Any]]:
     """Per case: what the capture wrote, what the client received, and the verdict.
 
     THREE OUTCOMES, NOT TWO. The predecessor collapsed them into one boolean read off a
@@ -3091,7 +3632,7 @@ def _coalescing_rows(results: list[RunResult]) -> list[dict[str, Any]]:
             and result.upstream_responses_observed == 1
         )
         rows.append({
-            "case": {k: result.case[k] for k in sorted(AXES)},
+            "case": {k: result.case[k] for k in sorted(AXES if axes is None else axes)},
             "upstream_data_events_emitted": upstream,
             "upstream_responses_observed": result.upstream_responses_observed,
             "data_events_observed": observed,
@@ -3103,7 +3644,11 @@ def _coalescing_rows(results: list[RunResult]) -> list[dict[str, Any]]:
     return rows
 
 
-def _fragmentation_check(results: list[RunResult], segments: Segments) -> dict[str, Any]:
+def _fragmentation_check(
+    results: list[RunResult],
+    segments: Segments,
+    axes: dict[str, tuple[str, ...]] | None = None,
+) -> dict[str, Any]:
     """Event counts over the WHOLE array, and coalescing as a rate rather than a verdict.
 
     Two defects, both from the same source. `build_report` used to pick one case --
@@ -3125,7 +3670,7 @@ def _fragmentation_check(results: list[RunResult], segments: Segments) -> dict[s
     """
     scored = [r for r in results if r.transport_error is None]
     counts = [max(r.events_observed, r.events_observed_max) for r in scored] or [0]
-    rows = _coalescing_rows(results)
+    rows = _coalescing_rows(results, axes)
     comparable = [r for r in rows if r["coalesced"] is not None]
     coalesced = [r for r in comparable if r["coalesced"]]
     failures = [r for r in rows if r["stream_failure"]]
@@ -3296,6 +3841,32 @@ def _injection_evidence(
     return evidence
 
 
+def _fragmentation_strategy_label(results: list[RunResult]) -> str:
+    """WHAT WAS ACTUALLY DONE, read off the adversarial cases.
+
+    This field said `exhaustive-2-part` while the code cut the value once at its midpoint
+    and `limitations.method_limits` in the same report said "not every split point". A
+    report cannot contradict itself about its own method. It is now the oracle the run
+    recorded, mapped onto the schema enum, so a three-part or union run cannot be
+    published under the two-part label.
+    """
+    # EVERY result, not just the adversarial ones. `run_case` records the oracle on both
+    # arms, and a run whose adversarial cases all died in transport would otherwise be
+    # published under the midpoint label whatever oracle was actually requested.
+    oracles = {r.oracle for r in results}
+    if len(oracles) != 1:
+        # Mixed or empty. `across-sse-events` is the weakest true statement available:
+        # the value was placed in separate SSE events and nothing stronger is claimed.
+        return "across-sse-events"
+    oracle = oracles.pop()
+    return {
+        "midpoint": "across-sse-events",
+        "exhaustive-2-part": "exhaustive-2-part",
+        "exhaustive-3-part": "exhaustive-3-part",
+        "union-worst-case": "union-worst-case",
+    }[oracle]
+
+
 def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[str, Any]:
     # A case the client never saw a response for cannot testify to containment. The
     # schema already forbids `passed` alongside `delivery_confirmed: false`; tying them
@@ -3308,11 +3879,7 @@ def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[
         # value once at its midpoint, and `limitations.method_limits` in the same report
         # said "not every split point". A report cannot contradict itself about its own
         # method; the label is now derived from the split points that were run.
-        "fragmentation_strategy": (
-            "exhaustive-2-part"
-            if any(r.split_points_tried > 1 for r in results)
-            else "across-sse-events"
-        ),
+        "fragmentation_strategy": _fragmentation_strategy_label(results),
         "injected_entity_types": sorted({r.case["entity"] for r in results}),
         "leaked_entity_types": leaked_types,
         # HOW each value was recovered, strongest claim per entity. Every entry used to
@@ -3340,7 +3907,8 @@ def run_policy(
     gateway_url: str | None = None,
     upstream_port: int = 0,
     model: str = "test",
-    exhaustive_splits: bool = False,
+    oracle: str = "midpoint",
+    partition_cap: int = DEFAULT_PARTITION_CAP,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run one policy across the whole covering array and emit its v2 report.
 
@@ -3374,7 +3942,8 @@ def run_policy(
             gateway_url=gateway_url,
             upstream_port=upstream_port,
             model=model,
-            exhaustive_splits=exhaustive_splits,
+            oracle=oracle,
+            partition_cap=partition_cap,
         )
         for case in covering_array()
     ]
@@ -3434,12 +4003,46 @@ def main(argv: list[str] | None = None) -> int:
         "--exhaustive-splits",
         action="store_true",
         help=(
-            "cut each adversarial value at EVERY internal offset instead of its "
-            "midpoint; a case leaks if any split leaks. ~20x the requests, and the "
-            "strictly stronger oracle -- see injection_split_points()"
+            "alias for --oracle exhaustive-2-part. Kept because every published run "
+            "recipe and rerun script names it; a flag that silently stopped working "
+            "would re-measure a row under an oracle its own recipe does not describe."
+        ),
+    )
+    parser.add_argument(
+        "--oracle",
+        default=None,
+        choices=list(ORACLES),
+        help=(
+            "which partition family to enumerate for each adversarial case. "
+            "midpoint: one two-part cut at len//2 (the published default). "
+            "exhaustive-2-part: every internal two-part split, N-1 per value. "
+            "exhaustive-3-part: every internal three-part partition, choose(N-1,2). "
+            "union-worst-case: both, with the case failing if ANY enumerated partition "
+            "leaks. 'Worst case' is bounded to these corpus values and these families."
+        ),
+    )
+    parser.add_argument(
+        "--partition-cap",
+        type=int,
+        default=DEFAULT_PARTITION_CAP,
+        help=(
+            "per case per family enumeration ceiling. A family that would exceed it is "
+            "NOT shortened: the case is inconclusive for that family and is excluded "
+            "from its denominator. An aborted combinatorial run must not score as "
+            "containment."
         ),
     )
     args = parser.parse_args(argv)
+
+    # The alias and the flag must not disagree silently. A recipe that says one thing and
+    # a run that does another is how `fragmentation_strategy` came to claim
+    # `exhaustive-2-part` for a midpoint cut.
+    if args.exhaustive_splits and args.oracle not in (None, "exhaustive-2-part"):
+        parser.error(
+            "--exhaustive-splits is an alias for --oracle exhaustive-2-part and "
+            f"contradicts --oracle {args.oracle}"
+        )
+    oracle = args.oracle or ("exhaustive-2-part" if args.exhaustive_splits else "midpoint")
 
     import pathlib
 
@@ -3477,7 +4080,8 @@ def main(argv: list[str] | None = None) -> int:
             gateway_url=args.gateway_url,
             upstream_port=args.upstream_port,
             model=args.model,
-            exhaustive_splits=args.exhaustive_splits,
+            oracle=oracle,
+            partition_cap=args.partition_cap,
         )
         errors = validator(report) if validator else []
         path = outdir / f"{name}.json"

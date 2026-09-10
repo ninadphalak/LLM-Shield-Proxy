@@ -193,7 +193,14 @@ def test_later_missing_done_does_not_change_first_data_count(monkeypatch) -> Non
             self.wfile.flush()
             self.close_connection = True
 
-    monkeypatch.setattr(v2, "injection_split_points", lambda *_args, **_kwargs: [1, 2])
+    # MIGRATED 2026-09-09 with the enumerator. Two two-part partitions, which is what the
+    # original `[1, 2]` meant, expressed in the tuple form the three-part families need.
+    monkeypatch.setattr(
+        v2,
+        "injection_partitions",
+        lambda *_a, **_k: ([(1,), (2,)], ["exhaustive-2-part"] * 2,
+                           {"exhaustive-2-part": 2}, {"exhaustive-2-part": False}),
+    )
     gateway, gateway_url = v2._serve(LaterMissingDoneGateway)
     try:
         segments = v2.build_segments("a1b2c3d4e5f60001")
@@ -204,7 +211,7 @@ def test_later_missing_done_does_not_change_first_data_count(monkeypatch) -> Non
             iterations=1,
             gateway_url=gateway_url,
             upstream_port=upstream_port,
-            exhaustive_splits=True,
+            oracle="exhaustive-2-part",
         )
     finally:
         v2._stop(gateway)

@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-07T18:36:38Z",
+ "generated_at": "2026-09-09T17:22:48Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -29,9 +29,9 @@
   "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
   "self_probe": {
    "performed": true,
-   "url": "http://127.0.0.1:61722/v1/chat/completions",
+   "url": "http://127.0.0.1:52295/v1/chat/completions",
    "recorded": true,
-   "round_trip_ms": 158.0541
+   "round_trip_ms": 187.9881
   }
  },
  "checks": {
@@ -620,10 +620,10 @@
    "unit": "milliseconds",
    "iterations": 32,
    "iterations_measured": 32,
-   "mean": 868.7721,
-   "p50": 765.0752,
-   "p95": 928.4655,
-   "p99": 4258.1697
+   "mean": 978.87,
+   "p50": 822.4755,
+   "p95": 1179.8842,
+   "p99": 5726.6812
   }
  },
  "passed": false,
@@ -637,7 +637,7 @@
    "Every rate is over cases_applicable=32 of the 32 cases attempted; 0 were inconclusive and are excluded from the denominator rather than counted as no-leak.",
    "4 entity, 2 encoding, 2 fragmentation, 2 carrier, 4 request_site.",
    "Request sites are four shapes, not a survey of real client payloads.",
-   "Fragmentation is a two-part split at the value midpoint, not every split point.",
+   "Fragmentation is a two-part split at the value midpoint, not every split point (16 midpoint partitions over 16 uncut single-chunk requests; 32 captured requests total).",
    "Latency is loopback and in-process; it is not gateway overhead on a network."
   ]
  },
@@ -662,7 +662,8 @@
   "value_space_nominal": {
    "EMAIL": 208827064576,
    "SSN": 48995100,
-   "CARDPAN": 6
+   "CARDPAN": 6,
+   "USPHONE": 80000
   },
   "specimens_are_valid": "Luhn and SSA-range constraints enforced by make_fixture",
   "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only"
@@ -833,6 +834,218 @@
      "leaked": 6
     }
    }
+  },
+  "partition_oracle": {
+   "oracle": "midpoint",
+   "resource_cap_per_case_per_family": 6000,
+   "families": {},
+   "worst_case": {
+    "cases_enumerated": 0,
+    "cases_leaked": 0,
+    "paired_single_chunk_cases": 0,
+    "leak_rate_adversarial": null,
+    "leak_rate_single_chunk_paired": null,
+    "delta_frag": null,
+    "component_leak_rates_on_union_denominator": {},
+    "never_below_components": true,
+    "definition": "no partition family was enumerated by this oracle, so no union-based worst-case statistic is defined for this run; the rates are null rather than zero because they were not measured, and NOT a worst case over arbitrary streams",
+    "families_in_union": [],
+    "cases_excluded_by_cap": 0
+   },
+   "adversarial_partitions": 16,
+   "uncut_single_chunk_requests": 16,
+   "captured_requests_total": 32,
+   "partition_seconds_total": 55.7737,
+   "cases_inconclusive_by_cap": 0,
+   "cases_inconclusive_in_transport": 0,
+   "method_limit_sentence": "Fragmentation is a two-part split at the value midpoint, not every split point (16 midpoint partitions over 16 uncut single-chunk requests; 32 captured requests total)."
+  },
+  "by_axis_arm": {
+   "entity": {
+    "EMAIL": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 1.0
+    },
+    "SSN": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "CARDPAN": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 1.0
+    },
+    "USPHONE": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   },
+   "encoding": {
+    "plain": {
+     "single_chunk": {
+      "applicable": 11,
+      "leaked": 6,
+      "leak_rate": 0.5455
+     },
+     "adversarial": {
+      "applicable": 11,
+      "leaked": 11,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 11,
+     "delta_frag": 0.4545
+    },
+    "percent": {
+     "single_chunk": {
+      "applicable": 5,
+      "leaked": 2,
+      "leak_rate": 0.4
+     },
+     "adversarial": {
+      "applicable": 5,
+      "leaked": 5,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 5,
+     "delta_frag": 0.6
+    }
+   },
+   "carrier": {
+    "sse-delta-content": {
+     "single_chunk": {
+      "applicable": 12,
+      "leaked": 6,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 12,
+      "leaked": 12,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 12,
+     "delta_frag": 0.5
+    },
+    "sse-json-field": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.5
+    }
+   },
+   "request_site": {
+    "chat-content": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.5
+    },
+    "system-content": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.5
+    },
+    "unrecognised-key": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.5
+    },
+    "tool-description": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 4,
+      "leak_rate": 1.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.5
+    }
+   }
+  },
+  "discordance": {
+   "pairs_complete": 16,
+   "pairs_incomplete": 0,
+   "both_arms_leaked": 8,
+   "adversarial_only": 8,
+   "single_chunk_only": 0,
+   "neither_arm_leaked": 0,
+   "delta_frag_from_discordance": 0.5
   }
  },
  "entity_scope": {
@@ -854,6 +1067,6 @@
   "emitter_version": "0.2.1",
   "client_scope_sha256": "c15a0522954fb64f",
   "boundary_scope_sha256": "4a09ca6d088914e7",
-  "inspector_sha256": "3ac1f621aa008d04"
+  "inspector_sha256": "94262e29a492ab6a"
  }
 }

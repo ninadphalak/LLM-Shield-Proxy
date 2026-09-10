@@ -44,7 +44,7 @@ from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     _present,
     _sse_check,
     build_segments,
-    injection_split_points,
+    injection_partitions,
 )
 
 # `_fragmentation_check` derives `one_character_events_requested` from the pieces the
@@ -278,25 +278,44 @@ def test_sse_validity_can_fail() -> None:
 
 
 def test_exhaustive_splits_enumerate_every_internal_offset() -> None:
+    """Migrated 2026-09-09 from `injection_split_points` to `injection_partitions`.
+
+    The single-offset enumerator was replaced by a family-aware one so a three-part
+    partition could be expressed at all. The assertions are unchanged in substance: the
+    midpoint is one cut at `len // 2`, the exhaustive family is every internal offset, and
+    no cut leaves the whole value in one piece -- otherwise "adversarial" would silently
+    contain single-chunk cases and DeltaFrag would be diluted toward zero.
+    """
     segments = build_segments("a1b2c3d4e5f60001")
     case = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
             "carrier": "sse-delta-content", "request_site": "chat-content"}
     value = segments.injection["EMAIL"]
 
-    assert injection_split_points(segments, case) == [len(value) // 2]
-    exhaustive = injection_split_points(segments, case, exhaustive=True)
-    assert exhaustive == list(range(1, len(value)))
-    # Every offset produces two non-empty halves, and no offset reproduces the whole
-    # value in one piece -- otherwise "adversarial" would silently include a
-    # single-chunk case and DeltaFrag would be diluted toward zero.
-    assert all(0 < point < len(value) for point in exhaustive)
+    midpoint, _f, _a, _c = injection_partitions(segments, case)
+    assert midpoint == [(len(value) // 2,)]
+
+    exhaustive, families, attempted, capped = injection_partitions(
+        segments, case, oracle="exhaustive-2-part"
+    )
+    assert exhaustive == [(i,) for i in range(1, len(value))]
+    assert attempted == {"exhaustive-2-part": len(value) - 1}
+    assert capped == {"exhaustive-2-part": False}
+    assert set(families) == {"exhaustive-2-part"}
+    assert all(0 < cuts[0] < len(value) for cuts in exhaustive)
 
 
 def test_single_chunk_is_never_split_however_exhaustive_the_run() -> None:
     segments = build_segments("a1b2c3d4e5f60001")
     case = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "single_chunk",
             "carrier": "sse-delta-content", "request_site": "chat-content"}
-    assert injection_split_points(segments, case, exhaustive=True) == [0]
+    for oracle in ("midpoint", "exhaustive-2-part", "exhaustive-3-part", "union-worst-case"):
+        partitions, families, attempted, _capped = injection_partitions(
+            segments, case, oracle=oracle
+        )
+        # The empty tuple is the UNCUT attempt. It is the baseline arm, and counting it as
+        # a split is exactly how `252 splits` came to be published.
+        assert partitions == [()], oracle
+        assert families == [] and attempted == {}, oracle
 
 
 # --------------------------------------------------------------------------------------

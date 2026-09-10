@@ -1,5 +1,5 @@
 {
-"passthrough": {
+ "passthrough": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -202,10 +202,10 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  },
-"redact-all": {
+ "redact-all": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -408,10 +408,10 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  },
-"chunk-local": {
+ "chunk-local": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -614,10 +614,10 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  },
-"bounded-retention": {
+ "bounded-retention": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -820,10 +820,10 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  },
-"retention-plus-decoding": {
+ "retention-plus-decoding": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -1026,10 +1026,10 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  },
-"presidio-chunk-local": {
+ "presidio-chunk-local": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -1232,10 +1232,10 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  },
-"presidio-retention": {
+ "presidio-retention": {
   "runs": [
    {
     "seed": "0000000000000001",
@@ -1438,7 +1438,7 @@
    "emitter_version": "0.2.1",
    "client_scope_sha256": "c15a0522954fb64f",
    "boundary_scope_sha256": "4a09ca6d088914e7",
-   "inspector_sha256": "3ac1f621aa008d04"
+   "inspector_sha256": "94262e29a492ab6a"
   }
  }
 }

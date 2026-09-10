@@ -1986,9 +1986,11 @@
             "mid-utf8-codepoint",
             "mid-sse-field",
             "across-sse-events",
-            "interleaved-noise"
+            "interleaved-noise",
+            "exhaustive-3-part",
+            "union-worst-case"
           ],
-          "description": "Where the capture placed chunk boundaries inside the injected value. 'single-chunk' is the CONTROL condition and is not adversarial: it establishes the static-detection baseline that DeltaFrag subtracts."
+          "description": "Where the capture placed chunk boundaries inside the injected value. 'single-chunk' is the CONTROL condition and is not adversarial: it establishes the static-detection baseline that DeltaFrag subtracts. AMENDED 2026-09-09: 'exhaustive-3-part' enumerates every pair of distinct internal cuts, choose(N-1,2) ordered nonempty contiguous pieces that concatenate back to the value byte for byte; 'union-worst-case' runs both exhaustive families and fails the case if ANY enumerated partition leaks. Both labels are bounded to the measured corpus values and the enumerated families -- neither is a worst case over arbitrary streams."
         },
         "injected_entity_types": {
           "type": "array",
@@ -2567,6 +2569,15 @@
           },
           "uniqueItems": true,
           "description": "Entities the target failed to redact in every unfragmented case. A non-empty list means part of the overall leak_rate measures detector coverage rather than streaming behaviour, and the two must not be summed into one claim."
+        },
+        "partition_oracle": {
+          "$ref": "#/$defs/partition_oracle_block"
+        },
+        "by_axis_arm": {
+          "$ref": "#/$defs/axis_arm_block"
+        },
+        "discordance": {
+          "$ref": "#/$defs/discordance_block"
         }
       },
       "additionalProperties": false
@@ -2764,6 +2775,357 @@
           "passed"
         ]
       }
+    },
+    "partition_oracle_block": {
+      "type": "object",
+      "description": "WHAT THE ORACLE ENUMERATED, beside the rates it produced.\n\nAdded 2026-09-09. Three things it exists to stop.\n\n1. An aborted combinatorial run scoring as containment. Three-part enumeration is choose(N-1,2) per case and a long value is tens of thousands of requests. A family over the cap is not shortened: its cases are counted in cases_capped and excluded from that family's denominator.\n\n2. The '252 splits' erratum. adversarial_partitions, uncut_single_chunk_requests and captured_requests_total are three different numbers, and the published tree reported the third under the name of the first for every exhaustive row until this amendment.\n\n3. An unbounded 'worst case'. worst_case.definition carries the bound in the field a reader quotes, so the statistic cannot travel without it.",
+      "required": [
+        "oracle",
+        "resource_cap_per_case_per_family",
+        "families",
+        "worst_case",
+        "adversarial_partitions",
+        "uncut_single_chunk_requests",
+        "captured_requests_total",
+        "method_limit_sentence"
+      ],
+      "properties": {
+        "oracle": {
+          "enum": [
+            "midpoint",
+            "exhaustive-2-part",
+            "exhaustive-3-part",
+            "union-worst-case",
+            "mixed"
+          ],
+          "description": "'mixed' means the run's cases did not agree on an oracle, which is a defect in the run rather than a result; it is representable so that it cannot be silently reported as one of the others."
+        },
+        "resource_cap_per_case_per_family": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "families": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "cases_enumerated",
+              "cases_leaked",
+              "leak_rate_adversarial",
+              "leak_rate_single_chunk_paired",
+              "delta_frag"
+            ],
+            "properties": {
+              "enumerated": {
+                "type": "boolean"
+              },
+              "cases_enumerated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cases_leaked": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cases_capped": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Cases whose enumeration for this family would have exceeded the resource cap. The family was NOT shortened and NOT run for them; they are excluded from this family's denominator and are never scored as containment."
+              },
+              "paired_single_chunk_cases": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "partitions_attempted": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "partitions_leaked": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "leak_rate_adversarial": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "leak_rate_single_chunk_paired": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Baseline over the PAIRED twins of exactly the adversarial cases this family enumerated, not over the whole single-chunk arm. When a family is capped on some cases the two arms would otherwise be differently composed populations -- the defect the fragmentation twin exists to prevent."
+              },
+              "delta_frag": {
+                "type": "number",
+                "minimum": -1,
+                "maximum": 1
+              },
+              "cases_value_too_short": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Cases whose rendered value is too short for this family to have any partition at all (choose(N-1,2) is zero below three characters). Recorded rather than dropped: silently absent is indistinguishable from never requested."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "worst_case": {
+          "type": "object",
+          "required": [
+            "cases_enumerated",
+            "cases_leaked",
+            "leak_rate_adversarial",
+            "leak_rate_single_chunk_paired",
+            "delta_frag",
+            "definition",
+            "families_in_union",
+            "never_below_components"
+          ],
+          "properties": {
+            "enumerated": {
+              "type": "boolean"
+            },
+            "cases_enumerated": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cases_leaked": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cases_capped": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Cases whose enumeration for this family would have exceeded the resource cap. The family was NOT shortened and NOT run for them; they are excluded from this family's denominator and are never scored as containment."
+            },
+            "paired_single_chunk_cases": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "partitions_attempted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "partitions_leaked": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "leak_rate_adversarial": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "NULL when no partition family was enumerated by this run's oracle. Zero would assert that the union statistic was measured and came out zero; on a midpoint row it was never computed at all. Same rule as coalescing_rate: 'never observed' and 'measured at zero' are different claims."
+            },
+            "leak_rate_single_chunk_paired": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "NULL when no partition family was enumerated by this run's oracle. Zero would assert that the union statistic was measured and came out zero; on a midpoint row it was never computed at all. Same rule as coalescing_rate: 'never observed' and 'measured at zero' are different claims."
+            },
+            "delta_frag": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -1,
+              "maximum": 1,
+              "description": "NULL when no partition family was enumerated. See the leak-rate fields."
+            },
+            "definition": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The bound, stated in the field a reader quotes. The union statistic is a worst case over the ENUMERATED partition families and the MEASURED corpus values only, never over arbitrary streams, values, interleavings, or partitions into more than three pieces."
+            },
+            "families_in_union": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            },
+            "cases_excluded_by_cap": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "never_below_components": {
+              "const": true,
+              "description": "A union cannot leak in fewer cases than any of its components. Harness-asserted; a false here means the arithmetic is wrong, not that the target improved."
+            },
+            "component_leak_rates_on_union_denominator": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "description": "Each component family's leak rate computed over the UNION's case set, not over the family's own. A family capped on some cases has a different population, and a component rate over a different population can exceed the union rate without anything being wrong -- so the never_below_components inequality is checked against these, not against the published per-family rates."
+            }
+          },
+          "additionalProperties": false
+        },
+        "adversarial_partitions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Internal partitions actually driven against adversarial cases. NOT the request total: the uncut single-chunk arm is a baseline, not a split of anything."
+        },
+        "uncut_single_chunk_requests": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "captured_requests_total": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "adversarial_partitions + uncut_single_chunk_requests. This is the number that was published under the name 'splits'."
+        },
+        "partition_seconds_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cases_inconclusive_by_cap": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cases_inconclusive_in_transport": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "method_limit_sentence": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "axis_arm_block": {
+      "type": "object",
+      "description": "PER AXIS VALUE, THE TWO FRAGMENTATION ARMS SEPARATELY, with their denominators.\n\nAdded 2026-09-09. by_axis publishes one leak rate per axis value over both arms POOLED, which is the wrong statistic for every question this profile exists to answer: pooling the fragmented and unfragmented cases of one entity hides exactly the contrast being measured. A reader wanting per-entity DeltaFrag previously had to reconstruct it from cases they did not have.\n\nThe fragmentation axis itself is omitted: sliced by fragmentation, the arms are trivially the whole slice.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "single_chunk",
+            "adversarial",
+            "paired_cases",
+            "delta_frag"
+          ],
+          "properties": {
+            "single_chunk": {
+              "type": "object",
+              "required": [
+                "applicable",
+                "leaked",
+                "leak_rate"
+              ],
+              "properties": {
+                "applicable": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "leaked": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "leak_rate": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "adversarial": {
+              "type": "object",
+              "required": [
+                "applicable",
+                "leaked",
+                "leak_rate"
+              ],
+              "properties": {
+                "applicable": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "leaked": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "leak_rate": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "paired_cases": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Axis values whose two arms are the same cases apart from fragmentation. A delta over unpaired arms attributes a composition difference to fragmentation, which is the defect the fragmentation twin exists to prevent."
+            },
+            "delta_frag": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "discordance_block": {
+      "type": "object",
+      "description": "THE PAIRED 2x2 TABLE BEHIND DeltaFrag.\n\nAdded 2026-09-09. Every adversarial case has exactly one single-chunk twin differing only in fragmentation, so DeltaFrag is exactly (adversarial_only - single_chunk_only) / pairs_complete. The difference alone cannot distinguish a run where no pair disagreed from one where equally many disagreed in each direction, and those are not the same evidence. A paired test at the seed level needs these counts; a pooled test over them would treat one run's 16 pairs as 16 independent samples, which they are not.\n\nA pair is counted only if BOTH twins were scored. Half a pair is not a pair.",
+      "required": [
+        "pairs_complete",
+        "both_arms_leaked",
+        "adversarial_only",
+        "single_chunk_only",
+        "neither_arm_leaked",
+        "delta_frag_from_discordance"
+      ],
+      "properties": {
+        "pairs_complete": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pairs_incomplete": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cases whose twin was not scored, usually because one arm died in transport. Excluded from the table rather than counted as a concordant non-leak."
+        },
+        "both_arms_leaked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "adversarial_only": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Discordant pairs in the direction the profile is about: the value was contained whole and leaked when fragmented."
+        },
+        "single_chunk_only": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Discordant pairs the other way. Not necessarily an error: a detector can match a FRAGMENT for an unrelated reason and suppress a leak that the complete value produced, which is the measured cause of a negative DeltaFrag."
+        },
+        "neither_arm_leaked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delta_frag_from_discordance": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "description": "Recomputed from the table, published so the pairing identity can be checked rather than taken on trust."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

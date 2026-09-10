@@ -49,8 +49,13 @@ Repeat for seeds `0000000000000001` through `000000000000000c`. Each exhaustive 
 executes 236 internal adversarial split attempts plus 16 uncut single-chunk requests, or
 252 captured requests total.
 
-**Tagged-artifact erratum:** `limitations.method_limits[4]` in these reports says "252
-splits." That human-readable string is wrong; 252 is the total request count. The correct
-decomposition is the one above. `build_report` is part of the instrument digest, so fixing
-the emitter string must be batched with a complete evidence refresh rather than silently
-rewriting measured reports.
+**The `252 splits` erratum is fixed (round 7, 2026-09-09).** These reports used to call all
+252 captured requests "splits". The instrument now publishes the three numbers separately
+in `metrics.partition_oracle`, and a test fails if the block, the `fragmentation_strategy`
+enum and the `method_limits` sentence disagree. Fixing that string moved
+`inspector_sha256`, so all 26 reports here were re-measured; every rate above reproduced.
+
+**A stronger oracle is archived beside this one.** `../worst-case-presidio-seed-sweep/`
+runs the same twelve seeds under the union of every internal two-part split and every
+internal three-part partition, and reports the union statistic with its own bound stated
+in the artefact.

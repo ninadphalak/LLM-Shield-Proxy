@@ -188,6 +188,32 @@
 > keeps DeltaFrag at **0.00 on every seed**. Tag `v2-evidence-round-6` preserves the
 > reports; the directory README gives the complete summary and reproduction command.
 
+> ### Round 7, 2026-09-09: worst-case unions, FIDE, and an external exhaustive control
+>
+> The current instrument (`inspector_sha256` **`94262e29a492ab6a`**) now distinguishes
+> adversarial partitions from uncut baseline requests and publishes the exact oracle in
+> every report. The v2 tree contains **95 schema reports** plus nine sweep aggregates:
+> the previous 54 reports, 29 new worst-case/12-seed Presidio reports, and 12 exhaustive
+> LLM Guard reports. All refreshed v2 headline leaves reproduced; none moved.
+>
+> At the published seed, the union oracle drove **934 two-part** and **20,959 three-part**
+> adversarial partitions across 32 cases, plus 32 uncut baselines. Adding the third piece
+> changed no verdict: chunk-local detection already saturated under the two-part oracle,
+> while retention stayed at its single-chunk baseline. The separate 64-case FIDE profile
+> extends the same instrument to PII and secrets; see `../fide-v2.1/README.md`.
+>
+> LLM Guard 0.3.16 supplies an independent detector control. Across six seeds and every
+> internal two-part split, the chunk-local wrapper leaked adversarially at **1.0000 on all
+> seeds** (mean DeltaFrag **0.8333**, range 0.7500-1.0000). Whole-response buffering held
+> DeltaFrag at **0.0000**, at the cost of incremental delivery. One partial buffered row
+> and one listener failure were preserved outside the published tree before bounded
+> recovery; every published row is complete.
+>
+> The first bounded external-sweep attempt lost one Shield case and four Portkey cases.
+> Their first attempts were preserved, and the single prescribed rerun completed 32/32
+> for every seed while reproducing every summary statistic. This is transport history,
+> not a silently retried measurement.
+
 > ### Round 5, 2026-09-07: coalescing evidence now follows the response attempt
 >
 > Five instrument defects were repaired together. The capture records each upstream
@@ -225,10 +251,11 @@
   omit `--out` and was measured doing exactly that. Run it from the repo root; the schema
   path is CWD-relative.
 - Schema: `spec/v2.0.0/http-profile.schema.json`
-- Reports on the current instrument (54): all 19 single-seed JSON reports in this
-  directory, all nine reports under `exhaustive-splits/`, and the 26 archived Presidio
-  reports under `exhaustive-presidio-seed-sweep/`. All nine `seed-sweep*.json` files
-  carry the same instrument block.
+- Reports on the current instrument (95): all 19 single-seed JSON reports in this
+  directory, all nine reports under `exhaustive-splits/`, 26 archived Presidio reports
+  under `exhaustive-presidio-seed-sweep/`, 29 worst-case/12-seed Presidio reports, and
+  12 exhaustive LLM Guard reports. All nine `seed-sweep*.json` files carry the same
+  instrument block.
 - The two `presidio-*` policies require a live analyzer on `127.0.0.1:5002`. Select a
   subset with `--only`, e.g. `--only chunk-local,bounded-retention`.
 
@@ -239,7 +266,7 @@ claim a reviewer could reasonably discount.
 
 ---
 
-**All 54 single-run artefacts in this tree come from one corpus definition: 32 cases, 5
+**All 95 single-run artefacts in this tree come from one corpus definition: 32 cases, 5
 axes, 76/76 pairs.** `tests/conformance/test_results_are_comparable.py` walks the tree
 recursively and fails the build if that stops being true, because on 2026-09-04 this
 directory briefly held artefacts from four different corpus generations at once --
@@ -920,12 +947,20 @@ python -m pii_leak_benchmark.v2_emitter --only chunk-local --exhaustive-splits \
 ```
 
 A case then leaks if **any** of its split points leaks, and the report says which oracle
-ran: `fragmentation_strategy` is `across-sse-events` for the midpoint and
-`exhaustive-2-part` for the full enumeration, with the split count in
-`limitations.method_limits`.
+ran: `fragmentation_strategy` is `across-sse-events` for the midpoint,
+`exhaustive-2-part` for every internal two-part split, `exhaustive-3-part` for every
+internal three-part partition, and `union-worst-case` for both together.
 
-**Measured on every row it could be, seed `a1b2c3d4e5f60001`, 236 internal splits over
-16 adversarial cases (plus 16 uncut single-chunk requests, 252 requests total):**
+**Since round 7 (2026-09-09) each report also carries `metrics.partition_oracle`**, which
+publishes the three request counts separately instead of collapsing them into one word:
+`adversarial_partitions` (the partitions actually driven), `uncut_single_chunk_requests`
+(the baseline arm, which splits nothing), and `captured_requests_total`. Reports before
+round 7 called the total "splits"; that erratum is fixed in the instrument, not only in
+prose, and a test fails if the block, the enum and the `method_limits` sentence disagree.
+
+**Measured on every row it could be, seed `a1b2c3d4e5f60001`, 236 internal adversarial
+splits over 16 adversarial cases, plus 16 uncut single-chunk requests, so 252 captured
+requests in total:**
 
 | Policy | midpoint adv / DeltaFrag | exhaustive adv / DeltaFrag |
 |---|---|---|

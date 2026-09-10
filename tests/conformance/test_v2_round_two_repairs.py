@@ -534,7 +534,7 @@ def test_one_character_events_requested_is_derived_not_asserted() -> None:
         _injection_events,
         _one_character_events,
         build_segments,
-        injection_split_points,
+        injection_partitions,
     )
 
     segments = build_segments("a1b2c3d4e5f60001")
@@ -542,26 +542,54 @@ def test_one_character_events_requested_is_derived_not_asserted() -> None:
             "carrier": "sse-delta-content", "request_site": "chat-content"}
 
     # The midpoint cuts a 20-character email into 10 and 10. No one-character event.
-    assert _one_character_events(segments, [_result(case=case, split_points_tried=1)]) is False
+    assert _one_character_events(segments, [_result(case=case, oracle="midpoint")]) is False
 
     # Exhaustive enumerates offset 1, and the harness really does write a single character
     # there. Proved from the events themselves, not from the helper's own arithmetic.
-    points = injection_split_points(segments, case, exhaustive=True)
-    assert points[0] == 1, points[:3]
-    emitted = _injection_events(segments, case, split_at=1)
+    #
+    # MIGRATED 2026-09-09: the helper now reads the partitions back from the SAME
+    # enumerator the run drove, at the oracle the RESULT recorded, instead of inferring
+    # "exhaustive" from a count. Inferring it from a count was the weaker version of the
+    # same defect this test exists for -- a field derived from something other than what
+    # happened.
+    points, _families, _attempted, _capped = injection_partitions(
+        segments, case, oracle="exhaustive-2-part"
+    )
+    assert points[0] == (1,), points[:3]
+    emitted = _injection_events(segments, case, (1,))
     payloads = [e.get("content") or e.get("record_field") for e in emitted]
     assert any(len(p) == 1 for p in payloads), payloads
 
     # ...so the field must say so. This is the assertion the old version could not make
     # for any input, on the REAL corpus rather than a two-character fixture.
     assert _one_character_events(
-        segments, [_result(case=case, split_points_tried=len(points))]
+        segments, [_result(case=case, oracle="exhaustive-2-part")]
     ) is True
+
+    # And it holds for the families added in 2026-09-09: a three-part partition cutting at
+    # (1, 2) writes TWO one-character pieces.
+    assert _one_character_events(
+        segments, [_result(case=case, oracle="exhaustive-3-part")]
+    ) is True
+    assert _partition_pieces_length_one(segments, case)
 
     # A single-chunk case is never split, so it contributes no one-character event.
     single = {**case, "fragmentation": "single_chunk"}
-    assert _one_character_events(segments, [_result(case=single, split_points_tried=1)]) is False
+    assert _one_character_events(
+        segments, [_result(case=single, oracle="exhaustive-2-part")]
+    ) is False
     assert len(_encode(segments.injection["EMAIL"], "plain")) == 20
+
+
+def _partition_pieces_length_one(segments, case) -> bool:
+    """A three-part cut at (1, 2) really does emit two single-character data events."""
+    from pii_leak_benchmark.v2_emitter import _injection_events
+
+    payloads = [
+        e.get("content") or e.get("record_field")
+        for e in _injection_events(segments, case, (1, 2))
+    ]
+    return sum(1 for p in payloads if len(p) == 1) == 2
 
 
 def test_the_published_field_follows_the_derivation_not_a_literal() -> None:
@@ -577,8 +605,10 @@ def test_the_published_field_follows_the_derivation_not_a_literal() -> None:
     case = {"entity": "EMAIL", "encoding": "plain", "fragmentation": "adversarial",
             "carrier": "sse-delta-content", "request_site": "chat-content"}
 
-    midpoint = _result(case=case, split_points_tried=1, data_events_observed=4, client_text="x")
-    exhaustive = _result(case=case, split_points_tried=19, data_events_observed=4, client_text="x")
+    midpoint = _result(case=case, oracle="midpoint", data_events_observed=4, client_text="x")
+    exhaustive = _result(
+        case=case, oracle="exhaustive-2-part", data_events_observed=4, client_text="x"
+    )
 
     assert _fragmentation_check([midpoint], segments)[
         "one_character_events_requested"] is False
@@ -636,9 +666,9 @@ def test_the_upstream_count_is_measured_at_the_socket_not_recomputed() -> None:
              "carrier": "sse-delta-content", "request_site": "chat-content"}
     whole = {**split, "fragmentation": "single_chunk"}
 
-    for case, split_at, expected in ((whole, 0, 3), (split, 5, 4)):
+    for case, cuts, expected in ((whole, (), 3), (split, (5,), 4)):
         state = UpstreamState(segments=segments, case=case)
-        state.split_at = split_at
+        state.cuts = cuts
         server, url = _serve(_make_upstream(state))
         try:
             request = Request(

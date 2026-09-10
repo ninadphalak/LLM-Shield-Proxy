@@ -1,6 +1,6 @@
 {
  "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
- "generated_at": "2026-09-07T18:18:12Z",
+ "generated_at": "2026-09-09T15:40:57Z",
  "profile": {
   "name": "OpenAI-compatible HTTP gateway profile",
   "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
@@ -29,9 +29,9 @@
   "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
   "self_probe": {
    "performed": true,
-   "url": "http://127.0.0.1:13435/v1/chat/completions",
+   "url": "http://127.0.0.1:19200/v1/chat/completions",
    "recorded": true,
-   "round_trip_ms": 40.2261
+   "round_trip_ms": 35.0059
   }
  },
  "checks": {
@@ -590,10 +590,10 @@
    "unit": "milliseconds",
    "iterations": 252,
    "iterations_measured": 252,
-   "mean": 14.4984,
-   "p50": 12.9092,
-   "p95": 37.526,
-   "p99": 41.3125
+   "mean": 14.7951,
+   "p50": 13.8783,
+   "p95": 38.8419,
+   "p99": 43.9935
   }
  },
  "passed": true,
@@ -607,7 +607,7 @@
    "Every rate is over cases_applicable=32 of the 32 cases attempted; 0 were inconclusive and are excluded from the denominator rather than counted as no-leak.",
    "4 entity, 2 encoding, 2 fragmentation, 2 carrier, 4 request_site.",
    "Request sites are four shapes, not a survey of real client payloads.",
-   "Fragmentation is every internal two-part split of the value (252 splits over 16 adversarial cases); a case leaks if any split leaks.",
+   "Fragmentation is every internal two-part split of the value (236 internal adversarial partitions over 16 adversarial cases, plus 16 uncut single-chunk requests = 252 captured requests total); a case leaks if any enumerated partition leaks. Bounded to these corpus values and these partition families, not to arbitrary streams.",
    "Latency is loopback and in-process; it is not gateway overhead on a network."
   ]
  },
@@ -632,7 +632,8 @@
   "value_space_nominal": {
    "EMAIL": 208827064576,
    "SSN": 48995100,
-   "CARDPAN": 6
+   "CARDPAN": 6,
+   "USPHONE": 80000
   },
   "specimens_are_valid": "Luhn and SSA-range constraints enforced by make_fixture",
   "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only"
@@ -800,6 +801,236 @@
      "leaked": 0
     }
    }
+  },
+  "partition_oracle": {
+   "oracle": "exhaustive-2-part",
+   "resource_cap_per_case_per_family": 6000,
+   "families": {
+    "exhaustive-2-part": {
+     "cases_enumerated": 16,
+     "cases_leaked": 0,
+     "paired_single_chunk_cases": 16,
+     "leak_rate_adversarial": 0.0,
+     "leak_rate_single_chunk_paired": 0.0,
+     "delta_frag": 0.0,
+     "enumerated": true,
+     "partitions_attempted": 236,
+     "partitions_leaked": 0,
+     "cases_capped": 0,
+     "cases_value_too_short": 0
+    }
+   },
+   "worst_case": {
+    "cases_enumerated": 16,
+    "cases_leaked": 0,
+    "paired_single_chunk_cases": 16,
+    "leak_rate_adversarial": 0.0,
+    "leak_rate_single_chunk_paired": 0.0,
+    "delta_frag": 0.0,
+    "component_leak_rates_on_union_denominator": {
+     "exhaustive-2-part": 0.0
+    },
+    "never_below_components": true,
+    "definition": "case rate under the union of the enumerated partition families over the measured corpus values; NOT a worst case over arbitrary streams, values, interleavings, or partitions into more than three pieces",
+    "families_in_union": [
+     "exhaustive-2-part"
+    ],
+    "cases_excluded_by_cap": 0
+   },
+   "adversarial_partitions": 236,
+   "uncut_single_chunk_requests": 16,
+   "captured_requests_total": 252,
+   "partition_seconds_total": 35.4869,
+   "cases_inconclusive_by_cap": 0,
+   "cases_inconclusive_in_transport": 0,
+   "method_limit_sentence": "Fragmentation is every internal two-part split of the value (236 internal adversarial partitions over 16 adversarial cases, plus 16 uncut single-chunk requests = 252 captured requests total); a case leaks if any enumerated partition leaks. Bounded to these corpus values and these partition families, not to arbitrary streams."
+  },
+  "by_axis_arm": {
+   "entity": {
+    "EMAIL": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "SSN": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "CARDPAN": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "USPHONE": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   },
+   "encoding": {
+    "plain": {
+     "single_chunk": {
+      "applicable": 11,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 11,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 11,
+     "delta_frag": 0.0
+    },
+    "percent": {
+     "single_chunk": {
+      "applicable": 5,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 5,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 5,
+     "delta_frag": 0.0
+    }
+   },
+   "carrier": {
+    "sse-delta-content": {
+     "single_chunk": {
+      "applicable": 12,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 12,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 12,
+     "delta_frag": 0.0
+    },
+    "sse-json-field": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   },
+   "request_site": {
+    "chat-content": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "system-content": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "unrecognised-key": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "tool-description": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   }
+  },
+  "discordance": {
+   "pairs_complete": 16,
+   "pairs_incomplete": 0,
+   "both_arms_leaked": 0,
+   "adversarial_only": 0,
+   "single_chunk_only": 0,
+   "neither_arm_leaked": 16,
+   "delta_frag_from_discordance": 0.0
   }
  },
  "entity_scope": {
@@ -821,6 +1052,6 @@
   "emitter_version": "0.2.1",
   "client_scope_sha256": "c15a0522954fb64f",
   "boundary_scope_sha256": "4a09ca6d088914e7",
-  "inspector_sha256": "3ac1f621aa008d04"
+  "inspector_sha256": "94262e29a492ab6a"
  }
 }

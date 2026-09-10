@@ -3,8 +3,10 @@
 Produced with `--exhaustive-splits`, which cuts each adversarial value at **every internal
 offset** instead of once at its midpoint, and fails the case if **any** split leaks. Same
 corpus, same seed (`a1b2c3d4e5f60001`), same inspector as the rows one directory up. The
-only variable is where the value is cut: 236 internal splits over 16 adversarial cases,
-plus 16 uncut single-chunk requests (252 requests total).
+only variable is where the value is cut: 236 internal adversarial splits over 16
+adversarial cases, plus 16 uncut single-chunk requests, which is 252 captured requests in
+total. Those three numbers are now emitted by the instrument in
+`metrics.partition_oracle`, not only stated here.
 
 These are in a subdirectory on purpose, so the fixed published-seed oracle comparison is
 visibly distinct from the midpoint rows. The guards in
@@ -51,7 +53,22 @@ looks like, so the cut position changes the answer. A regex does not.
 
 `fragmentation_strategy` in each report reads `exhaustive-2-part`, and
 the reports therefore state which oracle produced them rather than leaving a reader to
-infer it. **Known erratum:** `limitations.method_limits[4]` incorrectly calls all 252
-requests "splits"; the correct count is 236 internal adversarial splits plus 16 uncut
-single-chunk requests. Correcting that emitter string moves the inspector digest and must
-be batched with a complete evidence refresh.
+infer it.
+
+**The `252 splits` erratum is fixed (round 7, 2026-09-09).** These reports used to call all
+252 captured requests "splits" in `limitations.method_limits[4]`. That string is produced
+inside `build_report`, which is part of the instrument digest, so correcting it moved
+`inspector_sha256` and every report in this tree was re-measured. The reports now carry a
+`metrics.partition_oracle` block that publishes the three numbers separately:
+
+- `adversarial_partitions` — 236, the internal partitions actually driven
+- `uncut_single_chunk_requests` — 16, the baseline arm, which splits nothing
+- `captured_requests_total` — 252
+
+Three places in each report describe the oracle: that block, the `fragmentation_strategy`
+enum, and the `method_limits` sentence. `tests/conformance/test_published_profiles.py`
+fails if any two of them disagree, so the erratum cannot come back as a prose edit.
+
+**The stronger oracle now has a directory of its own.** `../worst-case-splits/` carries the
+same policies under the union of every internal two-part split and every internal
+three-part partition. See its README for what the third piece changes and what it does not.
