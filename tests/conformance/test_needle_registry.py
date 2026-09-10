@@ -118,7 +118,7 @@ def test_the_registry_digest_moves_when_a_fixture_changes() -> None:
     before = nr.registry_digest()
     original = nr.BY_ID["AWSKEYID"]
     patched = nr.Needle(
-        **{**original.__dict__, "value": "AKIAIOSFODNN7EXAMPLX"}
+        **{**original.__dict__, "value": "digest-mutation-not-a-credential"}
     )
     index = nr.NEEDLES.index(original)
     replaced = nr.NEEDLES[:index] + (patched,) + nr.NEEDLES[index + 1:]
@@ -226,6 +226,14 @@ PRE_EXISTING_PLACEHOLDERS = frozenset({
     "-----BEGIN OPENSSH PRIVATE KEY-----",
 })
 
+# Round 7's digest-mutation test originally changed the final character of AWS's own
+# published example.  That synthetic value entered the immutable evidence commit before
+# the history scanner could see it, because a commit is what makes text become history.
+# It was never a corpus fixture, configuration value, captured value, or credential.  Keep
+# the exact, reviewed history-only exception split across literals so the current source
+# itself does not contain another credential-shaped span.
+REVIEWED_HISTORY_TEST_VALUES = frozenset({"AKIA" + "IOSFODNN7EXAMPLX"})
+
 
 def test_the_reviewed_placeholders_are_still_only_placeholders() -> None:
     """The allowlist is a claim about two specific strings; this re-checks the claim.
@@ -242,6 +250,10 @@ def test_the_reviewed_placeholders_are_still_only_placeholders() -> None:
     pem = "-----BEGIN OPENSSH PRIVATE KEY-----"
     assert pem in PRE_EXISTING_PLACEHOLDERS
     assert pem.endswith("-----") and "\n" not in pem, "a bare boundary carries no payload"
+
+    mutation = next(iter(REVIEWED_HISTORY_TEST_VALUES))
+    assert mutation == nr.BY_ID["AWSKEYID"].value[:-1] + "X"
+    assert mutation not in _known_fixture_values()
 
 
 def _is_declared_fixture(found: str) -> bool:
@@ -342,6 +354,8 @@ def test_git_history_holds_no_credential_that_a_fixture_could_have_come_from() -
         if any(marker in found for marker in ("[A-Z", "{16}", "{36}", "?:")):
             continue
         if found in PRE_EXISTING_PLACEHOLDERS:
+            continue
+        if found in REVIEWED_HISTORY_TEST_VALUES:
             continue
         offenders.append(f"{shape}: {found[:24]!r}")
     assert not offenders, (
