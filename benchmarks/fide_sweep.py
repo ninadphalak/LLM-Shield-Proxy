@@ -10,8 +10,8 @@ Stages:
     midpoint      6 controls x 12 seeds, midpoint oracle          ~80 min
     worstcase     6 controls x 1 seed, union of both families     ~40 min
     twopart       2 controls x 12 seeds, exhaustive-2-part        ~25 min
-    shield        the author's gateway, which is the only measured shipping product
-                  with a DOCUMENTED secret-scanning claim         ~5 min
+    shield        midpoint plus every two-part split for the author's gateway
+    shield-union  every two- and three-part split for that gateway (large; explicit)
 
 Usage:
     python benchmarks/fide_sweep.py midpoint worstcase
@@ -26,6 +26,7 @@ import statistics
 import subprocess
 import sys
 import time
+from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 STAGING = ROOT / "benchmarks" / "results" / "staging-fide"
@@ -50,6 +51,7 @@ CONTROLS = [
 # The two rows the class comparison turns on: the modelled defect and the corrected
 # retention control.
 CONTRAST = ["fide-chunk-local", "fide-length-bounded-retention"]
+SHIELD_CONTAINER = "shield-160"
 
 
 def _env() -> dict[str, str]:
@@ -144,7 +146,96 @@ def stage_shield() -> None:
     stage_shield_exhaustive()
 
 
-def _shield_oracle(name: str, oracle: str) -> None:
+def _docker_json(*args: str) -> Any:
+    result = subprocess.run(
+        ["docker", *args], cwd=ROOT, check=True, capture_output=True, text=True
+    )
+    return json.loads(result.stdout)
+
+
+def _shield_transport_contract(read_timeout: float) -> dict[str, Any]:
+    """Record timing/config facts from the running image without publishing secrets."""
+    inspected = _docker_json("inspect", SHIELD_CONTAINER)[0]
+    runtime_script = (
+        "from llm_shield_proxy.core.config import settings; import json; "
+        "keys=['HTTP_TIMEOUT_SECONDS','HTTP_CONNECT_TIMEOUT_SECONDS','MAX_RETRIES',"
+        "'ENABLE_RETRY_FAILOVER','FALLBACK_BASE_URL','ENABLE_RESPONSE_PII_REDACTION',"
+        "'UPSTREAM_BASE_URL','SHIELD_FAILURE_MODE']; "
+        "print(json.dumps({k:getattr(settings,k) for k in keys},sort_keys=True))"
+    )
+    effective = _docker_json("exec", SHIELD_CONTAINER, "python", "-c", runtime_script)
+    environment_names = {
+        item.partition("=")[0] for item in inspected["Config"].get("Env", [])
+    }
+    secret_names = {
+        "SHIELD_ENCRYPTION_KEY",
+        "OPENAI_API_KEY",
+        "UPSTREAM_API_KEY",
+        "VALID_VIRTUAL_KEYS",
+    }
+    retry_enabled = bool(effective["ENABLE_RETRY_FAILOVER"])
+    maximum_retries = int(effective["MAX_RETRIES"]) if retry_enabled else 0
+    phase_default = float(effective["HTTP_TIMEOUT_SECONDS"])
+    fallback_configured = effective["FALLBACK_BASE_URL"] is not None
+    return {
+        "measurement_revision": "fide-transport-contract/1",
+        "harness": {
+            "library": "httpx",
+            "overall_deadline_enforced": False,
+            "connect_timeout_seconds": 5.0,
+            "read_timeout_seconds": float(read_timeout),
+            "write_timeout_seconds": float(read_timeout),
+            "pool_timeout_seconds": 5.0,
+        },
+        "target": {
+            "library": "httpx.AsyncClient",
+            "overall_deadline_enforced": False,
+            "phase_default_timeout_seconds": phase_default,
+            "connect_timeout_seconds": float(effective["HTTP_CONNECT_TIMEOUT_SECONDS"]),
+            "read_timeout_seconds": phase_default,
+            "write_timeout_seconds": phase_default,
+            "pool_timeout_seconds": phase_default,
+            "retry": {
+                "enabled": retry_enabled,
+                "maximum_retries": maximum_retries,
+                "maximum_attempts": maximum_retries + 1,
+                "backoff": {
+                    "kind": "capped-exponential-multiplicative-jitter",
+                    "initial_base_seconds": 0.5,
+                    "multiplier": 2.0,
+                    "cap_seconds": 5.0,
+                    "jitter_factor_min": 0.5,
+                    "jitter_factor_max": 1.0,
+                },
+            },
+            "fallback": {
+                "configured": fallback_configured,
+                "per_request_header_sent": False,
+            },
+            "image": {
+                "container_name": SHIELD_CONTAINER,
+                "reference": inspected["Config"]["Image"],
+                "id": inspected["Image"],
+            },
+            "effective_configuration": {
+                "values": effective,
+                "redacted_fields_present": sorted(secret_names & environment_names),
+            },
+        },
+    }
+
+
+def _shield_oracle(name: str, oracle: str, read_timeout: float | None = None) -> None:
+    extra_env = {
+        "V2_GATEWAY_TOKEN": "sk-shield-v2-profile",
+        "V2_REQUEST_PATH_REDACTION": "configured",
+    }
+    if read_timeout is not None:
+        extra_env["V2_CLIENT_CONNECT_TIMEOUT"] = "5.0"
+        extra_env["V2_CLIENT_READ_TIMEOUT"] = str(read_timeout)
+        extra_env["V2_TRANSPORT_CONTRACT_JSON"] = json.dumps(
+            _shield_transport_contract(read_timeout), sort_keys=True, separators=(",", ":")
+        )
     _emit(
         # In external-gateway mode this is metadata only.  It must not reuse a
         # reference-control name: doing so attributes the product row to the study's
@@ -152,10 +243,7 @@ def _shield_oracle(name: str, oracle: str) -> None:
         ["llm-shield-proxy-1.6.0-response-on"],
         STAGING / "shield-1.6.0-response-on" / name, PUBLISHED_SEED, oracle,
         gateway=("http://127.0.0.1:8813/v1/chat/completions", "capture", 8799),
-        extra_env={
-            "V2_GATEWAY_TOKEN": "sk-shield-v2-profile",
-            "V2_REQUEST_PATH_REDACTION": "configured",
-        },
+        extra_env=extra_env,
     )
 
 
@@ -166,7 +254,12 @@ def stage_shield_midpoint() -> None:
 
 def stage_shield_exhaustive() -> None:
     """Recover only the product two-part row without repeating the valid midpoint row."""
-    _shield_oracle("exhaustive-2-part", "exhaustive-2-part")
+    _shield_oracle("exhaustive-2-part", "exhaustive-2-part", read_timeout=60.0)
+
+
+def stage_shield_union() -> None:
+    """Run the separately gated product union without repeating either smaller oracle."""
+    _shield_oracle("worst-case", "union-worst-case", read_timeout=60.0)
 
 
 def claim_scoped_metrics(report: dict) -> dict:
@@ -218,10 +311,10 @@ def claim_scoped_metrics(report: dict) -> dict:
     }
 
 
-def summarise() -> int:
-    """Per-class aggregates over the staged tree, recomputed from the report JSON."""
+def summarise(root: pathlib.Path = STAGING) -> int:
+    """Per-class aggregates over one complete tree, recomputed from raw report JSON."""
     out: dict[str, dict] = {}
-    for path in sorted(STAGING.rglob("*.json")):
+    for path in sorted(root.rglob("*.json")):
         if path.name.endswith(".summary.json") or path.name == "fide-sweep.json":
             continue
         report = json.loads(path.read_text(encoding="utf-8"))
@@ -230,7 +323,7 @@ def summarise() -> int:
         key = f"{policy}::{oracle}"
         arms = report["metrics"]["by_axis_arm"]["needle_class"]
         row = {
-            "source": path.relative_to(STAGING).as_posix(),
+            "source": path.relative_to(root).as_posix(),
             "seed": report["corpus"]["seed"],
             "delta_frag": report["metrics"]["delta_frag"],
             "fidelity_rate": report["metrics"]["fidelity_rate"],
@@ -291,8 +384,10 @@ def summarise() -> int:
             "therefore have zero seed variance BY CONSTRUCTION and no seed-level interval "
             "is identified for them."
         )
-    target = STAGING / "fide-sweep.json"
-    target.write_text(json.dumps(out, indent=1), encoding="utf-8")
+    target = root / "fide-sweep.json"
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(json.dumps(out, indent=1), encoding="utf-8")
+    temporary.replace(target)
     print(f"\nwrote {target}")
     for key, block in sorted(out.items()):
         s = block["summary"]
@@ -320,17 +415,26 @@ def publishable_fide_files(root: pathlib.Path = STAGING) -> list[pathlib.Path]:
 
 
 def stage_promote() -> int:
-    """Mirror the staged experiment layout without publishing derived sidecars."""
+    """Add staged raw reports, then rebuild the aggregate over the complete public tree."""
     import shutil
 
-    paths = publishable_fide_files()
-    if not paths:
+    reports = [
+        path for path in publishable_fide_files(STAGING)
+        if path.name != "fide-sweep.json"
+    ]
+    if not reports:
         raise SystemExit(f"nothing staged at {STAGING}")
-    for path in paths:
+    for path in reports:
         target = PUBLISHED / path.relative_to(STAGING)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
-    print(f"promoted {len(paths)} FIDE files into {PUBLISHED}")
+    # Staging may contain only an incremental experiment. Never copy its partial
+    # aggregate over the complete published aggregate: recompute from all public reports.
+    summarise(PUBLISHED)
+    print(
+        f"promoted {len(reports)} FIDE reports into {PUBLISHED} "
+        "and regenerated the complete aggregate"
+    )
     return 0
 
 
@@ -353,6 +457,7 @@ STAGES = {
     "shield": stage_shield,
     "shield-midpoint": stage_shield_midpoint,
     "shield-exhaustive": stage_shield_exhaustive,
+    "shield-union": stage_shield_union,
     "summarise": summarise,
     "promote": stage_promote,
 }

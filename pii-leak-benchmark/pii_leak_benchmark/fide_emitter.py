@@ -69,6 +69,23 @@ from .v2_emitter import (
 FIDE_SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.1.0"
 FIDE_CORPUS_ID = "fide-response-split"
 FIDE_CORPUS_VERSION = "0.1.0"
+TRANSPORT_CONTRACT_ENV = "V2_TRANSPORT_CONTRACT_JSON"
+TRANSPORT_MEASUREMENT_REVISION = "fide-transport-contract/1"
+
+
+def _transport_contract_from_environment() -> dict[str, Any] | None:
+    raw = os.environ.get(TRANSPORT_CONTRACT_ENV)
+    if not raw:
+        return None
+    contract = json.loads(raw)
+    if not isinstance(contract, dict):
+        raise TypeError(f"{TRANSPORT_CONTRACT_ENV} must encode a JSON object")
+    if contract.get("measurement_revision") != TRANSPORT_MEASUREMENT_REVISION:
+        raise ValueError(
+            f"{TRANSPORT_CONTRACT_ENV}.measurement_revision must be "
+            f"{TRANSPORT_MEASUREMENT_REVISION!r}"
+        )
+    return contract
 
 
 # --------------------------------------------------------------------------------------
@@ -604,6 +621,12 @@ def run_fide_policy(
         claim=claim,
         schema_id=FIDE_SCHEMA_ID,
     )
+    transport_contract = _transport_contract_from_environment()
+    if transport_contract is not None:
+        report["transport_contract"] = transport_contract
+        # The scoring functions and inspector digest are unchanged. This label makes the
+        # report-level provenance addition visible without falsely claiming a new scorer.
+        report["harness_revision"] += "+transport-contract.1"
     if external:
         # `build_report`'s default version identifies the harness reference policy.  An
         # external product row must identify the target version instead; the harness
@@ -641,6 +664,8 @@ def run_fide_policy(
         ),
         "instrument": instrument_block(),
     }
+    if "transport_contract" in report:
+        summary["transport_contract"] = report["transport_contract"]
     return report, summary
 
 

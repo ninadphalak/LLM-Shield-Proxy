@@ -354,6 +354,79 @@
       "pattern": "^[0-9a-f]{64}$",
       "description": "Digest of the per-case result sidecar. Per-case results do NOT go in the report body: 500 cases inline makes the report unreadable and therefore unreviewable, and an unreviewable artifact is not a citable one. The report carries aggregates plus this digest; the sidecar carries the cases."
     },
+    "transport_contract": {
+      "type": "object",
+      "description": "Optional for historical rows; required by the gated LLM-Shield-Proxy exhaustive rerun. Phase timeouts are explicit because httpx does not interpret its default timeout as one total wall-clock deadline.",
+      "required": ["measurement_revision", "harness", "target"],
+      "properties": {
+        "measurement_revision": {"const": "fide-transport-contract/1"},
+        "harness": {"$ref": "#/$defs/httpx_transport_timing"},
+        "target": {
+          "allOf": [
+            {"$ref": "#/$defs/httpx_transport_timing"},
+            {
+              "type": "object",
+              "required": ["phase_default_timeout_seconds", "retry", "fallback", "image", "effective_configuration"],
+              "properties": {
+                "phase_default_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "retry": {
+                  "type": "object",
+                  "required": ["enabled", "maximum_retries", "maximum_attempts", "backoff"],
+                  "properties": {
+                    "enabled": {"type": "boolean"},
+                    "maximum_retries": {"type": "integer", "minimum": 0},
+                    "maximum_attempts": {"type": "integer", "minimum": 1},
+                    "backoff": {
+                      "type": "object",
+                      "required": ["kind", "initial_base_seconds", "multiplier", "cap_seconds", "jitter_factor_min", "jitter_factor_max"],
+                      "properties": {
+                        "kind": {"type": "string", "minLength": 1},
+                        "initial_base_seconds": {"type": "number", "minimum": 0},
+                        "multiplier": {"type": "number", "minimum": 1},
+                        "cap_seconds": {"type": "number", "minimum": 0},
+                        "jitter_factor_min": {"type": "number", "minimum": 0},
+                        "jitter_factor_max": {"type": "number", "minimum": 0}
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "fallback": {
+                  "type": "object",
+                  "required": ["configured", "per_request_header_sent"],
+                  "properties": {
+                    "configured": {"type": "boolean"},
+                    "per_request_header_sent": {"type": "boolean"}
+                  },
+                  "additionalProperties": false
+                },
+                "image": {
+                  "type": "object",
+                  "required": ["container_name", "reference", "id"],
+                  "properties": {
+                    "container_name": {"type": "string", "minLength": 1},
+                    "reference": {"type": "string", "minLength": 1},
+                    "id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+                  },
+                  "additionalProperties": false
+                },
+                "effective_configuration": {
+                  "type": "object",
+                  "required": ["values", "redacted_fields_present"],
+                  "properties": {
+                    "values": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean", "null"]}},
+                    "redacted_fields_present": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "instrument": {
       "type": "object",
       "required": [
@@ -673,6 +746,18 @@
     }
   ],
   "$defs": {
+    "httpx_transport_timing": {
+      "type": "object",
+      "required": ["library", "overall_deadline_enforced", "connect_timeout_seconds", "read_timeout_seconds", "write_timeout_seconds", "pool_timeout_seconds"],
+      "properties": {
+        "library": {"type": "string", "minLength": 1},
+        "overall_deadline_enforced": {"type": "boolean"},
+        "connect_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "read_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "write_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "pool_timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
     "fragmentation_check": {
       "type": "object",
       "required": [

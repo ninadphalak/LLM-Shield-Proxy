@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pii-leak-benchmark"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks"))
 
+import fide_sweep  # noqa: E402
 from fide_sweep import claim_scoped_metrics, publishable_fide_files  # noqa: E402
 from llm_guard_exhaustive import publishable_llm_guard_files  # noqa: E402
 from pii_leak_benchmark import fide_emitter as fide  # noqa: E402
@@ -549,6 +550,33 @@ def test_fide_promotion_keeps_reports_and_aggregate_but_not_sidecars(tmp_path: P
         "fide-sweep.json",
         "midpoint/seed/row.json",
     ]
+
+
+def test_incremental_fide_promotion_never_copies_a_partial_aggregate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging = tmp_path / "staging"
+    published = tmp_path / "published"
+    staged_report = staging / "new-oracle" / "new.json"
+    old_report = published / "old-oracle" / "old.json"
+    staged_report.parent.mkdir(parents=True)
+    old_report.parent.mkdir(parents=True)
+    staged_report.write_text("{}", encoding="utf-8")
+    old_report.write_text("{}", encoding="utf-8")
+    (staging / "fide-sweep.json").write_text('{"partial": true}', encoding="utf-8")
+    published_aggregate = published / "fide-sweep.json"
+    published_aggregate.write_text('{"complete": true}', encoding="utf-8")
+
+    rebuilt: list[Path] = []
+    monkeypatch.setattr(fide_sweep, "STAGING", staging)
+    monkeypatch.setattr(fide_sweep, "PUBLISHED", published)
+    monkeypatch.setattr(fide_sweep, "summarise", lambda root: rebuilt.append(root) or 0)
+
+    assert fide_sweep.stage_promote() == 0
+    assert (published / "new-oracle" / "new.json").is_file()
+    assert old_report.is_file()
+    assert published_aggregate.read_text(encoding="utf-8") == '{"complete": true}'
+    assert rebuilt == [published]
 
 
 def test_llm_guard_promotion_keeps_only_raw_reports(tmp_path: Path) -> None:

@@ -117,9 +117,11 @@ twelve independent observations.
 For the union run, 32 adversarial cases produce 934 two-part splits and 20,959
 three-part partitions. The reports therefore record 21,893 adversarial partitions plus
 32 uncut baseline requests, or 21,925 captured requests per policy. No case reaches the
-6,000-per-family cap. Adding the third piece changes no case verdict: the two-part oracle
-already saturates the chunk-local result on this corpus, while retention stays at its
-single-chunk baseline.
+6,000-per-family cap. For the study-owned reference controls, adding the third piece
+changes no case verdict: the two-part oracle already saturates the chunk-local result on
+this corpus, while retention stays at its single-chunk baseline. The separately measured
+shipping product below is the counterexample: its three-part family exposes one additional
+case.
 
 The whitespace-retention row is the important baseline warning. Its DeltaFrag is zero,
 but it leaks every multi-line PEM case in both arms because its own whitespace cut divides
@@ -127,7 +129,7 @@ the protected unit. Bounding retention by the longest protected unit removes tha
 Zero therefore does not mean containment; it means only that fragmentation did not change
 the rate.
 
-## Shipping-product result and bounded exhaustive gap
+## Shipping-product result
 
 LLM-Shield-Proxy 1.6.0 response-on completed the 64-case midpoint profile with
 FidelityRate **1.0000** and no inconclusive cases. The raw corpus-wide rates were
@@ -136,14 +138,31 @@ not document a Slack token detector, the claim-scoped view excludes `SLACKBOT`: 
 seven enabled entities the corresponding rates are 0.0714, 0.3214, and 0.2500. Within
 the documented secret scope alone they are 0.0833, 0.5000, and 0.4167.
 
-No exhaustive shipping-product row is published. After correcting the required
-`SHIELD_ENCRYPTION_KEY` configuration, the first bounded attempt completed 62/64 logical
-cases and the single prescribed retry completed 63/64; both failed schema validity because
-an upstream disconnect makes the paired statistic incomplete. The attempts are retained
-in the private evidence ledger. The midpoint point result is valid, but no exhaustive
-claim about the shipping product follows from it. This distinction is especially important
-because the product is maintained by the study author and is the only eligible shipping
-secret-scanner row.
+The promoted exhaustive-two-part run completed 64/64 cases and 966/966 measured client
+iterations. Its corpus-wide rates are 0.1875 single-chunk, 0.4062 adversarial, and
+DeltaFrag 0.2187. The bounded union then completed 64/64 and 21,925/21,925 iterations:
+934 two-part partitions, 20,959 three-part partitions, and 32 uncut baselines. Its
+corpus-wide rates are 0.1875, 0.4375, and 0.2500. Three-part enumeration adds one
+plain-CARDPAN failure in the `sse-json-field` / `tool-description` condition. Over the
+seven documented entity types, the union rates are 0.0714, 0.3571, and 0.2857; within
+the documented secret scope they are 0.0833, 0.5000, and 0.4167.
+
+Both reports disclose `fide-transport-contract/1`: 60-second harness read/write timeouts,
+the gateway's 10-second connect timeout, four-attempt retry budget, fallback state,
+container-image identity, and redacted effective configuration. No case was transport-
+or cap-inconclusive. A bounded operator log observation recorded 62 retry warnings across
+59 requests in the union run; every request recovered and no HTTP 503 was added. The raw
+log capture was hashed but not retained, so the report's 21,925 measured iterations and
+zero inconclusive cases are the independently reprocessable primary record. Four earlier
+default-timeout attempts remain private and schema-invalid; they were not replaced or
+reported as results.
+
+The shared report limitations list contains the sentence "Reference response-path policies,
+not products." It describes the study-owned controls, not these external-gateway rows.
+For the product reports, `implementation.name`, `implementation.version`, and `target`
+identify LLM-Shield-Proxy 1.6.0; the shared sentence is retained and clarified here rather
+than silently rewriting a generated artifact after measurement. The owner-run conflict
+remains disclosed.
 
 ## Raw reports and the derived aggregate
 
@@ -165,7 +184,10 @@ Run from the repository root. Every command writes to staging first:
 
 ```bash
 PYTHONPATH=pii-leak-benchmark python benchmarks/fide_sweep.py midpoint twopart worstcase
-PYTHONPATH=pii-leak-benchmark python benchmarks/fide_sweep.py shield summarise
+PYTHONPATH=pii-leak-benchmark python benchmarks/fide_sweep.py shield-midpoint
+PYTHONPATH=pii-leak-benchmark python benchmarks/fide_sweep.py shield-exhaustive
+PYTHONPATH=pii-leak-benchmark python benchmarks/fide_sweep.py shield-union summarise
+PYTHONPATH=pii-leak-benchmark python benchmarks/fide_sweep.py promote
 python benchmarks/fide_numeric_audit.py
 ```
 

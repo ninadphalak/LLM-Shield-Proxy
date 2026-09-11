@@ -6406,6 +6406,254 @@
   },
   "seed_variation_note": "The four PII needles are drawn per seed; the four secret needles are fixed literals (see needle_registry.why_secrets_are_not_seeded). Secret-class rates therefore have zero seed variance BY CONSTRUCTION and no seed-level interval is identified for them."
  },
+ "llm-shield-proxy-1.6.0-response-on::exhaustive-2-part": {
+  "runs": [
+   {
+    "source": "shield-1.6.0-response-on/exhaustive-2-part/llm-shield-proxy-1.6.0-response-on.json",
+    "seed": "a1b2c3d4e5f60001",
+    "delta_frag": 0.2187,
+    "fidelity_rate": 1.0,
+    "cases_applicable": 64,
+    "inconclusive": 0,
+    "detector_blind_entities": [
+     "SLACKBOT"
+    ],
+    "by_class": {
+     "pii": {
+      "leak_single": 0.0625,
+      "leak_adversarial": 0.1875,
+      "delta_frag": 0.125,
+      "pairs": 16
+     },
+     "secret": {
+      "leak_single": 0.3125,
+      "leak_adversarial": 0.625,
+      "delta_frag": 0.3125,
+      "pairs": 16
+     }
+    },
+    "claim_scoped": {
+     "definition": "Rates recomputed from metrics.by_axis_arm.entity over only entity_scope.enabled; not_enabled needles are excluded rather than scored as misses. The schema report's corpus-wide rates remain unchanged.",
+     "enabled_entities": [
+      "AWSKEYID",
+      "CARDPAN",
+      "EMAIL",
+      "GHTOKEN",
+      "PEMBLOCK",
+      "SSN",
+      "USPHONE"
+     ],
+     "not_enabled_entities": [
+      "SLACKBOT"
+     ],
+     "overall": {
+      "single_chunk": {
+       "applicable": 28,
+       "leaked": 2,
+       "leak_rate": 0.0714
+      },
+      "adversarial": {
+       "applicable": 28,
+       "leaked": 9,
+       "leak_rate": 0.3214
+      },
+      "delta_frag": 0.25
+     },
+     "by_class": {
+      "pii": {
+       "single_chunk": {
+        "applicable": 16,
+        "leaked": 1,
+        "leak_rate": 0.0625
+       },
+       "adversarial": {
+        "applicable": 16,
+        "leaked": 3,
+        "leak_rate": 0.1875
+       },
+       "delta_frag": 0.125
+      },
+      "secret": {
+       "single_chunk": {
+        "applicable": 12,
+        "leaked": 1,
+        "leak_rate": 0.0833
+       },
+       "adversarial": {
+        "applicable": 12,
+        "leaked": 6,
+        "leak_rate": 0.5
+       },
+       "delta_frag": 0.4167
+      }
+     }
+    }
+   }
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  },
+  "corpus_sha256": "7ac985ef82a6ca360120302c3a1541253c39eb5e3c295b0628d579794d721678",
+  "needle_registry_sha256": "7f86fe6fea426cf736f730eb455d5a44dbce9d69ebd7972f9e88124a8750e492",
+  "seeds": [
+   "a1b2c3d4e5f60001"
+  ],
+  "summary_seeds": [
+   "a1b2c3d4e5f60001"
+  ],
+  "summary_frame": "published-seed point observation; no seed distribution is estimated",
+  "published_seed_observation": [
+   {
+    "source": "shield-1.6.0-response-on/exhaustive-2-part/llm-shield-proxy-1.6.0-response-on.json",
+    "seed": "a1b2c3d4e5f60001",
+    "delta_frag": 0.2187,
+    "fidelity_rate": 1.0,
+    "cases_applicable": 64,
+    "inconclusive": 0,
+    "detector_blind_entities": [
+     "SLACKBOT"
+    ],
+    "by_class": {
+     "pii": {
+      "leak_single": 0.0625,
+      "leak_adversarial": 0.1875,
+      "delta_frag": 0.125,
+      "pairs": 16
+     },
+     "secret": {
+      "leak_single": 0.3125,
+      "leak_adversarial": 0.625,
+      "delta_frag": 0.3125,
+      "pairs": 16
+     }
+    },
+    "claim_scoped": {
+     "definition": "Rates recomputed from metrics.by_axis_arm.entity over only entity_scope.enabled; not_enabled needles are excluded rather than scored as misses. The schema report's corpus-wide rates remain unchanged.",
+     "enabled_entities": [
+      "AWSKEYID",
+      "CARDPAN",
+      "EMAIL",
+      "GHTOKEN",
+      "PEMBLOCK",
+      "SSN",
+      "USPHONE"
+     ],
+     "not_enabled_entities": [
+      "SLACKBOT"
+     ],
+     "overall": {
+      "single_chunk": {
+       "applicable": 28,
+       "leaked": 2,
+       "leak_rate": 0.0714
+      },
+      "adversarial": {
+       "applicable": 28,
+       "leaked": 9,
+       "leak_rate": 0.3214
+      },
+      "delta_frag": 0.25
+     },
+     "by_class": {
+      "pii": {
+       "single_chunk": {
+        "applicable": 16,
+        "leaked": 1,
+        "leak_rate": 0.0625
+       },
+       "adversarial": {
+        "applicable": 16,
+        "leaked": 3,
+        "leak_rate": 0.1875
+       },
+       "delta_frag": 0.125
+      },
+      "secret": {
+       "single_chunk": {
+        "applicable": 12,
+        "leaked": 1,
+        "leak_rate": 0.0833
+       },
+       "adversarial": {
+        "applicable": 12,
+        "leaked": 6,
+        "leak_rate": 0.5
+       },
+       "delta_frag": 0.4167
+      }
+     }
+    }
+   }
+  ],
+  "summary": {
+   "delta_frag": {
+    "mean": 0.2187,
+    "min": 0.2187,
+    "max": 0.2187,
+    "stdev": 0.0,
+    "n": 1
+   },
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0,
+    "n": 1
+   },
+   "by_class": {
+    "pii": {
+     "leak_single": {
+      "mean": 0.0625,
+      "min": 0.0625,
+      "max": 0.0625,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "leak_adversarial": {
+      "mean": 0.1875,
+      "min": 0.1875,
+      "max": 0.1875,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "delta_frag": {
+      "mean": 0.125,
+      "min": 0.125,
+      "max": 0.125,
+      "stdev": 0.0,
+      "n": 1
+     }
+    },
+    "secret": {
+     "leak_single": {
+      "mean": 0.3125,
+      "min": 0.3125,
+      "max": 0.3125,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "leak_adversarial": {
+      "mean": 0.625,
+      "min": 0.625,
+      "max": 0.625,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "delta_frag": {
+      "mean": 0.3125,
+      "min": 0.3125,
+      "max": 0.3125,
+      "stdev": 0.0,
+      "n": 1
+     }
+    }
+   }
+  },
+  "seed_variation_note": "The four PII needles are drawn per seed; the four secret needles are fixed literals (see needle_registry.why_secrets_are_not_seeded). Secret-class rates therefore have zero seed variance BY CONSTRUCTION and no seed-level interval is identified for them."
+ },
  "llm-shield-proxy-1.6.0-response-on::midpoint": {
   "runs": [
    {
@@ -6623,6 +6871,254 @@
       "mean": 0.125,
       "min": 0.125,
       "max": 0.125,
+      "stdev": 0.0,
+      "n": 1
+     }
+    },
+    "secret": {
+     "leak_single": {
+      "mean": 0.3125,
+      "min": 0.3125,
+      "max": 0.3125,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "leak_adversarial": {
+      "mean": 0.625,
+      "min": 0.625,
+      "max": 0.625,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "delta_frag": {
+      "mean": 0.3125,
+      "min": 0.3125,
+      "max": 0.3125,
+      "stdev": 0.0,
+      "n": 1
+     }
+    }
+   }
+  },
+  "seed_variation_note": "The four PII needles are drawn per seed; the four secret needles are fixed literals (see needle_registry.why_secrets_are_not_seeded). Secret-class rates therefore have zero seed variance BY CONSTRUCTION and no seed-level interval is identified for them."
+ },
+ "llm-shield-proxy-1.6.0-response-on::union-worst-case": {
+  "runs": [
+   {
+    "source": "shield-1.6.0-response-on/worst-case/llm-shield-proxy-1.6.0-response-on.json",
+    "seed": "a1b2c3d4e5f60001",
+    "delta_frag": 0.25,
+    "fidelity_rate": 1.0,
+    "cases_applicable": 64,
+    "inconclusive": 0,
+    "detector_blind_entities": [
+     "SLACKBOT"
+    ],
+    "by_class": {
+     "pii": {
+      "leak_single": 0.0625,
+      "leak_adversarial": 0.25,
+      "delta_frag": 0.1875,
+      "pairs": 16
+     },
+     "secret": {
+      "leak_single": 0.3125,
+      "leak_adversarial": 0.625,
+      "delta_frag": 0.3125,
+      "pairs": 16
+     }
+    },
+    "claim_scoped": {
+     "definition": "Rates recomputed from metrics.by_axis_arm.entity over only entity_scope.enabled; not_enabled needles are excluded rather than scored as misses. The schema report's corpus-wide rates remain unchanged.",
+     "enabled_entities": [
+      "AWSKEYID",
+      "CARDPAN",
+      "EMAIL",
+      "GHTOKEN",
+      "PEMBLOCK",
+      "SSN",
+      "USPHONE"
+     ],
+     "not_enabled_entities": [
+      "SLACKBOT"
+     ],
+     "overall": {
+      "single_chunk": {
+       "applicable": 28,
+       "leaked": 2,
+       "leak_rate": 0.0714
+      },
+      "adversarial": {
+       "applicable": 28,
+       "leaked": 10,
+       "leak_rate": 0.3571
+      },
+      "delta_frag": 0.2857
+     },
+     "by_class": {
+      "pii": {
+       "single_chunk": {
+        "applicable": 16,
+        "leaked": 1,
+        "leak_rate": 0.0625
+       },
+       "adversarial": {
+        "applicable": 16,
+        "leaked": 4,
+        "leak_rate": 0.25
+       },
+       "delta_frag": 0.1875
+      },
+      "secret": {
+       "single_chunk": {
+        "applicable": 12,
+        "leaked": 1,
+        "leak_rate": 0.0833
+       },
+       "adversarial": {
+        "applicable": 12,
+        "leaked": 6,
+        "leak_rate": 0.5
+       },
+       "delta_frag": 0.4167
+      }
+     }
+    }
+   }
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  },
+  "corpus_sha256": "7ac985ef82a6ca360120302c3a1541253c39eb5e3c295b0628d579794d721678",
+  "needle_registry_sha256": "7f86fe6fea426cf736f730eb455d5a44dbce9d69ebd7972f9e88124a8750e492",
+  "seeds": [
+   "a1b2c3d4e5f60001"
+  ],
+  "summary_seeds": [
+   "a1b2c3d4e5f60001"
+  ],
+  "summary_frame": "published-seed point observation; no seed distribution is estimated",
+  "published_seed_observation": [
+   {
+    "source": "shield-1.6.0-response-on/worst-case/llm-shield-proxy-1.6.0-response-on.json",
+    "seed": "a1b2c3d4e5f60001",
+    "delta_frag": 0.25,
+    "fidelity_rate": 1.0,
+    "cases_applicable": 64,
+    "inconclusive": 0,
+    "detector_blind_entities": [
+     "SLACKBOT"
+    ],
+    "by_class": {
+     "pii": {
+      "leak_single": 0.0625,
+      "leak_adversarial": 0.25,
+      "delta_frag": 0.1875,
+      "pairs": 16
+     },
+     "secret": {
+      "leak_single": 0.3125,
+      "leak_adversarial": 0.625,
+      "delta_frag": 0.3125,
+      "pairs": 16
+     }
+    },
+    "claim_scoped": {
+     "definition": "Rates recomputed from metrics.by_axis_arm.entity over only entity_scope.enabled; not_enabled needles are excluded rather than scored as misses. The schema report's corpus-wide rates remain unchanged.",
+     "enabled_entities": [
+      "AWSKEYID",
+      "CARDPAN",
+      "EMAIL",
+      "GHTOKEN",
+      "PEMBLOCK",
+      "SSN",
+      "USPHONE"
+     ],
+     "not_enabled_entities": [
+      "SLACKBOT"
+     ],
+     "overall": {
+      "single_chunk": {
+       "applicable": 28,
+       "leaked": 2,
+       "leak_rate": 0.0714
+      },
+      "adversarial": {
+       "applicable": 28,
+       "leaked": 10,
+       "leak_rate": 0.3571
+      },
+      "delta_frag": 0.2857
+     },
+     "by_class": {
+      "pii": {
+       "single_chunk": {
+        "applicable": 16,
+        "leaked": 1,
+        "leak_rate": 0.0625
+       },
+       "adversarial": {
+        "applicable": 16,
+        "leaked": 4,
+        "leak_rate": 0.25
+       },
+       "delta_frag": 0.1875
+      },
+      "secret": {
+       "single_chunk": {
+        "applicable": 12,
+        "leaked": 1,
+        "leak_rate": 0.0833
+       },
+       "adversarial": {
+        "applicable": 12,
+        "leaked": 6,
+        "leak_rate": 0.5
+       },
+       "delta_frag": 0.4167
+      }
+     }
+    }
+   }
+  ],
+  "summary": {
+   "delta_frag": {
+    "mean": 0.25,
+    "min": 0.25,
+    "max": 0.25,
+    "stdev": 0.0,
+    "n": 1
+   },
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0,
+    "n": 1
+   },
+   "by_class": {
+    "pii": {
+     "leak_single": {
+      "mean": 0.0625,
+      "min": 0.0625,
+      "max": 0.0625,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "leak_adversarial": {
+      "mean": 0.25,
+      "min": 0.25,
+      "max": 0.25,
+      "stdev": 0.0,
+      "n": 1
+     },
+     "delta_frag": {
+      "mean": 0.1875,
+      "min": 0.1875,
+      "max": 0.1875,
       "stdev": 0.0,
       "n": 1
      }
