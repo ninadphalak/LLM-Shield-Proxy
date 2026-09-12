@@ -23,10 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pii-leak-benchmark
 from collections import Counter  # noqa: E402
 
 from pii_leak_benchmark.v2_emitter import (  # noqa: E402
+    _STRUCTURAL_KEYS,
     AXES,
     _all_pairs,
     _pairs_of,
-    _STRUCTURAL_KEYS,
     build_request,
     build_segments,
     covering_array,

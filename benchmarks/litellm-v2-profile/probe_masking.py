@@ -8,7 +8,6 @@ two can be told apart by eye.
 """
 import json
 import sys
-import threading
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, 'pii-leak-benchmark')

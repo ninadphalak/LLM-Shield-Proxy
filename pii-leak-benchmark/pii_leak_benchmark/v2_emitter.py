@@ -1160,7 +1160,7 @@ def _haystacks(sse: str) -> list[str]:
     OpenAI response field carrying model-generated text, so a gateway that redacted
     `delta.content` and nothing else scored a perfect LeakRate of 0.00.
     """
-    from pii_leak_benchmark.http_profile import _Inspection, _collect
+    from pii_leak_benchmark.http_profile import _collect, _Inspection
 
     def _string_values(node: Any, out: list[str], skip_content: bool = False) -> None:
         """Non-key string VALUES in arrival order, content excluded.
