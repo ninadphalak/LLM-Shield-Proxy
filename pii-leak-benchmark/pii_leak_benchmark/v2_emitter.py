@@ -470,7 +470,7 @@ def _presidio_redact(text: str, url: str = PRESIDIO_ANALYZER_URL) -> str:
         return text
     payload = json.dumps({"text": text, "language": "en"}).encode()
     request = Request(url, data=payload, headers={"Content-Type": "application/json"})
-    with urlopen(request, timeout=30) as response:  # noqa: S310
+    with urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
         spans = json.loads(response.read().decode("utf-8"))
     keep = [s for s in spans if s.get("entity_type") != "URL"]
     out = text
@@ -549,14 +549,22 @@ _GCP_TOKEN_CACHE: dict[str, str] = {}
 
 def _gcp_context() -> tuple[str, str]:
     """(access token, project id) from the local gcloud install, cached per process."""
-    import subprocess  # noqa: S404
+    import subprocess  # noqa: S404  # nosec B404 - argv below is hardcoded literals, never caller input
 
     if not _GCP_TOKEN_CACHE:
         for key, argv in (
             ("token", ["gcloud", "auth", "print-access-token"]),
             ("project", ["gcloud", "config", "get-value", "project"]),
         ):
-            done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602
+            # FIXME(portability): `shell=True` with a LIST is Windows-only behaviour. On
+            # POSIX, subprocess passes argv[0] to the shell and the rest become $0/$1, so
+            # this runs a bare `gcloud` and the subcommand is silently dropped. It works
+            # here because the GCP runs were driven from Windows. Not changed with the
+            # 1.6.1 audit: this path produced published evidence, so re-running it is a
+            # measurement decision, not a lint fix.
+            # The bandit finding itself is a false positive -- argv is hardcoded literals
+            # above, with no caller-controlled input, so there is nothing to inject.
+            done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602  # nosec B602
             value = done.stdout.strip()
             if done.returncode != 0 or not value:
                 raise RuntimeError(f"gcloud {key} unavailable: {done.stderr.strip()[:200]}")
@@ -575,7 +583,7 @@ def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
             "x-goog-user-project": project,
         },
     )
-    with urlopen(request, timeout=60) as response:  # noqa: S310
+    with urlopen(request, timeout=60) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -1042,7 +1050,7 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            with urlopen(request, timeout=30) as response:  # noqa: S310
+            with urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
                 upstream_sse = response.read().decode("utf-8", "replace")
 
             policy = POLICIES[policy_name](vault)
@@ -1287,7 +1295,7 @@ def run_case(
             headers.update(_extra_gateway_headers())
             request = Request(gateway_url, data=body, headers=headers)
             try:
-                with urlopen(request, timeout=120) as response:  # noqa: S310
+                with urlopen(request, timeout=120) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
                     sse = response.read().decode("utf-8", "replace")
             except Exception as exc:  # noqa: BLE001
                 # Refusing a case is a legitimate gateway behaviour and it is also the
