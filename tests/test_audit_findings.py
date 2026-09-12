@@ -14,6 +14,7 @@ C3's MCP portion lives in test_mcp_routing.py; C4 lives in test_vault.py.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 
 import pytest
@@ -201,3 +202,76 @@ def test_short_padded_base64_pii_is_detected():
     redacted = engine.redact_text(f"ssn {encoded_ssn} here", vault)
     assert encoded_ssn not in redacted
 
+
+
+# ---------------------------------------------------------------------------
+# Greptile round 2: the shape-following walker and the unparsed port
+# ---------------------------------------------------------------------------
+
+
+def test_non_streaming_redaction_covers_fields_a_shape_walker_misses():
+    """The first C2 fix mirrored rehydration's shapes and missed most model text.
+
+    Every field below is model-generated text in a shipping provider schema, and none of
+    them is `message.content`, a tool-call argument, or an Anthropic `text` block -- the
+    only places the original walker looked.
+    """
+    from llm_shield_proxy.api.main import _redact_model_originated_json_response
+    from llm_shield_proxy.engines.vault import Vault
+
+    vault = Vault(synthetic=False)
+    leaked = "victim@example.com"
+    res = {
+        "id": "chatcmpl-123",
+        "model": "gpt-4o-mini",
+        "choices": [
+            {
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    # list-valued content parts, not a plain string
+                    "content": [{"type": "text", "text": f"part says {leaked}"}],
+                    "refusal": f"I cannot help with {leaked}",
+                    "reasoning_content": f"the user mentioned {leaked}",
+                },
+            }
+        ],
+        # Anthropic-shaped thinking / tool_use, neither of which is a `text` block
+        "content": [
+            {"type": "thinking", "thinking": f"internally noting {leaked}"},
+            {"type": "tool_use", "input": {"q": f"lookup {leaked}"}},
+        ],
+    }
+
+    out = _redact_model_originated_json_response(res, vault)
+    flat = json.dumps(out)
+    assert leaked not in flat, "model-originated PII survived in a non-content field"
+    assert flat.count("[EMAIL_REDACTED]") == 5
+
+    # Structural keys are never rewritten: mangling them breaks clients for no gain.
+    assert out["id"] == "chatcmpl-123"
+    assert out["model"] == "gpt-4o-mini"
+    assert out["choices"][0]["finish_reason"] == "stop"
+    assert out["choices"][0]["message"]["role"] == "assistant"
+
+    # The caller's input is not mutated in place.
+    assert res["choices"][0]["message"]["refusal"] == f"I cannot help with {leaked}"
+
+
+@pytest.mark.parametrize("bad_url", ["https://fallback.example:abc", "https://fallback.example:99999"])
+def test_malformed_fallback_port_is_rejected_not_a_500(monkeypatch, bad_url):
+    """`urlsplit(...).port` raises on these. A routing header must not produce a 500."""
+    monkeypatch.setattr(settings, "ALLOW_CLIENT_UPSTREAM_OVERRIDE", True)
+
+    async def _accept(hostname):
+        return True, "93.184.216.34"
+
+    monkeypatch.setattr("llm_shield_proxy.api.main._resolve_and_validate_hostname", _accept)
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-proj-mock-key", "X-Shield-Fallback-Url": bad_url},
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert response.status_code == 403
