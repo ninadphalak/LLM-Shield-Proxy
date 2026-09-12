@@ -36,20 +36,30 @@ logger = logging.getLogger(__name__)
 
 
 def _redact_url_for_audit(url: str) -> str:
-    """Strip query string, fragment, and userinfo from a URL for the audit chain.
+    """Reduce a URL to scheme and authority for the signed audit chain.
 
-    A `tools/call` URL can carry secrets/PII in query params or embedded credentials;
-    the signed audit chain must not record them.
+    The PATH goes too, not just the query, fragment and userinfo. A blocked `tools/call`
+    URL is attacker-shaped and identifiers sit in paths as readily as in query params --
+    `https://x.test/customer/123-45-6789` would otherwise be written verbatim into a
+    tamper-evident record that is meant to contain no raw request content. Nothing is
+    lost for forensics: the audit entry already carries `blocked_host`, `resolved_ip` and
+    `matched_rule` as their own fields.
+
+    Fails soft, and that is the point: this runs INSIDE the egress-violation handler, so
+    an exception here would replace a security rejection with a 500 and lose the audit
+    event entirely. `urlsplit(...).port` raises ValueError on a malformed or out-of-range
+    port, which an attacker controls, so a URL that cannot be parsed is recorded as
+    unparseable rather than allowed to abort the denial.
     """
-    parsed = urlsplit(url)
-    hostname = parsed.hostname or ""
-    if ":" in hostname:
-        host = f"[{hostname}]"
-    else:
-        host = hostname
-    if parsed.port is not None:
-        host += f":{parsed.port}"
-    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname or ""
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        if parsed.port is not None:
+            host += f":{parsed.port}"
+        return urlunsplit((parsed.scheme, host, "", "", ""))
+    except ValueError:
+        return "<unparseable-url>"
 
 
 mcp_router = APIRouter()

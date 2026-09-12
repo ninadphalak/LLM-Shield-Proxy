@@ -69,7 +69,7 @@ from llm_shield_proxy.security.tool_rbac import (
     build_policy_resolver,
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
-from llm_shield_proxy.streaming.streaming import redact_model_originated_text, rehydrate_sse_stream
+from llm_shield_proxy.streaming.streaming import redact_model_originated_tree, rehydrate_sse_stream
 
 logger = logging.getLogger(__name__)
 
@@ -1175,6 +1175,17 @@ async def _proxy_catch_all_internal(
             if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
                 parsed_fallback = urlparse(x_shield_fallback_url)
                 hostname = parsed_fallback.hostname or ""
+                # `.port` PARSES, and raises ValueError on a non-numeric or out-of-range
+                # port ("https://h:abc", "https://h:99999"). Reading it lazily further
+                # down turned a malformed routing header into an unhandled 500. Force the
+                # parse here, inside the validation that already fails closed.
+                try:
+                    fallback_port = parsed_fallback.port
+                except ValueError:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {"message": "Forbidden fallback hostname", "type": "security_error"}},
+                    )
                 if parsed_fallback.scheme not in ("http", "https") or not hostname:
                     return JSONResponse(
                         status_code=403,
@@ -1188,7 +1199,7 @@ async def _proxy_catch_all_internal(
                     )
                 fallback_sni_hostname = hostname
                 ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
-                port_str = f":{parsed_fallback.port}" if parsed_fallback.port else ""
+                port_str = f":{fallback_port}" if fallback_port else ""
                 fallback_url_override = f"{parsed_fallback.scheme}://{ip_str}{port_str}{parsed_fallback.path}"
 
             max_retries = settings.MAX_RETRIES if settings.ENABLE_RETRY_FAILOVER else 0
@@ -1635,43 +1646,19 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
 
 
 def _redact_model_originated_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
-    """Redact model-originated PII in a non-streaming response, mirroring rehydration shapes.
+    """Redact model-originated PII anywhere in a non-streaming response.
 
-    Walks the same OpenAI/Anthropic fields as `_rehydrate_json_response`, but applies
-    `redact_model_originated_text` (which skips this session's own tokens) instead of
-    rehydrating. Called before rehydration so the two passes compose correctly.
+    This deliberately does NOT mirror `_rehydrate_json_response`'s shape walk. Rehydration
+    may be narrow: it only has to find this session's own tokens, which it put there.
+    Redaction may not, because it has to find text the MODEL chose to emit, and the model
+    chooses the field. An earlier version of this function walked exactly the rehydration
+    shapes and so skipped list-valued content parts, `refusal`, `reasoning_content`, and
+    Anthropic `thinking` / `tool_use` inputs -- all model-generated text, all forwarded
+    unscanned with `ENABLE_RESPONSE_PII_REDACTION` on.
+
+    Runs before rehydration, the same order the SSE path uses; see
+    `redact_model_originated_tree` for the structural-key exception list.
     """
     if not isinstance(res_json, dict):
         return res_json
-
-    import copy
-
-    res_copy = copy.deepcopy(res_json)
-
-    if "choices" in res_copy and isinstance(res_copy["choices"], list):
-        for choice in res_copy["choices"]:
-            if isinstance(choice, dict):
-                message = choice.get("message", {})
-                if isinstance(message, dict):
-                    if "content" in message and isinstance(message["content"], str):
-                        message["content"] = redact_model_originated_text(message["content"], vault)
-                    if "tool_calls" in message and isinstance(message["tool_calls"], list):
-                        for tc in message["tool_calls"]:
-                            if isinstance(tc, dict) and "function" in tc and isinstance(tc["function"], dict):
-                                fn = tc["function"]
-                                if "arguments" in fn and isinstance(fn["arguments"], str):
-                                    fn["arguments"] = redact_model_originated_text(fn["arguments"], vault)
-                    if "function_call" in message and isinstance(message["function_call"], dict):
-                        fn = message["function_call"]
-                        if "arguments" in fn and isinstance(fn["arguments"], str):
-                            fn["arguments"] = redact_model_originated_text(fn["arguments"], vault)
-                delta = choice.get("delta", {})
-                if isinstance(delta, dict) and "content" in delta and isinstance(delta["content"], str):
-                    delta["content"] = redact_model_originated_text(delta["content"], vault)
-
-    if "content" in res_copy and isinstance(res_copy["content"], list):
-        for block in res_copy["content"]:
-            if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
-                block["text"] = redact_model_originated_text(block["text"], vault)
-
-    return res_copy
+    return redact_model_originated_tree(res_json, vault)

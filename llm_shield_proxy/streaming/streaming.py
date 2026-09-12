@@ -72,6 +72,42 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
     return "".join(out)
 
 
+def redact_model_originated_tree(node: Any, vault: "Vault", skip_keys: frozenset = frozenset()) -> Any:
+    """Recursively redact model-originated PII in EVERY string a response carries.
+
+    Shape-following walkers are how response redaction gets quietly bypassed. A walker
+    that visits `message.content`, tool-call arguments and Anthropic `text` blocks looks
+    complete against today's schemas and silently misses list-valued content parts,
+    `refusal`, `reasoning_content`, and Anthropic `thinking` / `tool_use` inputs -- every
+    one of them model-generated text that reaches the client. Each new provider field is
+    then a leak until someone remembers to add it here.
+
+    So the default is to scan, and the exception list is explicit: `_SSE_STRUCTURAL_KEYS`
+    values are left alone because rewriting them changes what the response MEANS rather
+    than what it discloses (an id, a model name, a finish_reason is not PII, and mangling
+    them breaks clients for no privacy gain). This is the non-streaming counterpart of
+    `_redact_sibling_strings`, which applies the same rule per SSE event.
+
+    `skip_keys` exists for the streaming caller, whose ordered content channel is already
+    handled by the retention buffer. The non-streaming caller passes nothing: there is no
+    buffer, so content must be scanned here or not at all.
+    """
+    if isinstance(node, dict):
+        return {
+            key: (
+                value
+                if key in _SSE_STRUCTURAL_KEYS or key in skip_keys
+                else redact_model_originated_tree(value, vault, skip_keys)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [redact_model_originated_tree(item, vault, skip_keys) for item in node]
+    if isinstance(node, str):
+        return redact_model_originated_text(node, vault)
+    return node
+
+
 def _redact_sibling_strings(node: Any, buffer: "SSERehydrationBuffer", skip_content: bool = True) -> Any:
     """Redact model-originated PII in event fields OTHER than the delta content.
 
