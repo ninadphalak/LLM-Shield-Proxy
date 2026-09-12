@@ -482,7 +482,7 @@ def _presidio_redact(text: str, url: str = PRESIDIO_ANALYZER_URL) -> str:
         return text
     payload = json.dumps({"text": text, "language": "en"}).encode()
     request = Request(url, data=payload, headers={"Content-Type": "application/json"})
-    with urlopen(request, timeout=30) as response:  # noqa: S310
+    with urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
         spans = json.loads(response.read().decode("utf-8"))
     keep = [s for s in spans if s.get("entity_type") != "URL"]
     out = text
@@ -1618,13 +1618,23 @@ class RunResult:
 def _serve(
     handler: type[BaseHTTPRequestHandler], port: int = 0
 ) -> tuple[ThreadingHTTPServer, str]:
-    # allow_reuse_address is deliberately NOT set. It was, and on Windows SO_REUSEADDR
-    # lets a SECOND socket bind a port another process already holds -- and the older
-    # socket keeps receiving. A stale capture from a previous run then answered every
-    # request while the new one recorded nothing, and the case scored as "did not leak"
-    # because the stale fixture's needles differ from the current one's. Binding must
-    # fail loudly instead.
-    ThreadingHTTPServer.allow_reuse_address = False
+    # SO_REUSEADDR is set per PLATFORM, because the option does not mean the same thing
+    # on both and the hazard it caused here is Windows-only.
+    #
+    # Windows: SO_REUSEADDR lets a SECOND socket bind a port another process already
+    # holds, and the OLDER socket keeps receiving. A stale capture from a previous run
+    # then answered every request while the new one recorded nothing, and the case
+    # scored as "did not leak" because the stale fixture's needles differ from the
+    # current one's. It must stay off, and binding must fail loudly.
+    #
+    # POSIX: SO_REUSEADDR cannot steal a live listener -- that is SO_REUSEPORT. All it
+    # permits is rebinding a port held in TIME_WAIT by a CLOSED connection. Leaving it
+    # off there does not buy the protection above; it just makes an honest rebind fail
+    # with EADDRINUSE, which is what happened on the Linux CI runners: the capture's own
+    # `Connection: close` puts the accepted socket into TIME_WAIT on the capture port, so
+    # serving two cases on one fixed port could never work. The stale-capture hazard is
+    # still covered on POSIX -- a live listener on the port makes bind() fail either way.
+    ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pii-leak-benchmark
 
 from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     DEFAULT_POLICIES,
-    POLICIES,
     run_policy,
 )
 
