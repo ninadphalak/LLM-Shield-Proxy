@@ -50,9 +50,21 @@ def test_transient_recovery(monkeypatch, mock_httpx_request):
 
 
 def test_explicit_failover(monkeypatch, mock_httpx_request):
-    """Test 2: Explicit Failover - Mock 503 persistently. Pass X-Shield-Fallback-URL and validate."""
+    """Test 2: Explicit Failover - Mock 503 persistently. Pass X-Shield-Fallback-URL and validate.
+
+    A client-supplied fallback is a routing override, so it needs ALLOW_CLIENT_UPSTREAM_OVERRIDE
+    open and it is IP-pinned like the primary override: the dialed URL carries the validated IP
+    and the original hostname rides along in the Host header for TLS. See
+    test_audit_findings.py for the gate-closed and metadata-rejection halves of this contract.
+    """
     monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", True)
     monkeypatch.setattr(settings, "MAX_RETRIES", 1) # Reduce retries for faster test
+    monkeypatch.setattr(settings, "ALLOW_CLIENT_UPSTREAM_OVERRIDE", True)
+
+    async def _accept(hostname):
+        return True, "93.184.216.34"
+
+    monkeypatch.setattr("llm_shield_proxy.api.main._resolve_and_validate_hostname", _accept)
 
     # 503 response
     mock_response_503 = httpx.Response(503, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
@@ -81,10 +93,13 @@ def test_explicit_failover(monkeypatch, mock_httpx_request):
         assert response.json()["choices"][0]["message"]["content"] == "Fallback Success"
         assert mock_httpx_request.call_count == 3
 
-        # Verify the last call was to the fallback URL
-        last_call_url = str(mock_httpx_request.call_args_list[-1].kwargs["url"])
+        # The last call goes to the PINNED IP, never to the unresolved hostname.
+        last_call = mock_httpx_request.call_args_list[-1]
+        last_call_url = str(last_call.kwargs["url"])
         from urllib.parse import urlparse
-        assert urlparse(last_call_url).hostname == "fallback.example.com"
+        assert urlparse(last_call_url).hostname == "93.184.216.34"
+        # ...and the real hostname rides along so TLS still verifies against it.
+        assert last_call.kwargs["headers"]["host"] == "fallback.example.com"
 
 
 def test_fast_fail(monkeypatch, mock_httpx_request):

@@ -24,7 +24,6 @@ import unicodedata
 from collections import OrderedDict
 from typing import Callable, Dict, Optional
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from faker import Faker
 
 from llm_shield_proxy.core.config import settings
@@ -39,18 +38,6 @@ except ImportError:
     redis = None  # type: ignore
 
 _faker_ctx: contextvars.ContextVar[Faker] = contextvars.ContextVar("faker_ctx")
-_PROCESS_DEK: Optional[bytes] = None
-
-
-def get_vault_dek() -> bytes:
-    """Retrieves or derives 256-bit Data Encryption Key (DEK) for AES-256-GCM vault security."""
-    global _PROCESS_DEK
-    key_src = settings.VAULT_ENCRYPTION_KEY
-    if key_src:
-        return hashlib.sha256(key_src.encode("utf-8")).digest()
-    if _PROCESS_DEK is None:
-        _PROCESS_DEK = AESGCM.generate_key(bit_length=256)
-    return _PROCESS_DEK
 
 
 class Vault:
@@ -62,13 +49,11 @@ class Vault:
 
     Note: original PII values are held in plaintext in `original_to_token`/
     `token_to_original` for the vault's lifetime -- this class does NOT encrypt
-    them. `self.dek`/`self._aesgcm` are currently unused by this class (no
-    caller reads `self.dek` or invokes `self._aesgcm`); AES-256-GCM encryption
-    elsewhere in the codebase (e.g. `engines/crypto_vault.py`, the stateless
-    mutation engine's cipher) is separate from this vault's own token maps.
-    Confidentiality of the in-memory mapping relies on process memory isolation
-    (or, for `RedisVaultStore`, on Redis ACLs/TLS) and TTL-bounded lifetime, not
-    on encryption at this layer.
+    them. AES-256-GCM encryption elsewhere in the codebase (e.g.
+    `engines/crypto_vault.py`, the stateless mutation engine's cipher) is
+    separate from this vault's own token maps. Confidentiality of the in-memory
+    mapping relies on process memory isolation (or, for `RedisVaultStore`, on
+    Redis ACLs/TLS) and TTL-bounded lifetime, not on encryption at this layer.
 
     Thread-safe and supports multi-tenant namespace isolation.
     """
@@ -77,15 +62,14 @@ class Vault:
         self,
         tenant_id: str = "default",
         session_id: str = "default",
+        virtual_key_id: str = "default",
         synthetic: Optional[bool] = None,
         save_callback: Optional[Callable[[Vault], None]] = None,
-        dek: Optional[bytes] = None,
     ) -> None:
         self.tenant_id: str = tenant_id
         self.session_id: str = session_id
+        self.virtual_key_id: str = virtual_key_id
         self.synthetic: bool = synthetic if synthetic is not None else settings.ENABLE_SYNTHETIC_SWAPPING
-        self.dek: bytes = dek or get_vault_dek()
-        self._aesgcm: AESGCM = AESGCM(self.dek)
         self.original_to_token: Dict[str, str] = {}
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
@@ -276,6 +260,7 @@ class Vault:
 
         # Neutralize Markdown Image Exfiltration payloads
         if retention_length == 0 and "![" in result:
+            originals_ge_4 = [orig for orig in self.original_to_token.keys() if len(orig) >= 4]
             result = re.sub(
                 r"!\[(.*?)\]\((https?://[^\s)]+)\)",
                 lambda m: (
@@ -283,7 +268,7 @@ class Vault:
                     if (
                         "?" in m.group(2)
                         or "leak" in m.group(2).lower()
-                        or any(orig in m.group(2) for orig in self.original_to_token.keys() if len(orig) >= 4)
+                        or any(orig in m.group(2) for orig in originals_ge_4)
                     )
                     else m.group(0)
                 ),
@@ -358,7 +343,7 @@ class VaultStore:
             The session-bound Vault instance.
         """
         if not session_id:
-            return Vault()
+            return Vault(virtual_key_id=virtual_key_id)
 
         vault_key = f"{virtual_key_id}:{session_id}"
         now = time.time()
@@ -378,7 +363,7 @@ class VaultStore:
                 oldest_key, _ = self._sessions.popitem(last=False)
                 self._timestamps.pop(oldest_key, None)
 
-            new_vault = Vault()
+            new_vault = Vault(session_id=session_id, virtual_key_id=virtual_key_id)
             self._sessions[vault_key] = new_vault
             self._timestamps[vault_key] = now
             return new_vault
@@ -433,7 +418,7 @@ class RedisVaultStore:
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
         """Synchronous vault retrieval for backward compatibility and sync tests."""
         if not session_id:
-            return Vault()
+            return Vault(virtual_key_id=virtual_key_id)
 
         vault_key = f"{virtual_key_id}:{session_id}"
         data = self.sync_client.get(vault_key)
@@ -453,7 +438,7 @@ class RedisVaultStore:
             except RuntimeError:
                 self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
 
-        vault = Vault(save_callback=save_callback)
+        vault = Vault(session_id=session_id, virtual_key_id=virtual_key_id, save_callback=save_callback)
         if data:
             try:
                 parsed = json.loads(data)
@@ -470,7 +455,7 @@ class RedisVaultStore:
     async def get_vault_async(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
         """Non-blocking async Redis vault retrieval using redis.asyncio."""
         if not session_id:
-            return Vault()
+            return Vault(virtual_key_id=virtual_key_id)
 
         vault_key = f"{virtual_key_id}:{session_id}"
         data = await self.async_client.get(vault_key)
@@ -494,7 +479,7 @@ class RedisVaultStore:
                 # Fallback to sync if not running in an async event loop
                 self.sync_client.setex(vault_key, self.ttl, json.dumps(payload))
 
-        vault = Vault(save_callback=save_callback)
+        vault = Vault(session_id=session_id, virtual_key_id=virtual_key_id, save_callback=save_callback)
         if data:
             try:
                 parsed = json.loads(data)

@@ -44,8 +44,12 @@ class CompiledProfile:
 # Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
 INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
 
-# Candidate base64 patterns for obfuscated PII smuggling
-BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9+/]{20,}={0,2}\b")
+# Candidate base64 patterns for obfuscated PII smuggling. The lower bound of 8
+# data characters matches the >= 6 decoded-byte floor enforced below, and the
+# lookaround boundaries (instead of `\b`) keep trailing '=' padding inside the
+# match so padded base64 actually decodes -- the old trailing `\b` stripped the
+# padding, which made every padded value fail the validate=True decode.
+BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}(?![A-Za-z0-9+/=])")
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
 
@@ -582,13 +586,13 @@ class PIIEngine:
                 for offset, segment in scan_segments:
                     for match in pattern.finditer(segment):
                         matched_text = match.group(0)
-                        # Structural validation. Fail-closed: any error keeps the span.
-                        try:
-                            keep, _confidence = classify_tier1_match(entity_type, matched_text)
-                        except Exception:  # noqa: BLE001
-                            keep = True
-                        if not keep:
-                            continue
+                        # classify_tier1_match is deliberately NOT called here. It is a pure
+                        # function whose every branch returns keep=True, so the old
+                        # `if not keep: continue` was unreachable and the call was work with
+                        # no effect -- a Luhn checksum and an IIN lookup per card-shaped
+                        # match, thrown away. Detection does not consult it, and must not:
+                        # a validator that rejects is a validator that can leak. It stays as
+                        # a standalone, tested signal for callers that want confidence.
                         raw_spans.append(
                             (offset + match.start(), offset + match.end(), entity_type, matched_text)
                         )

@@ -13,6 +13,7 @@ import inspect
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import orjson
@@ -32,6 +33,24 @@ from llm_shield_proxy.security.egress_guard import (
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, build_policy_resolver
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_url_for_audit(url: str) -> str:
+    """Strip query string, fragment, and userinfo from a URL for the audit chain.
+
+    A `tools/call` URL can carry secrets/PII in query params or embedded credentials;
+    the signed audit chain must not record them.
+    """
+    parsed = urlsplit(url)
+    hostname = parsed.hostname or ""
+    if ":" in hostname:
+        host = f"[{hostname}]"
+    else:
+        host = hostname
+    if parsed.port is not None:
+        host += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
 
 mcp_router = APIRouter()
 
@@ -253,7 +272,7 @@ async def _process_single_call(
                     "reason": exc.reason,
                     "tool_name": tool_name,
                     "method": method,
-                    "blocked_url": exc.url,
+                    "blocked_url": _redact_url_for_audit(exc.url),
                     "blocked_host": exc.host,
                     "resolved_ip": exc.matched_ip,
                     "matched_rule": exc.matched_rule,
@@ -311,7 +330,7 @@ async def _process_single_call(
         AuditLogger.log_security_event(
             event_type="mcp_upstream_failure",
             severity="CRITICAL",
-            details={"reason": "MCP Upstream Unavailable", "error": str(exc), "method": method},
+            details={"reason": "MCP Upstream Unavailable", "error_type": type(exc).__name__, "method": method},
             virtual_key_id=virtual_key,
         )
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "Upstream MCP server unreachable") if has_id else None
@@ -402,7 +421,7 @@ async def mcp_gateway(
                 details={
                     "reason": exc.reason,
                     "method": "upstream_routing",
-                    "blocked_url": exc.url,
+                    "blocked_url": _redact_url_for_audit(exc.url),
                     "blocked_host": exc.host,
                     "resolved_ip": exc.matched_ip,
                     "matched_rule": exc.matched_rule,

@@ -202,7 +202,14 @@ def test_bare_digit_runs_are_not_rejected_as_phone_matches():
 
 
 def test_validation_fails_closed_when_it_raises(engine, monkeypatch):
-    """A validator that explodes must redact, not leak. Never the reverse."""
+    """A validator that explodes must redact, not leak. Never the reverse.
+
+    Since 1.6.1 this holds for the strongest possible reason: detect_spans does not
+    call classify_tier1_match at all, so no behaviour of the validator -- raising
+    included -- can drop a span. The monkeypatch stays as the regression guard on
+    that independence. If someone wires the validator back into the detection path,
+    this test fails and they have to argue for it.
+    """
     import llm_shield_proxy.engines.pii_engine as module
 
     def boom(*_args, **_kwargs):

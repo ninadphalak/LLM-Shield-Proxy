@@ -35,6 +35,43 @@ _SSE_STRUCTURAL_KEYS = frozenset(
 _CONTENT_KEYS = frozenset({"content", "text"})
 
 
+def redact_model_originated_text(text: str, vault: "Vault") -> str:
+    """Redact PII the model produced, leaving this vault's own tokens alone.
+
+    ORDER IS LOAD-BEARING, and it is the whole difficulty of the response path. The
+    text here still holds vault TOKENS, and in SYNTHETIC mode a token is a
+    realistic-looking value, so a detector cannot tell "the surrogate we substituted"
+    from "PII the model invented" by appearance alone. Redacting after rehydration
+    would destroy the caller's own data; redacting without consulting the vault would
+    destroy the surrogates and leave nothing to restore. Both mistakes are observable
+    in shipping gateways.
+
+    So spans whose matched text is a known token are skipped and everything else is
+    replaced. Rehydration then runs on what survives.
+    """
+    if not text:
+        return text
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+
+    try:
+        spans = pii_engine.detect_spans(text)
+    except Exception:  # noqa: BLE001
+        # Deliberately NOT fail-closed, unlike the request path. Failing closed here
+        # means emitting nothing to the client, which breaks the response for a
+        # scanner error rather than for a leak. The text is forwarded and the failure
+        # is logged, so the gap is visible rather than silent.
+        logger.warning("Response PII scan failed; forwarding unscanned text", exc_info=True)
+        return text
+
+    known = getattr(vault, "token_to_original", None) or {}
+    out = list(text)
+    for start, end, entity_type, matched_text in reversed(spans):
+        if matched_text in known:
+            continue
+        out[start:end] = list(f"[{entity_type}_REDACTED]")
+    return "".join(out)
+
+
 def _redact_sibling_strings(node: Any, buffer: "SSERehydrationBuffer", skip_content: bool = True) -> Any:
     """Redact model-originated PII in event fields OTHER than the delta content.
 
@@ -181,40 +218,8 @@ class SSERehydrationBuffer:
         return window - boundary - 1 if boundary != -1 else window
 
     def _redact_model_originated(self, text: str) -> str:
-        """Redact PII the model produced, leaving this vault's own tokens alone.
-
-        ORDER IS LOAD-BEARING, and it is the whole difficulty of the response path. The
-        text here still holds vault TOKENS, and in SYNTHETIC mode a token is a
-        realistic-looking value, so a detector cannot tell "the surrogate we substituted"
-        from "PII the model invented" by appearance alone. Redacting after rehydration
-        would destroy the caller's own data; redacting without consulting the vault would
-        destroy the surrogates and leave nothing to restore. Both mistakes are observable
-        in shipping gateways.
-
-        So spans whose matched text is a known token are skipped and everything else is
-        replaced. Rehydration then runs on what survives.
-        """
-        if not text:
-            return text
-        from llm_shield_proxy.engines.pii_engine import pii_engine
-
-        try:
-            spans = pii_engine.detect_spans(text)
-        except Exception:  # noqa: BLE001
-            # Deliberately NOT fail-closed, unlike the request path. Failing closed here
-            # means emitting nothing to the client, which breaks the response for a
-            # scanner error rather than for a leak. The text is forwarded and the failure
-            # is logged, so the gap is visible rather than silent.
-            logger.warning("Response PII scan failed; forwarding unscanned text", exc_info=True)
-            return text
-
-        known = getattr(self.vault, "token_to_original", None) or {}
-        out = list(text)
-        for start, end, entity_type, matched_text in reversed(spans):
-            if matched_text in known:
-                continue
-            out[start:end] = list(f"[{entity_type}_REDACTED]")
-        return "".join(out)
+        """Delegate to the module-level scanner so the non-streaming path can reuse it."""
+        return redact_model_originated_text(text, self.vault)
 
     def _calculate_retention_length(self, text: str) -> int:
         """Calculates the minimum trailing retention boundary needed for text.
