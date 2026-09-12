@@ -140,8 +140,9 @@ def test_a_response_that_never_reached_the_capture_is_inconclusive() -> None:
     OLDER one keeps receiving), and a Higress probe reported every injected value
     contained while the capture for that run had recorded zero requests.
     """
-    from pii_leak_benchmark.v2_emitter import _sse, run_case
     from http.server import BaseHTTPRequestHandler
+
+    from pii_leak_benchmark.v2_emitter import _sse, run_case
 
     segments = build_segments("a1b2c3d4e5f60001")
     case = {
