@@ -609,11 +609,11 @@ class AuditLogger:
         Deliberately carries only the exception's type name -- never `str(exc)` or a
         traceback, since either can contain raw request content (a fragment of an
         unredacted prompt, a malformed value under inspection, etc.) that has no
-        business entering the "zero raw PII leakage" WORM audit chain. The full
-        exception message and traceback belong in the operational application logger
-        (see `global_exception_handler` in api/main.py, which logs both there via
-        `logger.error(..., exc_info=exc)`) -- a separate sink with shorter retention
-        that engineers use for root-causing, not the compliance-grade audit record.
+        business entering the "zero raw PII leakage" WORM audit chain. The operational
+        application logger (`global_exception_handler` in api/main.py) is the sink for
+        root-causing: it adds the frame LOCATIONS (`file:line in function`), which cannot
+        carry runtime data, but it withholds `str(exc)` too. Neither sink carries raw
+        request content; this one is the stricter of the two.
         """
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

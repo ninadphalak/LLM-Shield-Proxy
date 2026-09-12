@@ -21,6 +21,7 @@ import logging
 import re
 import socket
 import time
+import traceback
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
@@ -31,7 +32,7 @@ from urllib.parse import urlparse
 
 import httpx
 import orjson
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from watchdog.events import FileSystemEventHandler
@@ -68,11 +69,11 @@ from llm_shield_proxy.security.tool_rbac import (
     build_policy_resolver,
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
-from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+from llm_shield_proxy.streaming.streaming import redact_model_originated_text, rehydrate_sse_stream
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 
 
 class AppState:
@@ -460,26 +461,59 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
                 app_state.shutdown_event.set()
 
 
+_TRACEBACK_FRAME_LIMIT = 20
+
+
+def _format_sanitized_traceback(exc: BaseException) -> str:
+    """Frame locations only -- ``file:line in function`` -- and nothing else.
+
+    ``exc_info=exc`` hands the logging module the whole exception, and the last line it
+    renders is ``str(exc)`` -- exactly the part that can embed raw request content
+    ("invalid literal for int() with base 10: '<value under inspection>'"). Dropping the
+    traceback altogether is the other extreme: it honours the zero-PII invariant and
+    leaves a 500 with nowhere to look. Locations are the middle: they pin the fault to a
+    line and cannot carry runtime data.
+
+    ``lookup_lines=False`` is load-bearing, not an optimisation. The rendered source line
+    a normal traceback shows is the one place a frame can reproduce a value verbatim --
+    a literal on the raising line -- and it also costs file I/O on an error path. We
+    never read it. Chained causes are not walked either: their messages are the same
+    hazard, and the immediate frames already locate the fault.
+    """
+    try:
+        summary = traceback.StackSummary.extract(
+            traceback.walk_tb(exc.__traceback__),
+            limit=_TRACEBACK_FRAME_LIMIT,
+            lookup_lines=False,
+        )
+    except Exception:  # noqa: BLE001
+        return "<traceback unavailable>"
+    if not summary:
+        return "<no frames>"
+    return "\n".join(f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in summary)
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Sanitized global exception handler preventing raw PII or stack trace leaks.
 
-    The client only ever sees a flat "Internal Server Error" -- but the exception and
-    its full traceback are NOT lost: they go to the operational application logger
-    (this process's stdout/stderr, which enterprises typically ship to a SIEM/log
-    aggregator via a sidecar or the container log driver) with the request_id attached
-    for correlation, plus a PII-safe CRITICAL entry in the signed WORM audit chain
-    (see AuditLogger.log_unhandled_exception) so the *fact* that a request failed
-    unhandled is part of the tamper-evident compliance record even though the raw
-    exception detail deliberately isn't.
+    The client only ever sees a flat "Internal Server Error". The operational
+    application logger records the exception's type name and its frame LOCATIONS
+    (``file:line in function``), but never ``str(exc)``: an exception raised
+    mid-redaction can carry a fragment of the unredacted prompt in its message, whereas
+    a location cannot carry runtime data at all. See ``_format_sanitized_traceback``.
+    The *fact* that a request failed unhandled is additionally written to the signed
+    WORM audit chain (see AuditLogger.log_unhandled_exception), which is stricter still
+    and carries only the exception type.
     """
     request_id = getattr(request.state, "request_id", None) or "n/a"
     logger.error(
-        "Unhandled exception on %s %s (request_id=%s)",
+        "Unhandled exception on %s %s (request_id=%s, exception_type=%s)\n%s",
         request.method,
         request.url.path,
         request_id,
-        exc_info=exc,
+        type(exc).__name__,
+        _format_sanitized_traceback(exc),
     )
     AuditLogger.log_unhandled_exception(
         request_id=request_id,
@@ -519,8 +553,15 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
     """Reads request body stream enforcing maximum memory payload limits."""
     max_limit = limit or settings.MAX_PAYLOAD_SIZE_BYTES
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > max_limit:
-        raise ValueError("Payload Too Large")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+        if declared_length < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+        if declared_length > max_limit:
+            raise ValueError("Payload Too Large")
 
     body_bytes = bytearray()
     cumulative_size = 0
@@ -540,7 +581,6 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
             body_bytes.extend(chunk)
             cumulative_size += chunk_len
         except TimeoutError:
-            from fastapi import HTTPException
             raise HTTPException(status_code=408, detail="Request Timeout: Slowloris prevention")
 
     return bytes(body_bytes)
@@ -657,9 +697,6 @@ async def _proxy_catch_all_internal(
     background_tasks: Optional[BackgroundTasks] = None,
     policy_resolver: Optional[BasePolicyResolver] = None,
 ) -> Response:
-    if path == "metrics":
-        return await metrics_endpoint(request)
-
     # CORS Preflight
     if request.method == "OPTIONS":
         origin = request.headers.get("origin", "")
@@ -907,6 +944,8 @@ async def _proxy_catch_all_internal(
                 status_code=400,
                 content={"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}},
             )
+        except HTTPException:
+            raise
         except Exception:
             return JSONResponse(
                 status_code=400,
@@ -1144,6 +1183,31 @@ async def _proxy_catch_all_internal(
                     redacted_bytes = body_bytes
 
             x_shield_fallback_url = request.headers.get("x-shield-fallback-url")
+            # SSRF guard: a client-supplied failover target is a routing override just like
+            # X-Upstream-Base-Url, so it must be gated by the same flag and IP-pinned by the
+            # same resolver. The configured FALLBACK_BASE_URL is operator-controlled (like
+            # UPSTREAM_BASE_URL) and is used directly.
+            fallback_url_override: Optional[str] = None
+            fallback_sni_hostname: Optional[str] = None
+            if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
+                parsed_fallback = urlparse(x_shield_fallback_url)
+                hostname = parsed_fallback.hostname or ""
+                if parsed_fallback.scheme not in ("http", "https") or not hostname:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {"message": "Forbidden fallback hostname", "type": "security_error"}},
+                    )
+                is_safe, resolved_ip = await _resolve_and_validate_hostname(hostname)
+                if not is_safe or not resolved_ip:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {"message": "Forbidden fallback hostname", "type": "security_error"}},
+                    )
+                fallback_sni_hostname = hostname
+                ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+                port_str = f":{parsed_fallback.port}" if parsed_fallback.port else ""
+                fallback_url_override = f"{parsed_fallback.scheme}://{ip_str}{port_str}{parsed_fallback.path}"
+
             max_retries = settings.MAX_RETRIES if settings.ENABLE_RETRY_FAILOVER else 0
 
             if is_streaming:
@@ -1187,19 +1251,20 @@ async def _proxy_catch_all_internal(
                             continue
 
                         if settings.ENABLE_RETRY_FAILOVER and not is_fallback:
-                            fallback_url = x_shield_fallback_url or settings.FALLBACK_BASE_URL
+                            fallback_url = fallback_url_override or settings.FALLBACK_BASE_URL
                             if fallback_url:
                                 is_fallback = True
                                 attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
-                                # Fallback URLs are plain configured FQDNs, never IP-rewritten,
-                                # so normal httpx hostname-based TLS applies -- no SNI override.
-                                current_sni_hostname = None
+                                # A client-supplied fallback is IP-pinned and carries its original
+                                # hostname for TLS SNI; a configured fallback is a plain FQDN with
+                                # normal httpx hostname-based TLS.
+                                current_sni_hostname = fallback_sni_hostname
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
-                                parsed_fallback = urlparse(fallback_url)
-                                if parsed_fallback.hostname:
-                                    current_headers["host"] = parsed_fallback.hostname
+                                fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_host:
+                                    current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
                                 continue
 
@@ -1330,19 +1395,20 @@ async def _proxy_catch_all_internal(
                             continue
 
                         if settings.ENABLE_RETRY_FAILOVER and not is_fallback:
-                            fallback_url = x_shield_fallback_url or settings.FALLBACK_BASE_URL
+                            fallback_url = fallback_url_override or settings.FALLBACK_BASE_URL
                             if fallback_url:
                                 is_fallback = True
                                 attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
-                                # Fallback URLs are plain configured FQDNs, never IP-rewritten,
-                                # so normal httpx hostname-based TLS applies -- no SNI override.
-                                current_sni_hostname = None
+                                # A client-supplied fallback is IP-pinned and carries its original
+                                # hostname for TLS SNI; a configured fallback is a plain FQDN with
+                                # normal httpx hostname-based TLS.
+                                current_sni_hostname = fallback_sni_hostname
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
-                                parsed_fallback = urlparse(fallback_url)
-                                if parsed_fallback.hostname:
-                                    current_headers["host"] = parsed_fallback.hostname
+                                fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_host:
+                                    current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
                                 continue
 
@@ -1401,11 +1467,20 @@ async def _proxy_catch_all_internal(
                         rehydrator = NonStreamingRehydrator(v3_cipher)
                         rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, res_json)
                     else:
+                        # Response-path model-originated PII redaction for the non-streaming
+                        # REST path: redact what the model produced that is not this session's
+                        # own token, then rehydrate the caller's own values -- the same order
+                        # as the SSE path.
+                        scan_target = res_json
+                        if settings.ENABLE_RESPONSE_PII_REDACTION:
+                            scan_target = await loop.run_in_executor(
+                                None, _redact_model_originated_json_response, res_json, vault
+                            )
                         if target_provider == "anthropic":
-                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, scan_target, vault)
                             rehydrated_res = AnthropicAdapter.transform_response(rehydrated_res)
                         else:
-                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, scan_target, vault)
 
                     if watermark_text:
                         _append_watermark(rehydrated_res, watermark_text)
@@ -1572,5 +1647,48 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
         for block in res_copy["content"]:
             if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
                 block["text"] = vault.rehydrate(block["text"])
+
+    return res_copy
+
+
+def _redact_model_originated_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
+    """Redact model-originated PII in a non-streaming response, mirroring rehydration shapes.
+
+    Walks the same OpenAI/Anthropic fields as `_rehydrate_json_response`, but applies
+    `redact_model_originated_text` (which skips this session's own tokens) instead of
+    rehydrating. Called before rehydration so the two passes compose correctly.
+    """
+    if not isinstance(res_json, dict):
+        return res_json
+
+    import copy
+
+    res_copy = copy.deepcopy(res_json)
+
+    if "choices" in res_copy and isinstance(res_copy["choices"], list):
+        for choice in res_copy["choices"]:
+            if isinstance(choice, dict):
+                message = choice.get("message", {})
+                if isinstance(message, dict):
+                    if "content" in message and isinstance(message["content"], str):
+                        message["content"] = redact_model_originated_text(message["content"], vault)
+                    if "tool_calls" in message and isinstance(message["tool_calls"], list):
+                        for tc in message["tool_calls"]:
+                            if isinstance(tc, dict) and "function" in tc and isinstance(tc["function"], dict):
+                                fn = tc["function"]
+                                if "arguments" in fn and isinstance(fn["arguments"], str):
+                                    fn["arguments"] = redact_model_originated_text(fn["arguments"], vault)
+                    if "function_call" in message and isinstance(message["function_call"], dict):
+                        fn = message["function_call"]
+                        if "arguments" in fn and isinstance(fn["arguments"], str):
+                            fn["arguments"] = redact_model_originated_text(fn["arguments"], vault)
+                delta = choice.get("delta", {})
+                if isinstance(delta, dict) and "content" in delta and isinstance(delta["content"], str):
+                    delta["content"] = redact_model_originated_text(delta["content"], vault)
+
+    if "content" in res_copy and isinstance(res_copy["content"], list):
+        for block in res_copy["content"]:
+            if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
+                block["text"] = redact_model_originated_text(block["text"], vault)
 
     return res_copy
