@@ -573,4 +573,26 @@ def test_tool_argument_url_secret_is_redacted_in_audit(httpx_mock, monkeypatch):
     details = mock_log.call_args[1]["details"]
     assert "SUPERSECRET" not in details["blocked_url"]
     assert "token=" not in details["blocked_url"]
-    assert details["blocked_url"] == "http://evil.example.com/upload"
+    # The path goes too: identifiers live in paths as readily as in query params.
+    assert details["blocked_url"] == "http://evil.example.com"
+
+
+def test_redact_url_for_audit_drops_identifier_bearing_paths():
+    """C3: a PII-bearing path must not reach the signed chain either."""
+    from llm_shield_proxy.api.mcp_router import _redact_url_for_audit
+
+    assert _redact_url_for_audit("https://x.test/customer/123-45-6789") == "https://x.test"
+    assert _redact_url_for_audit("https://u:pw@x.test:8443/a/b?q=s#f") == "https://x.test:8443"
+    assert _redact_url_for_audit("http://[::1]:9000/path") == "http://[::1]:9000"
+
+
+def test_redact_url_for_audit_survives_a_malformed_port():
+    """A denial must not become a 500 because the attacker chose an unparseable port.
+
+    `urlsplit(...).port` raises ValueError on these, and this helper runs inside the
+    egress-violation handler -- so raising would drop the audit event as well.
+    """
+    from llm_shield_proxy.api.mcp_router import _redact_url_for_audit
+
+    for bad in ("https://evil.test:abc/x", "https://evil.test:99999/x"):
+        assert _redact_url_for_audit(bad) == "<unparseable-url>"
