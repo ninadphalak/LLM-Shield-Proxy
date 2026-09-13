@@ -14,6 +14,22 @@ production rollout.
 | Envoy `ext_proc` | [`envoy/envoy.yaml`](envoy/envoy.yaml) | body modes, buffer limits, timeout/failure policy, UDS permissions |
 | MCP JSON-RPC gateway | [`mcp_jsonrpc.py`](mcp_jsonrpc.py) | supported methods, policy resolver, upstream URL policy, response types |
 
+## LiteLLM: in front of the proxy, or inside it
+
+`litellm/` ships two wirings, and they are not interchangeable.
+
+**In front** — `litellm/docker-compose.yml`. Clients call LLM Shield, which forwards to
+LiteLLM. Nothing is installed into LiteLLM. The cost is that the shield then owns the
+upstream path: LiteLLM's model routing, key management, retries and budgets sit behind it,
+and the shield must be trusted with the route.
+
+**In-process** — `litellm/config.guardrail.yaml`. LiteLLM calls the shield as a guardrail and
+keeps the model path. `pre_call` redacts the outbound request, `post_call` restores the reply,
+and streaming replies are restored as chunks arrive rather than buffered. This needs
+`pip install llm-shield-proxy` in the proxy's own environment, because LiteLLM imports
+`llm_shield_proxy.integrations.litellm_guardrail.LLMShieldProxyGuardrail` from it. No file in
+LiteLLM's repository is modified, so there is nothing to keep in sync with upstream.
+
 ## Common client configuration
 
 The HTTP examples use `http://localhost:8000/v1` and a non-provider client credential.
