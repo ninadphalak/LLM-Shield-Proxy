@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import logging
-from typing import Any, AsyncGenerator, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, Iterator, Optional
 
 import orjson as json
 
@@ -28,11 +28,79 @@ _SSE_STRUCTURAL_KEYS = frozenset(
     {"id", "object", "model", "role", "type", "finish_reason", "index", "created"}
 )
 
-# The ordered content channels, already handled by the retention buffer above. They are
-# skipped at EVERY depth, not just the top level: the buffer has already rehydrated the
-# caller's own values into them, and re-scanning would redact the caller's data back out
-# -- fidelity 1.00 to 0.00 in one line, which is how this was caught.
-_CONTENT_KEYS = frozenset({"content", "text"})
+# The ordered channels the retention buffer owns. They are skipped at EVERY depth, not
+# just the top level: the buffer has already redacted and rehydrated them in that order,
+# and re-scanning would redact the caller's own restored values back out -- fidelity 1.00
+# to 0.00 in one line, which is how this was caught. `arguments` joined the set when
+# streamed tool-call arguments became a buffered channel; it is NOT skipped on the
+# non-streaming path, which has no buffer and passes no `skip_keys`.
+_BUFFERED_CHANNEL_KEYS = frozenset({"content", "text", "arguments"})
+
+# How many retention windows one stream may open. Every channel needs its own (see
+# `_buffer_for`): one per choice for content, plus one per tool call per choice for that
+# call's accumulating `arguments`. Both counts are attacker-influenced through an upstream
+# that invents indices, so the total is bounded and fails closed past the bound rather
+# than allocating on demand -- invariant 1. 256 is far above any real `n` x tool-call
+# fan-out and far below a memory concern at 64 KiB of buffer each.
+MAX_STREAM_WINDOWS = 256
+
+# A retention window's identity: `(choice index, tool-call index or None)`. `None` is that
+# choice's ordered content channel; an int is one tool call's `arguments` fragments. They
+# are separate token streams and must never share a window -- see `_buffer_for`.
+_WindowKey = tuple
+
+
+def _entry_index(entry: Any) -> int:
+    """The `index` an SSE choice or tool-call delta is matched by across events.
+
+    An event that omits it carries the single choice of an `n`=1 stream, which is index
+    0. A bool is an int in Python and would silently alias indices 0 and 1, so upstream
+    junk in this field falls back to 0 rather than opening a window under it.
+    """
+    raw = entry.get("index", 0) if isinstance(entry, dict) else 0
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return raw
+    return 0
+
+
+def _tool_argument_fragments(delta: Any) -> Iterator[tuple]:
+    """Yields `(tool-call index, function object)` for each argument fragment in a delta.
+
+    A streaming tool call arrives as `arguments` fragments spread across events and keyed
+    by the tool call's own `index`; the client concatenates them and parses the result as
+    JSON when the choice finishes. The fragments are model-generated text like any other,
+    so they can carry this session's placeholders and have to be restored the same way.
+    """
+    for entry in (delta.get("tool_calls") if isinstance(delta, dict) else None) or ():
+        if not isinstance(entry, dict):
+            continue
+        function = entry.get("function")
+        if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+            yield _entry_index(entry), function
+
+
+def _append_tool_arguments(delta: dict, tool_index: int, text: str) -> None:
+    """Appends flushed `arguments` text to a delta, on the tool call that owns it.
+
+    An index-only entry is the standard OpenAI continuation shape -- `id` and `name` went
+    out with the call's first fragment and clients concatenate by index -- so a delta that
+    names no tool call can still carry a flush for one.
+    """
+    entries = delta.get("tool_calls")
+    if not isinstance(entries, list):
+        entries = []
+        delta["tool_calls"] = entries
+    for entry in entries:
+        if not isinstance(entry, dict) or _entry_index(entry) != tool_index:
+            continue
+        function = entry.get("function")
+        if not isinstance(function, dict):
+            continue
+        # Appended rather than assigned: a fragment for this call may already have been
+        # restored into this same event, and the flush belongs after it.
+        function["arguments"] = f"{function.get('arguments', '')}{text}"
+        return
+    entries.append({"index": tool_index, "function": {"arguments": text}})
 
 
 def redact_model_originated_text(text: str, vault: "Vault") -> str:
@@ -131,7 +199,7 @@ def _redact_sibling_strings(node: Any, buffer: "SSERehydrationBuffer", skip_cont
         return {
             key: (
                 value
-                if key in _SSE_STRUCTURAL_KEYS or (skip_content and key in _CONTENT_KEYS)
+                if key in _SSE_STRUCTURAL_KEYS or (skip_content and key in _BUFFERED_CHANNEL_KEYS)
                 else _redact_sibling_strings(value, buffer, skip_content=skip_content)
             )
             for key, value in node.items()
@@ -435,7 +503,81 @@ async def rehydrate_sse_stream(
         # one accepted request. Allow that request-bounded value plus the input
         # line's own framing, but fail closed on repeated-token amplification.
         max_output_piece_bytes = settings.MAX_PAYLOAD_SIZE_BYTES + max_line_length
-        buffer = SSERehydrationBuffer(vault, max_output_bytes=max_output_piece_bytes)
+        # One retention window PER CHANNEL, not one per stream. With `n` > 1 the choices
+        # are independent token streams interleaved on one wire and told apart only by
+        # `index`, and each tool call's `arguments` is another such stream inside a choice.
+        # A shared window releases the characters held back for one channel into whichever
+        # chunk arrives next, so the channel that owned a split token never gets it back
+        # (its value is destroyed, not merely delayed) and the other channel is handed a
+        # fragment of a vault token that was never part of it.
+        buffers: Dict[_WindowKey, SSERehydrationBuffer] = {}
+
+        def _buffer_for(key: _WindowKey) -> SSERehydrationBuffer:
+            """The retention window for one channel, created on first sight."""
+            existing = buffers.get(key)
+            if existing is not None:
+                return existing
+            if len(buffers) >= MAX_STREAM_WINDOWS:
+                # Fail closed. Reusing another channel's window here would reintroduce
+                # exactly the splicing this keying exists to prevent.
+                raise ValueError(
+                    f"SSE stream opened more than {MAX_STREAM_WINDOWS} retention windows"
+                )
+            created = SSERehydrationBuffer(vault, max_output_bytes=max_output_piece_bytes)
+            buffers[key] = created
+            return created
+
+        def _flush_window(key: _WindowKey) -> str:
+            """Drains one window, or returns empty if it was never opened."""
+            window = buffers.get(key)
+            return window.process_delta_text("", is_final=True) if window is not None else ""
+
+        def _tool_windows_of(choice_index: int) -> tuple:
+            """This choice's tool-call windows, in tool-call index order."""
+            return tuple(sorted(k for k in buffers if k[0] == choice_index and k[1] is not None))
+
+        def _flush_tool_windows_into(delta: dict, choice_index: int) -> bool:
+            """Empties this choice's tool-call windows INTO the event that finishes it.
+
+            ORDER IS LOAD-BEARING, and it is the one way the tool-argument channel differs
+            from content. A client reads content as it arrives, so a tail delivered in a
+            trailing event after `finish_reason` merely lands a beat late. It accumulates
+            `arguments` instead, and parses the whole string as JSON the moment the choice
+            reports finished -- so a tail delivered after that point is parsed too late,
+            against a truncated document. The flush therefore rides inside the finishing
+            event rather than following it.
+            """
+            flushed = False
+            for key in _tool_windows_of(choice_index):
+                remaining = _flush_window(key)
+                if remaining:
+                    _append_tool_arguments(delta, key[1], remaining)
+                    flushed = True
+            return flushed
+
+        def _flush_all_windows() -> Iterator[bytes]:
+            """Drains every window still open, one event per channel, tagged with its keys.
+
+            Driven by the windows rather than by the last event seen: a choice that
+            finished earlier is not named in the terminal event, and flushing only what
+            that event carries would drop its held text and truncate its answer. Tool-call
+            windows are normally already empty here, having been flushed into their
+            finishing event; this is the net for a stream that stopped without one.
+            """
+            # `None` sorts before any int so a choice's content precedes its tool calls.
+            for key in sorted(buffers, key=lambda k: (k[0], -1 if k[1] is None else k[1])):
+                remaining = _flush_window(key)
+                if not remaining:
+                    continue
+                choice_index, tool_index = key
+                if tool_index is None:
+                    delta: dict = {"content": remaining}
+                else:
+                    delta = {}
+                    _append_tool_arguments(delta, tool_index, remaining)
+                flush_obj = {"choices": [{"index": choice_index, "delta": delta}]}
+                yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         def _bounded_output(piece: bytes) -> bytes:
@@ -562,23 +704,62 @@ async def rehydrate_sse_stream(
                                 # 1. OpenAI Chat Completion Delta
                                 choices = data_obj.get("choices", [])
                                 if choices and isinstance(choices, list):
-                                    delta = choices[0].get("delta", {})
-                                    if "content" in delta and isinstance(delta["content"], str):
-                                        raw_content = delta["content"]
-                                        rehydrated_content = buffer.process_delta_text(raw_content)
-                                        delta["content"] = rehydrated_content
-                                        data_obj["choices"][0]["delta"] = delta
+                                    # Every choice the event carries, not just the first.
+                                    # Providers usually send one choice per event and tag it
+                                    # with `index`, but the field is a list and a provider
+                                    # that batches `n` choices into one event had the rest
+                                    # forwarded unrehydrated.
+                                    sibling_buffer = None
+                                    for choice in choices:
+                                        if not isinstance(choice, dict):
+                                            continue
+                                        delta = choice.get("delta")
+                                        if not isinstance(delta, dict):
+                                            continue
+                                        choice_index = _entry_index(choice)
+                                        if isinstance(delta.get("content"), str):
+                                            content_window = _buffer_for((choice_index, None))
+                                            delta["content"] = content_window.process_delta_text(delta["content"])
+                                            sibling_buffer = content_window
+                                        # Tool arguments are model-generated text on their
+                                        # own ordered channel, one per tool call. Restoring
+                                        # only `content` shipped placeholders to the app
+                                        # inside `function.arguments`, which is the same
+                                        # redact-without-restore failure in a field the
+                                        # shape-following walk never visited.
+                                        for tool_index, function in _tool_argument_fragments(delta):
+                                            tool_window = _buffer_for((choice_index, tool_index))
+                                            function["arguments"] = tool_window.process_delta_text(
+                                                function["arguments"]
+                                            )
+                                            sibling_buffer = tool_window
+                                        # A finished choice parses its arguments now, so any
+                                        # tail still held has to travel in THIS event.
+                                        if choice.get("finish_reason") is not None and _flush_tool_windows_into(
+                                            delta, choice_index
+                                        ):
+                                            sibling_buffer = sibling_buffer or _buffer_for((choice_index, None))
+                                        choice["delta"] = delta
+                                    if sibling_buffer is not None:
                                         if settings.ENABLE_RESPONSE_PII_REDACTION:
                                             # Sibling fields of the event, which were
-                                            # forwarded unscanned until 1.6.0.
-                                            data_obj = _redact_sibling_strings(data_obj, buffer)
+                                            # forwarded unscanned until 1.6.0. This scan is
+                                            # vault-scoped rather than window-scoped, so any
+                                            # of the event's windows answers for the event.
+                                            data_obj = _redact_sibling_strings(data_obj, sibling_buffer)
                                         line = f"data: {json.dumps(data_obj).decode('utf-8')}"
                                 # 2. Anthropic Content Block Delta
                                 elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
                                     delta = data_obj["delta"]
                                     if "text" in delta and isinstance(delta["text"], str):
                                         raw_content = delta["text"]
-                                        rehydrated_content = buffer.process_delta_text(raw_content)
+                                        # One window for the whole Anthropic stream. Its
+                                        # `index` counts content BLOCKS, which are emitted
+                                        # in sequence within a single message, not parallel
+                                        # answers -- so this is one continuous token stream
+                                        # and keying by block would strand each block's held
+                                        # tail until the stream ended.
+                                        rehydrated_content = _buffer_for((0, None)).process_delta_text(raw_content)
                                         openai_chunk = {
                                             "id": cached_id,
                                             "object": "chat.completion.chunk",
@@ -599,7 +780,8 @@ async def rehydrate_sse_stream(
                                     cb = data_obj["content_block"]
                                     if "text" in cb and isinstance(cb["text"], str):
                                         raw_content = cb["text"]
-                                        rehydrated_content = buffer.process_delta_text(raw_content)
+                                        # Same single window as the delta branch above.
+                                        rehydrated_content = _buffer_for((0, None)).process_delta_text(raw_content)
                                         openai_chunk = {
                                             "id": cached_id,
                                             "object": "chat.completion.chunk",
@@ -623,13 +805,8 @@ async def rehydrate_sse_stream(
                             for ready in _queue_output((line + "\n").encode("utf-8")):
                                 yield ready
                         elif stripped == "data: [DONE]":
-                            # Flush the buffer completely BEFORE yielding the [DONE] signal
-                            remaining = buffer.process_delta_text("", is_final=True)
-                            if remaining:
-                                flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                                flush_piece = (
-                                    f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
-                                )
+                            # Flush every choice's window BEFORE yielding the [DONE] signal
+                            for flush_piece in _flush_all_windows():
                                 for ready in _queue_output(flush_piece):
                                     yield ready
 
@@ -706,10 +883,8 @@ async def rehydrate_sse_stream(
                 if trailing_text:
                     line_accumulator += trailing_text
 
-                remaining = buffer.process_delta_text("", is_final=True)
-                if remaining:
-                    flush_obj = {"choices": [{"delta": {"content": remaining}}]}
-                    yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                for flush_piece in _flush_all_windows():
+                    yield flush_piece
 
                 if watermark_text:
                     if is_anthropic_stream:
