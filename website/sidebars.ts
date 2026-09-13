@@ -17,7 +17,6 @@ const sidebars: SidebarsConfig = {
     'policies',
     'guides/mcp-tool-governance',
     'guides/pilot-assessment',
-    'guides/litellm-integration',
     {
       type: 'category',
       label: 'Open Conformance Lab',

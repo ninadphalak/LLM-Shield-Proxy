@@ -23,7 +23,7 @@ LiteLLM can also call the proxy as a guardrail and keep its own model path, rout
 budgets — either by loading a guardrail class from this package by dotted path, or through
 LiteLLM's built-in `generic_guardrail_api`. Both wirings, what each costs, and the streaming
 settings that have to move together are in
-[Running behind LiteLLM](./guides/litellm-integration.md).
+[Running behind LiteLLM](./features/litellm-integration.md).
 
 ## MCP Integration Boundary
 The `POST /v1/mcp` endpoint supports a strict subset of JSON-RPC methods (`tools/list`, `tools/call`, `resources/read`) required for tool governance.
