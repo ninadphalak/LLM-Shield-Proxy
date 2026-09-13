@@ -100,3 +100,290 @@ async def test_anthropic_claude_sse_stream_generator():
     full_output = "".join(output_bytes)
     assert "sarah@skynet.com" in full_output
     assert "[EMAIL_1]" not in full_output
+
+
+async def _collect_stream(raw_stream, vault) -> str:
+    """Drains a rehydrated SSE stream into one string."""
+    pieces = []
+    async for chunk in rehydrate_sse_stream(raw_stream, vault):
+        pieces.append(chunk.decode("utf-8"))
+    return "".join(pieces)
+
+
+def _choice_texts(output: str) -> dict:
+    """Reassembles each choice's answer from the emitted SSE events, keyed by index."""
+    import json
+
+    texts: dict = {}
+    for line in output.splitlines():
+        if not line.startswith("data: ") or line.strip() == "data: [DONE]":
+            continue
+        try:
+            event = json.loads(line[6:])
+        except json.JSONDecodeError:
+            continue
+        for choice in event.get("choices") or ():
+            content = choice.get("delta", {}).get("content")
+            if isinstance(content, str):
+                texts.setdefault(choice.get("index", 0), "")
+                texts[choice.get("index", 0)] += content
+    return texts
+
+
+@pytest.mark.asyncio
+async def test_parallel_choices_do_not_share_a_retention_window():
+    """A token split across one choice's deltas must not leak into another choice.
+
+    With `n` > 1 the choices interleave on one wire and are told apart only by `index`.
+    A single shared window released choice 0's held-back "[EMA" into choice 1's next
+    event, so choice 0's token was destroyed (never rehydrated) AND choice 1's answer
+    carried a fragment of a vault token it never produced.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_parallel_stream():
+        yield b'data: {"choices":[{"index":0,"delta":{"content":"A:[EMA"}}]}\n'
+        yield b'data: {"choices":[{"index":1,"delta":{"content":"B:hello"}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"content":"IL_1]"}}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_parallel_stream(), vault)
+
+    texts = _choice_texts(output)
+    assert texts[0] == "A:sarah@skynet.com"
+    assert texts[1] == "B:hello"
+    assert "[EMA" not in output
+
+
+@pytest.mark.asyncio
+async def test_every_choice_in_one_event_is_rehydrated():
+    """A provider that batches `n` choices into one event must not have the rest skipped.
+
+    `choices` is a list, and only its first entry used to be walked.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_batched_stream():
+        yield (
+            b'data: {"choices":['
+            b'{"index":0,"delta":{"content":"first [EMAIL_1]"}},'
+            b'{"index":1,"delta":{"content":"second [EMAIL_1]"}}'
+            b"]}\n"
+        )
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_batched_stream(), vault)
+
+    texts = _choice_texts(output)
+    assert texts[0] == "first sarah@skynet.com"
+    assert texts[1] == "second sarah@skynet.com"
+    assert "[EMAIL_1]" not in output
+
+
+@pytest.mark.asyncio
+async def test_a_held_tail_flushes_onto_the_choice_that_owns_it():
+    """A window still holding text at [DONE] flushes onto its own choice, not choice 0.
+
+    Choice 0 ends mid-token, so its window is still holding at end of stream while
+    choice 1 has completed. The flush must be tagged with index 0, and choice 1's
+    answer must not have been handed choice 0's held fragment on the way past.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_unterminated_stream():
+        yield b'data: {"choices":[{"index":0,"delta":{"content":"A:[EMA"}}]}\n'
+        yield b'data: {"choices":[{"index":1,"delta":{"content":"B:[EMAIL_1] done"}}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_unterminated_stream(), vault)
+
+    texts = _choice_texts(output)
+    # Choice 1 completed and is untouched by choice 0's held fragment.
+    assert texts[1] == "B:sarah@skynet.com done"
+    # Choice 0's token never completed, so the held fragment comes back verbatim --
+    # on choice 0, which is the point.
+    assert texts[0] == "A:[EMA"
+
+
+def _tool_arguments(output: str) -> dict:
+    """Reassembles each tool call's `arguments`, keyed by `(choice index, tool index)`."""
+    import json
+
+    args: dict = {}
+    for line in output.splitlines():
+        if not line.startswith("data: ") or line.strip() == "data: [DONE]":
+            continue
+        try:
+            event = json.loads(line[6:])
+        except json.JSONDecodeError:
+            continue
+        for choice in event.get("choices") or ():
+            for call in choice.get("delta", {}).get("tool_calls") or ():
+                key = (choice.get("index", 0), call.get("index", 0))
+                fragment = call.get("function", {}).get("arguments", "")
+                args[key] = args.get(key, "") + fragment
+    return args
+
+
+@pytest.mark.asyncio
+async def test_streamed_tool_call_arguments_are_rehydrated():
+    """A placeholder split across `function.arguments` fragments must be restored.
+
+    Rehydration used to be gated on a string `delta.content`, which a tool-call event
+    does not carry, so the whole event was forwarded verbatim and the application
+    invoked its tool with `[EMAIL_1]` as the argument value.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_tool_call_stream():
+        yield (
+            b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+            b'"type":"function","function":{"name":"send_email","arguments":""}}]}}]}\n'
+        )
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"to\\": \\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"IL_1]\\"}"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_tool_call_stream(), vault)
+
+    assert _tool_arguments(output)[(0, 0)] == '{"to": "sarah@skynet.com"}'
+    assert "[EMAIL_1]" not in output
+    assert "[EMA" not in output
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_calls_do_not_share_a_retention_window():
+    """Each tool call accumulates its own `arguments`, so each needs its own window."""
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_two_tool_calls():
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"a\\":\\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\\"b\\":\\"plain"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"IL_1]\\"}"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\\"}"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_two_tool_calls(), vault)
+
+    args = _tool_arguments(output)
+    assert args[(0, 0)] == '{"a":"sarah@skynet.com"}'
+    assert args[(0, 1)] == '{"b":"plain"}'
+
+
+@pytest.mark.asyncio
+async def test_tool_argument_tail_flushes_inside_the_finishing_event():
+    """A held tail must ride IN the `finish_reason` event, never in one after it.
+
+    The client concatenates `arguments` fragments and parses the result as JSON the
+    moment the choice reports finished. A tail delivered after that point is parsed
+    too late, against a truncated document -- which is why this channel cannot reuse
+    the trailing-flush behaviour that is harmless for content.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_unterminated_tool_call():
+        # Ends mid-token, so the window is still holding when the choice finishes.
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"to\\": \\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_unterminated_tool_call(), vault)
+
+    events = [ln for ln in output.splitlines() if ln.startswith("data: ")]
+    finishing = [i for i, ln in enumerate(events) if "finish_reason" in ln]
+    assert finishing, "expected a finishing event"
+    # The held tail travels in the finishing event itself...
+    assert "arguments" in events[finishing[0]]
+    # ...and nothing carrying tool arguments follows it.
+    assert not [ln for ln in events[finishing[0] + 1 :] if "arguments" in ln]
+    assert _tool_arguments(output)[(0, 0)] == '{"to": "[EMA'
+
+
+@pytest.mark.asyncio
+async def test_content_and_tool_arguments_are_separate_channels():
+    """One choice's content window must not be fed by its tool-call fragments."""
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_mixed_stream():
+        yield b'data: {"choices":[{"index":0,"delta":{"content":"Sending to [EMA"}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"to\\":\\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"content":"IL_1] now"}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"IL_1]\\"}"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_mixed_stream(), vault)
+
+    assert _choice_texts(output)[0] == "Sending to sarah@skynet.com now"
+    assert _tool_arguments(output)[(0, 0)] == '{"to":"sarah@skynet.com"}'
+
+
+@pytest.mark.asyncio
+async def test_restored_tool_arguments_stay_parseable_json():
+    """A restored value carrying JSON metacharacters must not break the document.
+
+    `arguments` is JSON text and the client parses the joined fragments, so splicing a
+    raw value containing a quote, backslash or newline turns one wrong field into a
+    parse error on the whole tool call.
+    """
+    import json as stdlib_json
+
+    hostile = 'A "quoted" name\\with a backslash\nand a newline\twith a tab'
+    vault = Vault(synthetic=False)
+    token = vault.get_or_create_token(hostile, "PERSON")
+
+    async def mock_tool_call_stream():
+        payload = stdlib_json.dumps('{"who": "' + token + '"}')
+        yield (
+            b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,'
+            b'"function":{"arguments":' + payload.encode() + b"}}]}}]}\n"
+        )
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_tool_call_stream(), vault)
+
+    arguments = _tool_arguments(output)[(0, 0)]
+    # The whole point: it still parses, and the value round-trips exactly.
+    assert stdlib_json.loads(arguments) == {"who": hostile}
+
+
+@pytest.mark.asyncio
+async def test_finishing_a_choice_at_the_window_cap_does_not_fail_closed(monkeypatch):
+    """Flushing at exactly the cap must not try to open one more window.
+
+    The sibling scan is vault-scoped, so it can borrow a window that was just drained.
+    Opening a fresh one on the finishing event would trip the fail-closed cap and cut
+    off a stream that was completing normally.
+    """
+    from llm_shield_proxy.streaming import streaming as streaming_module
+
+    monkeypatch.setattr(streaming_module, "MAX_STREAM_WINDOWS", 2)
+    monkeypatch.setattr(streaming_module.settings, "ENABLE_RESPONSE_PII_REDACTION", True)
+
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_at_cap_stream():
+        # Two tool channels fill the cap, and neither event opens a content window.
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"a\\":\\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\\"b\\":\\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_at_cap_stream(), vault)
+
+    # The stream completed rather than aborting, and both tails came back.
+    assert "[DONE]" in output
+    args = _tool_arguments(output)
+    assert args[(0, 0)] == '{"a":"[EMA'
+    assert args[(0, 1)] == '{"b":"[EMA'
