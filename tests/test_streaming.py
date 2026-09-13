@@ -325,3 +325,65 @@ async def test_content_and_tool_arguments_are_separate_channels():
 
     assert _choice_texts(output)[0] == "Sending to sarah@skynet.com now"
     assert _tool_arguments(output)[(0, 0)] == '{"to":"sarah@skynet.com"}'
+
+
+@pytest.mark.asyncio
+async def test_restored_tool_arguments_stay_parseable_json():
+    """A restored value carrying JSON metacharacters must not break the document.
+
+    `arguments` is JSON text and the client parses the joined fragments, so splicing a
+    raw value containing a quote, backslash or newline turns one wrong field into a
+    parse error on the whole tool call.
+    """
+    import json as stdlib_json
+
+    hostile = 'A "quoted" name\\with a backslash\nand a newline\twith a tab'
+    vault = Vault(synthetic=False)
+    token = vault.get_or_create_token(hostile, "PERSON")
+
+    async def mock_tool_call_stream():
+        payload = stdlib_json.dumps('{"who": "' + token + '"}')
+        yield (
+            b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,'
+            b'"function":{"arguments":' + payload.encode() + b"}}]}}]}\n"
+        )
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_tool_call_stream(), vault)
+
+    arguments = _tool_arguments(output)[(0, 0)]
+    # The whole point: it still parses, and the value round-trips exactly.
+    assert stdlib_json.loads(arguments) == {"who": hostile}
+
+
+@pytest.mark.asyncio
+async def test_finishing_a_choice_at_the_window_cap_does_not_fail_closed(monkeypatch):
+    """Flushing at exactly the cap must not try to open one more window.
+
+    The sibling scan is vault-scoped, so it can borrow a window that was just drained.
+    Opening a fresh one on the finishing event would trip the fail-closed cap and cut
+    off a stream that was completing normally.
+    """
+    from llm_shield_proxy.streaming import streaming as streaming_module
+
+    monkeypatch.setattr(streaming_module, "MAX_STREAM_WINDOWS", 2)
+    monkeypatch.setattr(streaming_module.settings, "ENABLE_RESPONSE_PII_REDACTION", True)
+
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    async def mock_at_cap_stream():
+        # Two tool channels fill the cap, and neither event opens a content window.
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"a\\":\\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\\"b\\":\\"[EMA"}}]}}]}\n'
+        yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+        yield b"data: [DONE]\n"
+
+    output = await _collect_stream(mock_at_cap_stream(), vault)
+
+    # The stream completed rather than aborting, and both tails came back.
+    assert "[DONE]" in output
+    args = _tool_arguments(output)
+    assert args[(0, 0)] == '{"a":"[EMA'
+    assert args[(0, 1)] == '{"b":"[EMA'

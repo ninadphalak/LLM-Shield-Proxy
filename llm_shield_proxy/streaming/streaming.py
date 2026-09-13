@@ -79,6 +79,51 @@ def _tool_argument_fragments(delta: Any) -> Iterator[tuple]:
             yield _entry_index(entry), function
 
 
+def _json_string_body(value: str) -> str:
+    """`value` as it must appear INSIDE a JSON string, without the quotes."""
+    return json.dumps(value).decode("utf-8")[1:-1]
+
+
+class _JsonStringVaultView:
+    """A vault whose restored values are escaped for a JSON string context.
+
+    `arguments` is JSON *text*, not prose. Splicing a raw value into it breaks the
+    document the moment that value carries a quote, a backslash or a control character
+    -- and because the client joins the fragments and parses the result, that surfaces
+    as a parse error on the whole tool call rather than as one wrong field.
+
+    Every placeholder in this channel was substituted into a JSON string on the request
+    side, so the faithful restoration is the escaped form. Values needing no escaping
+    pass through byte-identical, which is the overwhelmingly common case.
+
+    Only the values are rewritten. The keys stay the raw tokens, so token matching,
+    `max_token_length` retention and the model-originated scan are all unaffected.
+    """
+
+    # Bound as a class attribute so `type(vault).rehydrate is Vault.rehydrate` still
+    # holds and `SSERehydrationBuffer._rehydrate` keeps passing its byte ceiling.
+    rehydrate = Vault.rehydrate
+
+    def __init__(self, vault: Any) -> None:
+        self._vault = vault
+        self._escaped: Dict[str, str] = {}
+        self._escaped_from = -1
+
+    def __getattr__(self, name: str) -> Any:
+        # Everything else -- the lock, session id, max_token_length -- is the real vault's.
+        return getattr(self._vault, name)
+
+    @property
+    def token_to_original(self) -> Dict[str, str]:
+        source = getattr(self._vault, "token_to_original", None) or {}
+        # Rebuilt only when the vault gained tokens, so this stays off the per-delta
+        # path: the response phase does not mint tokens (invariant 2).
+        if len(source) != self._escaped_from:
+            self._escaped = {token: _json_string_body(original) for token, original in source.items()}
+            self._escaped_from = len(source)
+        return self._escaped
+
+
 def _append_tool_arguments(delta: dict, tool_index: int, text: str) -> None:
     """Appends flushed `arguments` text to a delta, on the tool call that owns it.
 
@@ -511,6 +556,18 @@ async def rehydrate_sse_stream(
         # (its value is destroyed, not merely delayed) and the other channel is handed a
         # fragment of a vault token that was never part of it.
         buffers: Dict[_WindowKey, SSERehydrationBuffer] = {}
+        # One escaping view for the whole stream, shared by every tool-call window, so
+        # the escaped mapping is built at most once rather than once per tool call.
+        json_vault: Optional[_JsonStringVaultView] = None
+
+        def _channel_vault(key: _WindowKey) -> Any:
+            """The vault a channel restores against: escaped for JSON, raw for prose."""
+            nonlocal json_vault
+            if key[1] is None:
+                return vault
+            if json_vault is None:
+                json_vault = _JsonStringVaultView(vault)
+            return json_vault
 
         def _buffer_for(key: _WindowKey) -> SSERehydrationBuffer:
             """The retention window for one channel, created on first sight."""
@@ -523,7 +580,9 @@ async def rehydrate_sse_stream(
                 raise ValueError(
                     f"SSE stream opened more than {MAX_STREAM_WINDOWS} retention windows"
                 )
-            created = SSERehydrationBuffer(vault, max_output_bytes=max_output_piece_bytes)
+            created = SSERehydrationBuffer(
+                _channel_vault(key), max_output_bytes=max_output_piece_bytes
+            )
             buffers[key] = created
             return created
 
@@ -536,7 +595,9 @@ async def rehydrate_sse_stream(
             """This choice's tool-call windows, in tool-call index order."""
             return tuple(sorted(k for k in buffers if k[0] == choice_index and k[1] is not None))
 
-        def _flush_tool_windows_into(delta: dict, choice_index: int) -> bool:
+        def _flush_tool_windows_into(
+            delta: dict, choice_index: int
+        ) -> Optional[SSERehydrationBuffer]:
             """Empties this choice's tool-call windows INTO the event that finishes it.
 
             ORDER IS LOAD-BEARING, and it is the one way the tool-argument channel differs
@@ -546,13 +607,19 @@ async def rehydrate_sse_stream(
             reports finished -- so a tail delivered after that point is parsed too late,
             against a truncated document. The flush therefore rides inside the finishing
             event rather than following it.
+
+            Returns a window it drained, for the sibling scan to borrow. The scan is
+            vault-scoped rather than window-scoped, so any open window answers -- and
+            opening a fresh one here would be an allocation with no channel behind it,
+            which at exactly MAX_STREAM_WINDOWS would fail the cap and cut the stream off
+            while finishing it.
             """
-            flushed = False
+            flushed = None
             for key in _tool_windows_of(choice_index):
                 remaining = _flush_window(key)
                 if remaining:
                     _append_tool_arguments(delta, key[1], remaining)
-                    flushed = True
+                    flushed = buffers[key]
             return flushed
 
         def _flush_all_windows() -> Iterator[bytes]:
@@ -735,10 +802,11 @@ async def rehydrate_sse_stream(
                                             sibling_buffer = tool_window
                                         # A finished choice parses its arguments now, so any
                                         # tail still held has to travel in THIS event.
-                                        if choice.get("finish_reason") is not None and _flush_tool_windows_into(
-                                            delta, choice_index
-                                        ):
-                                            sibling_buffer = sibling_buffer or _buffer_for((choice_index, None))
+                                        if choice.get("finish_reason") is not None:
+                                            drained = _flush_tool_windows_into(delta, choice_index)
+                                            # Borrow the drained window rather than opening
+                                            # one: a finishing event needs no new channel.
+                                            sibling_buffer = sibling_buffer or drained
                                         choice["delta"] = delta
                                     if sibling_buffer is not None:
                                         if settings.ENABLE_RESPONSE_PII_REDACTION:
