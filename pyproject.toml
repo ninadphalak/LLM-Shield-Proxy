@@ -104,6 +104,15 @@ ner = [
 onnx = [
     "onnxruntime>=1.17.0"
 ]
+# There is deliberately no `litellm` extra. The guardrail adapter lives in
+# `examples/integrations/litellm/` instead of in this package, because it imports
+# LiteLLM at module scope and this distribution must not declare a dependency it
+# cannot satisfy: `tests/ootb/_import_every_module.py` imports every packaged module on
+# a wheel-only install and fails on exactly that. Shipping it in the wheel would force
+# a choice between an undeclared import and pulling LiteLLM's dependency tree into
+# every install of the gateway. Publishing the adapter as its own small distribution --
+# the way the benchmark was split out -- is the proper long-term answer if the
+# `pip install` UX for the adapter is wanted.
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

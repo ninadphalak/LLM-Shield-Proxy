@@ -1,0 +1,37 @@
+# LiteLLM runs this guardrail in-process, so LLM Shield sits BEHIND LiteLLM rather
+# than in front of it: model routing, key management, retries and budgets stay
+# LiteLLM's, and only the text crosses the boundary.
+#
+# Two prerequisites:
+#   1. `litellm_guardrail.py` where the proxy can import it, so the dotted path below
+#      resolves. It is an example artifact, not a module of the published package,
+#      because it imports LiteLLM at module scope.
+#   2. A running LLM Shield Proxy reachable at `api_base` below.
+
+model_list:
+  - model_name: shield-demo
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+guardrails:
+  # Both modes belong on ONE entry. `pre_call` redacts the outbound request and
+  # `post_call` restores the reply. Registering `pre_call` alone redacts the
+  # request and hands the placeholders straight back to the caller, which is the
+  # most common way to misconfigure this guardrail.
+  - guardrail_name: "llm-shield"
+    litellm_params:
+      # Dotted path to the mounted file: the module name is the file's name, so this
+      # resolves to /app/litellm_guardrail.py inside the proxy.
+      guardrail: litellm_guardrail.LLMShieldProxyGuardrail
+      mode: ["pre_call", "post_call"]
+      default_on: true
+      # Where your own LLM Shield Proxy listens. Also reads LLM_SHIELD_PROXY_API_BASE.
+      # Use the shield's service name instead of localhost when both run in compose.
+      api_base: http://localhost:8000
+      # A virtual key configured on that deployment. Also reads
+      # LLM_SHIELD_PROXY_API_KEY.
+      api_key: os.environ/LLM_SHIELD_PROXY_API_KEY
