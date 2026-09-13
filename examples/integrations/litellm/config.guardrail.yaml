@@ -25,7 +25,7 @@ guardrails:
     litellm_params:
       # Dotted path to the class shipped by this package. LiteLLM imports it, so
       # litellm and llm_shield_proxy must live in the same environment.
-      guardrail: llm_shield_proxy.integrations.litellm_guardrail.LLMShieldProxyGuardrail
+      guardrail: llm_shield_proxy.integrations.litellm.guardrail.LLMShieldProxyGuardrail
       mode: ["pre_call", "post_call"]
       default_on: true
       # Where your own LLM Shield Proxy listens. Also reads LLM_SHIELD_PROXY_API_BASE.

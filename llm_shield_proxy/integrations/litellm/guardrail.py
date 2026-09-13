@@ -7,16 +7,17 @@
 """LiteLLM guardrail adapter: reversible PII redaction and restoration.
 
 This is the out-of-tree form of the ``llm_shield_proxy`` guardrail. It lives in
-this package rather than inside LiteLLM's own tree so that it requires no change
-to LiteLLM's source and shares no file with the guardrails LiteLLM staff edit --
-which is what made the in-tree submission conflict on every upstream guardrail.
+this package (``llm_shield_proxy/integrations/litellm/``) rather than inside
+LiteLLM's own tree so that it requires no change to LiteLLM's source and shares no
+file with the guardrails LiteLLM staff edit -- which is what made the in-tree
+submission conflict on every upstream guardrail addition.
 
 Point a LiteLLM ``config.yaml`` at this class by dotted path::
 
     guardrails:
       - guardrail_name: "llm-shield"
         litellm_params:
-          guardrail: llm_shield_proxy.integrations.litellm_guardrail.LLMShieldProxyGuardrail
+          guardrail: llm_shield_proxy.integrations.litellm.guardrail.LLMShieldProxyGuardrail
           mode: ["pre_call", "post_call"]
           api_base: http://localhost:8000
           api_key: os.environ/LLM_SHIELD_PROXY_API_KEY
