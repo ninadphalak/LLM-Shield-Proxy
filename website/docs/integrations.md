@@ -16,6 +16,15 @@ Below are starting-point configuration recipes for common frameworks.
 
 *You can find the raw configuration files and smoke test scripts in the `examples/integrations/` directory of the repository.*
 
+### LiteLLM behind the proxy
+
+The table above covers pointing LiteLLM *at* the proxy, so the proxy owns the upstream call.
+LiteLLM can also call the proxy as a guardrail and keep its own model path, routing, retries and
+budgets — either by loading a guardrail class from this package by dotted path, or through
+LiteLLM's built-in `generic_guardrail_api`. Both wirings, what each costs, and the streaming
+settings that have to move together are in
+[Running behind LiteLLM](./guides/litellm-integration.md).
+
 ## MCP Integration Boundary
 The `POST /v1/mcp` endpoint supports a strict subset of JSON-RPC methods (`tools/list`, `tools/call`, `resources/read`) required for tool governance.
 
