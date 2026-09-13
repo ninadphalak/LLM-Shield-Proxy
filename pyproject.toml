@@ -104,6 +104,19 @@ ner = [
 onnx = [
     "onnxruntime>=1.17.0"
 ]
+# Optional host integration. `llm_shield_proxy.integrations.litellm_guardrail`
+# subclasses `litellm.integrations.custom_guardrail.CustomGuardrail`, so the host
+# has to be importable for LiteLLM to load the class by dotted path. This package
+# never imports that module, so the base install stays free of LiteLLM's tree.
+#
+# Deliberately no version floor. The adapter targets the current CustomGuardrail
+# interface (`apply_guardrail` plus `get_supported_event_hooks`), and a floor
+# guessed from a release date would refuse newer LiteLLM builds for no benefit.
+# Tightening this needs a real compatibility run against a pinned upstream, not a
+# guess -- recorded as a known gap rather than papered over with a made-up number.
+litellm = [
+    "litellm"
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
