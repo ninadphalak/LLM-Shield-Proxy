@@ -12,6 +12,7 @@ repository.
 | Guardrails dashboard card | no | no |
 | Listed in LiteLLM's docs | no | no |
 | Streaming restoration | yes | yes, opt-in on both sides |
+| Tool-call arguments restored | yes | no — LiteLLM's response contract has no field for them |
 | Conflicts with LiteLLM releases | none | none |
 
 Neither gets you a card in LiteLLM's Admin UI or a page in LiteLLM's own docs: both
@@ -81,6 +82,13 @@ session isolation rests on LiteLLM's per-call id. Keep the shim on loopback or a
 private interface, and treat its key as equivalent in power to the Shield key it
 uses. See `examples/integrations/litellm/config.generic_guardrail.yaml`.
 
+One thing this path cannot do: LiteLLM's generic-guardrail contract carries `tool_calls`
+**in** but has no field to carry them back, so a tool call's arguments come back holding
+placeholders and nothing raises. There is no shim-side fix — the value has nowhere to go.
+`GENERIC_GUARDRAIL_CONTRACT.md` records the source-level reason. If your workload calls
+tools whose arguments carry redactable text, use the in-process guardrail, which restores
+them.
+
 ## Streaming
 
 Streaming restoration works on both wirings, and on both it is opt-in — the defaults
@@ -99,6 +107,20 @@ that region were the raw placeholder, every reply ending on a redacted value wou
 finish by showing the user a placeholder — which is the failure this product exists to
 prevent. `tests/integrations/litellm/test_streaming_holdback.py` proves both the
 mapping and that the naive single-call version really does reproduce that defect.
+
+## Known limits
+
+- **A restored value inside a tool call's `arguments` is spliced into a JSON string.** The
+  arguments are a JSON document, so a restored value containing a double quote, a backslash
+  or a newline can leave that document unparseable by a strict parser. The Shield's own JSON
+  rehydration has the same property. Escaping is deliberately not applied as a fix: a
+  streamed fragment is an arbitrary slice of a JSON document, so the code cannot tell whether
+  the position it writes is inside a string literal, and escaping unconditionally would
+  corrupt the values that are not.
+- **The generic guardrail API path cannot restore tool arguments at all** — see above.
+- **LiteLLM's `incremental_diff` mode covers string `delta.content` only**, so streamed
+  tool-argument restoration through that path is out of scope upstream. The in-process
+  guardrail restores them per tool call.
 
 ## Further reading
 
