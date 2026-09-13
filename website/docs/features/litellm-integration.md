@@ -20,14 +20,23 @@ conversation with LiteLLM, not a configuration choice.
 
 ## In-process guardrail
 
-LiteLLM, `litellm` and `llm_shield_proxy` must be importable in the same environment,
-because LiteLLM imports the class itself.
+LiteLLM imports the class itself, so the file must be importable by the proxy process. Copy or
+mount `examples/integrations/litellm/litellm_guardrail.py` where the proxy can reach it — LiteLLM
+documents this pattern for custom guardrails:
+
+```shell
+-v $(pwd)/litellm_guardrail.py:/app/litellm_guardrail.py
+```
+
+It is an example artifact rather than a module of the published package, because it imports
+LiteLLM at module scope and `tests/ootb/_import_every_module.py` requires every packaged module to
+import on a wheel-only install.
 
 ```yaml
 guardrails:
   - guardrail_name: "llm-shield"
     litellm_params:
-      guardrail: llm_shield_proxy.integrations.litellm.guardrail.LLMShieldProxyGuardrail
+      guardrail: litellm_guardrail.LLMShieldProxyGuardrail
       mode: ["pre_call", "post_call"]
       default_on: true
       api_base: http://localhost:8000

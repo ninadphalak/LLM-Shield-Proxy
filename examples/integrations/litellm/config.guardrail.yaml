@@ -3,8 +3,9 @@
 # LiteLLM's, and only the text crosses the boundary.
 #
 # Two prerequisites:
-#   1. `pip install llm-shield-proxy` in the environment that runs LiteLLM, because
-#      LiteLLM imports the guardrail class from this package.
+#   1. `litellm_guardrail.py` where the proxy can import it, so the dotted path below
+#      resolves. It is an example artifact, not a module of the published package,
+#      because it imports LiteLLM at module scope.
 #   2. A running LLM Shield Proxy reachable at `api_base` below.
 
 model_list:
@@ -23,9 +24,9 @@ guardrails:
   # most common way to misconfigure this guardrail.
   - guardrail_name: "llm-shield"
     litellm_params:
-      # Dotted path to the class shipped by this package. LiteLLM imports it, so
-      # litellm and llm_shield_proxy must live in the same environment.
-      guardrail: llm_shield_proxy.integrations.litellm.guardrail.LLMShieldProxyGuardrail
+      # Dotted path to the mounted file: the module name is the file's name, so this
+      # resolves to /app/litellm_guardrail.py inside the proxy.
+      guardrail: litellm_guardrail.LLMShieldProxyGuardrail
       mode: ["pre_call", "post_call"]
       default_on: true
       # Where your own LLM Shield Proxy listens. Also reads LLM_SHIELD_PROXY_API_BASE.

@@ -6,18 +6,24 @@
 # +-------------------------------------------------------------+
 """LiteLLM guardrail adapter: reversible PII redaction and restoration.
 
-This is the out-of-tree form of the ``llm_shield_proxy`` guardrail. It lives in
-this package (``llm_shield_proxy/integrations/litellm/``) rather than inside
-LiteLLM's own tree so that it requires no change to LiteLLM's source and shares no
-file with the guardrails LiteLLM staff edit -- which is what made the in-tree
-submission conflict on every upstream guardrail addition.
+This is the out-of-tree form of the ``llm_shield_proxy`` guardrail. It is an example
+artifact rather than a module of the published package, because it imports LiteLLM at
+module scope and this distribution must not declare a dependency it cannot satisfy:
+``tests/ootb/_import_every_module.py`` imports every packaged module on a wheel-only
+install and fails on exactly that. It also shares no file with LiteLLM's own tree,
+which is what made the in-tree submission conflict on every upstream guardrail.
 
-Point a LiteLLM ``config.yaml`` at this class by dotted path::
+Put the file where the LiteLLM proxy can import it -- LiteLLM documents this for
+custom guardrails -- so it lands as ``/app/litellm_guardrail.py`` in the container:
+
+    -v $(pwd)/litellm_guardrail.py:/app/litellm_guardrail.py
+
+Then point a LiteLLM ``config.yaml`` at the class by dotted path::
 
     guardrails:
       - guardrail_name: "llm-shield"
         litellm_params:
-          guardrail: llm_shield_proxy.integrations.litellm.guardrail.LLMShieldProxyGuardrail
+          guardrail: litellm_guardrail.LLMShieldProxyGuardrail
           mode: ["pre_call", "post_call"]
           api_base: http://localhost:8000
           api_key: os.environ/LLM_SHIELD_PROXY_API_KEY
