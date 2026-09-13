@@ -259,4 +259,3 @@ def test_streaming_flag_does_not_change_the_request_side(monkeypatch):
     assert seen == ["/v1/guard/redact"]
     assert body["texts"] == ["<EMAIL_ADDRESS>"]
     assert body["stream_holdback_chars"] is None
-
