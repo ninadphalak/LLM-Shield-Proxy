@@ -950,7 +950,13 @@ async def rehydrate_sse_stream(
                                 pass
 
                             for pre_line in pre_lines:
-                                for ready in _queue_output((pre_line + "\n").encode("utf-8")):
+                                # Terminated here, with its OWN blank line. `line` is
+                                # followed by the upstream's blank line, not by one of
+                                # ours, so a pre-line ending in a single newline would
+                                # share that terminator: one SSE event carrying two
+                                # newline-joined JSON documents, which no compliant
+                                # client can parse and whose restored tail is lost.
+                                for ready in _queue_output((pre_line + "\n\n").encode("utf-8")):
                                     yield ready
                             for ready in _queue_output((line + "\n").encode("utf-8")):
                                 yield ready

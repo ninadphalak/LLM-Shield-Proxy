@@ -535,3 +535,37 @@ async def test_anthropic_tool_blocks_are_numbered_densely_from_zero():
     # Anthropic block index is 1.
     assert _tool_arguments(output)[(0, 0)] == '{"to": "sarah@skynet.com"}'
     assert _choice_texts(output)[0] == "Emailing sarah@skynet.com now"
+
+
+def _sse_events(output: str) -> list:
+    """Splits a stream into SSE events the way a compliant client frames them.
+
+    An event ends at a blank line. Two `data:` lines inside one event are ONE payload,
+    joined by a newline -- which is why line-by-line parsing cannot see a framing bug.
+    """
+    return [block for block in output.split("\n\n") if block.strip()]
+
+
+@pytest.mark.asyncio
+async def test_a_flushed_anthropic_tail_is_its_own_sse_event():
+    """A buffered flush must terminate before the event it precedes.
+
+    Emitted with a single newline, the flush and the following stop event share the
+    upstream's blank line and arrive as one event carrying two newline-joined JSON
+    documents. No compliant client can parse that, so the restored tail is lost --
+    invisible to any test that reads the stream line by line.
+    """
+    import json as stdlib_json
+
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    # Ends mid-token, so a tail is still held when the block stops.
+    output = await _collect_stream(_anthropic_tool_stream('{"to": "[EMA'), vault)
+
+    for event in _sse_events(output):
+        data_lines = [ln for ln in event.splitlines() if ln.startswith("data: ")]
+        assert len(data_lines) <= 1, f"event carries {len(data_lines)} data lines: {event!r}"
+        for data_line in data_lines:
+            # Every payload must be a JSON document on its own.
+            stdlib_json.loads(data_line[6:])

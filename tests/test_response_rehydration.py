@@ -143,3 +143,29 @@ def test_ordinary_values_are_unchanged_by_escaping():
 
     assert message["content"] == "see sarah@skynet.com"
     assert message["tool_calls"][0]["function"]["arguments"] == '{"to": "sarah@skynet.com"}'
+
+
+def test_deeply_nested_tool_input_is_still_rehydrated():
+    """A legitimately nested input must not keep placeholders below a shallow cutoff.
+
+    The bound exists to stop a crafted reply becoming an unbounded walk, not to describe
+    a real schema. Set inside the range a real payload can occupy, it silently hands the
+    caller a placeholder -- the exact failure this walk exists to prevent.
+    """
+    vault = Vault(synthetic=False)
+    token = vault.get_or_create_token("sarah@skynet.com", "EMAIL")
+
+    # 12 levels of nesting: absurd for a tool schema, trivial for a JSON parser.
+    leaf = {"email": token}
+    for _ in range(12):
+        leaf = {"nested": leaf}
+
+    response = {
+        "type": "message",
+        "content": [{"type": "tool_use", "id": "t", "name": "deep", "input": leaf}],
+    }
+
+    restored = _rehydrate_json_response(response, vault)
+
+    assert token not in json.dumps(restored)
+    assert "sarah@skynet.com" in json.dumps(restored)

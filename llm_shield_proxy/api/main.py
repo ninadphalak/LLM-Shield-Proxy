@@ -1600,7 +1600,13 @@ def _append_watermark(res: Dict[str, Any], watermark_text: str) -> None:
             block["text"] += watermark_text
 
 
-_MAX_TOOL_INPUT_DEPTH = 8
+# Matches the ceiling `NonStreamingRehydrator` already applies to decoded payloads. The
+# bound exists to stop a crafted reply becoming an unbounded walk, not to describe a real
+# schema: tool inputs nest a handful deep, so it should never be reached. It was 8 first,
+# which sits inside the range a legitimate payload can occupy -- and truncating here hands
+# the caller a placeholder, the exact failure this function exists to prevent, so the
+# cheap bound was the expensive choice.
+_MAX_TOOL_INPUT_DEPTH = 40
 
 
 def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0) -> Any:
@@ -1611,9 +1617,17 @@ def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0) -> Any:
     is why this needs no `json_escaped_vault`, unlike the OpenAI `arguments` string,
     which the model hands over already serialised.
 
-    Bounded rather than trusting the payload's own nesting to terminate.
+    Bounded rather than trusting the payload's own nesting to terminate. Reaching the
+    bound is logged rather than passed over quietly: everything below it keeps its
+    placeholders, and a caller holding one cannot tell it from a value.
     """
     if depth > _MAX_TOOL_INPUT_DEPTH:
+        # The message names no node content. Invariant 4 holds in log records too.
+        logger.warning(
+            "Tool input nesting exceeded %d levels; leaves below that depth keep their "
+            "placeholders and were not restored.",
+            _MAX_TOOL_INPUT_DEPTH,
+        )
         return node
     if isinstance(node, dict):
         return {key: _rehydrate_decoded_leaves(value, vault, depth + 1) for key, value in node.items()}
