@@ -73,7 +73,7 @@ from llm_shield_proxy.streaming.streaming import redact_model_originated_tree, r
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.6.2"
 
 
 class AppState:
