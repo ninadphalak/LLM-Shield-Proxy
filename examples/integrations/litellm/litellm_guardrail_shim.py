@@ -37,10 +37,31 @@ Security posture. This endpoint sits on the request path and speaks about PII, s
   key. Use a **dedicated** Shield virtual key for the shim, and treat the shim key
   as equivalent in power to that Shield key.
 
-Not implemented here: streaming restoration. ``GENERIC_GUARDRAIL_CONTRACT.md``
-explains why ``stream_holdback_chars`` must be validated against the real
-rehydration buffer before it is safe to enable -- a wrong holdback emits a partial
-placeholder, the exact failure this guardrail exists to prevent.
+Streaming restoration is available, and off unless you ask for it. Set
+``SHIM_STREAMING_REHYDRATION=true`` -- and only if LiteLLM's guardrail config also
+sets ``streaming_transform_mode: incremental_diff``, since LiteLLM's default
+(``block_only``) silently discards a rewriting guardrail's output on the streaming
+path. The flag exists because LiteLLM's request body carries no "am I streaming"
+field, so the shim cannot tell the two apart; and applying a holdback to a
+non-streaming response would withhold a tail that never receives a flush, losing
+the value rather than protecting it.
+
+The mapping, validated against ``SSERehydrationBuffer`` in
+``tests/integrations/litellm/test_generic_guardrail_shim.py``:
+
+- The Shield's ``/v1/guard/rehydrate/stream`` is called once per round with the
+  whole accumulated text and an empty carry, so this shim keeps no per-stream
+  state. The buffer's own ``content_buffer`` is the withheld tail, so re-feeding
+  the accumulated text reproduces it deterministically.
+- It answers ``{"text": emitted, "carry": withheld}``; the shim returns
+  ``texts = [emitted + carry]`` with ``stream_holdback_chars = len(carry)``.
+- LiteLLM then emits ``text[len(already_emitted) : len(text) - holdback]``, which
+  is the newly-safe prefix and never the withheld tail.
+
+That composition is what makes the framework's forward-extension precondition
+hold: the withheld region stays raw until it completes, and because it was never
+emitted, the restored text that replaces it is still a forward extension of what
+the client has already seen.
 """
 
 from __future__ import annotations
@@ -66,6 +87,12 @@ SHIM_API_KEY: str = os.environ.get("LITELLM_GUARDRAIL_SHIM_KEY", "")
 
 _REDACT_PATH = "/v1/guard/redact"
 _REHYDRATE_PATH = "/v1/guard/rehydrate"
+_REHYDRATE_STREAM_PATH = "/v1/guard/rehydrate/stream"
+
+# Opt-in. LiteLLM's request body has no streaming flag, and a holdback applied to a
+# non-streaming response withholds a tail that never gets flushed -- so this cannot be
+# inferred, only configured alongside `streaming_transform_mode: incremental_diff`.
+STREAMING_REHYDRATION: bool = os.environ.get("SHIM_STREAMING_REHYDRATION", "false").strip().lower() == "true"
 
 # Mirror llm_shield_proxy.api.guard_router's ceilings. Duplicated deliberately: a
 # bound that lives only in the thing being called is not a bound on the caller.
@@ -139,6 +166,65 @@ async def _call_shield(path: str, session_id: str, payload: dict[str, Any]) -> d
     return result
 
 
+async def _restore_streaming(request: GuardrailRequest, session_id: str) -> GuardrailResponse:
+    """Restores one round of an accumulated streaming reply.
+
+    LiteLLM hands over the accumulated text each round and emits
+    ``text[len(already_emitted) : len(text) - holdback]`` from whatever we return.
+    The Shield's stream endpoint answers ``emitted`` plus the ``carry`` it withheld,
+    so returning their concatenation as the text, with ``len(carry)`` as the
+    holdback, hands LiteLLM exactly the newly-safe prefix and nothing more.
+    """
+    restored: list[str] = []
+    holdback = 0
+
+    for text in request.texts:
+        try:
+            # Two calls per round, and the reason is the final flush. LiteLLM forces
+            # holdback to 0 on the last round, so whatever is withheld at that point is
+            # emitted verbatim -- which means the withheld region has to be the RESTORED
+            # text, not the raw token, or every stream ends with the user looking at a
+            # placeholder. The stream call supplies the withheld length; the
+            # complete-text call supplies the restored text.
+            carried = await _call_shield(
+                _REHYDRATE_STREAM_PATH,
+                session_id,
+                {"text": text, "carry": "", "final": False},
+            )
+            complete = await _call_shield(_REHYDRATE_PATH, session_id, {"texts": [text]})
+        except Exception:
+            logger.warning("LLM Shield shim: rehydrate call failed")
+            return GuardrailResponse(
+                action="BLOCKED",
+                blocked_reason="LLM Shield is unreachable; blocking the request.",
+            )
+
+        carry = carried.get("carry")
+        restored_texts = complete.get("texts")
+        if (
+            not isinstance(carry, str)
+            or not isinstance(restored_texts, list)
+            or len(restored_texts) != 1
+            or not isinstance(restored_texts[0], str)
+        ):
+            logger.warning("LLM Shield shim: rehydrate returned an unusable payload shape")
+            return GuardrailResponse(
+                action="BLOCKED",
+                blocked_reason="LLM Shield returned an unexpected payload; blocking the request.",
+            )
+
+        restored.append(restored_texts[0])
+        # The withheld length is measured on the raw text, so applying it to the restored
+        # text can only ever withhold MORE than strictly necessary -- which delays a
+        # value but never emits one early. One holdback covers every choice in LiteLLM's
+        # response, so take the widest.
+        holdback = max(holdback, len(carry))
+
+    if restored == request.texts and holdback == 0:
+        return GuardrailResponse(action="NONE")
+    return GuardrailResponse(action="GUARDRAIL_INTERVENED", texts=restored, stream_holdback_chars=holdback)
+
+
 @app.post("/beta/litellm_basic_guardrail_api")
 async def basic_guardrail_api(
     request: GuardrailRequest,
@@ -176,6 +262,9 @@ async def basic_guardrail_api(
                 "correlated with the reply. Blocking rather than returning placeholders."
             ),
         )
+
+    if request.input_type != "request" and STREAMING_REHYDRATION:
+        return await _restore_streaming(request, session_id)
 
     path = _REDACT_PATH if request.input_type == "request" else _REHYDRATE_PATH
     try:

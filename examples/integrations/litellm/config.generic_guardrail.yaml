@@ -33,18 +33,17 @@ guardrails:
       unreachable_fallback: fail_closed
 
       # ---------------------------------------------------------------------
-      # STREAMING IS NOT ENABLED. Read "OPEN ITEM before enabling streaming" in
-      # GENERIC_GUARDRAIL_CONTRACT.md first.
+      # STREAMING: off here, and it must be turned on in BOTH places at once.
       #
-      # `incremental_diff` is the only setting under which LiteLLM will emit a
-      # rewriting guardrail's changes on the streaming path; the default
-      # (`block_only`) silently DROPS them, which would stream placeholders to
-      # the end user. But enabling it requires `stream_holdback_chars` to be
-      # proven against the real rehydration buffer, because a wrong holdback
-      # emits a partial placeholder -- the exact failure this guardrail exists
-      # to prevent.
+      # LiteLLM's default (`block_only`) silently DROPS a rewriting guardrail's
+      # changes on the streaming path, so with it the end user sees placeholders.
+      # But setting `incremental_diff` alone is also wrong: the shim then sends no
+      # holdback, a placeholder split across two chunks reaches the client, and the
+      # stream fails closed on the next round with stream_transform_underflow.
       #
-      # Once validated with a test, set:
+      # So set the three keys below AND export SHIM_STREAMING_REHYDRATION=true.
+      # The mapping is validated against the real rehydration buffer in
+      # tests/integrations/litellm/test_streaming_holdback.py.
       #
       # streaming_transform_mode: incremental_diff
       # streaming_sampling_rate: 1            # default 5 samples every 5th chunk

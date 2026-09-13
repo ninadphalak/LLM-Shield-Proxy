@@ -119,10 +119,27 @@ Two things line up exactly with the in-tree guardrail:
 - `stream_holdback_chars` exists to let a rewriting guardrail hold back a trailing window before
   rewriting — the same job `SSERehydrationBuffer.content_buffer` does.
 
-## OPEN ITEM before enabling streaming
+## How the holdback composes with the rehydration buffer (validated)
 
-`stream_holdback_chars` semantics were read from the framework, not exercised against
-`SSERehydrationBuffer`. Before enabling `incremental_diff` in production, prove the mapping
-(returned text vs. holdback) against the real buffer with a test: a placeholder split across two
-deltas must never appear in fragments on the wire. Getting this wrong emits a partial placeholder —
-the exact failure the in-tree design exists to prevent.
+This was the one untested assumption, and it is now proved against the real
+`SSERehydrationBuffer` in `tests/integrations/litellm/test_streaming_holdback.py`.
+
+The framework wants the **accumulated** mutated text plus a holdback, and emits
+`text[len(already_emitted) : len(text) - holdback]`. The buffer's `process_delta_text` keeps its
+withheld tail in `content_buffer` and returns everything else, and it can re-derive that tail from
+the accumulated text alone — so the shim needs no per-stream state. Concretely:
+
+- the **withheld length** comes from `/v1/guard/rehydrate/stream`, called with the whole accumulated
+  text and an empty carry;
+- the **restored text** comes from `/v1/guard/rehydrate`;
+- the shim returns `texts = [restored]` with `stream_holdback_chars = len(carry)`.
+
+The second call is not redundant. LiteLLM forces the holdback to 0 on the final round, so whatever
+the shim withholds there is emitted verbatim — and if that region held the raw placeholder, every
+reply ending on a redacted value would finish by showing the user a placeholder. `emitted + carry`
+is the obvious single-call mapping and it reproduces exactly that defect; a negative-control test
+asserts so, which is what makes the two-call version evidence rather than preference.
+
+The cost is one extra call to the Shield per streaming round. Over a loopback interface that is
+cheaper than the failure it avoids.
+
