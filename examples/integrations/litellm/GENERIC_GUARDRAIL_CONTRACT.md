@@ -64,6 +64,29 @@ Behaviour, from `apply_guardrail` / `_build_guardrail_return_inputs`:
   list must be the same length and order as what you were sent.
 - `stream_holdback_chars` is forwarded into the streaming driver.
 
+### There is no return channel for tool calls
+
+The request body carries `tool_calls`, but the response has no field to hand them back, so
+this path cannot restore what a tool call is invoked with:
+
+- `GenericGuardrailAPIResponse` is `{action, blocked_reason, texts, images,
+  stream_holdback_chars}` — there is no `tool_calls` in it.
+- `_build_guardrail_return_inputs` never sets `return_inputs["tool_calls"]`, so
+  `guardrailed_inputs.get("tool_calls")` is `None` in the OpenAI handler and it falls back to
+  the **unmodified originals** (`llm/llms/openai/chat/guardrail_translation/handler.py`).
+- On the streaming side, `streaming_transform_mode: incremental_diff` is documented as string
+  `delta.content` only, so streamed tool arguments are out of scope here outright.
+
+There is no shim-side fix: the field has nowhere to go. A route that redacts tool arguments
+therefore gets the placeholders back in the arguments, and nothing raises. When a workload
+calls tools whose arguments carry redactable text, use the in-process guardrail
+(`litellm_guardrail.py`) — it restores them on the OpenAI non-streaming path, on the
+Anthropic `tool_use` path, on the Responses API path, and per tool call within a stream.
+
+Offering LiteLLM the upstream change is small and separable from the guardrail itself: add
+`tool_calls` to `GenericGuardrailAPIResponse` and thread it through
+`_build_guardrail_return_inputs`.
+
 ## Config knobs
 
 ```yaml
