@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SHIM_PATH = REPO_ROOT / "examples" / "integrations" / "litellm" / "litellm_guardrail_shim.py"
 
 SHIM_KEY = "shim-key-for-tests"

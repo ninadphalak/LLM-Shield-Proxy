@@ -1,10 +1,10 @@
 """The LiteLLM adapter is a host-provided module, not a dependency of this package.
 
-``llm_shield_proxy/integrations/litellm_guardrail.py`` subclasses LiteLLM's
+``llm_shield_proxy/integrations/litellm/guardrail.py`` subclasses LiteLLM's
 ``CustomGuardrail``, so LiteLLM has to be importable for LiteLLM to load it by
 dotted path. The direction of that dependency is what these tests defend:
 
-    litellm  --may-import-->  llm_shield_proxy.integrations.litellm_guardrail
+    litellm  --may-import-->  llm_shield_proxy.integrations.litellm.guardrail
     llm_shield_proxy  --never-imports-->  litellm
 
 If the second line broke, every install of the gateway would carry LiteLLM's
@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_CONFIG = REPO_ROOT / "examples" / "integrations" / "litellm" / "config.guardrail.yaml"
 
 _COUNT_IMPORTS = """

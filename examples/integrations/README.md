@@ -27,7 +27,7 @@ and the shield must be trusted with the route.
 keeps the model path. `pre_call` redacts the outbound request, `post_call` restores the reply,
 and streaming replies are restored as chunks arrive rather than buffered. This needs
 `pip install llm-shield-proxy` in the proxy's own environment, because LiteLLM imports
-`llm_shield_proxy.integrations.litellm_guardrail.LLMShieldProxyGuardrail` from it. No file in
+`llm_shield_proxy.integrations.litellm.guardrail.LLMShieldProxyGuardrail` from it. No file in
 LiteLLM's repository is modified, so there is nothing to keep in sync with upstream.
 
 ## Common client configuration
