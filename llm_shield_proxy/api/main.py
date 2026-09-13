@@ -69,7 +69,11 @@ from llm_shield_proxy.security.tool_rbac import (
     build_policy_resolver,
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
-from llm_shield_proxy.streaming.streaming import redact_model_originated_tree, rehydrate_sse_stream
+from llm_shield_proxy.streaming.streaming import (
+    json_escaped_vault,
+    redact_model_originated_tree,
+    rehydrate_sse_stream,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1596,6 +1600,44 @@ def _append_watermark(res: Dict[str, Any], watermark_text: str) -> None:
             block["text"] += watermark_text
 
 
+# Matches the ceiling `NonStreamingRehydrator` already applies to decoded payloads. The
+# bound exists to stop a crafted reply becoming an unbounded walk, not to describe a real
+# schema: tool inputs nest a handful deep, so it should never be reached. It was 8 first,
+# which sits inside the range a legitimate payload can occupy -- and truncating here hands
+# the caller a placeholder, the exact failure this function exists to prevent, so the
+# cheap bound was the expensive choice.
+_MAX_TOOL_INPUT_DEPTH = 40
+
+
+def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0) -> Any:
+    """Rehydrates every string leaf of an already-decoded JSON value.
+
+    Anthropic carries tool input as a decoded object rather than as JSON text, so the
+    leaves are restored in place and the serializer escapes them on the way out. That
+    is why this needs no `json_escaped_vault`, unlike the OpenAI `arguments` string,
+    which the model hands over already serialised.
+
+    Bounded rather than trusting the payload's own nesting to terminate. Reaching the
+    bound is logged rather than passed over quietly: everything below it keeps its
+    placeholders, and a caller holding one cannot tell it from a value.
+    """
+    if depth > _MAX_TOOL_INPUT_DEPTH:
+        # The message names no node content. Invariant 4 holds in log records too.
+        logger.warning(
+            "Tool input nesting exceeded %d levels; leaves below that depth keep their "
+            "placeholders and were not restored.",
+            _MAX_TOOL_INPUT_DEPTH,
+        )
+        return node
+    if isinstance(node, dict):
+        return {key: _rehydrate_decoded_leaves(value, vault, depth + 1) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_rehydrate_decoded_leaves(item, vault, depth + 1) for item in node]
+    if isinstance(node, str):
+        return vault.rehydrate(node)
+    return node
+
+
 def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
     """Rehydrates tokens in the known OpenAI and Anthropic response shapes.
 
@@ -1608,6 +1650,10 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     import copy
 
     res_copy = copy.deepcopy(res_json)
+    # OpenAI `arguments` is JSON *text*, so a restored value carrying a quote,
+    # backslash or control character would leave the document unparseable. Built once
+    # per response: the escaped mapping is rebuilt whenever the vault grows.
+    json_vault = json_escaped_vault(vault)
 
     # 1. OpenAI Chat Completion choices
     if "choices" in res_copy and isinstance(res_copy["choices"], list):
@@ -1624,13 +1670,13 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
                             if isinstance(tc, dict) and "function" in tc and isinstance(tc["function"], dict):
                                 fn = tc["function"]
                                 if "arguments" in fn and isinstance(fn["arguments"], str):
-                                    fn["arguments"] = vault.rehydrate(fn["arguments"])
+                                    fn["arguments"] = json_vault.rehydrate(fn["arguments"])
 
                     # Rehydrate legacy function_call arguments
                     if "function_call" in message and isinstance(message["function_call"], dict):
                         fn = message["function_call"]
                         if "arguments" in fn and isinstance(fn["arguments"], str):
-                            fn["arguments"] = vault.rehydrate(fn["arguments"])
+                            fn["arguments"] = json_vault.rehydrate(fn["arguments"])
 
                 delta = choice.get("delta", {})
                 if isinstance(delta, dict) and "content" in delta and isinstance(delta["content"], str):
@@ -1639,8 +1685,15 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     # 2. Anthropic Claude top-level content blocks
     if "content" in res_copy and isinstance(res_copy["content"], list):
         for block in res_copy["content"]:
-            if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
+            if not isinstance(block, dict):
+                continue
+            if "text" in block and isinstance(block["text"], str):
                 block["text"] = vault.rehydrate(block["text"])
+            elif block.get("type") == "tool_use":
+                # A tool_use block has no `text`, so a walk keyed on that field skipped it
+                # entirely and handed the caller a placeholder as a tool argument. Its
+                # `input` is a decoded object, so its leaves are restored in place.
+                block["input"] = _rehydrate_decoded_leaves(block.get("input"), vault)
 
     return res_copy
 

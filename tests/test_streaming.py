@@ -387,3 +387,185 @@ async def test_finishing_a_choice_at_the_window_cap_does_not_fail_closed(monkeyp
     args = _tool_arguments(output)
     assert args[(0, 0)] == '{"a":"[EMA'
     assert args[(0, 1)] == '{"b":"[EMA'
+
+
+def _anthropic_tool_stream(*partial_json_fragments: str, block_index: int = 0):
+    """An Anthropic tool-call stream: block start, input fragments, block stop."""
+    import json as stdlib_json
+
+    async def stream():
+        start = {
+            "type": "content_block_start",
+            "index": block_index,
+            "content_block": {"type": "tool_use", "id": "toolu_9", "name": "send_email", "input": {}},
+        }
+        yield b"event: content_block_start\ndata: " + stdlib_json.dumps(start).encode() + b"\n\n"
+        for fragment in partial_json_fragments:
+            event = {
+                "type": "content_block_delta",
+                "index": block_index,
+                "delta": {"type": "input_json_delta", "partial_json": fragment},
+            }
+            yield b"event: content_block_delta\ndata: " + stdlib_json.dumps(event).encode() + b"\n\n"
+        stop = {"type": "content_block_stop", "index": block_index}
+        yield b"event: content_block_stop\ndata: " + stdlib_json.dumps(stop).encode() + b"\n\n"
+        yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    return stream()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_streamed_tool_input_is_rehydrated():
+    """Anthropic streams tool input as `input_json_delta`, a shape nothing handled.
+
+    `grep input_json_delta` matched nothing before this change, so an Anthropic-native
+    tool call reached the caller still carrying placeholders even though the OpenAI
+    shape had been fixed.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    output = await _collect_stream(
+        _anthropic_tool_stream('{"to": "[EMA', 'IL_1]"}'), vault
+    )
+
+    assert _tool_arguments(output)[(0, 0)] == '{"to": "sarah@skynet.com"}'
+    assert "[EMAIL_1]" not in output
+    assert "[EMA" not in output
+
+
+@pytest.mark.asyncio
+async def test_anthropic_streamed_tool_call_carries_its_id_and_name():
+    """An OpenAI-shaped client needs the call's id and name once, on its first event."""
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")
+
+    output = await _collect_stream(_anthropic_tool_stream('{"to": "[EMAIL_1]"}'), vault)
+
+    import json as stdlib_json
+
+    openers = []
+    for line in output.splitlines():
+        if not line.startswith("data: ") or "tool_calls" not in line:
+            continue
+        for call in stdlib_json.loads(line[6:])["choices"][0]["delta"]["tool_calls"]:
+            if call.get("id"):
+                openers.append(call)
+    assert len(openers) == 1, "the call must be opened exactly once"
+    assert openers[0]["id"] == "toolu_9"
+    assert openers[0]["type"] == "function"
+    assert openers[0]["function"]["name"] == "send_email"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_tool_tail_flushes_before_the_block_stops():
+    """A held tail must precede `content_block_stop`, not follow it.
+
+    The stop event is where the call finishes growing, so a client parses the joined
+    arguments there. This is the Anthropic counterpart of the `finish_reason` rule.
+    """
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")
+
+    # Ends mid-token, so the window is still holding when the block stops.
+    output = await _collect_stream(_anthropic_tool_stream('{"to": "[EMA'), vault)
+
+    events = [ln for ln in output.splitlines() if ln.startswith("data: ")]
+    stops = [i for i, ln in enumerate(events) if "content_block_stop" in ln]
+    assert stops, "expected a content_block_stop event"
+    # Something carrying tool arguments precedes the stop...
+    assert any("tool_calls" in ln for ln in events[: stops[0]])
+    # ...and nothing carrying them follows it.
+    assert not [ln for ln in events[stops[0] + 1 :] if "tool_calls" in ln]
+    assert _tool_arguments(output)[(0, 0)] == '{"to": "[EMA'
+
+
+@pytest.mark.asyncio
+async def test_anthropic_streamed_tool_input_is_json_escaped():
+    """The Anthropic tool channel is JSON text too, so restored values are escaped."""
+    import json as stdlib_json
+
+    hostile = 'Bob "The Man" O\\Brien'
+    vault = Vault(synthetic=False)
+    token = vault.get_or_create_token(hostile, "PERSON")
+
+    output = await _collect_stream(
+        _anthropic_tool_stream('{"who": "' + token + '"}'), vault
+    )
+
+    assert stdlib_json.loads(_tool_arguments(output)[(0, 0)]) == {"who": hostile}
+
+
+@pytest.mark.asyncio
+async def test_anthropic_tool_blocks_are_numbered_densely_from_zero():
+    """Anthropic numbers tool blocks alongside text blocks; clients expect dense indices.
+
+    A reply whose first block is prose puts its tool call at Anthropic index 1. Emitting
+    that verbatim would open a tool call at index 1 with no index 0 in front of it.
+    """
+    import json as stdlib_json
+
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")
+
+    async def mixed_stream():
+        yield (
+            b"event: content_block_delta\n"
+            b'data: {"type":"content_block_delta","index":0,'
+            b'"delta":{"type":"text_delta","text":"Emailing [EMAIL_1] now"}}\n\n'
+        )
+        start = {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {"type": "tool_use", "id": "toolu_1", "name": "send_email", "input": {}},
+        }
+        yield b"event: content_block_start\ndata: " + stdlib_json.dumps(start).encode() + b"\n\n"
+        frag = {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '{"to": "[EMAIL_1]"}'},
+        }
+        yield b"event: content_block_delta\ndata: " + stdlib_json.dumps(frag).encode() + b"\n\n"
+        yield b'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n'
+        yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    output = await _collect_stream(mixed_stream(), vault)
+
+    # The tool call is the first one seen, so it is ordinal 0 even though its
+    # Anthropic block index is 1.
+    assert _tool_arguments(output)[(0, 0)] == '{"to": "sarah@skynet.com"}'
+    assert _choice_texts(output)[0] == "Emailing sarah@skynet.com now"
+
+
+def _sse_events(output: str) -> list:
+    """Splits a stream into SSE events the way a compliant client frames them.
+
+    An event ends at a blank line. Two `data:` lines inside one event are ONE payload,
+    joined by a newline -- which is why line-by-line parsing cannot see a framing bug.
+    """
+    return [block for block in output.split("\n\n") if block.strip()]
+
+
+@pytest.mark.asyncio
+async def test_a_flushed_anthropic_tail_is_its_own_sse_event():
+    """A buffered flush must terminate before the event it precedes.
+
+    Emitted with a single newline, the flush and the following stop event share the
+    upstream's blank line and arrive as one event carrying two newline-joined JSON
+    documents. No compliant client can parse that, so the restored tail is lost --
+    invisible to any test that reads the stream line by line.
+    """
+    import json as stdlib_json
+
+    vault = Vault(synthetic=False)
+    vault.get_or_create_token("sarah@skynet.com", "EMAIL")  # [EMAIL_1]
+
+    # Ends mid-token, so a tail is still held when the block stops.
+    output = await _collect_stream(_anthropic_tool_stream('{"to": "[EMA'), vault)
+
+    for event in _sse_events(output):
+        data_lines = [ln for ln in event.splitlines() if ln.startswith("data: ")]
+        assert len(data_lines) <= 1, f"event carries {len(data_lines)} data lines: {event!r}"
+        for data_line in data_lines:
+            # Every payload must be a JSON document on its own.
+            stdlib_json.loads(data_line[6:])

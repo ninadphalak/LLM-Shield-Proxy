@@ -124,6 +124,17 @@ class _JsonStringVaultView:
         return self._escaped
 
 
+def json_escaped_vault(vault: Any) -> Any:
+    """A vault whose restored values are escaped for a JSON string context.
+
+    For callers outside this module that splice restored values into JSON *text* --
+    principally `_rehydrate_json_response`, which writes into an OpenAI
+    `function.arguments` string. Build one per response, not per field: the escaped
+    mapping is rebuilt whenever the vault grows.
+    """
+    return _JsonStringVaultView(vault)
+
+
 def _append_tool_arguments(delta: dict, tool_index: int, text: str) -> None:
     """Appends flushed `arguments` text to a delta, on the tool call that owns it.
 
@@ -645,6 +656,42 @@ async def rehydrate_sse_stream(
                 flush_obj = {"choices": [{"index": choice_index, "delta": delta}]}
                 yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
 
+        # Anthropic block index -> the OpenAI tool-call ordinal it translates to. Anthropic
+        # numbers tool blocks in the same space as text blocks, so a reply whose first block
+        # is prose would otherwise open a tool call at index 1 with no index 0 in front of
+        # it. Clients concatenate by index, so ordinals are handed out densely from 0.
+        anthropic_tool_ordinals: Dict[int, int] = {}
+
+        def _anthropic_tool_ordinal(block_index: int) -> int:
+            """The tool-call ordinal for one Anthropic content block, stable per stream."""
+            existing = anthropic_tool_ordinals.get(block_index)
+            if existing is not None:
+                return existing
+            assigned = len(anthropic_tool_ordinals)
+            anthropic_tool_ordinals[block_index] = assigned
+            return assigned
+
+        def _tool_call_line(ordinal: int, arguments: str, opener: Optional[dict] = None) -> str:
+            """One OpenAI-shaped SSE line carrying a tool-call fragment.
+
+            `opener` is the Anthropic `content_block` that started the call, and supplies
+            the `id` and `name` an OpenAI client needs once, on the call's first event.
+            """
+            function: Dict[str, Any] = {"arguments": arguments}
+            call: Dict[str, Any] = {"index": ordinal, "function": function}
+            if opener is not None:
+                call["id"] = opener.get("id")
+                call["type"] = "function"
+                function["name"] = opener.get("name")
+            chunk = {
+                "id": cached_id,
+                "object": "chat.completion.chunk",
+                "created": cached_created,
+                "model": cached_model,
+                "choices": [{"index": 0, "delta": {"tool_calls": [call]}}],
+            }
+            return f"data: {json.dumps(chunk).decode('utf-8')}"
+
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         def _bounded_output(piece: bytes) -> bytes:
@@ -713,6 +760,9 @@ async def rehydrate_sse_stream(
                     while "\n" in line_accumulator:
                         line, line_accumulator = line_accumulator.split("\n", 1)
                         stripped = line.strip()
+                        # Lines this event must emit BEFORE itself, used where a tool
+                        # window has to be drained ahead of the event closing its call.
+                        pre_lines: list = []
 
                         if stripped.startswith("event: "):
                             for ready in _queue_output((line + "\n").encode("utf-8")):
@@ -841,8 +891,19 @@ async def rehydrate_sse_stream(
                                             ],
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                    elif isinstance(delta.get("partial_json"), str):
+                                        # Anthropic streams tool input as `partial_json`
+                                        # fragments on the block -- the shape OpenAI carries
+                                        # as `function.arguments`. It is JSON text on its own
+                                        # ordered channel, so it gets its own window and,
+                                        # through `_channel_vault`, escaped restored values.
+                                        tool_ordinal = _anthropic_tool_ordinal(_entry_index(data_obj))
+                                        restored = _buffer_for((0, tool_ordinal)).process_delta_text(
+                                            delta["partial_json"]
+                                        )
+                                        line = _tool_call_line(tool_ordinal, restored)
                                     else:
-                                        pass  # Skip non-text deltas
+                                        pass  # Skip deltas carrying neither text nor tool input
                                 # 3. Anthropic Content Block Start / Generic text delta
                                 elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
                                     cb = data_obj["content_block"]
@@ -863,13 +924,40 @@ async def rehydrate_sse_stream(
                                             ],
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
+                                    elif cb.get("type") == "tool_use":
+                                        # Opens the call so the client learns its id and name
+                                        # once. `input` is empty here; the arguments arrive
+                                        # as `input_json_delta` fragments.
+                                        tool_ordinal = _anthropic_tool_ordinal(_entry_index(data_obj))
+                                        line = _tool_call_line(tool_ordinal, "", opener=cb)
                                     else:
-                                        pass  # Skip non-text start blocks
+                                        pass  # Skip start blocks carrying neither
+                                elif data_obj.get("type") == "content_block_stop":
+                                    # This block's arguments are complete here, and an
+                                    # OpenAI-shaped client parses a tool call once it stops
+                                    # growing, so a tail held past this point is parsed
+                                    # against a truncated document. Same ordering rule as
+                                    # `finish_reason` on the OpenAI path: drain BEFORE the
+                                    # event that closes the call, never after it.
+                                    stopped = anthropic_tool_ordinals.get(_entry_index(data_obj))
+                                    if stopped is not None:
+                                        stopped_tail = _flush_window((0, stopped))
+                                        if stopped_tail:
+                                            pre_lines.append(_tool_call_line(stopped, stopped_tail))
                                 elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
                                     pass  # We let [DONE] be handled at stream end
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
 
+                            for pre_line in pre_lines:
+                                # Terminated here, with its OWN blank line. `line` is
+                                # followed by the upstream's blank line, not by one of
+                                # ours, so a pre-line ending in a single newline would
+                                # share that terminator: one SSE event carrying two
+                                # newline-joined JSON documents, which no compliant
+                                # client can parse and whose restored tail is lost.
+                                for ready in _queue_output((pre_line + "\n\n").encode("utf-8")):
+                                    yield ready
                             for ready in _queue_output((line + "\n").encode("utf-8")):
                                 yield ready
                         elif stripped == "data: [DONE]":
