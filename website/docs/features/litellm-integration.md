@@ -12,7 +12,7 @@ repository.
 | Guardrails dashboard card | no | no |
 | Listed in LiteLLM's docs | no | no |
 | Streaming restoration | yes | yes, opt-in on both sides |
-| Tool-call arguments restored | yes | no — LiteLLM's response contract has no field for them |
+| Tool-call arguments restored | yes | no: LiteLLM's response contract has no field for them |
 | Conflicts with LiteLLM releases | none | none |
 
 Neither gets you a card in LiteLLM's Admin UI or a page in LiteLLM's own docs: both
@@ -22,7 +22,7 @@ conversation with LiteLLM, not a configuration choice.
 ## In-process guardrail
 
 LiteLLM imports the class itself, so the file must be importable by the proxy process. Copy or
-mount `examples/integrations/litellm/litellm_guardrail.py` where the proxy can reach it — LiteLLM
+mount `examples/integrations/litellm/litellm_guardrail.py` where the proxy can reach it. LiteLLM
 documents this pattern for custom guardrails:
 
 ```shell
@@ -84,14 +84,14 @@ uses. See `examples/integrations/litellm/config.generic_guardrail.yaml`.
 
 One thing this path cannot do: LiteLLM's generic-guardrail contract carries `tool_calls`
 **in** but has no field to carry them back, so a tool call's arguments come back holding
-placeholders and nothing raises. There is no shim-side fix — the value has nowhere to go.
+placeholders and nothing raises. There is no shim-side fix: the value has nowhere to go.
 `GENERIC_GUARDRAIL_CONTRACT.md` records the source-level reason. If your workload calls
 tools whose arguments carry redactable text, use the in-process guardrail, which restores
 them.
 
 ## Streaming
 
-Streaming restoration works on both wirings, and on both it is opt-in — the defaults
+Streaming restoration works on both wirings, and on both it is opt-in, because the defaults
 break it silently:
 
 - LiteLLM's `streaming_transform_mode` defaults to `block_only`, which **discards a
@@ -104,7 +104,7 @@ break it silently:
 The shim makes two calls to the Shield per round while streaming, because LiteLLM
 forces the holdback to 0 on the final round and emits the withheld region verbatim. If
 that region were the raw placeholder, every reply ending on a redacted value would
-finish by showing the user a placeholder — which is the failure this product exists to
+finish by showing the user a placeholder, which is the failure this product exists to
 prevent. `tests/integrations/litellm/test_streaming_holdback.py` proves both the
 mapping and that the naive single-call version really does reproduce that defect.
 
@@ -117,13 +117,13 @@ mapping and that the naive single-call version really does reproduce that defect
   streamed fragment is an arbitrary slice of a JSON document, so the code cannot tell whether
   the position it writes is inside a string literal, and escaping unconditionally would
   corrupt the values that are not.
-- **The generic guardrail API path cannot restore tool arguments at all** — see above.
+- **The generic guardrail API path cannot restore tool arguments at all**, see above.
 - **LiteLLM's `incremental_diff` mode covers string `delta.content` only**, so streamed
   tool-argument restoration through that path is out of scope upstream. The in-process
   guardrail restores them per tool call.
 
 ## Further reading
 
-- `examples/integrations/litellm/GENERIC_GUARDRAIL_CONTRACT.md` — the LiteLLM contract,
+- `examples/integrations/litellm/GENERIC_GUARDRAIL_CONTRACT.md`: the LiteLLM contract,
   read out of LiteLLM's source
-- `examples/integrations/README.md` — the other integration examples
+- `examples/integrations/README.md`: the other integration examples
