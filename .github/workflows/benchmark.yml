@@ -3,6 +3,12 @@ name: Reproducible Public Benchmark
 on:
   push:
     branches: [main]
+  # Reproduction drift must be caught BEFORE it reaches main, not after. Without this,
+  # a change to the emitter that moves a published rate merges green and is only
+  # discovered by the push build, when the bad commit is already the thing an
+  # independent reproducer clones.
+  pull_request:
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch: {}
@@ -68,6 +74,51 @@ jobs:
           path: |
             FIDE_UNCERTAINTY.json
             FIDE_NUMERIC_AUDIT.md
+          retention-days: 90
+
+  results-page:
+    # The published results table is generated from the committed reports. This job is the
+    # thing that keeps it honest: it regenerates the page and fails if the committed page
+    # and the committed reports disagree, so a number on the site cannot outlive the
+    # artefact it came from.
+    #
+    # It is a staleness GATE rather than an auto-commit. A job that pushed to main would
+    # need write permissions it does not otherwise need, would be refused by branch
+    # protection, and cannot work at all from a fork. The gate gives the same guarantee
+    # -- page and reports can never disagree on main -- with none of that. The regenerated
+    # page is uploaded either way, so a fork run produces its own copy.
+    name: Results Page Matches The Reports
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Fail if the committed page drifted from the committed reports
+        # MUST run before anything regenerates the file. This job previously regenerated
+        # first and checked second, which made the gate unfalsifiable: the first step
+        # repaired a stale page in the runner's workspace, so `--check` compared the
+        # freshly written file against itself and could never fail. A gate that cannot
+        # fail is worse than no gate, because the green tick is read as evidence.
+        # Generates from JSON with the standard library only; nothing to install.
+        run: python benchmarks/generate_results_page.py --check
+
+      - name: Regenerate the page for the artifact
+        # After the gate, and on failure too, so a red run hands you the page it wanted.
+        if: always()
+        run: python benchmarks/generate_results_page.py
+
+      - name: Upload the regenerated page
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: generated-results-page
+          path: website/docs/conformance/results.md
           retention-days: 90
 
   fragmentation-reproduction:
