@@ -91,18 +91,33 @@ def _mean_range(stat: dict[str, Any] | None) -> str:
 def _request_path(report: dict[str, Any]) -> str:
     """What the target sent UPSTREAM, which the four response rates do not describe.
 
-    Without this column the page is actively misleading. `litellm-presidio` and
+    Without this column the page is misleading in one direction. `litellm-presidio` and
     `nemo-guardrails-0.24.0` both show leak 0.00 in both response arms and still read
     `fail`, and nothing in the row said why: all four entity types reached the capture
-    server on the REQUEST path. A reader could only conclude the outcome was arbitrary.
+    server on the REQUEST path.
+
+    Reporting the observed values ALONE is misleading in the other direction, and unfairly
+    so. An unmasked value from a target that never enabled request redaction is the
+    configuration working as asked; an unmasked value from a target that did enable it is a
+    control that failed. NeMo, Portkey and Guardrails AI are `not-configured` here and
+    LiteLLM is `configured`, so a column that printed "leak" for all four would accuse
+    three products of a defect they were never configured to prevent. The claim is read
+    from `redaction_claim.request_path_redaction_configured` and always shown with the
+    observation.
     """
     check = report.get("checks", {}).get("configured_upstream_boundary")
     if not isinstance(check, dict):
         return "not measured"
+    claim = report.get("redaction_claim", {}).get("request_path_redaction_configured")
     leaked = check.get("leaked_entity_types") or []
-    if leaked:
-        return "leak: " + ", ".join(leaked)
-    return "clean" if check.get("passed") else "not clean"
+
+    if claim == "not-configured":
+        # Not a finding. The values were expected to pass through.
+        return "not configured" + (f" ({len(leaked)} types seen)" if leaked else "")
+    if claim == "configured":
+        return "configured, leaked: " + ", ".join(leaked) if leaked else "configured, clean"
+    # Reference policies make no request-path claim; they are in-process models.
+    return "not claimed" + (f" ({len(leaked)} types seen)" if leaked else "")
 
 
 def _count_reports(root: pathlib.Path) -> int:
