@@ -37,6 +37,7 @@ import ssl
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request
@@ -387,13 +388,32 @@ class _StallingTLSServer(threading.Thread):
             pass
 
 
+def _trust_self_signed(opener, cafile):
+    """Point every HTTPS handler at a context that trusts the test CA. Returns them.
+
+    SELECT BY TYPE, NOT BY WHETHER `_context` IS ALREADY SET. The predecessor guarded on
+    `getattr(handler, "_context", None) is not None`, which is a statement about the
+    CPython version rather than about the handler: 3.12 and later build a default SSL
+    context in `HTTPSHandler.__init__`, while 3.11 stores the `context=None` it was given.
+    So on 3.11 the guard was false, NOTHING was patched, the self-signed certificate went
+    to a verifying context, and both tests failed with CERTIFICATE_VERIFY_FAILED. They
+    passed everywhere else, which is why it survived until this branch first reached CI.
+
+    The empty-result assertion is the other half of the repair. A patch loop that silently
+    matches nothing is the defect itself, not a precaution against it.
+    """
+    patched = [h for h in opener.handlers if isinstance(h, urllib.request.HTTPSHandler)]
+    for handler in patched:
+        handler._context = ssl.create_default_context(cafile=cafile)
+    assert patched, "no HTTPSHandler on the opener; the CA patch would be a silent no-op"
+    return patched
+
+
 def _trusting_opener(connect_timeout, read_timeout, cafile):
     """The PRODUCTION opener, with only the self-signed CA additionally trusted."""
     v2_emitter._GCP_OPENERS.clear()
     opener = _gcp_opener(connect_timeout, read_timeout)
-    for handler in opener.handlers:
-        if getattr(handler, "_context", None) is not None:
-            handler._context = ssl.create_default_context(cafile=cafile)
+    _trust_self_signed(opener, cafile)
     return opener
 
 
@@ -419,20 +439,18 @@ def test_the_socket_carries_the_read_deadline_after_the_handshake(stalling_serve
     seen = {}
     v2_emitter._GCP_OPENERS.clear()
     opener = _gcp_opener(30.0, 7.0)
-    for handler in opener.handlers:
-        if getattr(handler, "_context", None) is not None:
-            handler._context = ssl.create_default_context(cafile=certfile)
-            original = handler.do_open
+    for handler in _trust_self_signed(opener, certfile):
+        original = handler.do_open
 
-            def spy(cls, req, _original=original, **kw):
-                class _Spy(cls):
-                    def connect(inner):
-                        super().connect()
-                        seen["after_connect"] = inner.sock.gettimeout()
+        def spy(cls, req, _original=original, **kw):
+            class _Spy(cls):
+                def connect(inner):
+                    super().connect()
+                    seen["after_connect"] = inner.sock.gettimeout()
 
-                return _original(_Spy, req, **kw)
+            return _original(_Spy, req, **kw)
 
-            handler.do_open = spy
+        handler.do_open = spy
     try:
         opener.open(Request(f"https://localhost:{server.port}/v1/x", data=b"{}"))
     except Exception:  # noqa: BLE001 -- the stall is expected; only the timeout matters
@@ -490,3 +508,28 @@ def test_the_cloud_deadline_is_not_the_client_deadline():
         "the default must reproduce the deadline the published GCP rows were measured "
         "under; changing it silently rescopes what a timeout in those rows means"
     )
+
+
+def test_the_ca_patch_applies_when_the_handler_holds_no_context(tmp_path):
+    """The 3.11 shape, pinned. A guard that cannot fail is not a guard.
+
+    CPython 3.12 and later build a default SSL context inside `HTTPSHandler.__init__`;
+    3.11 stores the `context=None` it was handed. The previous patch loop tested
+    `_context is not None` and so did nothing at all on 3.11, which sent a self-signed
+    certificate to a verifying context and failed two tests with CERTIFICATE_VERIFY_FAILED
+    on that interpreter alone. This reproduces the 3.11 shape on any interpreter.
+    """
+    certfile, _keyfile = _self_signed(tmp_path)
+    v2_emitter._GCP_OPENERS.clear()
+    opener = _gcp_opener(30.0, 7.0)
+
+    for handler in opener.handlers:
+        if isinstance(handler, urllib.request.HTTPSHandler):
+            handler._context = None
+
+    patched = _trust_self_signed(opener, certfile)
+
+    assert patched, "nothing was patched"
+    for handler in patched:
+        assert handler._context is not None
+        assert handler._context.verify_mode == ssl.CERT_REQUIRED
