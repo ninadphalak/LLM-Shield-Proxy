@@ -65,6 +65,25 @@ pii-leak-benchmark \
 pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1 --target-name your-gateway
 ```
 
+### Reproduce a published result instead of measuring a gateway
+
+One bounded experiment, offline, no gateway or account. It re-runs the chunk-local and
+length-bounded-retention inspectors at the published seed and diffs every field of the result
+against the published reports:
+
+```bash
+git clone https://github.com/ninadphalak/LLM-Shield-Proxy.git
+cd LLM-Shield-Proxy
+python -m pip install ./pii-leak-benchmark
+python benchmarks/reproduce_fragmentation.py --out reproduction
+```
+
+About two minutes. Exit status `0` means every field matched except timestamps and wall-clock
+timings. The same command runs in CI on Ubuntu, macOS and Windows across Python 3.11 and 3.12
+(`fragmentation-reproduction` in [`.github/workflows/benchmark.yml`](.github/workflows/benchmark.yml)).
+Full walkthrough and what the numbers mean:
+[reproduce the fragmentation result](website/docs/conformance/reproduce-fragmentation.md).
+
 The only third-party Python dependency is `httpx`; you do not need to install one gateway to test
 another. You configure the gateway to use the benchmark's local capture server as its model
 provider. The benchmark then checks the URL, headers, HTTP framing, and JSON body for the test values. If

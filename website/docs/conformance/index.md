@@ -21,6 +21,8 @@ The lab is Apache-2.0 licensed. The specification, vectors, runner, report schem
 
 Review the [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), see the [published results table](./results), [reproduce the local and HTTP profiles](./reproducing), or [submit a run](./submitting).
 
+**Reproducing one result in two minutes:** [reproduce the fragmentation result](./reproduce-fragmentation) is a single bounded experiment — one chunk-local inspector against one length-bounded retaining inspector, offline, no gateway or account needed. It re-derives the published numbers on your machine and diffs them field by field against the published reports. Start there if you want to check the evidence rather than measure a gateway.
+
 ## Independent Harness
 
 The HTTP test suite ships as a separate, endpoint-neutral package named **`pii-leak-benchmark`**. This allows you to evaluate any gateway without installing the proxy itself. 

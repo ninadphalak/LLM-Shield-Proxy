@@ -1,74 +1,81 @@
-# Reproduce the Conformance Report
+---
+sidebar_position: 5
+title: Reproduce the conformance report
+---
 
-This guide explains how to run the conformance harness to generate a report, verify the artifact, and test gateways over HTTP.
+# Reproduce the conformance report
 
-## From a Source Checkout
+How to run the v1.0.0 conformance harness: the local in-process profile, and the HTTP
+profile against a gateway.
 
-To generate the conformance report locally, run the following two commands:
+Looking for the paper's fragmentation result instead? That is a different, smaller
+experiment: [reproduce the fragmentation result](./reproduce-fragmentation).
 
-### 1. Install the packages
+## Steps: local profile
 
-`ash
+Runs offline. No gateway, no API key, no model.
+
+### 1. Install
+
+```bash
 python -m pip install -e ./pii-leak-benchmark -e ".[dev]"
-`
+```
 
-This command installs:
-- pii-leak-benchmark: The endpoint-neutral HTTP profile package.
-- llm-shield-proxy (with dev dependencies): The local gateway and test tools.
+### 2. Run
 
-### 2. Run the local benchmark
-
-`ash
+```bash
 llm-shield-proxy benchmark \
   --iterations 10000 \
   --json-out CONFORMANCE_LATEST.json
-`
+```
 
-This command executes the proxy's **local, in-process conformance profile and microbenchmarks**.
-It runs offline, without calling any external LLMs, and does not write any test PII to the final JSON report.
-
-To ensure a specific revision is recorded (e.g., outside of GitHub Actions), set the environment variable:
+To record a specific revision in the report, set `LLM_SHIELD_SOURCE_REVISION` first.
+GitHub Actions supplies `GITHUB_SHA` instead and needs no flag.
 
 **Bash:**
-`ash
-LLM_SHIELD_SOURCE_REVISION=d0f4834b8d05444bfc04d3d32cfcb3a148aaa51f \
+
+```bash
+LLM_SHIELD_SOURCE_REVISION=$(git rev-parse HEAD) \
   llm-shield-proxy benchmark --iterations 10000 --json-out CONFORMANCE_LATEST.json
-`
+```
 
 **PowerShell:**
-`powershell
- = git rev-parse HEAD
-py -m llm_shield_proxy.cli benchmark --iterations 10000 --json-out CONFORMANCE_LATEST.json
-`
 
-## Verify the Artifact
+```powershell
+$env:LLM_SHIELD_SOURCE_REVISION = git rev-parse HEAD
+llm-shield-proxy benchmark --iterations 10000 --json-out CONFORMANCE_LATEST.json
+```
 
-After running the benchmark, check the output file (CONFORMANCE_LATEST.json) to confirm that:
+### 3. Check the report
 
-1. schema ends in /v1.0.0.
-2. source_revision matches the tested revision.
-3. All six checks are present and display as passed.
-4. Protected vector values (test PII) are absent from the report.
-5. The timing scope explicitly excludes network and framework overhead (it only measures in-process components).
-6. The memory scope distinguishes Python allocations from total process RSS.
+Open `CONFORMANCE_LATEST.json` and confirm:
 
-*Note: Latency measurements are provided under microbenchmarks rather than as a pass/fail check.*
+1. `schema` ends in `/v1.0.0`.
+2. `source_revision` matches the revision you tested.
+3. All six checks are present and passed.
+4. No test PII values appear anywhere in the file.
+5. The timing scope says it excludes network and framework overhead.
+6. The memory scope distinguishes Python allocations from process RSS.
 
-For production-shaped comparisons, refer to enchmarks/REPORTING.md. Please publish all runs, including unsuccessful ones and any deviations.
+## Steps: HTTP profile, local gateway
 
-## Run the OpenAI-Compatible HTTP Profile
+Tests any OpenAI-compatible gateway running on the same host. The harness starts a
+capture server on loopback and acts as the gateway's model provider.
 
-To test a target gateway over HTTP (rather than in-process), use the pii-leak-benchmark package.
+### 1. Install
 
-If you are testing a hosted gateway (e.g., behind a vendor account), please consult the [hosted-gateway runbook](./hosted-gateway-runbook).
+```bash
+pip install pii-leak-benchmark
+```
 
-The HTTP profile works by acting as the target gateway's **upstream capture server**. There are two capture modes: **loopback** and **public**.
+### 2. Point the gateway at the capture server
 
-### Capture Mode: Loopback (Default)
+Configure the gateway under test to use `http://127.0.0.1:8765/v1` as its upstream model
+provider.
 
-In loopback mode, the capture server binds to 127.0.0.1. This requires the gateway to be running on the same host (e.g., local process, container, or pod). This mode guarantees that all received traffic belongs to the target.
+### 3. Run
 
-`ash
+```bash
 CONFORMANCE_TARGET_API_KEY=local-evaluation-key \
 pii-leak-benchmark \
   --target-base-url http://127.0.0.1:8000/v1 \
@@ -76,24 +83,77 @@ pii-leak-benchmark \
   --target-version pinned-version \
   --iterations 10 \
   --json-out HTTP_CONFORMANCE.json
-`
+```
 
-If the target gateway runs in a container and needs a reachable host address, you can configure the harness to listen on a specific interface:
+If the gateway runs in a container, bind the capture server to a reachable interface
+instead:
 
-`python
-capture_host="0.0.0.0",
-capture_public_url="http://host.docker.internal:8765/v1",
-capture_token="a-long-random-value",
-`
+```bash
+pii-leak-benchmark \
+  --target-base-url http://127.0.0.1:8000/v1 \
+  --capture-host 0.0.0.0 \
+  --capture-public-url http://host.docker.internal:8765/v1 \
+  --json-out HTTP_CONFORMANCE.json
+```
 
-*Ensure your host firewall restricts access to this port.*
+Restrict that port at the host firewall.
 
-### Capture Mode: Public
+### 4. Read `outcome`
 
-Hosted gateways cannot connect to your local loopback address. You must deploy the capture server on a reachable public address (e.g., a VPS or a tunnel like 
-grok or cloudflared).
+| Value | Meaning |
+| :--- | :--- |
+| `pass` | No unmasked test value reached the capture server, and every profile requirement was met. |
+| `fail` | The gateway sent an unmasked test value to the capture server. |
+| `no-leak-profile-not-met` | Nothing leaked, but another requirement failed — for example one-way anonymization with no restoration. |
+| `not-applicable` | The product does not offer redaction. |
+| `redaction-not-enabled` | Redaction exists but was not turned on for this run. |
+| `inconclusive` | The run could not be attributed to the target. |
+| `claim-unstated` | No redaction claim was recorded. The report is not publishable as a results row. |
 
-`python
+`outcome` is derived from the recorded claim plus the measurement, not typed by the
+submitter. A hand-edited report fails schema validation.
+
+Read `outcome_rationale` for the reason, and
+`configured_upstream_boundary.leaked_entity_types` to see whether unmasked values were
+actually found. A failed check is not by itself a leak.
+
+## Steps: HTTP profile, hosted gateway
+
+A hosted gateway cannot reach your loopback address, so the capture server needs a public
+address — a VPS, or a tunnel such as `ngrok` or `cloudflared`. See the
+[hosted-gateway runbook](./hosted-gateway-runbook) first.
+
+### 1. Expose the capture server
+
+Your tunnel must terminate TLS. The capture server itself accepts plaintext HTTP/1.x only.
+
+### 2. Configure the gateway's upstream
+
+Point the gateway at your public capture URL. It must send the capture token as its
+upstream `Authorization` bearer token, or as an `x-conformance-capture-token` header.
+
+- **Cloudflare AI Gateway**: configure a Custom Provider pointing at the capture URL.
+- **Portkey**: use the `x-portkey-custom-host` header.
+
+### 3. Run
+
+```bash
+export CONFORMANCE_CAPTURE_TOKEN="rl55W7ikx2nF7sqC7Bkjb-PKlNc9Jm_C5VbFJ8Y3Knw"
+pii-leak-benchmark \
+  --target-base-url https://the-gateway-under-test.example/v1 \
+  --iterations 10 \
+  --capture-host 0.0.0.0 \
+  --capture-port 8765 \
+  --capture-public-url https://your-tunnel.example/v1 \
+  --json-out HTTP_CONFORMANCE.json
+```
+
+Use `CONFORMANCE_CAPTURE_TOKEN` rather than `--capture-token`, so the token does not
+appear in process lists.
+
+The Python API takes the same arguments:
+
+```python
 from pii_leak_benchmark import run_http_conformance
 
 report = run_http_conformance(
@@ -105,92 +165,101 @@ report = run_http_conformance(
     capture_token="a-long-random-value",
     capture_public_url="https://your-tunnel.example/v1",
 )
-`
+```
 
-**Requirements for Public Mode:**
-- **capture_host**: Must bind to a reachable interface.
-- **capture_public_url**: Must be the public base URL configured on the target gateway.
-- **capture_token**: Used to identify traffic from the target. The target gateway should send this as its upstream Authorization bearer token, or as an x-conformance-capture-token header.
+## Steps: contribute a reproduction
 
-*Note: Your tunnel must terminate TLS, as the capture server only accepts plaintext HTTP/1.x.*
+Open a GitHub Discussion or pull request with:
 
-#### Handling Unattributed Traffic
+1. The unmodified JSON report.
+2. Host environment details.
+3. The exact command you ran.
+4. Your relationship to the implementation you measured.
 
-Public capture servers may receive random internet scanning traffic. The benchmark handles this safely:
-- unattributed_requests: Requests lacking the capture token.
-- unattributed_uninspectable_requests: Unparseable requests.
-- unattributed_leaked_entity_types: Protected test values found in unattributed traffic.
+Publish unsuccessful runs and deviations too. See [submitting a result](./submitting).
 
-These metrics do not fail the boundary check unless the target gateway's own traffic contains leaked test values.
+## Explanation
 
-#### CLI Usage for Public Mode
+Everything below is context. None of it is needed to run the steps.
 
-You can run public mode from the command line:
+### What the local profile measures
 
-`ash
-export CONFORMANCE_CAPTURE_TOKEN="rl55W7ikx2nF7sqC7Bkjb-PKlNc9Jm_C5VbFJ8Y3Knw"
-pii-leak-benchmark \
-  --target-base-url https://the-gateway-under-test.example/v1 \
-  --iterations 10 \
-  --capture-port 8765 \
-  --capture-public-url https://your-tunnel.example/v1 \
-  --json-out HTTP_CONFORMANCE.json
-`
+`llm-shield-proxy benchmark` runs the proxy's in-process conformance checks and
+microbenchmarks. It never calls an external model and writes no test PII into the report.
 
-It is recommended to use the CONFORMANCE_CAPTURE_TOKEN environment variable rather than the --capture-token flag to prevent the token from appearing in system process lists.
+Latency appears under `microbenchmarks` as a measured distribution, not as a pass/fail
+check, because the numbers describe in-process components only. They are not end-to-end
+proxy latency. For production-shaped comparisons see `benchmarks/REPORTING.md`.
 
-### Configuring Hosted Gateways
+### Why the HTTP profile needs a capture server
 
-Hosted gateways (like Cloudflare AI Gateway or Portkey) require a publicly routable upstream URL (starting with https://).
+The question the profile answers is what the gateway sent to its model provider. The only
+way to see that is to be the model provider. The harness therefore stands up a capture
+server, the gateway is configured to treat it as upstream, and the harness inspects every
+request it receives. It then streams a response back one character per SSE event, so
+value restoration is tested against the hardest fragmentation the transport allows.
 
-- **Cloudflare AI Gateway**: Configure a "Custom Provider" pointing to your capture URL.
-- **Portkey**: Use the x-portkey-custom-host header to point to your capture URL.
+This measures network input and output only. Process RSS and audit integrity need the
+local profile.
 
-### The Capture Self-Probe
+### Loopback versus public capture
 
-Before testing the target, the harness sends a probe request to its own capture URL to verify connectivity. If the capture server does not record this probe, the run aborts. This prevents tests from failing due to misconfigured firewalls or port conflicts.
+Loopback binds to `127.0.0.1`, which guarantees that every request the capture server sees
+came from the target. Public mode gives up that guarantee in exchange for reaching a
+hosted gateway, so the report separates traffic that carried the capture token from
+traffic that did not:
 
-### What the Boundary Check Inspects
+- `unattributed_requests` — requests without the token.
+- `unattributed_uninspectable_requests` — requests that could not be parsed.
+- `unattributed_leaked_entity_types` — test values found in unattributed traffic.
 
-The capture server records and inspects every request from the target. It supports content-length, chunked framing, declared compression, JSON, and encoded text (base64, hex, percent-encoding).
+None of these fail the boundary check on their own. Only the target's own traffic can.
 
-The check searches for literal values, adjacent fragments, and values with separators removed. If a request is too large or malformed to parse, it counts as uninspectable_requests and fails the boundary check.
+### The capture self-probe
 
-The test prompt includes a random five-word marker. At least three words must appear in a captured request for it to count, ensuring the gateway actually forwarded the prompt to the capture server.
+Before testing anything, the harness sends a probe to its own capture URL. If the capture
+server does not record that probe, the run aborts rather than reporting a clean result
+produced by a firewall rule or a port conflict.
 
-### Run Validity
+### What the boundary check inspects
 
-The following conditions will invalidate a test run and are listed under limitations.run_validity:
+Every request from the target: URL, headers, HTTP framing and body. It handles
+content-length and chunked framing, declared compression, JSON, and encoded text
+(base64, hex, percent-encoding). It searches for literal values, adjacent fragments, and
+values with separators removed.
+
+A request too large or malformed to parse counts as `uninspectable_requests` and fails the
+boundary check. It is never assumed clean.
+
+The test prompt carries a random five-word marker. At least three of those words must
+appear in a captured request for it to count, which is how the harness knows the gateway
+actually forwarded the prompt rather than dropping it.
+
+### What invalidates a run
+
+Listed in `limitations.run_validity`:
+
 - The target was never configured to use the capture server.
-- captured_requests: 0 (this fails the boundary check).
-- The capture was unreachable from the target.
-- Policy rejections (e.g., authentication failure, rate limits).
+- `captured_requests: 0`.
+- The capture server was unreachable from the target.
+- Policy rejections — authentication failure, rate limits.
 - Unparseable captures.
-- The target used HTTP/2 instead of HTTP/1.x.
+- The target used HTTP/2 rather than HTTP/1.x.
 
-### Permanent Method Limits
+### Permanent limits of the method
 
-The following limitations apply to all runs (limitations.method_limits):
+Listed in `limitations.method_limits`, and true of every run:
+
 - Observation ends when client iterations finish.
-- Covert channels (e.g., timing, packetization) are not inspected.
-- Only requests sent to the capture server are monitored.
+- Covert channels — timing, packetization — are not inspected.
+- Only requests sent to the capture server are observed.
 - It does not measure population-level detector accuracy.
-- Process RSS, audit logging, and public-model behavior are not evaluated.
-- Latency measurements include local HTTP overhead.
+- Process RSS, audit logging and public-model behaviour are out of scope.
+- Latency figures include local HTTP overhead.
 
-### Interpreting a Non-Pass
+## Related
 
-Check the outcome field to understand the result:
-- ail: The gateway leaked unmasked test values.
-- 
-o-leak-profile-not-met: No leak occurred, but another requirement failed (e.g., one-way anonymization without rehydration).
-- 
-ot-applicable: The product does not support redaction.
-- 
-edaction-not-enabled / inconclusive: The run could not determine a verdict.
-
-Review outcome_rationale for details. A failure in one check does not automatically mean data leaked. Always check configured_upstream_boundary.leaked_entity_types to see if unmasked values were found.
-
-## Contribute an Independent Reproduction
-
-To contribute an independent reproduction, open a GitHub Discussion or pull request containing your unmodified JSON artifact, host environment details, command used, and your relationship to the measured implementation.
+- [Reproduce the fragmentation result](./reproduce-fragmentation)
+- [Hosted-gateway runbook](./hosted-gateway-runbook)
+- [Published results](./results)
+- [Submit a run](./submitting)
