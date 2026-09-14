@@ -15,9 +15,16 @@ whose drift would invalidate the published rates without changing them.
 
 `NONDETERMINISTIC` is an ignore list measured on this repository, not a guess: a
 chunk-local and a bounded-retention run reproduced their published reports with these
-eight fields differing and nothing else. Each one is wall-clock or an ephemeral loopback
-port. Anything that starts differing outside this list is a finding, and the exit status
-says so.
+eleven fields differing and nothing else. Each one records WHERE and WHEN the run
+happened, not what it measured. Anything that starts differing outside this list is a
+finding, and the exit status says so.
+
+The list was wrong when first written, and the way it was wrong is worth keeping. It was
+measured on the workstation that produced the published reports, under the interpreter
+that produced them, so the three `environment` fields could not appear in the diff: they
+were identical by coincidence of host. The cross-platform CI matrix found them on the
+first run. An ignore list derived from one machine can only ever be a lower bound, which
+is the argument for the matrix rather than a single reproducing runner.
 
 Usage:
     python benchmarks/reproduce_fragmentation.py
@@ -45,11 +52,18 @@ PUBLISHED = ROOT / "benchmarks" / "results" / "v2-response-split"
 PUBLISHED_SEED = "a1b2c3d4e5f60001"
 POLICIES = ("chunk-local", "bounded-retention")
 
-# Report paths that cannot reproduce because they record when and how fast the run went,
-# not what it measured. Every other leaf must match the published one exactly.
+# Report paths that cannot reproduce because they record when, where and how fast the run
+# went, not what it measured. Every other leaf must match the published one exactly.
+#
+# The `environment` block is provenance about the host. A reproduction on a different
+# machine SHOULD disagree with it; a reproduction that agreed would mean the report was
+# not recording the host that produced it.
 NONDETERMINISTIC = frozenset(
     {
         ".generated_at",
+        ".environment.python",
+        ".environment.implementation",
+        ".environment.platform",
         ".capture.self_probe.url",  # ephemeral loopback port
         ".capture.self_probe.round_trip_ms",
         ".checks.client_observed_latency.mean",
@@ -188,13 +202,13 @@ def main(argv: list[str] | None = None) -> int:
             match = "yes" if left == right else "NO"
             print(f"{label:22} {str(left):>18}  {str(right):>18}  {match}")
         if drift:
-            print(f"\n  {len(drift)} unexpected difference(s) outside the wall-clock fields:")
+            print(f"\n  {len(drift)} unexpected difference(s) outside the host and timing fields:")
             for entry in drift[:20]:
                 print(f"    {entry['path']}: {entry['published']!r} -> {entry['produced']!r}")
             if len(drift) > 20:
                 print(f"    ... and {len(drift) - 20} more (see reproduction-summary.json)")
         else:
-            print("\n  Every field matched except the wall-clock and ephemeral-port fields.")
+            print("\n  Every field matched except the host, timestamp and timing fields.")
 
     summary = {
         "reproduced": failures == 0,

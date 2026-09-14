@@ -135,14 +135,17 @@ the report keeps them separate. A third reference policy,
 ### What the script checks, beyond the four numbers
 
 It does a full recursive comparison of your report against the published one, every field,
-and fails on any difference outside an explicit eight-entry ignore list. Those eight are
-timestamps, wall-clock latency statistics, and the ephemeral loopback port the capture
-server bound to. Everything else — every rate, every digest, every per-axis marginal,
-the case inventory, the outcome — must match exactly.
+and fails on any difference outside an explicit eleven-entry ignore list. Those eleven
+record when, where and how fast the run happened: the timestamp, your OS and Python
+version, wall-clock latency statistics, and the ephemeral loopback port the capture server
+bound to. Everything else — every rate, every digest, every per-axis marginal, the case
+inventory, the outcome — must match exactly.
 
-The ignore list is measured, not assumed, and
-`tests/conformance/test_reproduce_fragmentation.py` fails the build if it grows to cover
-anything else.
+Your `environment` block is expected to differ from the published one. That is the report
+recording your machine, which is the point of an independent run.
+
+`tests/conformance/test_reproduce_fragmentation.py` pins that ignore list by exact set
+equality, so it cannot quietly grow to cover a real field.
 
 ### Where the published numbers come from
 
