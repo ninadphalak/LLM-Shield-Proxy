@@ -609,9 +609,31 @@ _GCP_TOKEN_LOCK = threading.Lock()
 
 
 def _gcloud(argv: list[str], what: str) -> str:
-    import subprocess  # noqa: S404
+    # `shell=True` WITH A LIST IS NOT A LINT NIT, IT IS A PORTABILITY BUG. On POSIX,
+    # `subprocess.run(["gcloud", "auth", "print-access-token"], shell=True)` execs
+    # `/bin/sh -c gcloud` and binds the remaining elements to $0, $1 ... so the
+    # subcommand is silently DROPPED and the call cannot do what it says. It only ever
+    # appeared to work because these rows are run from Windows, where the shell joins
+    # the list back into a command line.
+    #
+    # `shell=True` was presumably reached for because bare `gcloud` is not executable on
+    # Windows without the shell resolving `gcloud.cmd` through PATHEXT. `shutil.which`
+    # does that resolution honestly: it honours PATHEXT on Windows and returns an
+    # absolute path on both platforms, so the argument vector reaches the process
+    # unchanged and no shell is involved.
+    import shutil
+    import subprocess  # nosec B404 - a fixed argv to the operator's own gcloud, no shell
 
-    done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602
+    executable = shutil.which(argv[0])
+    if executable is None:
+        raise RuntimeError(f"gcloud {what} unavailable: {argv[0]!r} is not on PATH")
+
+    done = subprocess.run(  # nosec B603 - resolved absolute path, fixed argv, shell=False
+        [executable, *argv[1:]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     value = done.stdout.strip()
     if done.returncode != 0 or not value:
         raise RuntimeError(f"gcloud {what} unavailable: {done.stderr.strip()[:200]}")
@@ -1504,7 +1526,10 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            with urlopen(request, timeout=CLIENT_READ_TIMEOUT) as response:  # noqa: S310
+            # `upstream_url` is this process's own loopback capture, whose http:// address
+            # `_serve` just returned. It is not operator input and cannot carry a file:/
+            # or custom scheme.
+            with urlopen(request, timeout=CLIENT_READ_TIMEOUT) as response:  # nosec B310 # noqa: S310
                 upstream_sse = response.read().decode("utf-8", "replace")
 
             policy = POLICIES[policy_name](vault)
