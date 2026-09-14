@@ -34,7 +34,8 @@ MSYS_NO_PATHCONV=1 docker run -d --name litellm-v2 --network v2profile \
 V2_GATEWAY_TOKEN=sk-v2-profile-local python -m pii_leak_benchmark.v2_emitter \
   --validate --only litellm-presidio \
   --gateway-url http://127.0.0.1:4321/v1/chat/completions \
-  --upstream-port 8799 --model capture --seed a1b2c3d4e5f60001
+  --upstream-port 8799 --model capture --seed a1b2c3d4e5f60001 \
+  --out /tmp/litellm-v2
 
 # 5. And across seeds:
 V2_GATEWAY_TOKEN=sk-v2-profile-local python benchmarks/v2_seed_sweep.py \

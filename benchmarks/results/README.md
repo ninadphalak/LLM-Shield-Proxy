@@ -41,10 +41,16 @@ the run is reproducible from that commit:
 LLM_SHIELD_SOURCE_REVISION=$(git rev-parse HEAD)   llm-shield-proxy benchmark --iterations 10000   --json-out benchmarks/results/conformance-v1.0.0-1.6.0-windows.json
 ```
 
-`conformance-v1.0.0-pre-release-windows.json` is **superseded and kept only as a record**.
-Its `source_revision` ends in `+working-tree`, which is an honest label for a run made
-against uncommitted changes and also means the run cannot be reproduced from any commit.
-An artefact nobody can re-execute is not evidence, whatever it reports.
+`conformance-v1.0.0-pre-release-windows.json` was **deleted on 2026-09-06**, together with
+its `.sha256` sidecar. Its `source_revision` ended in `+working-tree` -- an honest label for
+a run made against uncommitted changes, and one that also means the run could not be
+reproduced from any commit. An artefact nobody can re-execute is not evidence, whatever it
+reports, and leaving it beside reproducible rows invited it to be cited as though it were.
+
+Nothing in this repository derives a number from it any more. The clean-tree
+`conformance-v1.0.0-1.6.0-windows.json` above covers the same six scored domains, passes all
+six, and is the file to cite. The deleted artefact remains recoverable from git history if it
+is ever wanted as a record.
 
 ## Latency
 

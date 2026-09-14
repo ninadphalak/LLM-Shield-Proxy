@@ -20,6 +20,15 @@ DESCRIPTION = (
     "to its configured upstream, and whether it restores the values in the response."
 )
 
+
+def _target_headers_from_env() -> list[str]:
+    """Read one NAME=VALUE target header per non-empty environment line."""
+    return [
+        line
+        for line in os.getenv("CONFORMANCE_TARGET_HEADERS", "").splitlines()
+        if line.strip()
+    ]
+
 EPILOG = """\
 The gateway under test must already be configured to send its upstream traffic to the
 capture this command starts (default http://127.0.0.1:8765/v1). Nothing is measured
@@ -80,9 +89,11 @@ def build_parser(
     parser.add_argument(
         "--target-header",
         action="append",
-        default=[],
+        default=_target_headers_from_env(),
         metavar="NAME=VALUE",
-        help="Additional target request header; repeat as needed. Values are not written to the report.",
+        help="Additional target request header; repeat as needed. Values are not written to "
+        "the report. Prefer newline-delimited CONFORMANCE_TARGET_HEADERS when values are "
+        "credentials, because process listings expose argv.",
     )
     parser.add_argument(
         "--capture-host",

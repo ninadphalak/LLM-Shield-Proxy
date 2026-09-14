@@ -26,10 +26,12 @@ THE POINT. On the response path a correct gateway must do two OPPOSITE things at
     INJECTION segment -- the upstream emits values that were never in the prompt. The
                          gateway must REDACT them. Measured as LeakRate.
 
-No single global policy satisfies both. A gateway that forwards everything scores
-FidelityRate 1.0 and LeakRate 1.0. One that redacts everything scores LeakRate 0.0 and
-FidelityRate 0.0. That is the discriminating property the split exists to expose, and the
-reference policies below are chosen to land in each quadrant.
+No single global policy satisfies both. The shipped controls make the trade-off concrete:
+`passthrough` scores Fidelity 0.0 and Leak 1.0/1.0 because it does not restore the masked
+echo; `redact-all` scores Fidelity 0.0 and Leak 0.125/1.0; `chunk-local` scores Fidelity
+1.0 and Leak 0.125/1.0; bounded retention scores Fidelity 1.0 and Leak 0.125/0.125; and
+retention plus decoding scores Fidelity 1.0 and Leak 0.0/0.0. Leak pairs are
+single-chunk/adversarial. These are measured controls, not idealized quadrants.
 
 DeltaFrag = LeakRate(adversarial) - LeakRate(single_chunk) is then the number that
 separates a chunk-local scanner from a retaining one. Both score identically when every
@@ -66,7 +68,10 @@ import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Iterable
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+import httpx
 
 from .http_profile import (
     _FIXTURE_EMAIL_DOMAIN,
@@ -83,7 +88,18 @@ from .http_profile import (
 )
 
 SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.0.0"
-EMITTER_VERSION = "0.1.0-minimal"
+# BUMP THIS WHEN BEHAVIOUR THAT DECIDES A NUMBER CHANGES. It read "0.1.0-minimal" through
+# two rounds of repair that gave the module a conformant SSE parser, path-keyed joins, five
+# checks that can now fail, a real capture self-probe and an exhaustive split oracle -- so
+# every report claimed a harness_revision that had stopped being true. "Minimal" in
+# particular was no longer a description of anything.
+#
+# It is a LABEL, not a selected-source staleness fingerprint:
+# `instrument.inspector_sha256` is derived from an explicit, non-transitive list and so
+# catches edits to that list without a manual version bump. The full evidence tag and
+# eligibility checks cover provenance and completeness beyond that fingerprint. This
+# label lets a reader distinguish report generations at a glance without hashing source.
+EMITTER_VERSION = "0.2.1"
 
 # Detector for the injection segment. Deliberately simple and deliberately NOT given the
 # fixture values: a gateway that was handed the needles would be measuring nothing.
@@ -445,6 +461,9 @@ class RetainingDecoding(Retaining):
             for match in pattern.finditer(decoded):
                 original = match.group(0)
                 # Redact the value in whatever surface form it appears in.
+                # The two quote calls are identical for the current fixtures (none
+                # contains '/'). The duplicate is harmless historical evidence-code
+                # debt; removing it awaits the next frozen-instrument evidence round.
                 for surface in (original, quote(original, safe=""), quote(original)):
                     out = out.replace(surface, "[REDACTED]")
         return out
@@ -544,47 +563,228 @@ class PresidioRetaining(Retaining):
 # missing header.
 # --------------------------------------------------------------------------------------
 
-_GCP_TOKEN_CACHE: dict[str, str] = {}
+# THE CLOUD DEADLINE AND RETRY BUDGET, and it is not the client one.
+#
+# `CLIENT_CONNECT_TIMEOUT` / `CLIENT_READ_TIMEOUT` bound the sockets this harness opens to
+# a gateway on loopback or in a container next door, where five and ten seconds are
+# generous. These two are a commercial SaaS across the public internet under a real
+# billing account, and the deadline here was the literal `timeout=60` -- so the ONE pair
+# of sockets in this harness that crosses a network was the one pair `--connect-timeout`
+# and `--read-timeout` could not reach. Both now route here.
+#
+# They are SEPARATE globals with their own defaults rather than an alias for the client
+# pair, because the client read default is 10s and a DLP call on a cold project exceeds
+# it: aliasing them would have turned "route the flags" into a silent 60s -> 10s
+# regression on the only calls that are billed. Unset, these reproduce the old 60s read.
+GCP_CONNECT_TIMEOUT = float(os.environ.get("V2_GCP_CONNECT_TIMEOUT", "5"))
+GCP_READ_TIMEOUT = float(os.environ.get("V2_GCP_READ_TIMEOUT", "60"))
+
+# THE RETRY BUDGET. DLP and Model Armor are quota'd per project per minute, and this
+# profile calls them once per DELTA -- 32 cases x several deltas x every split point under
+# `--exhaustive-splits` -- which is precisely the shape that meets a quota wall. An
+# unretried 429 propagates out of `feed()`, through the gateway handler, and ends a billed
+# multi-hour run at whichever case happened to be in flight. 503 is the same story from
+# the backend's side. Neither says anything about the DETECTOR, so neither may become a
+# measurement: the run either completes or it stops, but a transport refusal from the
+# vendor must never be scored as a redaction result.
+GCP_MAX_ATTEMPTS = int(os.environ.get("V2_GCP_MAX_ATTEMPTS", "6"))
+GCP_BACKOFF_BASE = float(os.environ.get("V2_GCP_BACKOFF_BASE", "1.0"))
+GCP_BACKOFF_CAP = float(os.environ.get("V2_GCP_BACKOFF_CAP", "60"))
+GCP_RETRY_STATUS = frozenset({429, 503})
+
+# Access tokens from `gcloud auth print-access-token` are one-hour bearer tokens. The
+# cache had no clock, so a run longer than an hour -- which the four GCP rows are, and
+# which `--exhaustive-splits` guarantees -- carried an expired token from the moment it
+# expired and answered 401 for every remaining case. Refresh well inside the hour.
+GCP_TOKEN_TTL_SECONDS = float(os.environ.get("V2_GCP_TOKEN_TTL_SECONDS", "3000"))
+
+# Backoff jitter, from a dedicated generator rather than the `random` module. The corpus
+# is drawn from `random.Random(seed)` instances and a seeded run must reproduce; touching
+# global `random` state from a retry path would make reproducibility depend on how many
+# times Google rate-limited us.
+_GCP_JITTER = random.Random()
+
+_GCP_TOKEN_CACHE: dict[str, Any] = {}
+_GCP_TOKEN_LOCK = threading.Lock()
+
+
+def _gcloud(argv: list[str], what: str) -> str:
+    # `shell=True` WITH A LIST IS NOT A LINT NIT, IT IS A PORTABILITY BUG. On POSIX,
+    # `subprocess.run(["gcloud", "auth", "print-access-token"], shell=True)` execs
+    # `/bin/sh -c gcloud` and binds the remaining elements to $0, $1 ... so the
+    # subcommand is silently DROPPED and the call cannot do what it says. It only ever
+    # appeared to work because these rows are run from Windows, where the shell joins
+    # the list back into a command line.
+    #
+    # `shell=True` was presumably reached for because bare `gcloud` is not executable on
+    # Windows without the shell resolving `gcloud.cmd` through PATHEXT. `shutil.which`
+    # does that resolution honestly: it honours PATHEXT on Windows and returns an
+    # absolute path on both platforms, so the argument vector reaches the process
+    # unchanged and no shell is involved.
+    import shutil
+    import subprocess  # nosec B404 - a fixed argv to the operator's own gcloud, no shell
+
+    executable = shutil.which(argv[0])
+    if executable is None:
+        raise RuntimeError(f"gcloud {what} unavailable: {argv[0]!r} is not on PATH")
+
+    done = subprocess.run(  # nosec B603 - resolved absolute path, fixed argv, shell=False
+        [executable, *argv[1:]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    value = done.stdout.strip()
+    if done.returncode != 0 or not value:
+        raise RuntimeError(f"gcloud {what} unavailable: {done.stderr.strip()[:200]}")
+    return value
 
 
 def _gcp_context() -> tuple[str, str]:
-    """(access token, project id) from the local gcloud install, cached per process."""
-    import subprocess  # noqa: S404  # nosec B404 - argv below is hardcoded literals, never caller input
+    """(access token, project id) from the local gcloud install, token refreshed on age.
 
-    if not _GCP_TOKEN_CACHE:
-        for key, argv in (
-            ("token", ["gcloud", "auth", "print-access-token"]),
-            ("project", ["gcloud", "config", "get-value", "project"]),
-        ):
-            # FIXME(portability): `shell=True` with a LIST is Windows-only behaviour. On
-            # POSIX, subprocess passes argv[0] to the shell and the rest become $0/$1, so
-            # this runs a bare `gcloud` and the subcommand is silently dropped. It works
-            # here because the GCP runs were driven from Windows. Not changed with the
-            # 1.6.1 audit: this path produced published evidence, so re-running it is a
-            # measurement decision, not a lint fix.
-            # The bandit finding itself is a false positive -- argv is hardcoded literals
-            # above, with no caller-controlled input, so there is nothing to inject.
-            done = subprocess.run(argv, capture_output=True, text=True, shell=True)  # noqa: S602  # nosec B602
-            value = done.stdout.strip()
-            if done.returncode != 0 or not value:
-                raise RuntimeError(f"gcloud {key} unavailable: {done.stderr.strip()[:200]}")
-            _GCP_TOKEN_CACHE[key] = value
-    return _GCP_TOKEN_CACHE["token"], _GCP_TOKEN_CACHE["project"]
+    The predecessor was `if not _GCP_TOKEN_CACHE:` -- fetch once, hold forever. Google's
+    access tokens live one hour. The GCP rows take longer than that, so the failure was
+    not hypothetical: every case after the 60-minute mark gets a 401, which no retry rule
+    here treats as retryable, and the run dies with most of the corpus measured and
+    nothing written.
+
+    The project id does NOT expire and is cached unconditionally; only the token carries a
+    clock. `time.monotonic` and not `time.time`, because a wall-clock step must not either
+    expire a live token or extend a dead one.
+    """
+    with _GCP_TOKEN_LOCK:
+        if "project" not in _GCP_TOKEN_CACHE:
+            _GCP_TOKEN_CACHE["project"] = _gcloud(
+                ["gcloud", "config", "get-value", "project"], "project"
+            )
+        issued = _GCP_TOKEN_CACHE.get("issued_at")
+        if issued is None or (time.monotonic() - issued) >= GCP_TOKEN_TTL_SECONDS:
+            _GCP_TOKEN_CACHE["token"] = _gcloud(
+                ["gcloud", "auth", "print-access-token"], "token"
+            )
+            _GCP_TOKEN_CACHE["issued_at"] = time.monotonic()
+        return _GCP_TOKEN_CACHE["token"], _GCP_TOKEN_CACHE["project"]
+
+
+_GCP_OPENERS: dict[tuple[float, float], Any] = {}
+
+
+def _gcp_opener(connect_timeout: float, read_timeout: float) -> Any:
+    """An opener whose connect and read deadlines are two numbers, not one.
+
+    `urlopen(request, timeout=T)` hands T to the socket as a per-operation timeout, so it
+    cannot express "connecting may take five seconds but a silent response may not stall
+    for sixty" -- the same limitation the client path already solves with `httpx.Timeout`
+    and documents at length above `CLIENT_CONNECT_TIMEOUT`. urllib has no `httpx.Timeout`,
+    so the phases are separated where urllib actually applies them: the connection is made
+    under the connect deadline and the socket is re-armed with the read deadline the
+    moment it is up.
+
+    Cached per (connect, read) pair rather than rebuilt per call, because the sweep may
+    rewrite the globals between policies and a per-call rebuild would define two classes
+    for every delta of every case.
+    """
+    key = (connect_timeout, read_timeout)
+    cached = _GCP_OPENERS.get(key)
+    if cached is not None:
+        return cached
+
+    import http.client
+    import urllib.request
+
+    class _PhasedHTTPSConnection(http.client.HTTPSConnection):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            # `do_open` passes `timeout=req.timeout`; the connect deadline wins here.
+            kwargs["timeout"] = connect_timeout
+            super().__init__(*args, **kwargs)
+
+        def connect(self) -> None:
+            super().connect()
+            # AFTER the TLS handshake, so this re-arms the wrapped SSL socket and every
+            # subsequent read is bounded by the read deadline rather than the connect one.
+            if self.sock is not None:
+                self.sock.settimeout(read_timeout)
+
+    class _PhasedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req: Any) -> Any:
+            return self.do_open(_PhasedHTTPSConnection, req, context=self._context)
+
+    opener = urllib.request.build_opener(_PhasedHTTPSHandler)
+    _GCP_OPENERS[key] = opener
+    return opener
+
+
+def _gcp_retry_delay(error: HTTPError, attempt: int) -> float:
+    """How long to wait before retrying, preferring what the service asked for.
+
+    `Retry-After` is seconds or an HTTP-date (RFC 9110 10.2.3). Google sends the seconds
+    form; the date form is parsed rather than ignored, because ignoring it falls back to a
+    backoff shorter than the one the service asked for, which is how a retry loop turns a
+    rate limit into a longer rate limit.
+    """
+    import datetime
+
+    header = ((error.headers.get("Retry-After") if error.headers else None) or "").strip()
+    if header:
+        try:
+            return max(0.0, float(int(header)))
+        except ValueError:
+            from email.utils import parsedate_to_datetime
+
+            try:
+                when = parsedate_to_datetime(header)
+            except (TypeError, ValueError):
+                when = None
+            if when is not None:
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=datetime.timezone.utc)
+                now = datetime.datetime.now(datetime.timezone.utc)
+                return max(0.0, (when - now).total_seconds())
+    # Exponential, with full jitter. Without jitter the per-delta call pattern
+    # re-synchronises on the quota window and every retry collides with the last.
+    return _GCP_JITTER.uniform(0.0, GCP_BACKOFF_BASE * (2 ** (attempt - 1)))
 
 
 def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    token, project = _gcp_context()
-    request = Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "x-goog-user-project": project,
-        },
-    )
-    with urlopen(request, timeout=60) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
-        return json.loads(response.read().decode("utf-8"))
+    """POST to a Google API under a phased deadline and a bounded retry budget.
+
+    The token is re-read from `_gcp_context()` on EVERY attempt rather than captured once
+    before the loop: a retry that sleeps a minute may cross the refresh boundary, and a
+    loop that re-sent the token it captured before sleeping would defeat the refresh it
+    had just waited through.
+    """
+    data = json.dumps(payload).encode()
+    for attempt in range(1, GCP_MAX_ATTEMPTS + 1):
+        token, project = _gcp_context()
+        request = Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "x-goog-user-project": project,
+            },
+        )
+        try:
+            opener = _gcp_opener(GCP_CONNECT_TIMEOUT, GCP_READ_TIMEOUT)
+            with opener.open(request) as response:  # noqa: S310
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            if error.code not in GCP_RETRY_STATUS or attempt == GCP_MAX_ATTEMPTS:
+                # Out of budget, or a status that says something about the REQUEST rather
+                # than the service's load. Raise: a case that could not be measured has to
+                # surface as a transport error, never be scored as a redaction result.
+                raise
+            wait = min(GCP_BACKOFF_CAP, _gcp_retry_delay(error, attempt))
+            print(
+                f"    gcp {error.code} on {url.rsplit('/', 1)[-1]}; "
+                f"retry {attempt}/{GCP_MAX_ATTEMPTS - 1} in {wait:.1f}s",
+                flush=True,
+            )
+            time.sleep(wait)
+    # Unreachable: the final attempt either returns or re-raises.
+    raise RuntimeError(f"gcp request to {url} exhausted {GCP_MAX_ATTEMPTS} attempts")
 
 
 def _dlp_redact(text: str) -> str:
@@ -837,39 +1037,67 @@ def extract_site(body: dict[str, Any], site: str) -> str | None:
     raise ValueError(f"unknown request_site {site!r}")
 
 
-def _all_pairs() -> set[tuple[str, str, str, str]]:
-    names = list(AXES)
-    pairs: set[tuple[str, str, str, str]] = set()
-    for i, a in enumerate(names):
-        for b in names[i + 1 :]:
-            for va in AXES[a]:
-                for vb in AXES[b]:
-                    pairs.add((a, va, b, vb))
-    return pairs
+def _all_pairs(
+    axes: dict[str, tuple[str, ...]] | None = None,
+    feasible: "Callable[[dict[str, str]], bool] | None" = None,
+) -> set[tuple[str, str, str, str]]:
+    """Every pair of axis values that SOME feasible case can carry.
 
-
-def covering_array() -> list[dict[str, str]]:
-    """Greedy pairwise covering array over the four axes.
-
-    Exhaustive here is only 24 cases, so the array is generated greedily and then the
-    pairwise proof is recomputed against it rather than asserted.
+    `feasible` exists for a constrained axis set. The FIDE profile carries both a needle
+    id and its `needle_class`, and a needle belongs to exactly one class -- so
+    `(entity, AKIAKEYID, needle_class, pii)` is not an uncovered pair, it is an
+    impossible one. Requiring it would make `proof_complete` unsatisfiable and the
+    schema's coverage gate meaningless. Pairs are filtered by asking whether any complete
+    case in the product satisfies both, not by hand-listing exclusions.
     """
     import itertools
 
-    names = list(AXES)
-    candidates = [dict(zip(names, combo)) for combo in itertools.product(*AXES.values())]
-    remaining = _all_pairs()
+    axes = AXES if axes is None else axes
+    names = list(axes)
+    pairs: set[tuple[str, str, str, str]] = set()
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            for va in axes[a]:
+                for vb in axes[b]:
+                    pairs.add((a, va, b, vb))
+    if feasible is None:
+        return pairs
+    reachable: set[tuple[str, str, str, str]] = set()
+    for combo in itertools.product(*axes.values()):
+        case = dict(zip(names, combo))
+        if feasible(case):
+            reachable |= _pairs_of(case, axes)
+    return pairs & reachable
+
+
+def covering_array(
+    axes: dict[str, tuple[str, ...]] | None = None,
+    feasible: "Callable[[dict[str, str]], bool] | None" = None,
+) -> list[dict[str, str]]:
+    """Greedy pairwise covering array over the profile's axes, plus fragmentation twins.
+
+    Exhaustive here is a few hundred cases, so the array is generated greedily and then
+    the pairwise proof is recomputed against it rather than asserted.
+    """
+    import itertools
+
+    axes = AXES if axes is None else axes
+    names = list(axes)
+    candidates = [dict(zip(names, combo)) for combo in itertools.product(*axes.values())]
+    if feasible is not None:
+        candidates = [c for c in candidates if feasible(c)]
+    remaining = _all_pairs(axes, feasible)
     chosen: list[dict[str, str]] = []
     while remaining:
         best, best_gain = None, -1
         for case in candidates:
-            gain = len(remaining & _pairs_of(case))
+            gain = len(remaining & _pairs_of(case, axes))
             if gain > best_gain:
                 best, best_gain = case, gain
         if best is None or best_gain <= 0:
             break
         chosen.append(best)
-        remaining -= _pairs_of(best)
+        remaining -= _pairs_of(best, axes)
         candidates.remove(best)
 
     # DeltaFrag is a DIFFERENCE of two leak rates, so it is only meaningful if the two
@@ -883,17 +1111,19 @@ def covering_array() -> list[dict[str, str]]:
     # This is why `gcp-dlp-retention` could report a NEGATIVE DeltaFrag before the fix.
     seen = {tuple(sorted(c.items())) for c in chosen}
     for case in list(chosen):
-        for value in AXES["fragmentation"]:
+        for value in axes["fragmentation"]:
             twin = dict(case, fragmentation=value)
             key = tuple(sorted(twin.items()))
-            if key not in seen:
+            if key not in seen and (feasible is None or feasible(twin)):
                 seen.add(key)
                 chosen.append(twin)
     return chosen
 
 
-def _pairs_of(case: dict[str, str]) -> set[tuple[str, str, str, str]]:
-    names = list(AXES)
+def _pairs_of(
+    case: dict[str, str], axes: dict[str, tuple[str, ...]] | None = None
+) -> set[tuple[str, str, str, str]]:
+    names = list(AXES if axes is None else axes)
     out: set[tuple[str, str, str, str]] = set()
     for i, a in enumerate(names):
         for b in names[i + 1 :]:
@@ -916,20 +1146,99 @@ def _encode(value: str, encoding: str) -> str:
 # --------------------------------------------------------------------------------------
 
 
+def _sse_frames(events: Iterable[dict[str, Any]]) -> list[bytes]:
+    """The same body as `_sse`, but as ONE FRAME PER EVENT rather than one blob.
+
+    Split out so the capture can write the frames individually and COUNT THE WRITES. The
+    number of data events the capture put on the socket used to be computed from the case
+    definition -- "one preamble plus `_injection_events`, so 3 or 4, fixed by
+    construction" -- which is a statement about what the code should do, published in the
+    slot reserved for what it did. Every published `upstream_data_events_emitted` was
+    therefore correct by assumption and could not have caught the capture emitting
+    something else: a serialisation change, a truncated write, a handler that raised
+    between two events. `data: [DONE]` is the last frame and is not a data event.
+    """
+    frames: list[bytes] = []
+    for event in events:
+        delta: dict[str, Any] = {"content": event.get("content", "")}
+        for key, value in event.items():
+            if key != "content":
+                delta[key] = value
+        frames.append(
+            b"data: " + json.dumps({"choices": [{"delta": delta}]}).encode() + b"\n\n"
+        )
+    return frames
+
+
+SSE_DONE_FRAME = b"data: [DONE]\n\n"
+
+
 def _sse(events: Iterable[dict[str, Any]]) -> bytes:
     """Serialise events. `content` is the delta text; any other key is a sibling field.
 
     The sibling field is the `sse-json-field` carrier: a value that never appears in the
     reassembled delta text and is found only by walking the event JSON.
     """
-    body = b""
-    for event in events:
-        delta: dict[str, Any] = {"content": event.get("content", "")}
-        for key, value in event.items():
-            if key != "content":
-                delta[key] = value
-        body += b"data: " + json.dumps({"choices": [{"delta": delta}]}).encode() + b"\n\n"
-    return body + b"data: [DONE]\n\n"
+    return b"".join(_sse_frames(events)) + SSE_DONE_FRAME
+
+
+# WHETHER THE CAPTURE AUTHENTICATES, stated once next to the handler that decides it.
+#
+# `capture.authentication_required` was reported as `bool(V2_GATEWAY_TOKEN)` -- the bearer
+# token the harness sends TO THE GATEWAY. That is a fact about the target, published as a
+# fact about the capture, and it read `true` in four gateway rows. `_make_upstream` reads
+# no headers and rejects nothing, so the honest value is False, and
+# `test_the_capture_answers_without_credentials` demonstrates it rather than asserting it.
+# It matters because an unauthenticated capture is exactly the condition `_self_probe`
+# exists to guard: anything that can reach the port can answer for it.
+CAPTURE_REQUIRES_AUTHENTICATION = False
+
+
+# A STRICT, PHASED CLIENT DEADLINE, because a stalled socket must fail the case rather
+# than the run.
+#
+# The client harness used `urlopen(..., timeout=120)`. `urllib` takes ONE number and hands
+# it to the socket as a per-operation timeout, so it cannot say "connecting may take 5
+# seconds but a silent stream may not stall for more than 10" -- and 120 seconds per
+# attempt, three attempts per split point, 32 cases, is an hour and a half of wall clock
+# before a stalled seed gives up. A multi-seed sweep that meets one stalled socket looks
+# indistinguishable from a hang, which is how the sweep came to be described as hanging on
+# a particular seed.
+#
+# `httpx.Timeout` separates the phases, so the deadline that matters -- no bytes arriving
+# on an accepted connection -- is short and the ones that do not are not made short with
+# it. A case that trips it records a `transport_error` and is scored INCONCLUSIVE, which
+# is the honest outcome and already the schema's: a refused or dead case must never be
+# counted as "did not leak".
+#
+# Overridable because a real gateway can legitimately be slow: LLM Guard and NeMo load
+# transformer models, and a first request through a cold container can exceed ten seconds
+# without anything being wrong. The in-process reference policies never approach it.
+CLIENT_CONNECT_TIMEOUT = float(os.environ.get("V2_CLIENT_CONNECT_TIMEOUT", "5"))
+CLIENT_READ_TIMEOUT = float(os.environ.get("V2_CLIENT_READ_TIMEOUT", "10"))
+
+
+def _client_timeout() -> httpx.Timeout:
+    """The deadline every request this harness makes is subject to."""
+    return httpx.Timeout(
+        connect=CLIENT_CONNECT_TIMEOUT,
+        read=CLIENT_READ_TIMEOUT,
+        write=CLIENT_READ_TIMEOUT,
+        pool=CLIENT_CONNECT_TIMEOUT,
+    )
+
+
+@dataclass
+class UpstreamResponseRecord:
+    """Empirical socket-write facts for one capture response.
+
+    The record is installed before the first data frame is written and updated after
+    every successful ``wfile.write``.  It therefore survives a reset or another
+    mid-response exception instead of losing all frames that preceded the failure.
+    """
+
+    data_events_written: int = 0
+    completed: bool = False
 
 
 @dataclass
@@ -937,17 +1246,160 @@ class UpstreamState:
     segments: Segments
     case: dict[str, str]
     received_bodies: list[str] = field(default_factory=list)
+    # Every request-target the capture was actually asked for. `upstream_paths_observed`
+    # was the literal `["/v1/chat/completions"]` and the handler recorded no path, so a
+    # gateway calling any other route was reported as calling that one.
+    received_paths: list[str] = field(default_factory=list)
+    # ONE RECORD PER RESPONSE the capture started. The record is appended before any
+    # frame write and incremented after each successful write, so a response reset after
+    # frame N still records N rather than disappearing. `run_case` snapshots this list
+    # around each gateway request; zero or multiple upstream responses are not guessed
+    # into a one-response coalescing comparison.
+    response_records: list[UpstreamResponseRecord] = field(default_factory=list)
+    response_records_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Where to cut the injected value for the attempt currently in flight. The empty
+    # tuple means "do not cut"; one offset is a two-part partition, two offsets a
+    # three-part one. Set by `run_case` before each request.
+    cuts: tuple[int, ...] = ()
 
 
-def _injection_events(segments: Segments, case: dict[str, str]) -> list[dict[str, Any]]:
+# The partition families this oracle knows how to enumerate, and what each one means.
+#
+#   midpoint            one two-part partition, cut at len // 2. The published default.
+#   exhaustive-2-part   every internal two-part partition: N - 1 of them.
+#   exhaustive-3-part   every internal three-part partition: choose(N - 1, 2) of them.
+#   union-worst-case    both exhaustive families together. The case fails if ANY
+#                       enumerated partition in either family leaks.
+#
+# `union-worst-case` is bounded by construction: it is the worst case over THE ENUMERATED
+# CORPUS VALUES AND THESE TWO FAMILIES, never over arbitrary streams, arbitrary values,
+# arbitrary interleavings, or more than three pieces. Every place the label is printed
+# says so.
+PARTITION_FAMILIES: tuple[str, ...] = ("exhaustive-2-part", "exhaustive-3-part")
+ORACLES: tuple[str, ...] = ("midpoint",) + PARTITION_FAMILIES + ("union-worst-case",)
+
+# Per case, per family. `choose(N - 1, 2)` is quadratic in the rendered length, so a
+# 74-character PEM block is 2,628 requests for ONE case and a 300-character one is 44,551.
+# A run that silently truncates its own enumeration and then reports containment is the
+# worst failure this harness has, so the cap is explicit, published, and turns the family
+# INCONCLUSIVE for that case rather than shortening it.
+DEFAULT_PARTITION_CAP = int(os.environ.get("V2_PARTITION_CAP", "6000"))
+
+
+def _family_partitions(rendered: str, family: str) -> list[tuple[int, ...]]:
+    """Every partition of `rendered` in one family, as tuples of internal cut offsets.
+
+    Both families produce ORDERED, NONEMPTY, CONTIGUOUS pieces that concatenate back to
+    `rendered` byte for byte, and no piece is the whole value: the offsets are drawn from
+    `1 .. N-1`, so the first piece loses at least the last character and the last piece
+    loses at least the first.
+    """
+    n = len(rendered)
+    if family == "exhaustive-2-part":
+        return [(i,) for i in range(1, n)]
+    if family == "exhaustive-3-part":
+        # Every PAIR of distinct internal cuts, i < j, both in 1..N-1. That is exactly
+        # choose(N - 1, 2) partitions, each with three nonempty pieces, no duplicates.
+        return [(i, j) for i in range(1, n - 1) for j in range(i + 1, n)]
+    raise ValueError(f"unknown partition family {family!r}")
+
+
+def injection_partitions(
+    segments: Segments,
+    case: dict[str, str],
+    oracle: str = "midpoint",
+    cap: int = DEFAULT_PARTITION_CAP,
+) -> tuple[list[tuple[int, ...]], list[str], dict[str, int], dict[str, bool]]:
+    """The partitions to try for one case, plus per-family attempted counts and cap hits.
+
+    Returns `(partitions, families, attempted_by_family, capped_by_family)`, where
+    `families[i]` names the family `partitions[i]` came from -- the union statistic has
+    to be decomposable into its components, and recomputing the membership afterwards is
+    how two enumerators drift apart. A single-chunk case
+    returns exactly one uncut attempt and no family is enumerated for it: the uncut arm
+    is the baseline the difference subtracts, not a partition.
+
+    THE MIDPOINT IS A WEAK ORACLE, and this is the axis where that matters most. Whether
+    a split defeats a detector depends on what the pieces LOOK LIKE, not on where the
+    middle is: `950-36-9596` cut at 6 leaves `950-36` and `9596`, and a detector may well
+    fire on neither, on one, or -- the case that produced a NEGATIVE DeltaFrag on seed
+    0000000000000001 -- on a fragment for an unrelated reason, which suppresses the leak
+    and scores the fragmented condition as safe. One sample per case cannot tell those
+    apart.
+
+    Enumeration is not expensive for two parts and sampling is the wrong instinct: a value
+    of N characters has exactly N-1 internal two-part partitions, about 20 for an email
+    and 11 for an SSN. Three parts is quadratic and IS expensive, which is what `cap` is
+    for. A family whose enumeration would exceed the cap is not shortened; the case is
+    marked capped, excluded from that family's denominator, and reported. An aborted
+    combinatorial run must never score as containment.
+
+    Default stays the midpoint so the published corpus does not move.
+    """
+    if oracle not in ORACLES:
+        raise ValueError(f"unknown oracle {oracle!r}; known: {ORACLES}")
+    if case["fragmentation"] == "single_chunk":
+        return [()], [], {}, {}
+    rendered = _encode(segments.injection[case["entity"]], case["encoding"])
+    if oracle == "midpoint":
+        return (
+            [(len(rendered) // 2,)],
+            ["midpoint"],
+            {"midpoint": 1},
+            {"midpoint": False},
+        )
+
+    wanted = PARTITION_FAMILIES if oracle == "union-worst-case" else (oracle,)
+    partitions: list[tuple[int, ...]] = []
+    families: list[str] = []
+    attempted: dict[str, int] = {}
+    capped: dict[str, bool] = {}
+    for family in wanted:
+        enumerated = _family_partitions(rendered, family)
+        if len(enumerated) > cap:
+            attempted[family] = 0
+            capped[family] = True
+            continue
+        attempted[family] = len(enumerated)
+        capped[family] = False
+        partitions.extend(enumerated)
+        families.extend([family] * len(enumerated))
+    return partitions, families, attempted, capped
+
+
+def _partition_pieces(rendered: str, cuts: tuple[int, ...]) -> list[str]:
+    """Cut `rendered` at the given internal offsets. Asserted, not assumed.
+
+    Two properties are what make a partition oracle a fragmentation measurement rather
+    than a mutation fuzzer, and both are checked here rather than in a test that runs
+    somewhere else:
+
+      * the pieces concatenate back to `rendered` BYTE FOR BYTE, so the client
+        reconstructs exactly the value the capture meant to send. A partition that
+        changed the value would measure detector recall on a different string.
+      * no piece contains the complete value, so any detection is a detection of a
+        FRAGMENT. Without this an oracle can score a leak it manufactured.
+    """
+    if not cuts:
+        return [rendered]
+    bounds = (0,) + cuts + (len(rendered),)
+    pieces = [rendered[a:b] for a, b in zip(bounds, bounds[1:])]
+    if "".join(pieces) != rendered:
+        raise RuntimeError(f"partition {cuts!r} does not reconstruct the value")
+    if any(not piece for piece in pieces):
+        raise RuntimeError(f"partition {cuts!r} produced an empty piece")
+    if any(rendered in piece for piece in pieces):
+        raise RuntimeError(f"partition {cuts!r} left the complete value in one piece")
+    return pieces
+
+
+def _injection_events(
+    segments: Segments, case: dict[str, str], cuts: tuple[int, ...] = ()
+) -> list[dict[str, Any]]:
     """Build the injection segment for one case: one entity, encoded, carried, split."""
     raw = segments.injection[case["entity"]]
     rendered = _encode(raw, case["encoding"])
-    pieces = (
-        [rendered]
-        if case["fragmentation"] == "single_chunk"
-        else [rendered[: len(rendered) // 2], rendered[len(rendered) // 2 :]]
-    )
+    pieces = _partition_pieces(rendered, cuts)
     events: list[dict[str, Any]] = []
     if case["carrier"] == "sse-delta-content":
         events.append({"content": "Reference record: "})
@@ -985,9 +1437,17 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
                 self.close_connection = True
 
         def _respond(self) -> None:
+            # Record the response attempt before parsing the request or constructing a
+            # frame. A malformed second upstream request still matters for correlation:
+            # without this record `run_case` would silently pair the gateway's response
+            # with the preceding successful request.
+            record = UpstreamResponseRecord()
+            with state.response_records_lock:
+                state.response_records.append(record)
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", "replace")
             state.received_bodies.append(raw)
+            state.received_paths.append(self.path)
             # Echo back whatever arrived AT THE CASE'S SITE, not a fixed field. Echoing
             # messages[0].content regardless of site would report "not restored" for every
             # case that put its values somewhere else, which says nothing about the gateway.
@@ -995,8 +1455,9 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             prompt = "" if echoed is None else echoed
 
             events = [{"content": f"You sent: {prompt}\n"}]
-            events.extend(_injection_events(state.segments, state.case))
-            body = _sse(events)
+            events.extend(_injection_events(state.segments, state.case, state.cuts))
+            frames = _sse_frames(events)
+            body = b"".join(frames) + SSE_DONE_FRAME
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
@@ -1009,7 +1470,22 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             # TCP handshake per case and buys per-case independence.
             self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(body)
+            # Install the record BEFORE the first write, then update it after every
+            # successful frame. The old local counter was appended only after the whole
+            # response flushed, so a reset after three frames recorded zero.
+            for frame in frames:
+                self.wfile.write(frame)
+                with state.response_records_lock:
+                    record.data_events_written += 1
+            self.wfile.write(SSE_DONE_FRAME)
+            # A CLEAN EOF, explicitly. `wfile` is a buffered writer and `close_connection`
+            # alone does not promise the buffer reached the socket before the handler
+            # returns; on a shutdown racing the last case that leaves the client blocked
+            # on a read for a body the server considers sent. Flush, then let
+            # `close_connection` do the FIN.
+            self.wfile.flush()
+            with state.response_records_lock:
+                record.completed = True
             self.close_connection = True
 
     return Handler
@@ -1050,7 +1526,10 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            with urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
+            # `upstream_url` is this process's own loopback capture, whose http:// address
+            # `_serve` just returned. It is not operator input and cannot carry a file:/
+            # or custom scheme.
+            with urlopen(request, timeout=CLIENT_READ_TIMEOUT) as response:  # nosec B310 # noqa: S310
                 upstream_sse = response.read().decode("utf-8", "replace")
 
             policy = POLICIES[policy_name](vault)
@@ -1079,8 +1558,17 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
+            # THE SAME CLEAN EOF THE CAPTURE GIVES. This handler kept the connection alive
+            # and never flushed. `urlopen` sends `Connection: close` so the server closed
+            # anyway and it never showed; a pooling client does not, and then the fixture
+            # for case N+1 is talking to a socket held open by case N's handler thread
+            # while `_stop` is trying to close the listener underneath it. Answer, flush,
+            # close -- one exchange per connection, the same rule as the capture.
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+            self.wfile.flush()
+            self.close_connection = True
 
     return Handler
 
@@ -1105,6 +1593,58 @@ class RunResult:
     events_observed: int
     upstream_bodies: list[str]
     latency_ms: list[float]
+    # Recorded, not assumed. `_sse_check` used to return a literal in which every one of
+    # these was a constant: status 200, content type valid, zero invalid events, no
+    # errors -- emitted verbatim by a run whose gateway answered `application/json` with
+    # no events at all. A check that cannot fail is not a check.
+    status_codes: list[int] = field(default_factory=list)
+    content_types: list[str] = field(default_factory=list)
+    invalid_events: int = 0
+    done_marker: bool = False
+    # HOW the injected value was recovered, or None if it was not. See `_leak_tier`.
+    # `injection_leaked` alone is an accusation with no way to check it, which is the
+    # objection the boundary check answered and this one had not.
+    leak_tier: str | None = None
+    # Largest event count over the case's split points. `events_observed` is the FIRST
+    # split point, so it agrees with `client_text` and `echo_recovered`, which are also
+    # read from the first attempt.
+    events_observed_max: int = 0
+    # Events carrying data, i.e. excluding the `[DONE]` sentinel. `events_observed`
+    # counts `[DONE]`, so `events_observed > 1` -- the old fragmentation_safety test --
+    # was satisfied by a gateway that emitted the entire response as ONE chunk.
+    data_events_observed: int = 0
+    # Data frames the CAPTURE actually wrote for the response `data_events_observed` was
+    # read from -- counted at the socket by `_respond`, not recomputed from the case. The
+    # pair is the coalescing comparison: fewer received than sent is coalescing PROVED.
+    # 0 means the capture wrote nothing for this case, so there is nothing to compare and
+    # the case is not evidence either way.
+    upstream_data_events: int = 0
+    # Capture responses observed during the gateway request paired with the client
+    # response. Exactly one is required for a coalescing comparison; with multiple
+    # responses there is no protocol-level evidence of which one the gateway returned.
+    upstream_responses_observed: int = 0
+    # Every request-target the capture was actually asked for, for this case.
+    upstream_paths: list[str] = field(default_factory=list)
+    # Which internal partitions of the value were tried, and which of them leaked.
+    # One midpoint two-part partition by default; whole families under a stronger oracle.
+    # A single_chunk case has exactly one UNCUT attempt, which is not a partition -- the
+    # `252 splits` erratum came from summing this field over both arms and calling the
+    # total "splits".
+    split_points_tried: int = 1
+    split_points_leaked: int = 0
+    # Which oracle produced those partitions, and the per-family breakdown behind the
+    # union statistic. Empty for a single_chunk case.
+    oracle: str = "midpoint"
+    partitions_attempted: dict[str, int] = field(default_factory=dict)
+    partitions_leaked: dict[str, int] = field(default_factory=dict)
+    # True for a family whose enumeration would have exceeded the resource cap. The
+    # family was NOT shortened and NOT run; the case is inconclusive for it. A capped
+    # family must never contribute a non-leak to a denominator.
+    partitions_capped: dict[str, bool] = field(default_factory=dict)
+    partition_cap: int = DEFAULT_PARTITION_CAP
+    partition_seconds: float = 0.0
+    self_probe_ms: float = 0.0
+    self_probe_url: str = ""
 
 
 def _serve(
@@ -1147,96 +1687,312 @@ def _stop(server: ThreadingHTTPServer) -> None:
     server.server_close()
 
 
-def _haystacks(sse: str) -> list[str]:
-    """Everything the client could see, over the WHOLE event, decodings included.
+@dataclass(frozen=True)
+class ParsedStream:
+    """One response body, parsed the way a conformant SSE client parses it."""
 
-    Two streams, and the separation is load-bearing:
+    events: list[str]
+    residue: list[str]
+    unknown_fields: list[str]
+    comments: int
+    undispatched_tail: str
+    looked_like_sse: bool
 
-      ORDERED -- `choices[*].delta.content` joined in arrival order, so a value split
-        across events is reassembled. Nothing else may enter this stream: splicing other
-        text between two halves stops the join from reassembling them.
-      EVERYTHING ELSE -- the rest of each event, walked recursively by v1's `_collect`,
-        which handles nested objects, lists, numbers, character-code arrays, and
-        base64/hex/percent decoding under a node budget.
 
-    This delegates to `http_profile._collect` rather than reimplementing it. An earlier
-    version of this function walked only `choices[0].delta` and only its string-valued
-    members, while the report it produced asserted v1's inspection_scope verbatim --
-    "walked recursively over all types ... base64/hex/percent-encoded runs and
-    character-code arrays decoded". The claim was v1's and the code was not. Measured
-    blind spots, every one a FALSE PASS in which a value reached the client and the case
-    scored as no leak:
+_SSE_LINE_SPLIT = re.compile(r"\r\n|\r|\n")
 
-        nested object inside delta          missed
-        list inside delta                   missed
-        choices[1] (n > 1 sampling)         missed
-        any top-level event field           missed
-        tool_calls[].function.arguments     missed
-        base64 in content                   missed
 
-    `tool_calls[].function.arguments` is the one that matters most: it is a standard
-    OpenAI response field carrying model-generated text, so a gateway that redacted
-    `delta.content` and nothing else scored a perfect LeakRate of 0.00.
+def _parse_sse(body: str) -> ParsedStream:
+    """WHATWG HTML 9.2.6 "interpreting an event stream", not a `startswith` test.
+
+    The previous version kept only lines beginning with the six characters `data: ` and
+    discarded every other byte of the response. Three shapes a real client accepts were
+    therefore never inspected, and each one is a FALSE PASS -- the value reached the
+    client and the case scored as no leak:
+
+        `data:{...}`          the space after the colon is OPTIONAL in the spec
+        a non-SSE 200 body    a gateway answering application/json instead of a stream
+        a multi-line `data`   the spec joins those lines with U+000A into ONE event;
+          payload             the old code saw three unrelated ones
+
+    Measured end to end: a relay that redacted nothing and re-emitted with `data:`
+    instead of `data: ` scored LeakRate 0.00/0.00, where the identical relay with the
+    space scored 1.00/1.00.
+
+    Everything the parser does not dispatch still arrived at the client, so it goes to
+    `residue` and is scanned as raw text. Dropping it would recreate the same class one
+    level down -- comments, unknown field values and an unterminated trailing event are
+    all places a value can sit, and the spec tells a CLIENT to ignore them, not an
+    INSPECTOR.
     """
-    from pii_leak_benchmark.http_profile import _collect, _Inspection
+    events: list[str] = []
+    residue: list[str] = []
+    unknown: list[str] = []
+    comments = 0
+    buffer: list[str] = []
+    saw_field = False
 
-    def _string_values(node: Any, out: list[str], skip_content: bool = False) -> None:
-        """Non-key string VALUES in arrival order, content excluded.
+    def dispatch() -> None:
+        # A blank line with an empty buffer fires nothing (spec), and it also cannot be
+        # hiding anything, so there is no fail-closed question here.
+        if buffer:
+            events.append("\n".join(buffer))
+        buffer.clear()
 
-        Kept separate from `_collect` output on purpose. `_collect` also emits object
-        KEYS and DECODED material, and joining those splices text between two halves of
-        a value carried in a sibling field across two events -- which stops the join
-        reassembling it. That is not hypothetical: doing exactly that made `passthrough`,
-        a policy that forwards everything, report LeakRate 0.75 instead of 1.00.
-        """
-        if isinstance(node, dict):
-            for key, value in node.items():
-                if skip_content and key in ("content", "text"):
-                    continue
-                _string_values(value, out, skip_content=skip_content)
-        elif isinstance(node, list):
-            for value in node:
-                _string_values(value, out, skip_content=skip_content)
-        elif isinstance(node, str):
-            out.append(node)
+    for line in _SSE_LINE_SPLIT.split(body):
+        if line == "":
+            dispatch()
+            continue
+        if line.startswith(":"):
+            comments += 1
+            residue.append(line[1:])
+            continue
+        name, separator, value = line.partition(":")
+        if not separator:
+            name, value = line, ""
+        elif value.startswith(" "):
+            # Exactly ONE leading space is removed. A second space is data.
+            value = value[1:]
+        if name == "data":
+            saw_field = True
+            buffer.append(value)
+        elif name in ("event", "id", "retry"):
+            saw_field = True
+            residue.append(value)
+        else:
+            # Not an SSE field at all: either a gateway invented one, or this body was
+            # never a stream -- a plain JSON object arrives here as a single line. Both
+            # reached the client verbatim.
+            unknown.append(name)
+            residue.append(line)
 
-    ordered: list[str] = []
-    ordered_siblings: list[str] = []
+    tail = "\n".join(buffer)
+    if tail:
+        residue.append(tail)
+    return ParsedStream(
+        events=events,
+        residue=residue,
+        unknown_fields=sorted(set(unknown)),
+        comments=comments,
+        undispatched_tail=tail,
+        looked_like_sse=saw_field,
+    )
+
+
+# The one channel whose join is the client's visible text. Named because
+# `RunResult.client_text`, and therefore `delivery_confirmed`, is derived from it.
+CONTENT_CHANNEL = ".choices[].delta.content"
+
+
+def _ordered_channels(node: Any, flat: list[tuple[str, str]], path: str = "") -> None:
+    """Every string in one event, tagged with its JSON PATH, list indices collapsed.
+
+    This replaces two hand-picked ordered streams and a skip-list of key names. That
+    design had a hole in the worst possible direction: the sibling stream skipped any
+    key called `content` or `text` AT ANY DEPTH, so a value split across two events in,
+    say, `delta.raw.text` sat in neither ordered stream -- and the fallback join
+    interleaves object keys between the two halves, so it did not reassemble it either.
+
+    Measured, not theorised. The same policy was run twice, changing nothing but the
+    JSON key its text came out under. `chunk-local` as published went DeltaFrag 0.875 to
+    -0.125; `chunk-local` given a detector that also percent-decodes -- so nothing leaks
+    unfragmented, and it is still chunk-local -- went LeakRate(adversarial) 1.00 /
+    DeltaFrag 1.00 / `fail` to 0.00 / 0.00 / `pass`. The corpus escaped only because its
+    own sibling carrier happens to be called `record_field`.
+
+    Keying by path removes the class instead of the instance: two fragments join only
+    if they arrived at the SAME path, so nothing is ever spliced between them and no
+    key name needs special-casing. Indices collapse to `[]` so `choices[0]` and
+    `choices[1]` share a channel -- which is what "every element of choices" has always
+    meant -- and so a content array carried as a list of parts reassembles across
+    events.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            _ordered_channels(value, flat, f"{path}.{key}")
+    elif isinstance(node, list):
+        for value in node:
+            _ordered_channels(value, flat, f"{path}[]")
+    elif isinstance(node, str):
+        flat.append((path, node))
+    elif isinstance(node, (int, float)) and not isinstance(node, bool):
+        # A digit run survives as a JSON number, and so does half of one.
+        flat.append((path, repr(node)))
+
+
+def _haystack_groups(sse: str) -> dict[str, list[str]]:
+    """Everything the client could see, over the WHOLE body, decodings included,
+    grouped by HOW STRONG a match in each group is.
+
+    Three kinds of haystack, and the separation is load-bearing twice -- once for what
+    gets found, and once for what the report is then entitled to claim:
+
+      SAME-PATH JOIN -- strings joined in arrival order within one JSON path, so a value
+        split across events reassembles. Nothing from another path may enter a channel:
+        splicing other text between two halves stops the join from working. A match here
+        is a value the client could read off one field.
+      CROSS-FIELD JOIN -- the legacy non-content stream, the whole-document join, and the
+        `_collect` sibling join. These reassemble a value split across DIFFERENT keys,
+        and they are also the only place this inspector can manufacture a value nothing
+        sent. Kept, because dropping them is a false pass; ranked, because reporting a
+        concatenation of two unrelated fields as the same fact as a verbatim leak is how
+        a harness turns a coincidence into a vendor defect.
+      SINGLE FIELD -- each event walked recursively by v1's `_collect` (nested objects,
+        lists, numbers, keys, base64/hex/percent runs, character-code arrays), plus every
+        byte the SSE parser did not dispatch.
+    """
+    from pii_leak_benchmark.http_profile import _Inspection, _collect  # noqa: I001
+
+    parsed = _parse_sse(sse)
+    flat: list[tuple[str, str]] = []
     found = _Inspection()
-    for line in sse.splitlines():
-        if not line.startswith("data: "):
+    for payload in parsed.events:
+        if payload == "[DONE]":
             continue
-        data = line[6:]
-        if data == "[DONE]":
-            continue
+        shadowed = False
+
+        def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+            # `json.loads` keeps the LAST of duplicate keys and silently discards the
+            # rest, so a value carried in a shadowed key reached the client and entered
+            # NEITHER `events` (it is gone from the parsed object) NOR `residue` (the
+            # parse succeeded). Demonstrated: `{"content":"<email>","content":"[REDACTED]"}`
+            # scored as no leak. RFC 8259 permits duplicate names and says nothing about
+            # which wins, so this is a shape a client may legitimately receive.
+            nonlocal shadowed
+            seen: set[str] = set()
+            for key, _value in items:
+                if key in seen:
+                    shadowed = True
+                    break
+                seen.add(key)
+            return dict(items)
+
         try:
-            event = json.loads(data)
+            event = json.loads(payload, object_pairs_hook=_pairs)
         except json.JSONDecodeError:
             # Not JSON, but it still reached the client. Scanning the raw text is the
             # only safe answer; skipping it would be a false pass.
-            _collect(data, found)
+            _collect(payload, found)
             continue
-        # The ordered content channel, taken from EVERY choice rather than the first.
-        choices = event.get("choices") if isinstance(event, dict) else None
-        if isinstance(choices, list):
-            for choice in choices:
-                if not isinstance(choice, dict):
-                    continue
-                delta = choice.get("delta")
-                if isinstance(delta, dict) and isinstance(delta.get("content"), str):
-                    ordered.append(delta["content"])
-        # A second ORDERED stream for sibling fields, so a value split across two
-        # events' sibling fields reassembles the way delta content does.
-        _string_values(event, ordered_siblings, skip_content=True)
-        # Then the whole event, recursively, for everything neither ordered stream
-        # reaches: nested objects, lists, numbers, keys, and decoded runs.
+        _ordered_channels(event, flat)
         _collect(event, found)
+        if shadowed:
+            # The parsed object is lossy for this event. Scan the bytes as well, the
+            # same answer already given to an event that did not parse at all.
+            _collect(payload, found)
+    for text in parsed.residue:
+        _collect(text, found)
+
+    channels: dict[str, list[str]] = {}
+    for path, value in flat:
+        channels.setdefault(path, []).append(value)
+
+    # RENDERABLE-TEXT SUBTREES. `content` is a string in the chat-completions shape and a
+    # list of `{"type": ..., "text": ...}` parts in the multimodal one, and a stream may
+    # use both. A value split with one half in the string form and the other in a part
+    # was in no channel: the paths differ, and the whole-document join splices the part's
+    # `type` discriminator between the halves.
+    #
+    # This is NOT the skip-list that was removed. That one EXCLUDED any key called
+    # `content` or `text` from a stream, so a value could fall out of every haystack.
+    # This is strictly ADDITIVE -- an extra channel that can only turn a miss into a
+    # find -- and it is keyed on the two names the wire formats define as renderable
+    # rather than on where the harness happens to put its own fixture.
+    renderable: dict[str, list[str]] = {}
+    for path, value in flat:
+        segments = path.split(".")
+        for index, segment in enumerate(segments):
+            if segment.rstrip("[]") not in ("content", "text"):
+                continue
+            rest = segments[index + 1:]
+            if all(s.rstrip("[]") in ("content", "text", "") for s in rest):
+                # `content` and `content[]` are the SAME subtree -- the string form and
+                # the list-of-parts form of one field -- so the key drops the brackets.
+                key = ".".join([*segments[:index], segment.rstrip("[]")])
+                renderable.setdefault(key, []).append(value)
+            break
+
     siblings: list[str] = list(found.strings) + list(found.decoded_strings)
-    joined = "".join(ordered)
     from urllib.parse import unquote
 
-    out = [joined, "".join(ordered_siblings), "".join(siblings), *siblings]
-    return out + [unquote(h) for h in out]
+    def _with_unquoted(values: list[str]) -> list[str]:
+        return values + [unquote(v) for v in values]
+
+    # ONE source of truth for both "did it leak" and "how was it recovered". Building
+    # the tiers separately from the detection would let the two disagree, which is the
+    # class of defect this module keeps finding.
+    return {
+        # groups[0][0] IS `client_text`. Its meaning must not drift: `delivery_confirmed`
+        # and every published row depend on it.
+        "same-path-join": _with_unquoted(
+            ["".join(value for path, value in flat if path == CONTENT_CHANNEL)]
+            + ["".join(values) for path, values in channels.items() if path != CONTENT_CHANNEL]
+        ),
+        # Joins that concatenate text from DIFFERENT paths with no separator. They close
+        # real blind spots and they are also the only place this inspector can
+        # manufacture a value nothing sent, so a match found only here is reported as the
+        # weaker claim rather than as the same fact.
+        #
+        # The whole-document join is the one added after `content` + `raw.text`,
+        # `content` + `tool_calls[].function.arguments` and a `content` string followed
+        # by a `content` list-of-parts were all measured as MISSES while the value
+        # reached the client whole.
+        "cross-field-join": _with_unquoted(
+            [
+                "".join(value for path, value in flat if path != CONTENT_CHANNEL),
+                "".join(value for _, value in flat),
+                "".join(siblings),
+                *("".join(values) for values in renderable.values()),
+            ]
+        ),
+        # Individual strings as they arrived, plus everything `_collect` decoded and
+        # every byte the SSE parser did not dispatch.
+        "single-field": _with_unquoted(siblings),
+    }
+
+
+# Order is weakest-claim-last, and `_leak_tier` returns the first group that matches.
+_HAYSTACK_TIERS = ("single-field", "same-path-join", "cross-field-join")
+
+# Strongest first. A reader should discount `cross-field-join` before anything else: it
+# is the only tier a coincidence can reach.
+_LEAK_TIER_RANK = {
+    "literal": 0,
+    "single-field": 1,
+    "same-path-join": 2,
+    "cross-field-join": 3,
+}
+
+
+def _haystacks(sse: str) -> list[str]:
+    """Flattened `_haystack_groups`, `client_text` first. The detection surface."""
+    groups = _haystack_groups(sse)
+    return [*groups["same-path-join"], *groups["cross-field-join"], *groups["single-field"]]
+
+
+def _leak_tier(value: str, sse: str) -> str | None:
+    """HOW a value was recovered from the response, or None if it was not.
+
+    The boundary check has said this since it stopped being a literal -- "a bare entity
+    name is an accusation with no way for the accused to check it" -- and the response
+    check did not: every entry in `leak_evidence` read `observed: normalized-match`
+    whether the value arrived verbatim in one event or was assembled by concatenating two
+    unrelated fields. Constructed and measured, all three found:
+
+        trace_id "4242-4242-" + span_id "4242-4242"  -> a test PAN
+        id "chatcmpl-590-"    + model "555-0126"     -> a USPHONE
+        author "ozvqklmr@"    + host "example.com"   -> an EMAIL
+
+    Those are real recoveries of a value the client could reconstruct, so suppressing
+    them would be a false pass. Ranking them is the answer, not dropping them.
+    """
+    if value and value in sse:
+        return "literal"
+    groups = _haystack_groups(sse)
+    for tier in _HAYSTACK_TIERS:
+        if _present(value, groups[tier]):
+            return tier
+    return None
 
 
 def _present(value: str, haystacks: list[str]) -> bool:
@@ -1269,6 +2025,49 @@ def _extra_gateway_headers() -> dict[str, str]:
     return {str(k): str(v) for k, v in parsed.items()}
 
 
+def _self_probe(url: str, state: UpstreamState) -> float:
+    """Confirm the server answering the capture URL is THIS run's, before any target traffic.
+
+    `capture.self_probe` was reported as `performed: true, recorded: true,
+    round_trip_ms: 0.0` in every report ever emitted, and no probe was ever sent. The
+    schema's own description says what it is for -- "the fail-closed check that the capture
+    was reachable and recording at the address the target was configured with; a run that
+    could not confirm it aborts and produces no report" -- which is why both fields are
+    `const true` there. A constant satisfying its own schema is the failure this profile
+    keeps finding in other people's software.
+
+    It is not redundant with the "capture recorded no request" guard in `run_case`. That
+    one fires after the target has answered, and cannot distinguish "the gateway never
+    called upstream" from "something else owns this port". This runs first, with a nonce
+    only this process knows, so a stale capture holding the port fails here instead of
+    silently scoring the run -- the Windows SO_REUSEADDR case that produced a perfect row
+    from a measurement that never happened.
+    """
+    import secrets as _secrets
+
+    nonce = _secrets.token_hex(8)
+    started = time.perf_counter()
+    with httpx.Client(timeout=_client_timeout(), trust_env=False) as client:
+        client.post(
+            url,
+            content=json.dumps({"__probe__": nonce}).encode(),
+            headers={"Content-Type": "application/json", "Connection": "close"},
+        ).read()
+    elapsed = (time.perf_counter() - started) * 1000.0
+    seen = any(nonce in body for body in state.received_bodies)
+    state.received_bodies.clear()
+    # The probe is a response the capture wrote, and it is not one of the case's. Remove
+    # its response record before target traffic starts.
+    with state.response_records_lock:
+        state.response_records.clear()
+    if not seen:
+        raise RuntimeError(
+            f"capture self-probe failed: {url} answered but this run's capture did not "
+            "record the probe, so another server owns that address. Refusing to measure."
+        )
+    return elapsed
+
+
 def run_case(
     segments: Segments,
     policy_name: str,
@@ -1277,6 +2076,8 @@ def run_case(
     gateway_url: str | None = None,
     upstream_port: int = 0,
     model: str = "test",
+    oracle: str = "midpoint",
+    partition_cap: int = DEFAULT_PARTITION_CAP,
 ) -> RunResult:
     """Drive one corpus case end to end over loopback HTTP.
 
@@ -1284,42 +2085,172 @@ def run_case(
     running and already configured to use this harness's capture as its upstream. In that
     mode `policy_name` is only a label for the report; no in-process policy runs, and the
     masking the gateway does (or fails to do) is entirely its own.
+
+    `oracle` selects which partition family or families an adversarial case is cut into,
+    and the case leaks if ANY enumerated partition leaks. See `injection_partitions` for
+    why the midpoint alone is a weak oracle and why the cap turns a family inconclusive
+    rather than shortening it.
+
+    Direct callers must use `iterations=1`. The historical multi-iteration path retains
+    only the last response for leak inspection, so `run_policy` rejects larger values
+    until the next evidence round can change this instrumented function and regenerate
+    every affected report.
     """
+    points, families, attempted, capped = injection_partitions(
+        segments, case, oracle=oracle, cap=partition_cap
+    )
+    leaked_by_family: dict[str, int] = {f: 0 for f in attempted}
     state = UpstreamState(segments=segments, case=case)
     upstream, upstream_url = _serve(_make_upstream(state), port=upstream_port)
+    probe_ms = 0.0
+    try:
+        probe_ms = _self_probe(upstream_url, state)
+    except Exception:
+        _stop(upstream)
+        raise
     gateway = None
     if gateway_url is None:
         gateway, gateway_url = _serve(_make_gateway(upstream_url, policy_name))
     latencies: list[float] = []
-    sse = ""
-    events = 0
+    first_sse = ""
+    leaked_points = 0
+    # THESE ACCUMULATE ACROSS SPLIT POINTS. They used to be plain assignments inside the
+    # loop, so they described only the LAST split point while `leaked_points` accumulated
+    # over all of them -- which made `--exhaustive-splits`, the STRONGER oracle, report
+    # LESS framing than the midpoint. Measured with a relay that ships one malformed
+    # event on every split point but the last: midpoint reported `invalid_events: 32`,
+    # exhaustive reported 16 for the identical traffic, and `events_observed_max` came
+    # out 5 against the midpoint's 6.
+    events_first = 0
+    events_max = 0
+    upstream_events_first = 0
+    upstream_responses_first = 0
+    invalid_events = 0
+    done_marker = True
+    done_marker_first = False
+    leak_tier: str | None = None
+    statuses: list[int] = []
+    content_types: list[str] = []
     transport_error: str | None = None
+    needle = segments.injection[case["entity"]]
+    # The request does not vary with the split point -- only the capture's RESPONSE does.
+    body = json.dumps(build_request(segments, case, model=model)).encode()
+    # ONE CLIENT PER CASE, CONSTRUCTED OUTSIDE THE TIMED REGION. Building an
+    # `httpx.Client` per request put a transport, a connection pool and an SSL context
+    # inside `client_observed_latency`, which is a PUBLISHED field: measured on
+    # chunk-local/seed 3, mean went 17.9ms -> 43.1ms and p95 38.6ms -> 70.5ms for traffic
+    # that had not changed. A transport swap must not move a number a reader takes as the
+    # target's latency. Per-case independence is preserved by `Connection: close` on every
+    # request, not by rebuilding the client: the server closes each connection, so nothing
+    # is pooled across cases even though the client object is reused within one.
+    client = httpx.Client(timeout=_client_timeout(), trust_env=False)
     try:
-        body = json.dumps(build_request(segments, case, model=model)).encode()
-        for _ in range(iterations):
-            started = time.perf_counter()
-            headers = {"Content-Type": "application/json"}
-            token = os.environ.get("V2_GATEWAY_TOKEN")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            headers.update(_extra_gateway_headers())
-            request = Request(gateway_url, data=body, headers=headers)
-            try:
-                with urlopen(request, timeout=120) as response:  # noqa: S310  # nosec B310 - fetching the operator-supplied target URL is this harness's purpose
-                    sse = response.read().decode("utf-8", "replace")
-            except Exception as exc:  # noqa: BLE001
-                # Refusing a case is a legitimate gateway behaviour and it is also the
-                # end of the measurement for that case. Aborting the whole run would
-                # lose the eleven cases that did work; scoring it 0 would credit the
-                # gateway with a clean result it never earned. Inconclusive is the only
-                # honest third answer, and the schema already forbids a pass when any
-                # case is inconclusive.
-                transport_error = f"{type(exc).__name__}: {exc}"
-                sse = ""
+        partitions_started = time.perf_counter()
+        for index, cuts in enumerate(points):
+            state.cuts = cuts
+            sse = ""
+            for _ in range(iterations):
+                # Correlate capture responses to THIS gateway request by a bounded
+                # before/after slice. The old `[-1]` silently paired the client response
+                # with whichever upstream response happened to append last.
+                with state.response_records_lock:
+                    response_record_start = len(state.response_records)
+                started = time.perf_counter()
+                headers = {"Content-Type": "application/json"}
+                token = os.environ.get("V2_GATEWAY_TOKEN")
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                headers.update(_extra_gateway_headers())
+                # `Connection: close` so no socket outlives the case that opened it. The
+                # capture is rebound per case and, on an external-gateway run, to the SAME
+                # fixed port every time -- a pooled connection therefore reaches the
+                # PREVIOUS case's fixture. `urlopen` sent this header for us; a pooling
+                # client has to be told.
+                headers["Connection"] = "close"
+                try:
+                    response = client.post(gateway_url, content=body, headers=headers)
+                    statuses.append(int(response.status_code))
+                    if response.status_code >= 400:
+                        # `urlopen` raised `HTTPError` here, so a refused case landed in
+                        # the handler below. httpx returns the response instead, and a 4xx
+                        # silently scored as a measurement would be far worse than the
+                        # timeout this block exists to fix: NeMo Guardrails answers 422 to
+                        # a request carrying an unrecognised top-level key, and that case
+                        # must stay INCONCLUSIVE.
+                        raise httpx.HTTPStatusError(
+                            f"{response.status_code} {response.reason_phrase}",
+                            request=response.request,
+                            response=response,
+                        )
+                    # `.content.decode(...)`, not `.text`: httpx would pick a codec from
+                    # the Content-Type charset, and a gateway that mislabels one would
+                    # change what the leak inspector sees. The bytes are decoded the same
+                    # way they were under `urlopen`.
+                    sse = response.content.decode("utf-8", "replace")
+                    content_types.append(response.headers.get("Content-Type", "") or "")
+                except Exception as exc:  # noqa: BLE001
+                    # Refusing a case is a legitimate gateway behaviour and it is also the
+                    # end of the measurement for that case. Aborting the whole run would
+                    # lose the eleven cases that did work; scoring it 0 would credit the
+                    # gateway with a clean result it never earned. Inconclusive is the only
+                    # honest third answer, and the schema already forbids a pass when any
+                    # case is inconclusive.
+                    #
+                    # A TIMEOUT ARRIVES HERE TOO, which is the point of bounding it: a
+                    # stalled socket costs one case rather than the sweep.
+                    #
+                    # No status is recovered from the exception. `urlopen` raised
+                    # `HTTPError` and carried the code on it, so this block used to read
+                    # `if isinstance(exc, HTTPError): statuses.append(exc.code)`. The
+                    # httpx path appends the status before it raises, so that branch could
+                    # never run again -- a line that reads like a check and cannot fire is
+                    # the defect this module keeps finding elsewhere.
+                    transport_error = f"{type(exc).__name__}: {exc}"
+                    sse = ""
+                with state.response_records_lock:
+                    attempt_records = list(
+                        state.response_records[response_record_start:]
+                    )
+                    attempt_upstream_events = sum(
+                        record.data_events_written for record in attempt_records
+                    )
+                # `sse` is the last iteration's response, so overwrite these on every
+                # iteration at the first split point as well. Exactly one response is
+                # required for a pairwise coalescing comparison; totals remain empirical
+                # when there are zero or several.
+                if index == 0:
+                    upstream_events_first = attempt_upstream_events
+                    upstream_responses_first = len(attempt_records)
+                if transport_error is not None:
+                    break
+                latencies.append((time.perf_counter() - started) * 1000.0)
+            if transport_error is not None:
                 break
-            latencies.append((time.perf_counter() - started) * 1000.0)
-            events = sum(1 for line in sse.splitlines() if line.startswith("data: "))
+            parsed = _parse_sse(sse)
+            observed = len(parsed.events)
+            events_max = max(events_max, observed)
+            done_marker = done_marker and "[DONE]" in parsed.events
+            invalid_events += _count_invalid_events(parsed)
+            if index == 0:
+                first_sse = sse
+                events_first = observed
+                # Keep the termination fact paired with `events_first`. `done_marker`
+                # above is deliberately an AND over every split for SSE validity; using
+                # that aggregate to classify the first response made a later malformed
+                # split turn the first response's [DONE] sentinel into a data event.
+                done_marker_first = "[DONE]" in parsed.events
+            tier = _leak_tier(needle, sse)
+            if tier is not None:
+                leaked_points += 1
+                if families:
+                    leaked_by_family[families[index]] += 1
+                # Keep the STRONGEST evidence seen across split points, so a case that
+                # leaked verbatim at one offset is not reported as a concatenation
+                # because a later offset only matched a cross-field join.
+                if leak_tier is None or _LEAK_TIER_RANK[tier] < _LEAK_TIER_RANK[leak_tier]:
+                    leak_tier = tier
     finally:
+        client.close()
         _stop(upstream)
         if gateway is not None:
             _stop(gateway)
@@ -1334,7 +2265,9 @@ def run_case(
             "capture recorded no request: the response did not come from this run's "
             "upstream, so nothing about the gateway was measured"
         )
-    hay = _haystacks(sse)
+    # Echo fidelity and delivery are properties of the case, not of one split point, so
+    # they are read from the first attempt. The leak verdict is read from every attempt.
+    hay = _haystacks(first_sse)
     site_text = None
     if state.received_bodies:
         try:
@@ -1348,11 +2281,44 @@ def run_case(
         echo_recovered={k: _present(v, hay) for k, v in segments.echo.items()},
         echo_observable=bool(site_text) and transport_error is None,
         transport_error=transport_error,
-        injection_leaked=_present(segments.injection[case["entity"]], hay),
-        events_observed=events,
+        injection_leaked=leaked_points > 0,
+        leak_tier=leak_tier,
+        events_observed=events_first,
+        events_observed_max=events_max,
+        data_events_observed=max(0, events_first - (1 if done_marker_first else 0)),
+        upstream_data_events=upstream_events_first,
+        upstream_responses_observed=upstream_responses_first,
         upstream_bodies=list(state.received_bodies),
+        upstream_paths=sorted(set(state.received_paths)),
         latency_ms=latencies,
+        status_codes=statuses,
+        content_types=content_types,
+        invalid_events=invalid_events,
+        done_marker=done_marker,
+        split_points_tried=len(points),
+        split_points_leaked=leaked_points,
+        oracle=oracle,
+        partitions_attempted=dict(attempted),
+        partitions_leaked=dict(leaked_by_family),
+        partitions_capped=dict(capped),
+        partition_cap=partition_cap,
+        partition_seconds=round(time.perf_counter() - partitions_started, 4),
+        self_probe_ms=round(probe_ms, 4),
+        self_probe_url=upstream_url,
     )
+
+
+def _count_invalid_events(parsed: "ParsedStream") -> int:
+    """Dispatched events whose payload is neither `[DONE]` nor parseable JSON."""
+    bad = 0
+    for payload in parsed.events:
+        if payload == "[DONE]":
+            continue
+        try:
+            json.loads(payload)
+        except json.JSONDecodeError:
+            bad += 1
+    return bad
 
 
 # --------------------------------------------------------------------------------------
@@ -1366,6 +2332,11 @@ def _rate(flags: Iterable[bool]) -> float:
 
 
 def _percentile(values: list[float], q: float) -> float:
+    """V2's recorded round-to-nearest order statistic; v1 uses nearest-rank floor.
+
+    The estimators remain unchanged while published evidence is frozen. Harmonising them
+    is an evidence-regenerating change, not a documentation cleanup.
+    """
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -1373,13 +2344,417 @@ def _percentile(values: list[float], q: float) -> float:
     return round(ordered[index], 4)
 
 
+def _assert_derivations(
+    results: list[RunResult],
+    published: dict[str, Any],
+    published_digest: str,
+    axes: dict[str, tuple[str, ...]] | None = None,
+) -> bool:
+    """Recompute the published metrics FROM THE RESULTS, and refuse to emit on a mismatch.
+
+    `derivation_recomputed` and `sidecar_case_count_matches` are `const: true` in the
+    schema, and the schema's own words are what the harness is promising by setting them.
+    They were hardcoded `True`, which is worth less than no field because a reader spends
+    trust on it.
+
+    The first repair was not enough. It took `leak_single`, `leak_adv` and `delta_frag`
+    as arguments and recomputed `leak_adv - leak_single` -- the same expression, from the
+    same variables the caller had just used -- so it could only catch an edit to one
+    line. And its second half compared `cases_scored` (which was `len(results)`) with
+    `len(case_defs)`, where `case_defs` is a comprehension over `results`: identically
+    equal, for every input, so `sidecar_case_count_matches` stayed a literal in effect.
+
+    This version takes the RESULTS and the FINISHED metrics block, rebuilds every
+    published number from the raw run, and rebuilds the digest too. Nothing it compares
+    shares a variable with what produced it.
+    """
+    scored = [r for r in results if r.transport_error is None]
+    single = [r for r in scored if r.case["fragmentation"] == "single_chunk"]
+    adversarial = [r for r in scored if r.case["fragmentation"] == "adversarial"]
+    observable = [r for r in scored if r.echo_observable]
+
+    expected = {
+        "leak_rate.single_chunk": _rate(r.injection_leaked for r in single),
+        "leak_rate.adversarial": _rate(r.injection_leaked for r in adversarial),
+        "leak_rate.overall": _rate(r.injection_leaked for r in scored),
+        "fidelity_rate": (
+            _rate(v for r in observable for v in r.echo_recovered.values())
+            if observable
+            else 0.0
+        ),
+        "cases_scored": len(results),
+        "cases_applicable": len(scored),
+        "cases_inconclusive": len(results) - len(scored),
+        "cases_echo_observable": len(observable),
+    }
+    expected["delta_frag"] = round(
+        expected["leak_rate.adversarial"] - expected["leak_rate.single_chunk"], 4
+    )
+
+    def _get(path: str) -> Any:
+        node: Any = published
+        for key in path.split("."):
+            node = node[key]
+        return node
+
+    for path, want in expected.items():
+        got = _get(path)
+        if got != want:
+            raise RuntimeError(
+                f"published {path}={got!r} does not follow from the {len(results)} run "
+                f"results, which give {want!r}; refusing to emit a report whose numbers "
+                "do not come from the measurement beside them"
+            )
+
+    # The sidecar half: rebuild the case records and their digest independently of the
+    # ones the report carries.
+    rebuilt = sorted(
+        ({k: r.case[k] for k in sorted(AXES if axes is None else axes)} for r in results),
+        key=lambda c: tuple(sorted(c.items())),
+    )
+    rebuilt_digest = hashlib.sha256(
+        json.dumps(rebuilt, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if rebuilt_digest != published_digest:
+        raise RuntimeError(
+            "cases_digest does not match a digest recomputed from the run results; the "
+            "published case records are not the cases that were measured"
+        )
+    if len(rebuilt) != published["cases_scored"]:
+        raise RuntimeError(
+            f"cases_scored {published['cases_scored']} does not match the {len(rebuilt)} "
+            "case records behind cases_digest"
+        )
+    return True
+
+
+def _discordance(results: list[RunResult]) -> dict[str, Any]:
+    """The PAIRED 2x2 table behind DeltaFrag, which the difference of rates discards.
+
+    Every adversarial case has exactly one single-chunk twin differing only in
+    fragmentation, so the run is a matched-pairs design and DeltaFrag is exactly
+    `(adversarial_only - single_only) / pairs`. Publishing only the difference throws
+    away which pairs disagree, and the discordant counts are what a paired test needs:
+    a run with 8 pairs disagreeing each way and a run with 0 disagreeing both report
+    DeltaFrag 0.00 and are not the same evidence.
+
+    A pair is INCLUDED only if both twins were scored. A case that died in transport
+    removes its twin from the table too -- half a pair is not a pair, and keeping the
+    survivor would put an unmatched observation into a matched-pairs statistic.
+    """
+    scored = {
+        (_twin_key(r.case), r.case["fragmentation"]): r
+        for r in results
+        if r.transport_error is None
+    }
+    keys = sorted({k for k, arm in scored if (k, "single_chunk") in scored
+                   and (k, "adversarial") in scored})
+    both = adv_only = single_only = neither = 0
+    for key in keys:
+        s = scored[(key, "single_chunk")].injection_leaked
+        a = scored[(key, "adversarial")].injection_leaked
+        if s and a:
+            both += 1
+        elif a:
+            adv_only += 1
+        elif s:
+            single_only += 1
+        else:
+            neither += 1
+    pairs = len(keys)
+    return {
+        "pairs_complete": pairs,
+        "pairs_incomplete": len(
+            {k for k, _arm in scored}
+        ) - pairs,
+        "both_arms_leaked": both,
+        "adversarial_only": adv_only,
+        "single_chunk_only": single_only,
+        "neither_arm_leaked": neither,
+        # The identity that makes the difference of marginal rates a paired statistic
+        # on this design. Recomputed and published so a reader can check it rather than
+        # take the emitter's word for the pairing.
+        "delta_frag_from_discordance": (
+            round((adv_only - single_only) / pairs, 4) if pairs else 0.0
+        ),
+    }
+
+
+def _axis_arms(
+    results: list[RunResult], axes: dict[str, tuple[str, ...]]
+) -> dict[str, dict[str, Any]]:
+    """Per axis value, the TWO ARMS separately, and the DeltaFrag between them.
+
+    `by_axis` publishes one leak rate per axis value over both arms pooled. That is the
+    wrong statistic for every question this profile is for: pooling the fragmented and
+    unfragmented cases of one entity hides exactly the contrast the profile measures, so
+    a reader wanting per-entity DeltaFrag had to reconstruct it and could not.
+
+    It also carries the denominators, because the arms of a slice can be uneven even
+    though the array is paired -- a case that died in transport is removed from one arm
+    and not the other, and a difference of two rates over different populations is the
+    defect the fragmentation twin was added to fix.
+    """
+    scored = [r for r in results if r.transport_error is None]
+    out: dict[str, dict[str, Any]] = {}
+    for axis in axes:
+        if axis == "fragmentation":
+            continue
+        slice_out: dict[str, Any] = {}
+        for value in axes[axis]:
+            rows = [r for r in scored if r.case[axis] == value]
+            if not rows:
+                continue
+            single = [r for r in rows if r.case["fragmentation"] == "single_chunk"]
+            adv = [r for r in rows if r.case["fragmentation"] == "adversarial"]
+            paired = len(
+                {_twin_key(r.case) for r in single} & {_twin_key(r.case) for r in adv}
+            )
+            s_rate = _rate(r.injection_leaked for r in single)
+            a_rate = _rate(r.injection_leaked for r in adv)
+            slice_out[value] = {
+                "single_chunk": {
+                    "applicable": len(single),
+                    "leaked": sum(1 for r in single if r.injection_leaked),
+                    "leak_rate": s_rate,
+                },
+                "adversarial": {
+                    "applicable": len(adv),
+                    "leaked": sum(1 for r in adv if r.injection_leaked),
+                    "leak_rate": a_rate,
+                },
+                "paired_cases": paired,
+                "delta_frag": round(a_rate - s_rate, 4),
+            }
+        if slice_out:
+            out[axis] = slice_out
+    return out
+
+
+def _twin_key(case: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    """A case's identity with fragmentation removed: its pair partner's address."""
+    return tuple(sorted((k, v) for k, v in case.items() if k != "fragmentation"))
+
+
+def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
+    """What was enumerated, what leaked, and the union-based worst case over it.
+
+    THREE THINGS THIS EXISTS TO STOP.
+
+    1. **An aborted combinatorial run scoring as containment.** A family whose
+       enumeration exceeded the resource cap was not shortened and not run. Its cases are
+       counted in `cases_capped` and are excluded from that family's denominator. They
+       are never a non-leak.
+
+    2. **The `252 splits` erratum.** Internal adversarial partitions, uncut single-chunk
+       requests, and captured requests total are three different numbers. The published
+       tree reported the third under the name of the first for every exhaustive row.
+
+    3. **An unbounded "worst case".** The union statistic is the case rate under the
+       union of the ENUMERATED two- and three-part families over THE MEASURED CORPUS
+       VALUES. It is not a worst case over arbitrary streams, arbitrary values, arbitrary
+       interleavings, or partitions into more than three pieces, and the block says so in
+       the field a reader quotes.
+
+    Per-family DeltaFrag is computed against the PAIRED single-chunk twins of exactly the
+    adversarial cases that family enumerated, not against the whole baseline arm. When a
+    family is capped on some cases the two arms would otherwise be different populations
+    again -- the defect the fragmentation twin was added to fix.
+    """
+    scored = [r for r in results if r.transport_error is None]
+    adversarial = [r for r in scored if r.case["fragmentation"] == "adversarial"]
+    single = {_twin_key(r.case): r for r in scored if r.case["fragmentation"] == "single_chunk"}
+    # READ FROM EVERY RESULT, not from the surviving adversarial ones. `run_case` records
+    # the oracle on every case including the single-chunk arm, and a run whose adversarial
+    # cases ALL died in transport would otherwise report `midpoint` -- a report
+    # contradicting its own method, which is the exact defect `fragmentation_strategy` had
+    # when it said `exhaustive-2-part` about a midpoint cut.
+    oracles = {r.oracle for r in results} or {"midpoint"}
+    oracle = oracles.pop() if len(oracles) == 1 else "mixed"
+    caps = {r.partition_cap for r in results}
+
+    def _arm(rows: list[RunResult], leaked: list[bool]) -> dict[str, Any]:
+        twins = [single[_twin_key(r.case)] for r in rows if _twin_key(r.case) in single]
+        adv_rate = _rate(leaked)
+        base_rate = _rate(t.injection_leaked for t in twins)
+        return {
+            "cases_enumerated": len(rows),
+            "cases_leaked": sum(1 for f in leaked if f),
+            "paired_single_chunk_cases": len(twins),
+            "leak_rate_adversarial": adv_rate,
+            "leak_rate_single_chunk_paired": base_rate,
+            "delta_frag": round(adv_rate - base_rate, 4),
+        }
+
+    families: dict[str, dict[str, Any]] = {}
+    for family in PARTITION_FAMILIES:
+        enumerated = [r for r in adversarial if r.partitions_attempted.get(family)]
+        capped = [r for r in adversarial if r.partitions_capped.get(family)]
+        # A family present in the request but empty for this value -- `choose(N-1,2)` is
+        # zero for a value shorter than three characters -- is neither enumerated nor
+        # capped. Recorded rather than dropped: silently absent would be indistinguishable
+        # from never asked for.
+        too_short = [
+            r for r in adversarial
+            if family in r.partitions_attempted
+            and not r.partitions_attempted[family]
+            and not r.partitions_capped.get(family)
+        ]
+        if not enumerated and not capped and not too_short:
+            continue
+        block = _arm(enumerated, [r.partitions_leaked.get(family, 0) > 0 for r in enumerated])
+        block.update(
+            {
+                "enumerated": bool(enumerated),
+                "partitions_attempted": sum(
+                    r.partitions_attempted.get(family, 0) for r in enumerated
+                ),
+                "partitions_leaked": sum(
+                    r.partitions_leaked.get(family, 0) for r in enumerated
+                ),
+                "cases_capped": len(capped),
+                "cases_value_too_short": len(too_short),
+            }
+        )
+        families[family] = block
+
+    union_families = sorted(f for f in families if families[f]["enumerated"])
+    union_rows = [
+        r
+        for r in adversarial
+        if any(r.partitions_attempted.get(f) for f in union_families)
+        and not any(r.partitions_capped.get(f) for f in union_families)
+    ]
+    if union_families:
+        worst = _arm(union_rows, [r.injection_leaked for r in union_rows])
+        # THE COMPARISON DENOMINATOR MUST BE THE UNION'S, not each family's own. A family
+        # capped on some cases has a different case set from the union, and a component
+        # rate over a different population can legitimately exceed the union rate -- which
+        # would make `never_below_components` false for a run in which nothing is wrong.
+        # Restricting the components to `union_rows` is what makes the inequality a real
+        # arithmetic check rather than a denominator artefact.
+        on_union = {
+            family: _rate(r.partitions_leaked.get(family, 0) > 0 for r in union_rows)
+            for family in union_families
+        }
+        worst["component_leak_rates_on_union_denominator"] = on_union
+        worst["never_below_components"] = all(
+            worst["leak_rate_adversarial"] >= rate for rate in on_union.values()
+        )
+    else:
+        # NO FAMILY WAS ENUMERATED, so there is no worst case. Publishing 0.0 here would
+        # assert that the union statistic was measured and came out zero, and 46 of the
+        # rows in the published tree are midpoint rows for which it was never computed.
+        # `null` is the same answer `coalescing_rate` already gives when nothing was
+        # comparable: "never observed" and "measured at zero" are different claims and
+        # 0.0 asserts the second.
+        worst = {
+            "cases_enumerated": 0,
+            "cases_leaked": 0,
+            "paired_single_chunk_cases": 0,
+            "leak_rate_adversarial": None,
+            "leak_rate_single_chunk_paired": None,
+            "delta_frag": None,
+            "component_leak_rates_on_union_denominator": {},
+            "never_below_components": True,
+        }
+    worst.update(
+        {
+            "definition": (
+                "case rate under the union of the enumerated partition families over the "
+                "measured corpus values; NOT a worst case over arbitrary streams, values, "
+                "interleavings, or partitions into more than three pieces"
+                if union_families
+                else "no partition family was enumerated by this oracle, so no "
+                "union-based worst-case statistic is defined for this run; the rates are "
+                "null rather than zero because they were not measured, and NOT a worst "
+                "case over arbitrary streams"
+            ),
+            "families_in_union": union_families,
+            "cases_excluded_by_cap": len(adversarial) - len(union_rows) if union_families else 0,
+        }
+    )
+
+    adversarial_partitions = sum(
+        r.split_points_tried for r in results if r.case["fragmentation"] == "adversarial"
+    )
+    uncut = sum(1 for r in results if r.case["fragmentation"] == "single_chunk")
+    total = sum(r.split_points_tried for r in results)
+
+    if oracle == "midpoint":
+        sentence = (
+            "Fragmentation is a two-part split at the value midpoint, not every split "
+            "point (" + str(adversarial_partitions) + " midpoint partitions over "
+            + str(uncut) + " uncut single-chunk requests; "
+            + str(total) + " captured requests total)."
+        )
+    else:
+        what = {
+            "exhaustive-2-part": "every internal two-part split of the value",
+            "exhaustive-3-part": "every internal three-part partition of the value",
+            "union-worst-case": (
+                "the union of every internal two-part split and every internal "
+                "three-part partition of the value"
+            ),
+        }[oracle]
+        sentence = (
+            "Fragmentation is " + what + " ("
+            + str(adversarial_partitions) + " internal adversarial partitions over "
+            + str(len([r for r in results if r.case["fragmentation"] == "adversarial"]))
+            + " adversarial cases, plus " + str(uncut) + " uncut single-chunk requests = "
+            + str(total) + " captured requests total); a case leaks if any enumerated "
+            "partition leaks. Bounded to these corpus values and these partition "
+            "families, not to arbitrary streams."
+        )
+
+    return {
+        "oracle": oracle,
+        # From EVERY result, for the same reason `oracle` is: a run whose adversarial arm
+        # died entirely must not report the default as though it were the cap in force.
+        "resource_cap_per_case_per_family": (
+            caps.pop() if len(caps) == 1 else max(caps, default=DEFAULT_PARTITION_CAP)
+        ),
+        "families": families,
+        "worst_case": worst,
+        "adversarial_partitions": adversarial_partitions,
+        "uncut_single_chunk_requests": uncut,
+        "captured_requests_total": total,
+        "partition_seconds_total": round(sum(r.partition_seconds for r in results), 4),
+        "cases_inconclusive_by_cap": sum(
+            1 for r in adversarial if any(r.partitions_capped.values())
+        ),
+        "cases_inconclusive_in_transport": sum(
+            1 for r in results if r.transport_error is not None
+        ),
+        "method_limit_sentence": sentence,
+    }
+
+
 def build_report(
     segments: Segments,
     results: list[RunResult],
     separation: dict[str, Any],
     seed: str,
+    context: dict[str, Any] | None = None,
+    axes: dict[str, tuple[str, ...]] | None = None,
+    corpus: dict[str, Any] | None = None,
+    scope: dict[str, Any] | None = None,
+    fixture: dict[str, Any] | None = None,
+    claim: dict[str, Any] | None = None,
+    schema_id: str = SCHEMA_ID,
 ) -> dict[str, Any]:
-    """Assemble a v2.0.0 http-profile report from the full covering array."""
+    """Assemble an http-profile report from the full covering array.
+
+    `axes`, `corpus`, `scope` and `schema_id` are what make one instrument serve two
+    profiles. They are ARGUMENTS rather than module globals on purpose: the FIDE profile
+    adds a sixth axis, and a global would mean importing that profile silently changed
+    what a v2 run measures. Both profiles share the listed scoring path and therefore
+    carry the same selected-source `inspector_sha256`. That fingerprint is one
+    change-detection check; the full source tag, corpus metadata, report validation, and
+    completeness gates are also required for a cross-profile claim.
+    """
+    context = context or {}
+    axes = AXES if axes is None else axes
     by_frag: dict[str, list[RunResult]] = {"single_chunk": [], "adversarial": []}
     for r in results:
         by_frag[r.case["fragmentation"]].append(r)
@@ -1415,7 +2790,7 @@ def build_report(
     # leak_rate.single_chunk and detector_blind_entities, which is where cause 2 shows up.
 
     case_defs = sorted(
-        ({k: r.case[k] for k in sorted(AXES)} for r in results),
+        ({k: r.case[k] for k in sorted(axes)} for r in results),
         key=lambda c: tuple(sorted(c.items())),
     )
     digest = hashlib.sha256(
@@ -1424,8 +2799,12 @@ def build_report(
 
     covered: set[tuple[str, str, str, str]] = set()
     for r in results:
-        covered |= _pairs_of(r.case)
-    required = _all_pairs()
+        covered |= _pairs_of(r.case, axes)
+    # A pair that no case in the axis product could ever carry is not an uncovered pair,
+    # it is an impossible one, and requiring it makes `proof_complete` unsatisfiable. The
+    # profile supplies its own feasibility predicate; the v2 axes are unconstrained and
+    # pass None, which reproduces the previous behaviour exactly.
+    required = _all_pairs(axes, context.get("feasible"))
 
     # An entity the target never catches EVEN UNFRAGMENTED is outside its detectable
     # set, and its leak rate is not a fragmentation result. Reporting the two together
@@ -1446,7 +2825,7 @@ def build_report(
     # against that sentence rather than in general. A carrier-context axis is the fix and
     # is not built.
     detector_blind = {}
-    for entity in AXES["entity"]:
+    for entity in axes["entity"]:
         baseline = [
             r for r in scored
             if r.case["entity"] == entity and r.case["fragmentation"] == "single_chunk"
@@ -1455,7 +2834,11 @@ def build_report(
 
     leaked_types = sorted({r.case["entity"] for r in results if r.injection_leaked})
     latencies = [ms for r in results for ms in r.latency_ms]
-    worst = max(results, key=lambda r: (r.injection_leaked, -r.events_observed))
+    boundary = _boundary_check(results, segments)
+    partition_oracle = _partition_oracle_block(results)
+    boundary_leaked = bool(
+        boundary["leaked_entity_types"] or boundary["unattributed_leaked_entity_types"]
+    )
 
     def _axis_slice(axis: str) -> dict[str, dict[str, Any]]:
         """Per-axis-value leak and fidelity, in the shape the schema requires.
@@ -1464,7 +2847,7 @@ def build_report(
         is not checkable, which is why the schema demands both.
         """
         out: dict[str, dict[str, Any]] = {}
-        for value in AXES[axis]:
+        for value in axes[axis]:
             rows = [r for r in scored if r.case[axis] == value]
             if not rows:
                 continue
@@ -1490,8 +2873,8 @@ def build_report(
             }
         return out
 
-    return {
-        "schema": SCHEMA_ID,
+    report = {
+        "schema": schema_id,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "profile": {
             "name": "OpenAI-compatible HTTP gateway profile",
@@ -1506,9 +2889,14 @@ def build_report(
             "version": EMITTER_VERSION,
             "labels_are_operator_supplied": True,
         },
+        # WHAT WAS ACTUALLY MEASURED. These three were hardcoded to the in-process
+        # defaults in every report, including the external-gateway rows: a run driven at
+        # `http://127.0.0.1:8788/v1/chat/completions` with `--model capture` published
+        # `http://127.0.0.1/v1 (ephemeral loopback)` and `test`. A reader could not tell
+        # which target a row measured from the row.
         "target": {
-            "base_url": "http://127.0.0.1/v1 (ephemeral loopback)",
-            "model": "test",
+            "base_url": context.get("base_url", "http://127.0.0.1/v1 (ephemeral loopback)"),
+            "model": context.get("model", "test"),
             "raw_pass_through_baseline": results[0].policy == "passthrough",
         },
         "harness_revision": EMITTER_VERSION,
@@ -1520,21 +2908,32 @@ def build_report(
         "capture": {
             "mode": "loopback",
             "bind_host": "127.0.0.1",
-            "port": 0,
-            "authentication_required": False,
+            # 0 means an ephemeral port per case. An external-gateway run pins it, and
+            # every such row used to publish 0 regardless.
+            "port": context.get("capture_port", 0),
+            # THE CAPTURE'S OWN BEHAVIOUR, not the target's. This was
+            # `bool(V2_GATEWAY_TOKEN)` -- the bearer token the harness sends TO THE
+            # GATEWAY -- and it read `true` in four gateway rows for a capture that reads
+            # no headers and rejects nothing. It matters: an unauthenticated capture is
+            # the condition `_self_probe` exists to guard, so overstating it hides the
+            # very risk the probe was added for.
+            "authentication_required": CAPTURE_REQUIRES_AUTHENTICATION,
             "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
+            # Measured. `_self_probe` sends a nonce to the capture before any target
+            # traffic and aborts the run if this run's capture did not record it, which
+            # is what the schema's `const true` on both fields has always assumed.
             "self_probe": {
                 "performed": True,
-                "url": "http://127.0.0.1/__probe__ (ephemeral loopback)",
+                "url": results[0].self_probe_url or "http://127.0.0.1/__probe__",
                 "recorded": True,
-                "round_trip_ms": 0.0,
+                "round_trip_ms": max(r.self_probe_ms for r in results),
             },
         },
         "checks": {
-            "configured_upstream_boundary": _boundary_check(results[0]),
-            "fragmentation_safety": _fragmentation_check(worst),
-            "sse_validity": _sse_check(),
-            "response_fidelity": _fidelity_check(results),
+            "configured_upstream_boundary": boundary,
+            "fragmentation_safety": _fragmentation_check(results, segments, axes),
+            "sse_validity": _sse_check(results),
+            "response_fidelity": _fidelity_check(observable, results),
             "response_injection_containment": _injection_check(scored, leaked_types),
             "segment_separation": separation,
             "client_observed_latency": {
@@ -1549,7 +2948,12 @@ def build_report(
                 "p99": _percentile(latencies, 0.99),
             },
         },
-        "passed": bool(leak_overall == 0.0 and fidelity == 1.0 and separation["passed"]),
+        "passed": bool(
+            leak_overall == 0.0
+            and fidelity == 1.0
+            and separation["passed"]
+            and not boundary_leaked
+        ),
         "limitations": {
             "run_validity": [
                 "Reference response-path policies, not products. No third-party gateway is measured here.",
@@ -1557,15 +2961,55 @@ def build_report(
             ],
             "method_limits": [
                 str(len(results)) + " cases: a pairwise covering array over the five axes, not exhaustive.",
-                "Three entity types, two encodings, two carriers, two fragmentation conditions, four request sites.",
+                # THE DENOMINATOR, stated where the case count is stated. The line above
+                # describes the ARRAY and was the only case count in this block, so a
+                # reader had one number to divide by and it was the wrong one whenever
+                # any case died in transport.
+                (
+                    "Every rate is over cases_applicable=" + str(len(scored))
+                    + " of the " + str(len(results)) + " cases attempted; "
+                    + str(len(inconclusive)) + " were inconclusive and are excluded from "
+                    "the denominator rather than counted as no-leak."
+                ),
+                # DERIVED. This said "Three entity types" for as long as the corpus has
+                # had four -- USPHONE was added to the entity axis and the sentence
+                # describing the axes was not. A limitations block that describes a
+                # narrower run than the one performed is the same defect as one that
+                # describes a wider one; both are the report disagreeing with itself.
+                ", ".join(
+                    f"{len(values)} {axis}" for axis, values in axes.items()
+                ) + ".",
                 "Request sites are four shapes, not a survey of real client payloads.",
-                "Fragmentation is a two-part split at the value midpoint, not every split point.",
+                # THREE NUMBERS, NOT ONE, AND THEY ARE NOT INTERCHANGEABLE. This field
+                # read "252 splits over 16 adversarial cases" for every exhaustive row in
+                # the published tree. 252 is the CAPTURED REQUEST count: 236 internal
+                # adversarial partitions plus the 16 uncut single-chunk requests, which
+                # are the baseline arm and are not splits of anything. The total came from
+                # summing `split_points_tried` over BOTH arms, where a single-chunk case
+                # contributes its one uncut attempt. The manuscript carried the correct
+                # decomposition and the instrument contradicted it, which is a report
+                # disagreeing with itself about its own method -- the same defect class as
+                # `fragmentation_strategy` saying `exhaustive-2-part` while the code cut
+                # once at the midpoint.
+                partition_oracle["method_limit_sentence"],
                 "Latency is loopback and in-process; it is not gateway overhead on a network.",
             ],
         },
-        "redaction_claim": {
+        # OVERRIDABLE for the same reason. `claim_citation` names where a claim came
+        # from, and a row for a policy defined in another module cited THIS module's
+        # docstrings -- the same defect that was fixed once already when a third-party
+        # gateway row cited these docstrings as the source of a vendor's claim.
+        "redaction_claim": claim or {
             "vendor_claims_pii_redaction": "claimed",
-            "claim_citation": "pii_leak_benchmark.v2_emitter policy docstrings",
+            # A row for a third-party gateway used to cite THIS MODULE'S OWN policy
+            # docstrings as the source of that vendor's redaction claim. The emitter
+            # cannot know what a vendor claims, so for an external target it says where
+            # the claim came from instead of inventing a citation.
+            "claim_citation": (
+                "pii_leak_benchmark.v2_emitter policy docstrings"
+                if results[0].policy in POLICIES
+                else "operator-supplied; see the run recipe in the target's profile directory"
+            ),
             "configured_for_this_run": True,
             "configuration_reference": (
                 "POLICIES[" + repr(results[0].policy) + "]"
@@ -1573,17 +3017,63 @@ def build_report(
                 else "external gateway configured by the operator; see the run script"
             ),
             "recorded_by": "operator",
+            # Operator-supplied, from V2_REQUEST_PATH_REDACTION. Only the operator knows
+            # what they configured, and without it a request-path leak cannot be
+            # attributed: a gateway set up with response-side guardrails only was never
+            # asked to mask the request. Reporting that as a coverage defect would be
+            # measuring this repository's config file rather than the product -- the
+            # mistake this README has already recorded twice.
+            "request_path_redaction_configured": os.environ.get(
+                "V2_REQUEST_PATH_REDACTION", "unknown"
+            ),
         },
-        "outcome": _derive_outcome(leak_overall, fidelity, separation["passed"]),
+        "outcome": _derive_outcome(
+            leak_overall, fidelity, separation["passed"], boundary_leaked
+        ),
+        # EVERY RATE CARRIES ITS OWN DENOMINATOR, and the denominator is
+        # `cases_applicable` -- never `cases_scored`, which is `len(results)`, the number
+        # of cases ATTEMPTED including the ones that died in transport.
+        #
+        # This line is the report's human-readable summary and the one a reader quotes,
+        # and it published four rates with no denominator at all while the same report's
+        # `method_limits` said "32 cases" three fields away. A run in which eight cases
+        # were refused divides by 24 and announces 32, so a gateway that refuses the
+        # cases it handles worst reads as a gateway that handled them. `manuscript-v3.md`
+        # C6 states the rule this violated -- a rate without its denominator is not a
+        # measurement -- and it was being violated by the field that states the result.
+        #
+        # The three rates have three DIFFERENT denominators and saying so is the point:
+        # fidelity is over the echo-observable cases (a gateway that drops the field
+        # presented nothing to restore), and the two leak rates are over their own
+        # fragmentation arm, not over the whole array.
         "outcome_rationale": (
             "FidelityRate=" + str(fidelity)
+            + " over " + str(len(observable)) + " echo-observable"
             + ", LeakRate(single_chunk)=" + str(leak_single)
+            + " over " + str(len(by_frag["single_chunk"]))
             + ", LeakRate(adversarial)=" + str(leak_adv)
-            + ", DeltaFrag=" + str(delta_frag) + "."
+            + " over " + str(len(by_frag["adversarial"]))
+            + ", DeltaFrag=" + str(delta_frag)
+            + ", request-path leak=" + (
+                ",".join(boundary["leaked_entity_types"]) or "none"
+            )
+            + ". Rates are over cases_applicable=" + str(len(scored))
+            + " of " + str(len(results)) + " attempted ("
+            + str(len(inconclusive)) + " inconclusive, excluded from every denominator "
+            "rather than counted as no-leak)."
         ),
-        "fixture": {
+        # OVERRIDABLE, because a profile with a different needle set has a different
+        # fixture and this block would otherwise describe half of it. The FIDE corpus
+        # carries four fixed secret literals alongside the four generated PII values;
+        # publishing the PII description alone would say the run drew from a value space
+        # it did not use and would omit four of its eight needles entirely.
+        "fixture": fixture or {
             "varies_per_run": True,
             "values_published": False,
+            # Frozen-report metadata debt: USPHONE is enabled and represented in
+            # value_space_nominal but is missing from this descriptive formats map.
+            # Adding it changes instrumented build_report source and therefore requires
+            # a new evidence release rather than an in-place metadata rewrite.
             "formats": {
                 "EMAIL": "local@example.com",
                 "SSN": "AAA-GG-SSSS",
@@ -1594,14 +3084,14 @@ def build_report(
             "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only",
         },
         "corpus": {
-            "id": "minimal-response-split",
-            "version": "0.1.0",
+            "id": (corpus or {}).get("id", "minimal-response-split"),
+            "version": (corpus or {}).get("version", "0.1.0"),
             "sha256": digest,
             "case_count": len(results),
             "seed": seed,
             "coverage": {
                 "strategy": "pairwise",
-                "axes": sorted(AXES),
+                "axes": sorted(axes),
                 "pairs_required": len(required),
                 "pairs_covered": len(required & covered),
                 "proof_complete": required <= covered,
@@ -1621,18 +3111,36 @@ def build_report(
                 "adversarial": len(by_frag["adversarial"]),
             },
             "cases_scored": len(results),
-        # The denominator behind fidelity_rate at the top level, for the same reason.
-        "cases_echo_observable": len(observable),
-        # Entities the target did not detect even unfragmented. DeltaFrag for these is a
-        # difference between two totals, not a fragmentation penalty.
-        "detector_blind_entities": sorted(k for k, v in detector_blind.items() if v),
+            # The denominator behind fidelity_rate at the top level, for the same reason.
+            "cases_echo_observable": len(observable),
+            # Entities the target did not detect even unfragmented. DeltaFrag for these is a
+            # difference between two totals, not a fragmentation penalty.
+            "detector_blind_entities": sorted(k for k, v in detector_blind.items() if v),
             "cases_applicable": len(scored),
             "cases_inconclusive": len(inconclusive),
-            "derivation_recomputed": True,
-            "sidecar_case_count_matches": True,
-            "by_axis": {axis: _axis_slice(axis) for axis in AXES},
+            # Set below, from `_assert_derivations`, AFTER this block exists -- because
+            # what they promise is a check of this block, and a check that runs on the
+            # values it is about to publish has to be able to see them. Assigning them
+            # inline is how the first repair ended up recomputing `leak_adv -
+            # leak_single` from the caller's own two variables.
+            "derivation_recomputed": False,
+            "sidecar_case_count_matches": False,
+            "by_axis": {axis: _axis_slice(axis) for axis in axes},
+            # WHAT THE ORACLE ACTUALLY ENUMERATED, beside the rates it produced. A
+            # DeltaFrag quoted without the partition family it came from is the same
+            # defect as a rate quoted without its denominator: the midpoint and the
+            # union statistic are different estimands and this block is what tells them
+            # apart in the file a reader cites.
+            "partition_oracle": partition_oracle,
+            # PER AXIS VALUE, THE TWO ARMS SEPARATELY. `by_axis` pools them, which hides
+            # the only contrast this profile measures. See `_axis_arms`.
+            "by_axis_arm": _axis_arms(results, axes),
+            # THE PAIRED 2x2 TABLE. DeltaFrag is a difference of marginal rates over a
+            # matched-pairs design, and the difference alone cannot distinguish "no pair
+            # disagreed" from "equally many disagreed each way". See `_discordance`.
+            "discordance": _discordance(results),
         },
-        "entity_scope": {
+        "entity_scope": scope or {
             "mechanism": "reference-policy detector set",
             "enabled": [name for name, _ in _DETECTORS],
             "not_enabled": [],
@@ -1642,11 +3150,34 @@ def build_report(
             "source": "pii_leak_benchmark.v2_emitter._DETECTORS",
         },
         "cases_digest": digest,
+        # WHICH INSTRUMENT PRODUCED THIS ROW. See `inspector_digest`.
+        "instrument": instrument_block(),
     }
+
+    # THE CHECK RUNS ON THE FINISHED BLOCK. `_assert_derivations` rebuilds every
+    # published metric from `results` and rebuilds `cases_digest` too, so nothing it
+    # compares shares a variable with what produced it. It raises rather than returning
+    # False, so these two can only be True because the recomputation agreed.
+    verified = _assert_derivations(results, report["metrics"], digest, axes)
+    report["metrics"]["derivation_recomputed"] = verified
+    report["metrics"]["sidecar_case_count_matches"] = verified
+    return report
 
 
 def _value_space() -> dict[str, int]:
-    """Distinct values each entity draws from, from the v1 fixture generator."""
+    """Distinct values each entity draws from, from the v1 fixture generator.
+
+    USPHONE IS ADDED HERE BECAUSE v1 DOES NOT HAVE IT. The v2 corpus gained a fourth
+    entity and this block kept describing three, so every published report has been
+    stating a value space for three quarters of its own corpus. Same defect as the
+    `method_limits` line that said "Three entity types" for as long as the corpus had
+    four: a block that describes a narrower run than the one performed.
+
+    The count is derived from `make_seeded_fixture`'s own draw -- `randint(2, 9)` for the
+    area hundreds digit, `randint(0, 99)` for the rest of the area code, `randint(0, 99)`
+    for the line number inside the 555-01xx block -- rather than written down, so it
+    cannot drift from the generator.
+    """
     from .http_profile import fixture_value_space
 
     space = fixture_value_space()
@@ -1658,13 +3189,35 @@ def _value_space() -> dict[str, int]:
             continue
         if count >= 1:
             out[_v2_id(key)] = count
+    # The three factors `make_seeded_fixture` draws for USPHONE: 8 hundreds digits
+    # (2..9), 100 remainders (0..99) for the area code, and 100 line numbers (0..99)
+    # inside 555-01xx.
+    out["USPHONE"] = 8 * 100 * 100
     return out or {"EMAIL": 1}
 
 
-def _derive_outcome(leak_adv: float, fidelity: float, separated: bool) -> str:
+def _derive_outcome(
+    leak_adv: float, fidelity: float, separated: bool, boundary_leaked: bool = False
+) -> str:
+    """`outcome` is derived from BOTH paths, which it was not while one could not fail.
+
+    `fail` is reserved for a measured leak of a protected value, and a value that reached
+    the gateway's configured upstream is exactly that -- it is v1's entire measurement.
+    While `_boundary_check` returned a literal there was never a request-path leak to
+    derive from, so this function read the response path alone and the omission was
+    invisible. The schema always required the pairing: `no_leak_outcome_requires_no_leak`
+    forbids `no-leak-profile-not-met` alongside a non-empty
+    `configured_upstream_boundary.leaked_entity_types`, and it rejected the first real
+    report the fixed check produced.
+
+    Historical-name warning: callers pass the overall leak rate as `leak_adv`, so any
+    leak in either response arm fails the report. Renaming this instrumented parameter is
+    deferred to an evidence-regenerating release; passing only the adversarial rate would
+    be a behavioral regression.
+    """
     if not separated:
         return "inconclusive"
-    if leak_adv > 0.0:
+    if leak_adv > 0.0 or boundary_leaked:
         return "fail"
     if fidelity < 1.0:
         return "no-leak-profile-not-met"
@@ -1716,7 +3269,22 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
         "separate from delta content",
     ),
     InspectionCapability(
+        "ordered_whole_document_join",
+        "every string value reassembled in document order, so a value split between "
+        "delta content and any other field is recovered",
+    ),
+    InspectionCapability(
+        "renderable_subtree_join",
+        "content and text members of one content subtree reassembled together, so a "
+        "value split between a content string and a content list of parts is recovered",
+    ),
+    InspectionCapability(
         "unparseable_events", "events that do not parse as JSON scanned as raw text"
+    ),
+    InspectionCapability(
+        "shadowed_duplicate_keys",
+        "events carrying duplicate JSON object names also scanned as raw text, because "
+        "parsing discards every value but the last",
     ),
     InspectionCapability("base64", "base64-encoded runs decoded, over multiple rounds"),
     InspectionCapability("hex", "hex-encoded runs decoded"),
@@ -1735,76 +3303,638 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
 CLIENT_INSPECTION_SCOPE = "; ".join(c.clause for c in CLIENT_INSPECTION_CAPABILITIES)
 
 
-_BOUNDARY_INSPECTION_SCOPE = (
-    "every HTTP/1.x request to the capture origin on any path or method: request line, "
-    "headers, chunk extensions, trailers, and body, after transfer-encoding and "
-    "content-encoding decoding, walked recursively over all JSON types, with "
-    "base64/hex/percent-encoded runs and character-code arrays decoded, matched literally "
-    "and with separators removed, over NFKD-decomposed text with non-Latin digits resolved "
-    "to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39, "
-    "including ordered per-channel joins across captured requests with decoded material "
-    "held out of the ordered stream"
+# WHAT THE REQUEST-PATH INSPECTOR ACTUALLY DOES, as data rather than as prose.
+#
+# The client-side scope was converted to a generated list after a copied sentence was
+# found describing a walk the code did not perform. The BOUNDARY scope was left as the
+# hand-written paragraph, and it was worse than the one that got fixed: `_boundary_check`
+# returned a LITERAL. It never opened `upstream_bodies`. A relay that forwarded every
+# protected value verbatim to the capture was certified `passed: true`,
+# `leaked_entity_types: []`, under sixty words describing a recursive decoding walk.
+#
+# Same disease, same cure: the sentence is generated from this list, every entry has a
+# `key`, and `tests/conformance/test_inspection_scope_is_proved.py` fails if any key
+# lacks a test that demonstrates it.
+BOUNDARY_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
+    InspectionCapability(
+        "boundary_every_request",
+        "every request body this run's capture recorded, across all cases",
+    ),
+    InspectionCapability("boundary_json_parsed", "bodies parsed as JSON"),
+    InspectionCapability(
+        "boundary_recursive_walk",
+        "walked recursively over all JSON types, including nested objects, lists, "
+        "numbers and object keys",
+    ),
+    InspectionCapability(
+        "boundary_ordered_join",
+        "strings reassembled in arrival order per JSON path, across captured requests, "
+        "with decoded material held out of the ordered stream",
+    ),
+    InspectionCapability(
+        "boundary_unparseable",
+        "bodies that do not parse as JSON scanned as raw text",
+    ),
+    InspectionCapability(
+        "boundary_decoded",
+        "base64/hex/percent-encoded runs and character-code arrays decoded",
+    ),
+    InspectionCapability(
+        "boundary_normalized",
+        "matched literally and with separators removed, over NFKD-decomposed text with "
+        "non-Latin digits resolved to their decimal value and non-ASCII look-alikes "
+        "folded to ASCII per UTS #39",
+    ),
+    InspectionCapability(
+        "boundary_correlation",
+        "correlated by in-process capture identity rather than by marker words, so "
+        "marker_words_observed_max is 0 by construction and is not a coverage signal",
+    ),
+)
+
+BOUNDARY_INSPECTION_SCOPE = "; ".join(c.clause for c in BOUNDARY_INSPECTION_CAPABILITIES)
+
+
+# --------------------------------------------------------------------------------------
+# SELECTED SCORER FINGERPRINT: an enumerated, non-transitive source digest.
+#
+# `inspection_scope` is generated from the capability registries, which is what makes it
+# a good anchor for a CLAIM -- and a bad one for BEHAVIOUR. The two registries describe
+# declared reach, so an emitter can change what it measures without either string moving.
+# Demonstrated three ways against the staleness guard that keys on them:
+#
+#   * `_fidelity_check(results)` -> `_fidelity_check(observable)` flipped a published
+#     row's `response_fidelity.passed` from false to true. 411 tests passed either way
+#     and both scope strings were identical.
+#   * Ten of the nineteen published artefacts were emitted by a build that did not yet
+#     have `redaction_claim.request_path_redaction_configured`, so the directory held two
+#     emitter builds at once. The guard was green.
+#   * Deleting the residue scan, which is a false pass, left both scope strings unchanged
+#     (that one is caught by test_v2_sse_parsing.py, not by the guard).
+#
+# So the report carries a digest of the SOURCE of an explicitly enumerated scorer subset,
+# plus three named v1 normalization helpers. It is intentionally non-transitive: helpers,
+# reference-policy methods, transport setup, and other producers outside that list are not
+# covered. The selected source is normalized through the AST so reformatting, comments, and
+# docstrings do not move it, while behavior-bearing edits to a listed function do. A match is
+# a change-detection fingerprint for that selected source, not proof of complete execution,
+# configuration identity, target identity, or report eligibility; the full evidence tag and
+# validation gates carry those separate responsibilities.
+# --------------------------------------------------------------------------------------
+
+_INSTRUMENTED = (
+    "_parse_sse",
+    "_sse_frames",
+    "_injection_events",
+    "_make_upstream",
+    "_ordered_channels",
+    "_haystack_groups",
+    "_haystacks",
+    "_leak_tier",
+    "_present",
+    "_boundary_haystacks",
+    "_boundary_evidence",
+    "_boundary_check",
+    "_fidelity_check",
+    "_sse_check",
+    "_fragmentation_check",
+    # Both decide a published field and NEITHER was digested. `_one_character_events` was
+    # added as the fix for a const that could not fail and could itself be rewritten
+    # without marking a single row stale -- the exact hole the digest exists to close.
+    "_one_character_events",
+    # `_upstream_data_events` was here and is gone: it derived the capture's emission
+    # count from the case definition instead of measuring it. `_make_upstream` contains
+    # the nested `_respond` method that now records each successful socket write;
+    # `_coalescing_rows` turns those records into the per-case verdict. Both producer and
+    # consumer must move the digest when their behaviour changes.
+    "_coalescing_rows",
+    "_injection_check",
+    "_injection_evidence",
+    "_derive_outcome",
+    "_assert_derivations",
+    "_count_invalid_events",
+    "_rate",
+    # The partition oracle. All five decide which bytes reach the target and how the
+    # result is scored, so all five must move the digest.
+    "_family_partitions",
+    "injection_partitions",
+    "_partition_pieces",
+    "_partition_oracle_block",
+    "_fragmentation_strategy_label",
+    "_twin_key",
+    "_axis_arms",
+    "_discordance",
+    # Decides `fixture.value_space_nominal`, a PUBLISHED field, and was not digested.
+    # Found 2026-09-09 while correcting it: v1 has no phone entity, so the block had been
+    # describing three of the corpus's four entities since USPHONE was added, and the
+    # correction would have landed with every existing row still reading "current". A
+    # published field whose producer is outside the digest is a row that can change
+    # meaning without going stale.
+    "_value_space",
+    "run_case",
+    "build_report",
 )
 
 
-def _boundary_check(result: RunResult) -> dict[str, Any]:
+def _behaviour_source(function: Any) -> str:
+    """One function's source with comments, docstrings and formatting normalised away."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list) or not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))
+            and isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            body.pop(0)
+            if not body:
+                body.append(ast.Pass())
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
+def inspector_digest() -> str:
+    """Fingerprint the enumerated scorer source; return 16 SHA-256 hex characters.
+
+    This non-transitive digest is a change detector for `_INSTRUMENTED` and the three
+    named v1 normalization helpers below. It is not a completeness, execution-validity,
+    configuration-identity, or target-identity proof.
+    """
+    from pii_leak_benchmark import http_profile
+
+    parts = [_behaviour_source(globals()[name]) for name in _INSTRUMENTED]
+    # The decoding and folding walk lives in v1 and is just as load-bearing.
+    parts += [
+        _behaviour_source(getattr(http_profile, name))
+        for name in ("_collect", "_normalize", "_normalize_confusable_digits")
+    ]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def instrument_block() -> dict[str, str]:
+    """The provenance block every artefact carries, single-run and sweep alike."""
+
+    def digest(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()[:16]
+
     return {
-        "passed": True,
-        "captured_requests": len(result.upstream_bodies),
-        "correlated_requests": len(result.upstream_bodies),
-        "uninspectable_requests": 0,
-        "uninspectable_reasons": [],
-        "leaked_entity_types": [],
-        "upstream_paths_observed": ["/v1/chat/completions"],
+        "emitter_version": EMITTER_VERSION,
+        "client_scope_sha256": digest(CLIENT_INSPECTION_SCOPE),
+        "boundary_scope_sha256": digest(BOUNDARY_INSPECTION_SCOPE),
+        # The one that moves when behaviour moves rather than when the claim does.
+        "inspector_sha256": inspector_digest(),
+    }
+
+
+def _boundary_haystacks(bodies: Iterable[str]) -> list[str]:
+    """The request-path equivalent of `_haystacks`, over every captured body."""
+    from pii_leak_benchmark.http_profile import _Inspection, _collect  # noqa: I001
+
+    found = _Inspection()
+    flat: list[tuple[str, str]] = []
+    unparseable = 0
+    for body in bodies:
+        try:
+            parsed = json.loads(body)
+        except (ValueError, TypeError):
+            unparseable += 1
+            _collect(body, found)
+            continue
+        _ordered_channels(parsed, flat)
+        _collect(parsed, found)
+    channels: dict[str, list[str]] = {}
+    for path, value in flat:
+        channels.setdefault(path, []).append(value)
+    siblings = list(found.strings) + list(found.decoded_strings)
+    out = [
+        "".join(value for _, value in flat),
+        *("".join(values) for values in channels.values()),
+        "".join(siblings),
+        *siblings,
+    ]
+    from urllib.parse import unquote
+
+    return [*out, *(unquote(h) for h in out), str(unparseable)]
+
+
+def _boundary_evidence(
+    bodies: list[str], per_body: list[list[str]], all_bodies: list[str], needle: str
+) -> tuple[str, str, str] | None:
+    """The STRONGEST provenance available for one value, or None if it never egressed.
+
+    The schema requires this and its wording is the reason: "a bare entity name is an
+    accusation with no way for the accused to check it." So the report says how the value
+    was recovered, weakest claim last:
+
+      literal / per-request     the value appeared verbatim in one body the target sent
+      normalized / per-request  recovered from one body only after folding and joining
+      normalized / cross-request  recovered only by joining several bodies together
+
+    A cross-request normalized match is the one that can collide, and it is the one a
+    reader should discount first. Reporting all three as the same fact is how a harness
+    turns a coincidence into a vendor defect.
+    """
+    for body in bodies:
+        if needle in body:
+            return ("body", "per-request", "literal")
+    for haystacks in per_body:
+        if _present(needle, haystacks):
+            return ("body", "per-request", "normalized")
+    if _present(needle, all_bodies):
+        return ("body", "cross-request", "normalized")
+    return None
+
+
+def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, Any]:
+    """Did the protected values reach the gateway's configured upstream unmasked?
+
+    This is the check that used to be a constant: it returned `passed: True`,
+    `leaked_entity_types: []` without ever opening `upstream_bodies`. A relay forwarding
+    all four protected values verbatim to the capture was certified clean.
+
+    It is also the column the module docstring calls not-optional. FidelityRate 1.00 means
+    "the originals came back", and only the prompt the upstream received separates a
+    gateway that masked and restored from one that never masked at all.
+
+    The values themselves are NOT published, only which entity types were present and how
+    they were recovered, because `fixture.values_published` is false and must stay false.
+    """
+    bodies = [body for result in results for body in result.upstream_bodies]
+    unparseable = 0
+    for body in bodies:
+        try:
+            json.loads(body)
+        except (ValueError, TypeError):
+            unparseable += 1
+
+    per_body = [_boundary_haystacks([body]) for body in bodies]
+    all_bodies = _boundary_haystacks(bodies)
+
+    evidence: list[dict[str, str]] = []
+    leaked: list[str] = []
+    for name, value in sorted(segments.echo.items()):
+        found = _boundary_evidence(bodies, per_body, all_bodies, value)
+        if found is None:
+            continue
+        leaked.append(name)
+        channel, scope, match = found
+        evidence.append(
+            {"entity_type": name, "channel": channel, "scope": scope, "match": match}
+        )
+
+    # An injection value in a REQUEST body would mean the harness contaminated its own
+    # control, not that the gateway leaked. It is reported so the run is not silently
+    # trusted; `check_segment_separation` is what normally prevents it.
+    contaminated: list[str] = []
+    contaminated_evidence: list[dict[str, str]] = []
+    for name, value in sorted(segments.injection.items()):
+        found = _boundary_evidence(bodies, per_body, all_bodies, value)
+        if found is None:
+            continue
+        contaminated.append(name)
+        channel, scope, match = found
+        contaminated_evidence.append(
+            {"entity_type": name, "channel": channel, "scope": scope, "match": match}
+        )
+
+    return {
+        "passed": not leaked and not contaminated and unparseable == 0 and bool(bodies),
+        "captured_requests": len(bodies),
+        "correlated_requests": len(bodies),
+        "uninspectable_requests": unparseable,
+        "uninspectable_reasons": (["body did not parse as JSON"] if unparseable else []),
+        "leaked_entity_types": leaked,
+        # Recorded by the capture handler, not asserted. This was the literal
+        # `["/v1/chat/completions"]` while `_make_upstream` kept no note of `self.path`,
+        # so a gateway calling any other route was reported as calling that one.
+        "upstream_paths_observed": sorted({p for r in results for p in r.upstream_paths}),
         "marker_words_required": 3,
         "marker_words_total": 5,
-        "marker_words_observed_max": 5,
+        # Zero BY CONSTRUCTION, not by failure. See `boundary_correlation` above: the
+        # capture is in-process and records the request itself, which is a stronger
+        # correlation than counting marker words in a public capture.
+        "marker_words_observed_max": 0,
         "payload_content_included": False,
-        "inspection_scope": _BOUNDARY_INSPECTION_SCOPE,
+        "inspection_scope": BOUNDARY_INSPECTION_SCOPE,
         "capture_mode": "loopback",
+        "correlation_mechanism": "in-process-capture",
         "unattributed_requests": 0,
         "unattributed_uninspectable_requests": 0,
-        "unattributed_leaked_entity_types": [],
-        "leak_evidence": [],
+        "unattributed_leaked_entity_types": contaminated,
+        "unattributed_leak_evidence": contaminated_evidence,
+        "leak_evidence": evidence,
         "needle_proximity": {},
         "needle_lengths": {},
     }
 
 
-def _fragmentation_check(result: RunResult) -> dict[str, Any]:
+def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
+    """Did the harness actually emit a single-character data event?
+
+    Derived rather than asserted, and the FIRST derivation was wrong in a way that made it
+    a constant again. It asked whether BOTH pieces of a split were one character, which is
+    possible only for a value of two characters; the shortest rendered corpus value is
+    eleven. So it returned False by arithmetic on the first adversarial case it looked at,
+    for every input this harness can produce -- the same defect as the `const: true` it
+    replaced, pointing the other way, and its own docstring stated the wrong rule ("a value
+    that is itself two characters long").
+
+    A piece is one character whenever a cut lands one away from EITHER end, or two cuts
+    land one apart, for a value of any length. Every exhaustive family enumerates offsets
+    from `1`, so under any of them this emitter really does emit a one-character data
+    event and must report true. The midpoint default does not, for any value longer than
+    three.
+
+    It reads the partitions back from the SAME enumerator `run_case` drove, at the same
+    oracle and cap the case recorded, rather than guessing from a count.
+    """
+    for result in results:
+        if result.case.get("fragmentation") != "adversarial":
+            continue
+        rendered = _encode(
+            segments.injection[result.case["entity"]], result.case["encoding"]
+        )
+        points, _families, _attempted, _capped = injection_partitions(
+            segments, result.case, oracle=result.oracle, cap=result.partition_cap
+        )
+        for cuts in points:
+            if not cuts:
+                continue
+            if any(len(piece) == 1 for piece in _partition_pieces(rendered, cuts)):
+                return True
+    return False
+
+
+def _coalescing_rows(
+    results: list[RunResult], axes: dict[str, tuple[str, ...]] | None = None
+) -> list[dict[str, Any]]:
+    """Per case: what the capture wrote, what the client received, and the verdict.
+
+    THREE OUTCOMES, NOT TWO. The predecessor collapsed them into one boolean read off a
+    single adversarially-selected case, and got both halves wrong:
+
+      * `coalesced: true`  -- the client received FEWER data events than the capture
+        wrote. Coalescing proved, not inferred from a low absolute count.
+      * `coalesced: false` -- it received at least as many. Nothing was merged.
+      * `coalesced: null`  -- there is nothing to compare. Either the case failed, the
+        client received NO data events at all (`stream_failure`), the capture wrote none,
+        or the gateway made other than one upstream request. The old
+        expression `0 < observed < upstream` returned **false** for the first of these,
+        which reads as "this gateway does not coalesce" about a gateway that dropped the
+        payload on the floor. NeMo Guardrails truncates the stream when it sees PII, so
+        this is the exonerating answer for a real measured behaviour, not a hypothetical.
+    """
+    rows: list[dict[str, Any]] = []
+    for result in results:
+        upstream = result.upstream_data_events
+        observed = result.data_events_observed
+        failed = result.transport_error is not None or observed == 0
+        comparison_available = (
+            not failed
+            and upstream > 0
+            and result.upstream_responses_observed == 1
+        )
+        rows.append({
+            "case": {k: result.case[k] for k in sorted(AXES if axes is None else axes)},
+            "upstream_data_events_emitted": upstream,
+            "upstream_responses_observed": result.upstream_responses_observed,
+            "data_events_observed": observed,
+            # A transport-errored case produced no complete stream measurement even if
+            # an earlier split point delivered data. Distinct from "carried fewer".
+            "stream_failure": failed,
+            "coalesced": observed < upstream if comparison_available else None,
+        })
+    return rows
+
+
+def _fragmentation_check(
+    results: list[RunResult],
+    segments: Segments,
+    axes: dict[str, tuple[str, ...]] | None = None,
+) -> dict[str, Any]:
+    """Event counts over the WHOLE array, and coalescing as a rate rather than a verdict.
+
+    Two defects, both from the same source. `build_report` used to pick one case --
+    `max(results, key=lambda r: (r.injection_leaked, -r.events_observed))`, the leaking
+    case with the fewest events -- and read this entire block off it.
+
+      1. `events_observed_max` was read off that case too, so the "maximum" reported a
+         minimum: `chunk-local` runs 16 cases at 4 events and 16 at 5, and the report
+         said max 4.
+      2. Coalescing was that one case's boolean. One case in 32 arriving a frame short --
+         a coalesced TCP segment, a scheduler hiccup -- branded the whole gateway as
+         buffering. An adversarial selector is right for a leak, where one leak is a leak;
+         it is wrong for a transport property, where the question is how often.
+
+    So: the scalars are honest extrema over every scored case, and coalescing is a rate
+    over the cases where the comparison could be made at all. `events_observed` stays the
+    MINIMUM because that is the published E15 column -- LiteLLM's `2` against an upstream
+    that wrote 3 or 4 -- and `coalescing_per_case` carries the full detail beside it.
+    """
+    scored = [r for r in results if r.transport_error is None]
+    counts = [max(r.events_observed, r.events_observed_max) for r in scored] or [0]
+    rows = _coalescing_rows(results, axes)
+    comparable = [r for r in rows if r["coalesced"] is not None]
+    coalesced = [r for r in comparable if r["coalesced"]]
+    failures = [r for r in rows if r["stream_failure"]]
     return {
-        "passed": result.events_observed > 1,
-        "one_character_events_requested": True,
-        "events_observed": result.events_observed,
-        "events_observed_max": result.events_observed,
-        "coalescing_not_distinguished": True,
-        "response_reconstructed": bool(result.client_text),
+        # `events_observed` COUNTS THE `[DONE]` SENTINEL, so `> 1` was satisfied by a
+        # gateway that emitted the whole response as a single chunk followed by `[DONE]`.
+        # Both `litellm-presidio` and `llm-guard-buffered` -- the two rows the write-up
+        # cites as "buffers everything and re-emits one chunk, E15" -- were certified
+        # `fragmentation_safety: passed: true` by that test. The decision now uses
+        # data-bearing events only, and it quantifies over EVERY scored case rather than
+        # the one the old adversarial selector happened to pick.
+        "passed": bool(
+            scored
+            and all(r.data_events_observed > 1 and r.client_text for r in scored)
+        ),
+        # DERIVED, not asserted -- and the first derivation was still a constant. See
+        # `_one_character_events`: it tested for BOTH pieces being one character, which no
+        # corpus value can satisfy, so it answered False by arithmetic while the emitter
+        # was demonstrably writing a one-character event at split point 1 under
+        # `--exhaustive-splits`. It now answers the question it asks.
+        "one_character_events_requested": _one_character_events(segments, results),
+        # Extrema over the scored array. Both were read off one case before, which is how
+        # a maximum came to report a minimum.
+        "events_observed": min((r.events_observed for r in scored), default=0),
+        "events_observed_max": max(counts),
+        "data_events_observed": min((r.data_events_observed for r in scored), default=0),
+        # NOT a limitation of this profile, though it was published as `const: true` until
+        # 2026-09-06 on the argument that a limitation disclosure is not a capability
+        # claim. The category is real; the disclosure is not true HERE. v1 cannot tell a
+        # gateway that coalesced several upstream events from an upstream that emitted
+        # fewer, because v1 does not control the upstream. v2 IS the upstream and COUNTS
+        # what it wrote, so the second hypothesis is excluded by measurement and the
+        # comparison below is available. Kept as a boolean rather than deleted so a
+        # profile that genuinely cannot make it can still say so.
+        "coalescing_not_distinguished": False,
+        # EMPIRICAL TOTALS. `upstream_data_events_emitted` used to be a per-case constant
+        # recomputed from the case definition by `_upstream_data_events` ("3 for a
+        # single-chunk case and 4 for a split one, fixed by construction"). It is now
+        # summed from the counter `_respond` increments as it writes each frame, so it
+        # reports what went out rather than what was supposed to.
+        "upstream_data_events_emitted_total": sum(
+            r["upstream_data_events_emitted"] for r in rows
+        ),
+        "data_events_observed_total": sum(r["data_events_observed"] for r in rows),
+        # THE RATE, over the cases where both counts exist. None -- not 0.0 -- when no
+        # case was comparable, because "never observed" and "measured at zero" are
+        # different claims and 0.0 asserts the second.
+        "coalescing_rate": (
+            round(len(coalesced) / len(comparable), 4) if comparable else None
+        ),
+        "coalescing_cases": len(coalesced),
+        "coalescing_cases_compared": len(comparable),
+        # THE FAIL-OPEN, closed. A case whose client received no data event at all is not
+        # evidence that the gateway does not coalesce; it is evidence the stream did not
+        # arrive. It is excluded from the rate's denominator and counted here instead.
+        "stream_failure": bool(failures),
+        "stream_failure_cases": len(failures),
+        "coalescing_per_case": rows,
+        "response_reconstructed": bool(scored) and all(bool(r.client_text) for r in scored),
     }
 
 
-def _sse_check() -> dict[str, Any]:
+def _sse_check(results: list[RunResult]) -> dict[str, Any]:
+    """Framing facts read off the responses, not asserted about them.
+
+    Every field here used to be a literal. A gateway answering `application/json` with
+    zero events was reported as `content_type_valid: true, status_codes: [200],
+    invalid_events: 0, errors: []`.
+    """
+    statuses = sorted({code for r in results for code in r.status_codes})
+    types = sorted({t for r in results for t in r.content_types})
+    invalid = sum(r.invalid_events for r in results)
+    scored = [r for r in results if r.transport_error is None]
+    bad_types = sorted(
+        {t for t in types if not t.split(";")[0].strip().lower() == "text/event-stream"}
+    )
+    missing_done = [r.case for r in scored if not r.done_marker]
+    # A case that never returned has no framing to validate, and it contributed no
+    # status code either -- a timeout or a reset appends nothing to `status_codes`, and
+    # it is excluded from `missing_done` because it is not in `scored`. So a run in which
+    # cases died in transport came out `passed: true, status_codes: [200], errors: []`.
+    # Measured: one good case beside one timed-out case passed this check. Fail closed;
+    # "we could not look" is not "we looked and it was fine".
+    unanswered = [r for r in results if r.transport_error is not None]
+    errors: list[str] = []
+    if bad_types:
+        errors.append("content type not text/event-stream: " + ", ".join(bad_types))
+    if missing_done:
+        errors.append(f"{len(missing_done)} scored cases ended without a [DONE] event")
+    if invalid:
+        errors.append(f"{invalid} dispatched events did not parse as JSON")
+    if unanswered:
+        errors.append(
+            f"{len(unanswered)} cases produced no complete response, so their framing "
+            "was never observed"
+        )
+    if not results:
+        errors.append("no cases were run")
     return {
-        "passed": True,
-        "invalid_events": 0,
-        "done_markers_valid": True,
-        "content_type_valid": True,
-        "status_codes": [200],
-        "errors": [],
+        "passed": not errors and statuses == [200],
+        "invalid_events": invalid,
+        "done_markers_valid": not missing_done,
+        "content_type_valid": not bad_types and bool(types),
+        "status_codes": statuses or [0],
+        "errors": errors,
     }
 
 
-def _fidelity_check(results: list[RunResult]) -> dict[str, Any]:
-    matching = sum(1 for r in results for v in r.echo_recovered.values() if v)
-    total = sum(len(r.echo_recovered) for r in results)
+def _fidelity_check(observable: list[RunResult], attempted: list[RunResult]) -> dict[str, Any]:
+    """Echo fidelity over the cases where the echo was MEASURABLE, with both denominators.
+
+    Two defects, and they are the same defect at two strengths.
+
+    This check used to be handed the full result list, so `iterations_requested` and
+    `iterations_completed` were the same number by construction and the pair could never
+    say that a run was incomplete. Narrowing it to `observable` fixed the denominator and
+    broke something worse: `observable` CAN be empty, and `matching == total` is
+    `0 == 0`, so a gateway that reconstructed nothing was published as
+    `passed: true, expected_value_reconstructed: true` beside `fidelity_rate: 0.0`.
+    Measured end to end against a relay that canonicalises the request and forwards none
+    of the four request sites -- pre-change `passed: false`, post-change `passed: true`.
+
+    `manuscript-v3.md` C6 states the rule this violated: a rate without its denominator
+    is not a measurement, and the failure is asymmetric. Removing the unmeasurable cases
+    from the numerator AND the denominator of a BOOLEAN turns missing data into a pass,
+    which is that asymmetry pointed the other way.
+
+    So: requested counts every echo assertion the run set out to make, completed counts
+    the ones that were measurable, and nothing is a pass on zero measurements.
+    """
+    matching = sum(1 for r in observable for v in r.echo_recovered.values() if v)
+    completed = sum(len(r.echo_recovered) for r in observable)
+    requested = sum(len(r.echo_recovered) for r in attempted)
     return {
-        "passed": matching == total,
-        "expected_value_reconstructed": matching == total,
+        "passed": completed > 0 and matching == completed,
+        "expected_value_reconstructed": completed > 0 and matching == completed,
         "iterations_matching": matching,
-        "iterations_completed": total,
-        "iterations_requested": total,
+        "iterations_completed": completed,
+        "iterations_requested": requested,
         "payload_content_included": False,
         "segment": "echo",
     }
+
+
+def _injection_evidence(
+    results: list[RunResult], leaked_types: list[str]
+) -> list[dict[str, str]]:
+    """Strongest recovery tier per leaked entity, and how many cases reached it."""
+    evidence: list[dict[str, str]] = []
+    for entity in leaked_types:
+        tiers = [
+            r.leak_tier
+            for r in results
+            if r.case["entity"] == entity and r.injection_leaked and r.leak_tier
+        ]
+        best = min(tiers, key=lambda t: _LEAK_TIER_RANK[t]) if tiers else "unrecorded"
+        evidence.append(
+            {
+                "entity_type": entity,
+                "observed": best,
+                "cases_leaked": str(len(tiers)),
+                # Named so a reader can act on the distinction without reading this file.
+                "weakest_tier_is_a_concatenation": str(
+                    all(t == "cross-field-join" for t in tiers) if tiers else False
+                ).lower(),
+            }
+        )
+    return evidence
+
+
+def _fragmentation_strategy_label(results: list[RunResult]) -> str:
+    """WHAT WAS ACTUALLY DONE, read off the adversarial cases.
+
+    This field said `exhaustive-2-part` while the code cut the value once at its midpoint
+    and `limitations.method_limits` in the same report said "not every split point". A
+    report cannot contradict itself about its own method. It is now the oracle the run
+    recorded, mapped onto the schema enum, so a three-part or union run cannot be
+    published under the two-part label.
+    """
+    # EVERY result, not just the adversarial ones. `run_case` records the oracle on both
+    # arms, and a run whose adversarial cases all died in transport would otherwise be
+    # published under the midpoint label whatever oracle was actually requested.
+    oracles = {r.oracle for r in results}
+    if len(oracles) != 1:
+        # Mixed or empty. `across-sse-events` is the weakest true statement available:
+        # the value was placed in separate SSE events and nothing stronger is claimed.
+        return "across-sse-events"
+    oracle = oracles.pop()
+    return {
+        "midpoint": "across-sse-events",
+        "exhaustive-2-part": "exhaustive-2-part",
+        "exhaustive-3-part": "exhaustive-3-part",
+        "union-worst-case": "union-worst-case",
+    }[oracle]
 
 
 def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[str, Any]:
@@ -1815,12 +3945,20 @@ def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[
     return {
         "passed": (not leaked_types) and delivery_confirmed,
         "segment": "injection",
-        "fragmentation_strategy": "exhaustive-2-part",
+        # WHAT WAS ACTUALLY DONE. This said "exhaustive-2-part" while the code cut the
+        # value once at its midpoint, and `limitations.method_limits` in the same report
+        # said "not every split point". A report cannot contradict itself about its own
+        # method; the label is now derived from the split points that were run.
+        "fragmentation_strategy": _fragmentation_strategy_label(results),
         "injected_entity_types": sorted({r.case["entity"] for r in results}),
         "leaked_entity_types": leaked_types,
-        "leak_evidence": [
-            {"entity_type": t, "observed": "normalized-match"} for t in leaked_types
-        ],
+        # HOW each value was recovered, strongest claim per entity. Every entry used to
+        # read `observed: normalized-match` whether the value arrived verbatim in one
+        # event or was assembled by concatenating two unrelated fields -- the same
+        # objection `_boundary_evidence` answers on the request path and this check did
+        # not. `cross-field-join` is the tier a coincidence can reach; it is the one a
+        # reader should discount first.
+        "leak_evidence": _injection_evidence(results, leaked_types),
         "needle_proximity": {},
         "needle_lengths": {},
         "delivery_confirmed": delivery_confirmed,
@@ -1839,14 +3977,22 @@ def run_policy(
     gateway_url: str | None = None,
     upstream_port: int = 0,
     model: str = "test",
+    oracle: str = "midpoint",
+    partition_cap: int = DEFAULT_PARTITION_CAP,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run one policy across the whole covering array and emit its v2 report.
 
-    `seed` reproduces a previous run exactly. Omitted, a fresh one is drawn from
-    `secrets` so successive runs still vary.
+    Within a pinned implementation, `seed` reproduces the generated fixture selection.
+    It does not freeze target binaries, environment, timestamps, ports, or timings.
+    Omitted, a fresh seed is drawn from `secrets` so successive runs still vary.
     """
     import secrets
 
+    if iterations != 1:
+        raise ValueError(
+            "v2 run_policy supports exactly one response observation per case; "
+            "multi-iteration leak aggregation requires a new instrument/evidence release"
+        )
     seed = seed or secrets.token_hex(8)
     if gateway_url is None and policy_name not in POLICIES:
         raise ValueError(
@@ -1872,16 +4018,38 @@ def run_policy(
             gateway_url=gateway_url,
             upstream_port=upstream_port,
             model=model,
+            oracle=oracle,
+            partition_cap=partition_cap,
         )
         for case in covering_array()
     ]
-    report = build_report(segments, results, separation, seed)
+    report = build_report(
+        segments,
+        results,
+        separation,
+        seed,
+        context={
+            "base_url": gateway_url or "in-process loopback reference policy",
+            "model": model,
+            "capture_port": upstream_port,
+        },
+    )
     summary = {
         "fidelity_rate": report["metrics"]["fidelity_rate"],
         "leak_single_chunk": report["metrics"]["leak_rate"]["single_chunk"],
         "leak_adversarial": report["metrics"]["leak_rate"]["adversarial"],
         "delta_frag": report["metrics"]["delta_frag"],
-        "cases": report["metrics"]["cases_scored"],
+        # THE DENOMINATOR FIRST, and named so it cannot be mistaken for the run size.
+        # This key was `cases` = `cases_scored` = `len(results)`, and it is what the
+        # sweep writes into every row of `seed-sweep.json` -- the file the README calls
+        # "the numbers to cite". Four rates over the applicable cases, published beside a
+        # case count that is the attempted cases, is the same defect as the rationale
+        # line: the reader is handed a denominator that is not the one used.
+        "cases_applicable": report["metrics"]["cases_applicable"],
+        # The run size, kept because the all-cases-refused guard below needs the total
+        # and because "24 of 32" is more informative than either number alone. NOT a
+        # denominator, and no longer spelled in a way that invites use as one.
+        "cases_attempted": report["metrics"]["cases_scored"],
         # Without these a run in which EVERY case failed is indistinguishable from a
         # perfect one: all four rates come back 0.00 and the row reads as clean. That is
         # not hypothetical -- a container that failed to start produced exactly such a
@@ -1896,18 +4064,83 @@ def run_policy(
     return report, summary
 
 
+def _write_report(path: Any, report: dict[str, Any]) -> None:
+    """Write canonical UTF-8 JSON with LF endings and one trailing newline.
+
+    Kept as a named local alias because `main` is not the only thing that has ever
+    written a report here, and because the round-two review found that fixing this
+    hazard in one writer at a time is how it keeps coming back. The implementation
+    lives in `artifact` so the v2/FIDE emitters and their sweep drivers share one
+    implementation. V1 retains its own explicit-LF writer.
+    """
+    from pii_leak_benchmark.artifact import write_json_artifact
+
+    write_json_artifact(path, report, indent=1)
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="benchmarks/results/v2-response-split")
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="output directory (REQUIRED; use a scratch directory for verification runs)",
+    )
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--only", default="", help="comma-separated policy names")
-    parser.add_argument("--seed", default=None, help="hex seed; reproduces a prior run")
+    parser.add_argument(
+        "--seed",
+        default=None,
+        help="hex seed; reproduces fixture selection within the pinned implementation",
+    )
     parser.add_argument("--gateway-url", default=None, help="external gateway chat-completions URL")
     parser.add_argument("--upstream-port", type=int, default=0, help="fixed capture port")
     parser.add_argument("--model", default="test", help="model name the gateway routes on")
+    parser.add_argument(
+        "--exhaustive-splits",
+        action="store_true",
+        help=(
+            "alias for --oracle exhaustive-2-part. Kept because every published run "
+            "recipe and rerun script names it; a flag that silently stopped working "
+            "would re-measure a row under an oracle its own recipe does not describe."
+        ),
+    )
+    parser.add_argument(
+        "--oracle",
+        default=None,
+        choices=list(ORACLES),
+        help=(
+            "which partition family to enumerate for each adversarial case. "
+            "midpoint: one two-part cut at len//2 (the published default). "
+            "exhaustive-2-part: every internal two-part split, N-1 per value. "
+            "exhaustive-3-part: every internal three-part partition, choose(N-1,2). "
+            "union-worst-case: both, with the case failing if ANY enumerated partition "
+            "leaks. 'Worst case' is bounded to these corpus values and these families."
+        ),
+    )
+    parser.add_argument(
+        "--partition-cap",
+        type=int,
+        default=DEFAULT_PARTITION_CAP,
+        help=(
+            "per case per family enumeration ceiling. A family that would exceed it is "
+            "NOT shortened: the case is inconclusive for that family and is excluded "
+            "from its denominator. An aborted combinatorial run must not score as "
+            "containment."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    # The alias and the flag must not disagree silently. A recipe that says one thing and
+    # a run that does another is how `fragmentation_strategy` came to claim
+    # `exhaustive-2-part` for a midpoint cut.
+    if args.exhaustive_splits and args.oracle not in (None, "exhaustive-2-part"):
+        parser.error(
+            "--exhaustive-splits is an alias for --oracle exhaustive-2-part and "
+            f"contradicts --oracle {args.oracle}"
+        )
+    oracle = args.oracle or ("exhaustive-2-part" if args.exhaustive_splits else "midpoint")
 
     import pathlib
 
@@ -1945,10 +4178,12 @@ def main(argv: list[str] | None = None) -> int:
             gateway_url=args.gateway_url,
             upstream_port=args.upstream_port,
             model=args.model,
+            oracle=oracle,
+            partition_cap=args.partition_cap,
         )
         errors = validator(report) if validator else []
         path = outdir / f"{name}.json"
-        path.write_text(json.dumps(report, indent=1), encoding="utf-8")
+        _write_report(path, report)
         rows.append((name, summary, report["outcome"], errors))
         status = "VALID" if validator and not errors else ("INVALID" if errors else "-")
         print(
@@ -1956,6 +4191,10 @@ def main(argv: list[str] | None = None) -> int:
             f"leak_single={summary['leak_single_chunk']:<6} "
             f"leak_adv={summary['leak_adversarial']:<6} "
             f"DeltaFrag={summary['delta_frag']:<7} "
+            # n= is cases_applicable, the denominator of the four rates to its left, over
+            # the cases attempted. A console line carrying rates and no denominator is
+            # the same trap as the report field that carried rates and no denominator.
+            f"n={summary['cases_applicable']}/{summary['cases_attempted']:<6} "
             f"outcome={report['outcome']:<24} schema={status}"
         )
         for err in errors[:6]:

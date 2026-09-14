@@ -11,6 +11,52 @@ permissions:
   contents: read
 
 jobs:
+  evidence-integrity:
+    name: Recompute Published Evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install the evidence verifier
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "./pii-leak-benchmark[validate]" pytest pyyaml
+
+      - name: Verify schemas, provenance, pairing, and bounded oracles
+        run: |
+          python -m pytest -q \
+            tests/conformance/test_published_profiles.py \
+            tests/conformance/test_results_are_comparable.py \
+            tests/conformance/test_fide_partition_oracle.py \
+            tests/conformance/test_spec_v2_schema.py
+
+      - name: Recompute uncertainty and every published table candidate
+        run: |
+          python benchmarks/fide_uncertainty.py \
+            --results benchmarks/results/v2-response-split \
+            --out FIDE_UNCERTAINTY.json > /dev/null
+          python benchmarks/fide_numeric_audit.py \
+            --v2 benchmarks/results/v2-response-split \
+            --fide benchmarks/results/fide-v2.1 \
+            --uncertainty FIDE_UNCERTAINTY.json \
+            --out FIDE_NUMERIC_AUDIT.md
+
+      - name: Upload recomputed analysis
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: published-evidence-analysis
+          path: |
+            FIDE_UNCERTAINTY.json
+            FIDE_NUMERIC_AUDIT.md
+          retention-days: 90
+
   benchmark:
     name: Run Streaming Privacy Conformance
     runs-on: ubuntu-latest
@@ -20,10 +66,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -94,7 +140,7 @@ jobs:
           EOF
 
       - name: Upload machine-readable conformance artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: conformance-latest
           path: CONFORMANCE_LATEST.json

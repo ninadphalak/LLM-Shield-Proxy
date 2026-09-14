@@ -14,13 +14,13 @@ row can be reproduced with `--seed`.
 from __future__ import annotations
 
 import argparse
-import json
 import statistics
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pii-leak-benchmark"))
 
+from pii_leak_benchmark.artifact import write_json_artifact  # noqa: E402
 from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     DEFAULT_POLICIES,
     run_policy,
@@ -52,15 +52,36 @@ def sweep(
                 **{m: summary[m] for m in METRICS},
                 "inconclusive": summary["inconclusive"],
                 "echo_observable": summary["echo_observable"],
-                "cases": summary["cases"],
+                # THE DENOMINATOR OF THE FOUR RATES ABOVE. This row used to carry
+                # `"cases": summary["cases"]`, which was `metrics.cases_scored`, which is
+                # `len(results)` -- the cases ATTEMPTED. A reader of `seed-sweep.json`
+                # reconstructing a leak count from `leak_adversarial x cases` got the
+                # wrong number by exactly the inconclusive count, and this file is the one
+                # the README calls "the numbers to cite".
+                "cases_applicable": summary["cases_applicable"],
+                "cases_attempted": summary["cases_attempted"],
+                # The four rates do not say whether the run PASSED. A request-path leak
+                # produces `fail` with all four response rates at 0.00, which is what
+                # LiteLLM does, so a sweep that records only the rates hides it.
+                "outcome": _report["outcome"],
+                "request_path_leak": _report["checks"]["configured_upstream_boundary"][
+                    "leaked_entity_types"
+                ],
             })
-            if summary["inconclusive"] >= summary["cases"]:
+            if summary["inconclusive"] >= summary["cases_attempted"]:
                 # Every case refused. The four rates are all 0.00, which reads as a
                 # flawless gateway, so refuse to record it as a result at all.
+                #
+                # Compared against cases_ATTEMPTED, deliberately. Against
+                # `cases_applicable` this reads `inconclusive >= applicable`, which the
+                # two numbers satisfy whenever HALF the array dies -- 16 >= 16 -- and the
+                # sweep would abort on a partially-degraded target that still produced a
+                # publishable row. The guard's question is "did anything come back at
+                # all", and only the attempted total can answer it.
                 raise SystemExit(
-                    f"{name} seed={seed}: all {summary['cases']} cases inconclusive -- "
-                    "the target answered nothing. Check the container is running and "
-                    "owns the port before trusting any row."
+                    f"{name} seed={seed}: all {summary['cases_attempted']} cases "
+                    "inconclusive -- the target answered nothing. Check the container is "
+                    "running and owns the port before trusting any row."
                 )
             print(
                 f"  {name:24} seed={seed}  "
@@ -81,8 +102,27 @@ def sweep(
                 for m in METRICS
             },
             "seeds": seeds,
+            # WHICH INSTRUMENT PRODUCED THESE NUMBERS. The README calls the sweep files
+            # "the numbers to cite", and until now they carried no way to tell that the
+            # leak inspector had changed underneath them -- the single-run artefacts have
+            # `inspection_scope` and are guarded on it, the sweeps had nothing. Both
+            # scopes are generated from capability registries, so these digests change
+            # exactly when the inspector's declared reach does.
+            "instrument": _instrument(),
         }
     return out
+
+
+def _instrument() -> dict[str, str]:
+    """The emitter's own provenance block, not a second copy of it.
+
+    This used to rebuild the digests here from the two scope strings. A sweep and a
+    single-run artefact could therefore disagree about what "the current instrument"
+    means, which is the drift the block exists to detect, one level up.
+    """
+    from pii_leak_benchmark.v2_emitter import instrument_block
+
+    return instrument_block()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,7 +133,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gateway-url", default=None)
     parser.add_argument("--upstream-port", type=int, default=0)
     parser.add_argument("--model", default="test")
+    # THE CLIENT DEADLINE, exposed because the right value depends on the target. The
+    # harness bounds every request at connect=5s / read=10s so a stalled socket costs one
+    # case instead of the sweep -- 12 seeds x 32 cases x the old `urlopen(timeout=120)` is
+    # long enough that one stalled seed is indistinguishable from a hang. A gateway that
+    # loads a transformer model on its first request (LLM Guard, NeMo) can legitimately
+    # exceed ten seconds; raise it for those rather than letting the sweep record a
+    # container that was merely slow as an inconclusive case.
+    parser.add_argument("--connect-timeout", type=float, default=None)
+    parser.add_argument("--read-timeout", type=float, default=None)
     args = parser.parse_args(argv)
+
+    from pii_leak_benchmark import v2_emitter
+
+    if args.connect_timeout is not None:
+        v2_emitter.CLIENT_CONNECT_TIMEOUT = args.connect_timeout
+    if args.read_timeout is not None:
+        v2_emitter.CLIENT_READ_TIMEOUT = args.read_timeout
+    print(
+        f"client deadline: connect={v2_emitter.CLIENT_CONNECT_TIMEOUT}s "
+        f"read={v2_emitter.CLIENT_READ_TIMEOUT}s",
+        flush=True,
+    )
 
     # Local policies only unless asked by name: the cloud rows are billed per delta.
     policies = [n.strip() for n in args.only.split(",") if n.strip()] or list(DEFAULT_POLICIES)
@@ -108,7 +169,9 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
     )
 
-    Path(args.out).write_text(json.dumps(results, indent=1), encoding="utf-8")
+    # The README calls this file "the numbers to cite", so its bytes must not depend on
+    # which host produced it.
+    write_json_artifact(args.out, results, indent=1)
 
     print("\n" + "=" * 96)
     print(f"{'policy':<26}{'fidelity':>18}{'leak(1chunk)':>18}{'leak(adv)':>18}{'DeltaFrag':>18}")

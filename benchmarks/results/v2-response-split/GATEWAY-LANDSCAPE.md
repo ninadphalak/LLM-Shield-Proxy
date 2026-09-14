@@ -11,15 +11,53 @@ Nothing here is a verdict on product quality.
 
 ## Measured
 
-| Gateway | Redacts response? | Restores caller's values? | Row |
+| Gateway / library | Redacts response? | Restores caller's values? | Row |
 |---|---|---|---|
 | LiteLLM 1.99 + Presidio guardrail | yes | no | measured |
 | Portkey OSS gateway | no, in the configuration measured | n/a | measured |
 | NeMo Guardrails 0.24.0 | detects and truncates | no | measured |
 | LLM-Shield-Proxy 1.6.0 | opt-in | **yes** | measured, both configurations |
+| **LLM Guard 0.3.16** | **yes** (`Sensitive`, opt-in) | **yes** (`Deanonymize`) | **measured, both integration modes** |
+| **Guardrails AI 0.10.2** | yes, and **accumulates across chunks** | **no such API** | **measured** |
 
 Plus Google Cloud DLP and Google Model Armor as credentialed **detectors** in this
 project's own wrapper, alongside the two Presidio rows.
+
+**The last two are libraries, not gateways**, wrapped in the thinnest possible gateway
+(`../../llm-guard-v2-profile/gateway.py`, `../../guardrails-v2-profile/gateway.py`) the same
+way the `presidio-*` rows wrap the analyzer. Neither needs an account. Both need their own
+Python 3.10-3.12 environment -- LLM Guard pins `torch>=2.4.0` and `transformers==4.51.3` and
+declares `requires_python: <3.13`, so **"free" is not the same as "light"**.
+
+### What the four new rows show together, and it is the whole argument
+
+| policy | restores? | retains? | Fidelity | Leak 1-chunk | Leak adv | DeltaFrag | events |
+|---|---|---|---:|---:|---:|---:|---:|
+| `bounded-retention` (our model) | yes | `L = N-1` | 1.00 | 0.125 | 0.125 | **0.00** | 6 |
+| `guardrails-ai-stream-validate` | **no API** | to next sentence | 0.00 | 0.125 | 0.125 | **0.00** | 6 |
+| `llm-guard-chunk-local` | **yes** | no | **1.00** | 0.17 [0.00-0.25] | 0.75 | **0.58 [0.50-0.75]** | 5 |
+| `llm-guard-buffered` | **yes** | whole response | 1.00 [0.98-1.00] | 0.29 [0.25-0.31] | 0.29 [0.25-0.31] | **0.00** | **3** |
+
+- **Guardrails AI's sentence accumulator reproduces `bounded-retention` exactly** -- same
+  leak rates, same DeltaFrag, same event count, and the same residual `EMAIL / percent /
+  adversarial` case, which is an encoding gap rather than a fragmentation one. A third party
+  with no knowledge of this profile chose retention-before-validation and landed on the same
+  numbers. **It has no restore half, so its FidelityRate 0.00 is a real failure**: the echo
+  segment comes back carrying the caller's own values and the validator redacts them,
+  because nothing tells it whose data it is.
+- **LLM Guard restores.** FidelityRate 1.00 -- the first third-party product in this survey
+  to return the caller's own values. And chunk-local it pays DeltaFrag **0.58 [0.50-0.75]**: the same
+  scanner, on the same corpus, leaks three times as often when the value is split.
+- **Buffering fixes the fragmentation penalty and removes streaming.** DeltaFrag 0.58 to
+  0.00, and `events_observed` 5 to 3. That is E15 reproduced a third time, on a product that
+  gets everything else right.
+
+**And buffering does not quite reach FidelityRate 1.00.** Across six seeds it is 0.9974 [0.9844-1.00]: on one seed a single value is not restored. Small, and worth recording rather than rounding away, because the buffered arm is the configuration in which the restorer always sees whole text and therefore has no excuse.
+
+**So no inspected implementation does all three of restore, retain, and stream.** The one
+that retains cannot restore; the one that restores must choose between retaining and
+streaming. That is a sharper statement than the survey could make before these rows existed,
+and it is made entirely out of other people's software.
 
 ---
 
@@ -42,6 +80,51 @@ A full round trip, in the same container the `presidio-*` rows already use.
 FidelityRate of 0.00 is therefore an integration choice rather than a detector limitation:
 the component that could restore the caller's values is already a dependency, already
 running, and is asked only to mask.
+
+### LLM Guard -- ships both halves by name, on a whole-string API
+
+`protectai/llm-guard`, the OSS guardrail library. It is not a gateway; it is the component
+gateways embed, which makes its API the more interesting object. Verified by inspecting the
+wheel, not the documentation.
+
+**Two versions appear below and the difference matters.** The API surface here was read from
+`llm_guard-0.3.10-py3-none-any.whl` (155 modules), which is what `pip download` resolves for
+CPython 3.14. **The measured rows use 0.3.16**, which is the newest release and declares
+`requires_python: <3.13,>=3.10` -- so it cannot be resolved for the harness interpreter at
+all and needs the separate 3.12 environment. The `Anonymize` / `Deanonymize` / `Vault`
+surface described here is unchanged between the two; the dependency pins are not
+(0.3.10 pins `torch==2.0.1`, 0.3.16 `torch>=2.4.0`).
+
+```
+llm_guard/input_scanners/anonymize.py     class Anonymize(Scanner)
+                                          def scan(self, prompt: str)
+llm_guard/output_scanners/deanonymize.py  class Deanonymize(Scanner)
+                                          def scan(self, prompt: str, output: str)
+llm_guard/vault.py                        the mapping carried between them
+```
+
+**Both halves, named, with a vault between them, and four `MatchingStrategy` values
+(`EXACT`, `CASE_INSENSITIVE`, `FUZZY`, `COMBINED_EXACT_FUZZY`) for finding placeholders in
+the model's reply.** This is the strongest confirmation available that the primitive is not
+scarce.
+
+**And `Deanonymize.scan` takes the complete output string.** Across all 155 modules,
+`delta`, `buffer` and `incremental` do not occur; the two `stream` matches are a logging
+handler in `util.py` and a transformers recognizer; the `chunk` matches are `chunk_text()`
+and `chunk_text_by_sentences()`, which split *a string you already hold* to fit a model's
+input limit. That is the opposite of response chunking.
+
+**So the restore half of the only OSS both-halves implementation found has a whole-string
+signature.** That is this paper's thesis stated by a third party's type annotation, and it
+is the response-side counterpart of the NeMo `context_size: 0` finding: there, a vendor's
+validator forbids retention on a rewriting rail; here, a vendor's API never offered the
+caller a way to restore incrementally at all. Neither is a defect report -- neither project
+claims to be a streaming scanner -- and both are evidence for the same gap.
+
+**It is measurable and it should be measured.** It is pip-installable and self-hosted, so a
+row costs no credentials: wrap `Anonymize`/`Deanonymize` around the capture the way the
+`presidio-*` rows wrap the analyzer, and the reference `chunk-local` and `bounded-retention`
+policies become the two ways an integrator could drive it. That row is not in this paper.
 
 So the accurate statement for the paper is **not** "restoring is rare because it is hard".
 It is:
@@ -99,10 +182,24 @@ The plugin ships **in the OSS image** and needs no external registry:
 `higress/all-in-one:latest`. Both the gateway (container port 8080) and the console
 (container port 8001) start.
 
-**Not measured**: attaching a WASM plugin to a route requires the console API, which
-answers `AuthException: Login required` and whose initialisation endpoint was not found
-from outside the image. This is an incomplete configuration on my side, not a limitation
-of Higress, and it is the most likely candidate for a fifth measured row.
+**Not measured**, and it stayed not-measured after an attempt that briefly published a row.
+
+The console API answers `AuthException: Login required` from outside the image, so the
+three resources were written into the container's file-backed config store directly. A row
+was published on 2026-09-04 (`higress-ai-data-masking.json`, FidelityRate 1.00, LeakRate
+1.00 / 1.00, "does nothing at all"). **It was withdrawn on 2026-09-05: the plugin had never
+loaded.** The `WasmPlugin` config used YAML double-quoted scalars for its regexes, and a
+double-quoted YAML scalar processes backslash escapes, so `\.` and `\d` made the document
+unparseable. The row measured a config file that never took effect and reported it as a
+property of the product.
+
+With a config that parses (single-quoted, committed at
+`../../higress-v2-profile/ai-data-masking.yaml`) the plugin loads, Higress answers HTTP 500
+and forwards an empty body upstream, and all 32 cases score `inconclusive`. Nothing is
+measurable in either direction yet. See `../../higress-v2-profile/STATUS.md`.
+
+This is still the most likely candidate for a fifth measured row, and the reason it is not
+one is still an incomplete configuration on my side rather than a limitation of Higress.
 
 ---
 
@@ -183,6 +280,118 @@ about Azure's detector rather than about anyone's streaming behaviour.
 No SDK or published API model was available locally to inspect, and no claim is made here
 either way. **Do not cite this line as evidence that Cloudflare lacks the capability**; it
 records only that this project did not check.
+
+---
+
+## Who has which half, from eight published SDKs
+
+Inspected 2026-09-05 by downloading each wheel and reading its API surface, the same method
+used for `botocore` and `azure-ai-textanalytics` above. **No product was run and no account
+was created**, so this says what each vendor's client library exposes, not how well it works.
+
+| SDK | Restore half? | Symbol | Stream-aware validation? |
+|---|---|---|---|
+| `privateai-client` 4.2.1 | **yes** | `reidentify_text` | no |
+| `skyflow` 2.1.3 | **yes** | `reidentify_string`, `detokenize` | no -- `stream` is its HTTP client only |
+| `pangea-sdk` 6.13.0 | **yes** | `unredact(redacted_data, fpe_context)` | no -- `log_stream` is the audit service |
+| `basistheory` 3.0.0 | **yes** | `detokenize` | no |
+| `llm-guard` 0.3.10 | **yes** | `Deanonymize.scan(prompt, output)` | no |
+| `guardrails-ai` 0.10.2 | no | -- | **yes -- `validate_stream`, 39 stream functions** |
+| `nightfall` 1.4.1 | no symbol found | -- | no |
+| `evervault` 5.1.3 | n/a -- `encrypt`/`decrypt`, not PII redaction | -- | no |
+
+### The result, and it is better than "the primitive is free"
+
+**Five of eight ship a restore half. Every one of them takes the whole string.** Private
+AI's `reidentify_text` takes a request object, Skyflow's `reidentify_string` takes
+`text: str`, Pangea's `unredact` takes `redacted_data` plus an FPE context, LLM Guard's
+`Deanonymize.scan` takes `prompt` and `output`. Not one of them offers the caller a way to
+restore incrementally, and in three of the five the word `stream` appears only in the HTTP
+client or an audit-log API.
+
+**And the one library that does understand streams has no restore half.** Guardrails AI
+0.10.2 ships `Validator.validate_stream`, and it is not a token-by-token scan -- it
+**accumulates**:
+
+```python
+accumulated_chunks.append(chunk)
+accumulated_text = "".join(accumulated_chunks)
+split_contents = self._chunking_function(accumulated_text)
+# "If the LLM chunk is smaller than the validator's chunking strategy, it will be
+#  accumulated until it reaches the desired size. In the meantime, the validator
+#  will return None."
+```
+
+That is retention across chunk boundaries, shipping, in OSS, from a project that is not
+this one. **It is a counter-example to "nobody retains" and it strengthens the argument
+rather than weakening it**: the fix is known and implementable, and the projects that
+implement it are not the projects that restore.
+
+**What bounds the retention is the interesting difference.** Guardrails AI's default
+`_chunking_function` is `split_sentence_word_tokenizers_jl_separator` -- it holds text to
+the next **sentence** boundary. So three shipping approaches bound the same buffer three
+ways:
+
+| | what is retained | bounded by |
+|---|---|---|
+| Guardrails AI | text to the next sentence boundary | the data -- unbounded in principle for text with no terminator |
+| LLM-Shield-Proxy | `L = N-1` characters | the longest placeholder, a compile-time property |
+| Hyperscan streaming mode | automaton state | the pattern database, a compile-time property |
+
+**So the accurate landscape claim for the paper is:**
+
+> Of eight published SDKs, five restore and one accumulates across chunk boundaries, and
+> they are not the same one. The two halves of a correct streaming gateway are both free
+> and both open source, and no inspected library ships them together.
+
+That is narrower, verifiable, and considerably more useful than a claim about scarcity.
+
+### What this costs to turn into rows
+
+- **LLM Guard and Guardrails AI need nothing.** Both are pip-installable and self-hosted.
+  They are the two rows that should exist next, and together they are the whole argument:
+  one restores on a whole string, the other accumulates but has nothing to restore.
+- **Private AI** ships a container; a row needs a licence key.
+- **Skyflow, Pangea, Basis Theory, Nightfall** are SaaS. A row needs an account each, and
+  each would measure a vendor's hosted detector rather than a streaming path.
+
+---
+
+## Not checked -- named so the survey has a stated boundary
+
+**Nothing below has been inspected.** These are candidates, recorded so a reader can see
+what this survey did not reach rather than inferring the list was exhaustive. Following the
+Cloudflare precedent above: **do not cite any line here as evidence that a product does or
+does not have the capability.** It records only that this project did not check.
+
+They are grouped by why they might matter, and the first group is the one that would change
+a claim in the paper.
+
+**Claim to do both halves -- would test "the primitive is free, the wiring is scarce":**
+
+- **Skyflow LLM Privacy Vault** -- markets de-identify before the model and re-identify
+  after. If it does that on a stream it is the first product to.
+- **Private AI** -- self-hostable container, markets de-identify plus re-identify.
+- **Pangea Redact** -- format-preserving encryption is reversible by construction, and
+  Pangea is already one of the six guardrail namespaces in Portkey's shipped bundle.
+- **Tokenization proxies** (VGS, Basis Theory, Evervault) -- alias-out / reveal-back is the
+  same shape as the response split, arrived at from payments rather than from LLMs. Whether
+  any applies it to a token stream is exactly the open question.
+- **Prompt Security**, **Nightfall AI** -- both market redaction for LLM traffic; whether
+  either restores is unchecked.
+
+**AI gateways whose response-path behaviour is unknown here:**
+
+Envoy AI Gateway, Solo.io Gloo AI Gateway / kgateway, Apache APISIX (`ai-prompt-guard`),
+Cloudflare AI Gateway (see above), Vercel AI Gateway, Helicone, TrueFoundry, Bifrost,
+Arch / katanemo, OpenRouter.
+
+**Guardrail libraries and services rather than gateways** -- they would be detector rows
+like Cloud DLP, not gateway rows: Guardrails AI, Lakera Guard, Cisco AI Defense (Robust
+Intelligence), Aporia / Coralogix, Arthur, Fiddler, IBM Granite Guardian.
+
+**The cheapest next row by a wide margin is LLM Guard**, above: pip-installable, no
+credentials, and its `Anonymize`/`Deanonymize` pair is already verified to exist.
 
 ---
 
