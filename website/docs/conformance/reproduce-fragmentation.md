@@ -159,8 +159,15 @@ Both files are byte-identical to the copies under the `v2-evidence-round-8` tag
 The `fragmentation-reproduction` job in
 [`.github/workflows/benchmark.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/benchmark.yml)
 runs exactly the command in step 3 on Ubuntu, macOS and Windows, on Python 3.11 and 3.12,
-and uploads the regenerated reports. If your machine disagrees with all six of those, that
-is worth knowing and is the kind of thing item 4 above is asking for.
+and uploads the regenerated reports.
+
+All six reproduced at commit `46f4c6d`
+([run 34897865803](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/runs/34897865803)).
+Each job's regenerated reports are downloadable from that run, so you can diff your files
+against a machine that is not the author's before reporting anything.
+
+If your machine disagrees with all six of those, that is worth knowing and is exactly what
+item 4 above is asking for.
 
 ### What this experiment does not establish
 
