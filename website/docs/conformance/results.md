@@ -16,7 +16,7 @@ offline.
 ## How to read the outcomes
 
 `fail` has one narrow meaning: a protected test value reached the capture server unmasked.
-It is not a quality judgement, and a non-`pass` is not automatically a leak — see the
+It is not a quality judgement, and a non-`pass` is not automatically a leak - see the
 [outcome table](./reproducing#4-read-outcome) for what each value means.
 
 Two groups appear below and they are not comparable with each other:
@@ -140,13 +140,13 @@ Scope: in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and mod
 ## Independent reproductions
 
 None submitted yet. The six CI runners that reproduce the fragmentation rows on every push
-are not independent — they run the author's code from the author's repository. See
+are not independent - they run the author's code from the author's repository. See
 [what a green run proves, and what it does not](./reproduce-fragmentation#what-a-green-run-proves-and-what-it-does-not).
 
 To add yours, see [submitting a result](./submitting).
 
 ## Related
 
-- [Benchmark readme](./benchmark_readme) — what the v2 profile measures and the findings a reviewer should check.
+- [Benchmark readme](./benchmark_readme) - what the v2 profile measures and the findings a reviewer should check.
 - [Reproduce the fragmentation result](./reproduce-fragmentation)
 - [Reproduce the conformance report](./reproducing)

@@ -16,7 +16,7 @@ fix.
 Nothing on this page is current-state documentation. For what the profile measures now, see
 the [benchmark readme](./benchmark_readme); for the numbers, [published results](./results).
 Figures quoted below are as they stood at the time of each entry and several were
-superseded by later corpus changes — where an entry and the results page disagree, the
+superseded by later corpus changes - where an entry and the results page disagree, the
 results page and the committed JSON are authoritative.
 
 ---

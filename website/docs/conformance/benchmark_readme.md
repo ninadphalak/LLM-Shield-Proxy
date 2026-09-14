@@ -19,9 +19,9 @@ need **opposite** treatment.
 
 - The **echo** segment is the user's own data coming back. The gateway masked it on the way
   out, so it must put the real values **back in**. Failing here means the user gets
-  `[EMAIL_1]` instead of their own email address — a broken product.
+  `[EMAIL_1]` instead of their own email address - a broken product.
 - The **injection** segment is data the user never sent, arriving from upstream. The gateway
-  must **take it out**. Failing here means someone else's data reaches the user — a leak.
+  must **take it out**. Failing here means someone else's data reaches the user - a leak.
 
 A gateway is not being asked to apply one rule to the response. It is being asked to apply
 two opposite rules to two segments of the same response. A profile measuring only one
@@ -31,10 +31,10 @@ direction cannot tell a correct gateway from a destructive one.
 
 | Column | Question it answers | Good value |
 | :--- | :--- | :--- |
-| **Fidelity** | Did the user get their own data back? | `1.00` — all of it |
-| **Leak, single chunk** | When values arrive whole, does anything leak? | `0.00` — nothing |
-| **Leak, fragmented** | When values are split across chunks, does anything leak? | `0.00` — nothing |
-| **DeltaFrag** | How much worse does splitting make it? | `0.00` — splitting changed nothing |
+| **Fidelity** | Did the user get their own data back? | `1.00` - all of it |
+| **Leak, single chunk** | When values arrive whole, does anything leak? | `0.00` - nothing |
+| **Leak, fragmented** | When values are split across chunks, does anything leak? | `0.00` - nothing |
+| **DeltaFrag** | How much worse does splitting make it? | `0.00` - splitting changed nothing |
 
 DeltaFrag is the third column minus the second. It is the headline because it isolates the
 streaming defect: **a policy can score perfectly on the second column and still fail the
@@ -45,7 +45,7 @@ To pass, a row needs Fidelity `1.00` and both leak rates `0.00`.
 ### DeltaFrag `0.00` is not good news on its own
 
 `passthrough` forwards bytes untouched. It scores Fidelity `0.00` (never rehydrates, so the
-user sees placeholders), leak `1.00` in both arms (never redacts), and DeltaFrag `0.00` —
+user sees placeholders), leak `1.00` in both arms (never redacts), and DeltaFrag `0.00` -
 because it is equally broken whether or not values are split.
 
 Always read DeltaFrag next to the single-chunk baseline. Zero means fragmentation changed
@@ -73,7 +73,7 @@ suppresses injected values in the single-chunk arm but destroys the echo, scorin
 single-chunk condition**. A benchmark that only sent whole values inside single chunks
 would rank all three equal.
 
-Under fragmentation they separate: `1.00`, `0.125`, `0.00`. DeltaFrag is exactly that gap —
+Under fragmentation they separate: `1.00`, `0.125`, `0.00`. DeltaFrag is exactly that gap -
 how much of a policy's apparent correctness is an artefact of being tested on unfragmented
 input.
 
@@ -100,7 +100,7 @@ Two things this rules out:
 ### 4. Retention fixes fragmentation and does not fix encoding
 
 `bounded-retention` holds back a bounded tail, so no value straddles a chunk boundary
-undetected. It still leaks — and the per-axis breakdown says exactly where:
+undetected. It still leaks - and the per-axis breakdown says exactly where:
 
 | Axis value | Leaked / applicable |
 | :--- | ---: |
@@ -116,7 +116,7 @@ same blind spot: `presidio-retention` leaks the same percent-encoded case on eve
 
 ### 5. The corpus block cannot be satisfied by a partial run
 
-`corpus.coverage.axes` requires all five axes — `entity`, `encoding`, `fragmentation`,
+`corpus.coverage.axes` requires all five axes - `entity`, `encoding`, `fragmentation`,
 `carrier`, `request_site`. A single-axis sweep cannot produce a valid v2 report.
 
 The generated array is **32 cases covering 76 of 76 pairs**, with `proof_complete: true`
@@ -128,7 +128,7 @@ DeltaFrag attribute a composition difference to fragmentation.
 ### 6. The instrument has been wrong, repeatedly, and always in the same direction
 
 Ten inspector defects have been found and fixed in this harness. Every one of them
-**flattered the target** — a leak instrument that fails toward "secure" is the one failure
+**flattered the target** - a leak instrument that fails toward "secure" is the one failure
 mode it must never have.
 
 The clearest example: a capture server that reused a socket across cases let Portkey, a
@@ -173,7 +173,7 @@ directory.
   inside a wrapper written here; the rehydration half is the wrapper's.
 - **Loopback transport**, single machine. Latency figures are in-process and must not be
   cited as gateway overhead on a network.
-- **32 cases, pairwise not exhaustive** — four entity types, two encodings, two carriers,
+- **32 cases, pairwise not exhaustive** - four entity types, two encodings, two carriers,
   four request sites, two fragmentation conditions.
 - **Fragmentation is a single midpoint split** in the headline rows, not every split point.
   Exhaustive and union oracles are separate, longer runs under `exhaustive-splits/` and
@@ -188,7 +188,7 @@ directory.
 
 ## Related
 
-- [Published results](./results) — the generated tables.
+- [Published results](./results) - the generated tables.
 - [Reproduce the fragmentation result](./reproduce-fragmentation)
-- [Benchmark revision history](./benchmark-revision-history) — every instrument defect found and fixed.
+- [Benchmark revision history](./benchmark-revision-history) - every instrument defect found and fixed.
 - [Submit a run](./submitting)

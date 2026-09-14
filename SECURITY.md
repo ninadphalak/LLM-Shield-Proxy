@@ -55,7 +55,7 @@ errors, and decoding or normalisation gaps all count.
   [immutable retention](website/docs/immutable-retention.md), and this is documented, not
   a defect.
 - Benchmark results you consider unfair or wrong. Those are a public discussion, not a
-  vulnerability — open an issue.
+  vulnerability - open an issue.
 
 ## Related
 

@@ -1,4 +1,4 @@
-# v2 response-split profile — measured runs
+# v2 response-split profile - measured runs
 
 This directory holds the machine-readable JSON reports. **They are the authority whenever
 prose disagrees with them.**

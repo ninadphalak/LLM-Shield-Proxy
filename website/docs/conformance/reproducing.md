@@ -104,7 +104,7 @@ Restrict that port at the host firewall.
 | :--- | :--- |
 | `pass` | No unmasked test value reached the capture server, and every profile requirement was met. |
 | `fail` | The gateway sent an unmasked test value to the capture server. |
-| `no-leak-profile-not-met` | Nothing leaked, but another requirement failed — for example one-way anonymization with no restoration. |
+| `no-leak-profile-not-met` | Nothing leaked, but another requirement failed - for example one-way anonymization with no restoration. |
 | `not-applicable` | The product does not offer redaction. |
 | `redaction-not-enabled` | Redaction exists but was not turned on for this run. |
 | `inconclusive` | The run could not be attributed to the target. |
@@ -120,7 +120,7 @@ actually found. A failed check is not by itself a leak.
 ## Steps: HTTP profile, hosted gateway
 
 A hosted gateway cannot reach your loopback address, so the capture server needs a public
-address — a VPS, or a tunnel such as `ngrok` or `cloudflared`. See the
+address - a VPS, or a tunnel such as `ngrok` or `cloudflared`. See the
 [hosted-gateway runbook](./hosted-gateway-runbook) first.
 
 ### 1. Expose the capture server
@@ -209,9 +209,9 @@ came from the target. Public mode gives up that guarantee in exchange for reachi
 hosted gateway, so the report separates traffic that carried the capture token from
 traffic that did not:
 
-- `unattributed_requests` — requests without the token.
-- `unattributed_uninspectable_requests` — requests that could not be parsed.
-- `unattributed_leaked_entity_types` — test values found in unattributed traffic.
+- `unattributed_requests` - requests without the token.
+- `unattributed_uninspectable_requests` - requests that could not be parsed.
+- `unattributed_leaked_entity_types` - test values found in unattributed traffic.
 
 None of these fail the boundary check on their own. Only the target's own traffic can.
 
@@ -242,7 +242,7 @@ Listed in `limitations.run_validity`:
 - The target was never configured to use the capture server.
 - `captured_requests: 0`.
 - The capture server was unreachable from the target.
-- Policy rejections — authentication failure, rate limits.
+- Policy rejections - authentication failure, rate limits.
 - Unparseable captures.
 - The target used HTTP/2 rather than HTTP/1.x.
 
@@ -251,7 +251,7 @@ Listed in `limitations.run_validity`:
 Listed in `limitations.method_limits`, and true of every run:
 
 - Observation ends when client iterations finish.
-- Covert channels — timing, packetization — are not inspected.
+- Covert channels - timing, packetization - are not inspected.
 - Only requests sent to the capture server are observed.
 - It does not measure population-level detector accuracy.
 - Process RSS, audit logging and public-model behaviour are out of scope.

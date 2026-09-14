@@ -36,7 +36,7 @@ git rev-parse HEAD
 Any CPython from 3.11 onward. The only third-party dependency is `httpx`.
 
 CI verifies 3.11 and 3.12; 3.14 is verified locally. The harness package declares
-3.9+, but this experiment has not been run there — if you only have 3.9 or 3.10,
+3.9+, but this experiment has not been run there - if you only have 3.9 or 3.10,
 run it anyway and tell us what happened.
 
 ```bash
@@ -74,9 +74,9 @@ Both reports must also carry corpus digest
 
 ### 5. Send back four things
 
-1. `reproduction/chunk-local.json` and `reproduction/bounded-retention.json` — the reports
+1. `reproduction/chunk-local.json` and `reproduction/bounded-retention.json` - the reports
    your run produced.
-2. `reproduction/reproduction-summary.json` — the comparison, plus your OS, Python version
+2. `reproduction/reproduction-summary.json` - the comparison, plus your OS, Python version
    and the commit you ran.
 3. The console output of step 3, and the exact commands you ran if they differed from the
    ones above.
@@ -119,13 +119,13 @@ They are otherwise the same inspector on the same 32-case corpus.
 
 ### What the four numbers mean
 
-- **Fidelity** — the fraction of echo iterations where the client received the value it
+- **Fidelity** - the fraction of echo iterations where the client received the value it
   was supposed to receive. It says the policy did not break the stream.
-- **Leak, single chunk** — the leak rate over the 16 cases where the protected value
+- **Leak, single chunk** - the leak rate over the 16 cases where the protected value
   arrives whole, in one chunk. This is the baseline arm.
-- **Leak, fragmented** — the leak rate over the 16 paired cases where the same value is
+- **Leak, fragmented** - the leak rate over the 16 paired cases where the same value is
   split. This is the treatment arm.
-- **DeltaFrag** — fragmented minus single-chunk. Zero means splitting the value changed
+- **DeltaFrag** - fragmented minus single-chunk. Zero means splitting the value changed
   nothing. A positive number is the share of values that a split made invisible to the
   inspector.
 
@@ -156,8 +156,8 @@ It does a full recursive comparison of your report against the published one, ev
 and fails on any difference outside an explicit eleven-entry ignore list. Those eleven
 record when, where and how fast the run happened: the timestamp, your OS and Python
 version, wall-clock latency statistics, and the ephemeral loopback port the capture server
-bound to. Everything else — every rate, every digest, every per-axis marginal, the case
-inventory, the outcome — must match exactly.
+bound to. Everything else - every rate, every digest, every per-axis marginal, the case
+inventory, the outcome - must match exactly.
 
 Your `environment` block is expected to differ from the published one. That is the report
 recording your machine, which is the point of an independent run.
@@ -226,6 +226,6 @@ reporting.
 
 ## Related
 
-- [Reproduce the conformance report](./reproducing) — the v1.0.0 local and HTTP profiles.
+- [Reproduce the conformance report](./reproducing) - the v1.0.0 local and HTTP profiles.
 - [Published results](./results)
 - [Submit a run](./submitting)
