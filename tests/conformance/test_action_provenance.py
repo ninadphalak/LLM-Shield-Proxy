@@ -120,9 +120,31 @@ def test_companion_package_releases_cannot_publish_proxy_images_or_assets():
     docker_publish = yaml.safe_load(DOCKER_PUBLISH.read_text(encoding="utf-8"))
 
     assert release["jobs"]["build-release-artifacts"]["if"] == (
-        "startsWith(github.event.release.tag_name, 'v')"
+        "startsWith(github.event.release.tag_name, 'v') && "
+        "!contains(github.event.release.tag_name, 'evidence')"
     )
     assert docker_publish["jobs"]["build-sign-attest"]["if"] == (
         "github.event_name == 'workflow_dispatch' || "
-        "startsWith(github.event.release.tag_name, 'v')"
+        "(startsWith(github.event.release.tag_name, 'v') && "
+        "!contains(github.event.release.tag_name, 'evidence'))"
     )
+
+
+def test_an_evidence_release_cannot_publish_proxy_images_or_assets():
+    """The `v` prefix is not specific enough, and the evidence tags share it.
+
+    Evidence tags are named `v2-evidence-round-N`. Publishing a GitHub Release on one is
+    the supported way to mint a Zenodo DOI for the measurement snapshot the manuscript
+    cites, and `startsWith(tag, 'v')` on its own would let that Release build and
+    GPG-sign proxy artifacts from an evidence commit and push a container image tagged
+    `v2-evidence-round-8`. A release gate that fires on the wrong kind of tag is the same
+    class of defect as a scope claim that outruns what was tested.
+    """
+    release = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
+    docker_publish = yaml.safe_load(DOCKER_PUBLISH.read_text(encoding="utf-8"))
+
+    for guard in (
+        release["jobs"]["build-release-artifacts"]["if"],
+        docker_publish["jobs"]["build-sign-attest"]["if"],
+    ):
+        assert "!contains(github.event.release.tag_name, 'evidence')" in guard
