@@ -88,6 +88,20 @@ than a clean pass. Open a
 [GitHub issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues) or send the files
 directly.
 
+### 6. Optional: run it in your own GitHub Actions
+
+If you would rather not trust a run on your own laptop either, run it on infrastructure
+neither of us controls.
+
+1. Fork <https://github.com/ninadphalak/LLM-Shield-Proxy>.
+2. In your fork, open the **Actions** tab and click **I understand my workflows, go ahead
+   and enable them**. GitHub disables workflows in new forks until you do this.
+3. Select **Reproducible Public Benchmark** in the left sidebar, then **Run workflow**.
+
+No secrets, tokens or configuration are needed. The job installs one dependency from PyPI
+and otherwise touches no network. Six runners report separately; each uploads its
+regenerated reports as a downloadable artifact.
+
 ## Explanation
 
 Everything below is context. None of it is needed to run the steps.
@@ -172,6 +186,32 @@ against a machine that is not the author's before reporting anything.
 
 If your machine disagrees with all six of those, that is worth knowing and is exactly what
 item 4 above is asking for.
+
+### What a green run proves, and what it does not
+
+Running this in your own CI raises the claim from *the author says the numbers reproduce*
+to *the numbers reproduce on infrastructure the author does not control*. Concretely, a
+green run in your fork shows that the published JSON in this repository is what this code
+produces, that the result does not depend on hidden machine state, and that nothing
+reaches the network to fetch an answer.
+
+It does not show that the instrument is honest. The corpus, the two policies and the leak
+inspector all live in this repository and were all written by the same person who
+published the numbers. A rigged inspector would reproduce perfectly on six runners.
+
+The part that needs a human reading the code rather than a green check is small, and it is
+worth naming exactly:
+
+| What to read | Where |
+| :--- | :--- |
+| The chunk-local policy | `ChunkLocal` in `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py`, line 379 |
+| The retaining policy, including its boundary rule | `Retaining` (line 394) and `Retaining._cut` (line 414), same file |
+| What both share, so the only difference is retention | `_redact_then_rehydrate` (line 339) and the `Policy` base (line 321) |
+| How a leak is decided and tiered | `_leak_tier` (line 1973) |
+
+Those four are the whole argument. If the two policies differ anywhere except retention,
+the comparison is not measuring what it claims to measure, and that is a finding worth
+reporting.
 
 ### What this experiment does not establish
 
