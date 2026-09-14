@@ -85,9 +85,10 @@ curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai-ga
 Execute the benchmark using the capture token as the provider credential:
 
 ```bash
+export CONFORMANCE_TARGET_API_KEY="$CONFORMANCE_CAPTURE_TOKEN"
+
 pii-leak-benchmark \
   --target-base-url "https://gateway.ai.cloudflare.com/v1/$CF_ACCOUNT_ID/$CF_GATEWAY/conformance-capture" \
-  --target-api-key "$CONFORMANCE_CAPTURE_TOKEN" \
   --target-name "cloudflare-ai-gateway" \
   --target-version "<observed dashboard build/date>" \
   --iterations 3 \
@@ -119,14 +120,15 @@ When testing, specify which detector was used:
 You can configure the custom host directly via headers; the dashboard is not required. *Note: Portkey blocks private/reserved IPs by default, so a public tunnel hostname is mandatory.*
 
 ```bash
+export CONFORMANCE_TARGET_API_KEY="$PORTKEY_API_KEY"
+export CONFORMANCE_TARGET_HEADERS="x-portkey-provider=openai
+x-portkey-custom-host=https://your-quick-tunnel.trycloudflare.com/v1
+x-portkey-config=$PORTKEY_CONFIG_ID
+Authorization=Bearer $CONFORMANCE_CAPTURE_TOKEN
+x-portkey-forward-headers=Authorization"
+
 pii-leak-benchmark \
   --target-base-url "https://api.portkey.ai/v1" \
-  --target-api-key "$PORTKEY_API_KEY" \
-  --target-header "x-portkey-provider=openai" \
-  --target-header "x-portkey-custom-host=https://your-quick-tunnel.trycloudflare.com/v1" \
-  --target-header "x-portkey-config=$PORTKEY_CONFIG_ID" \
-  --target-header "Authorization=Bearer $CONFORMANCE_CAPTURE_TOKEN" \
-  --target-header "x-portkey-forward-headers=Authorization" \
   --target-name "portkey" \
   --target-version "<observed>" \
   --iterations 3 \

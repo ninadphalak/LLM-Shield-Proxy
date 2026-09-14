@@ -60,10 +60,12 @@ splits them, and only the gap between the two shows it.
 
 ```bash
 # the five reference policies, no containers, no credentials
-python -m pii_leak_benchmark.v2_emitter --validate   --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
+python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/v2 \
+  --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
 
 # a real gateway you are already running, configured to use the capture as its upstream
-python -m pii_leak_benchmark.v2_emitter --validate --only my-gateway   --gateway-url http://127.0.0.1:4000/v1/chat/completions --upstream-port 8799
+python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/my-gateway \
+  --only my-gateway --gateway-url http://127.0.0.1:4000/v1/chat/completions --upstream-port 8799
 ```
 
 **Cut at every internal split point, not just the midpoint.** By default an adversarial case
@@ -116,7 +118,7 @@ pii-leak-benchmark \
 
 Exit code is `0` when all checks passed, `1` when they did not, and `2` when the run itself could not be trusted. For example, it returns `2` if the capture was unreachable or something else was already listening on its port.
 
-Hosted gateways are measurable too, by binding the capture behind your own tunnel and passing `--capture-public-url` with a `--capture-token` (env `CONFORMANCE_CAPTURE_TOKEN`; argv is visible in process listings). See the [hosted-gateway runbook](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/hosted-gateway-runbook.md). This project does not operate a shared capture service; each operator controls the capture endpoint used for their run.
+Hosted gateways are measurable too, by binding the capture behind your own tunnel and passing `--capture-public-url`. Put credentials in `CONFORMANCE_CAPTURE_TOKEN` and `CONFORMANCE_TARGET_API_KEY`; put credential-bearing extra headers in newline-delimited `CONFORMANCE_TARGET_HEADERS`. The corresponding flags remain available, but argv is visible in process listings. See the [hosted-gateway runbook](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/hosted-gateway-runbook.md). This project does not operate a shared capture service; each operator controls the capture endpoint used for their run.
 
 ## Submitting a result
 

@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set Environment Variables
         run: |
@@ -31,7 +31,7 @@ jobs:
           git archive --format=zip --prefix=llm-shield-proxy-${RELEASE_VERSION}/ HEAD -o llm-shield-proxy-source-${RELEASE_VERSION}.zip
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Build Docker Image & Export Tar Archive
         run: |
@@ -46,7 +46,7 @@ jobs:
 
       - name: Import GPG Key (Ninad Phalak)
         id: gpg_import
-        uses: crazy-max/ghaction-import-gpg@v7
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -67,7 +67,7 @@ jobs:
           gpg --verify checksums.txt.asc checksums.txt
 
       - name: Upload Release Assets & GPG Signature
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: |
             llm-shield-proxy-source-${{ env.RELEASE_VERSION }}.zip

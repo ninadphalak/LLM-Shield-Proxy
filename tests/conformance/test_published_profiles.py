@@ -16,11 +16,12 @@ comparison between them is exactly the failure this project has already had once
 four corpus generations sat in one directory and the numbers were "individually correct
 and jointly misleading".
 
-WHAT IS ASSERTED ACROSS PROFILES: the INSTRUMENT. Both directories must carry the same
-`inspector_sha256`, because the article's generality argument puts a PII result and a
-secret result in one sentence, and that sentence is only legitimate if the same code
-scored both. If the two profiles ever drift onto different inspectors, the comparison
-stops being a comparison and nothing in the corpus metadata would say so.
+WHAT IS ASSERTED ACROSS PROFILES HERE: the enumerated scorer fingerprint. Both directories
+must carry the same `inspector_sha256`; if they drift, the cross-profile discussion is
+ineligible. Equality is necessary under this publication policy but not sufficient proof
+of identical or complete execution. The full source tag, shared paths, corpus and
+configuration records, schema/derivation checks, and completeness gates supply the other
+evidence.
 """
 
 from __future__ import annotations

@@ -27,6 +27,28 @@ CASE = {
 }
 
 
+def test_cli_requires_an_explicit_output_directory() -> None:
+    """A verification command must not overwrite published evidence by default."""
+    with pytest.raises(SystemExit) as excinfo:
+        v2.main(["--only", "passthrough", "--seed", "a1b2c3d4e5f60001"])
+
+    assert excinfo.value.code == 2
+
+
+def test_v2_report_writer_is_lf_normalized_and_newline_terminated(tmp_path: Path) -> None:
+    path = tmp_path / "report.json"
+    v2._write_report(path, {"line": "one", "nested": {"line": "two"}})
+
+    payload = path.read_bytes()
+    assert b"\r\n" not in payload
+    assert payload.endswith(b"\n")
+
+
+def test_run_policy_rejects_unscored_earlier_iterations() -> None:
+    with pytest.raises(ValueError, match="exactly one response observation"):
+        v2.run_policy("passthrough", iterations=2, seed="a1b2c3d4e5f60001")
+
+
 def _result(**overrides) -> v2.RunResult:
     values = dict(
         policy="probe",

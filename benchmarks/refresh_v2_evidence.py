@@ -52,6 +52,10 @@ import time
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "pii-leak-benchmark"))
+
+from pii_leak_benchmark.artifact import write_json_artifact  # noqa: E402
+
 PUBLISHED = ROOT / "benchmarks" / "results" / "v2-response-split"
 STAGING = ROOT / "benchmarks" / "results" / "staging-refresh"
 
@@ -247,7 +251,7 @@ def stage_sweep() -> None:
         if policy not in block:
             raise SystemExit(f"{policy}: its sweep file does not contain its own block")
         merged[policy] = block[policy]
-    (STAGING / "seed-sweep.json").write_text(json.dumps(merged, indent=1), encoding="utf-8")
+    write_json_artifact(STAGING / "seed-sweep.json", merged, indent=1)
     print(f"\nmerged {len(merged)} policy blocks into seed-sweep.json", flush=True)
 
 

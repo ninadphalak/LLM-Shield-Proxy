@@ -26,10 +26,12 @@ THE POINT. On the response path a correct gateway must do two OPPOSITE things at
     INJECTION segment -- the upstream emits values that were never in the prompt. The
                          gateway must REDACT them. Measured as LeakRate.
 
-No single global policy satisfies both. A gateway that forwards everything scores
-FidelityRate 1.0 and LeakRate 1.0. One that redacts everything scores LeakRate 0.0 and
-FidelityRate 0.0. That is the discriminating property the split exists to expose, and the
-reference policies below are chosen to land in each quadrant.
+No single global policy satisfies both. The shipped controls make the trade-off concrete:
+`passthrough` scores Fidelity 0.0 and Leak 1.0/1.0 because it does not restore the masked
+echo; `redact-all` scores Fidelity 0.0 and Leak 0.125/1.0; `chunk-local` scores Fidelity
+1.0 and Leak 0.125/1.0; bounded retention scores Fidelity 1.0 and Leak 0.125/0.125; and
+retention plus decoding scores Fidelity 1.0 and Leak 0.0/0.0. Leak pairs are
+single-chunk/adversarial. These are measured controls, not idealized quadrants.
 
 DeltaFrag = LeakRate(adversarial) - LeakRate(single_chunk) is then the number that
 separates a chunk-local scanner from a retaining one. Both score identically when every
@@ -92,9 +94,11 @@ SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.0.0"
 # every report claimed a harness_revision that had stopped being true. "Minimal" in
 # particular was no longer a description of anything.
 #
-# It is a LABEL, not a staleness anchor: `instrument.inspector_sha256` is the anchor,
-# because it is derived and cannot be forgotten. This exists so a reader can tell two
-# generations of report apart at a glance without hashing anything.
+# It is a LABEL, not a selected-source staleness fingerprint:
+# `instrument.inspector_sha256` is derived from an explicit, non-transitive list and so
+# catches edits to that list without a manual version bump. The full evidence tag and
+# eligibility checks cover provenance and completeness beyond that fingerprint. This
+# label lets a reader distinguish report generations at a glance without hashing source.
 EMITTER_VERSION = "0.2.1"
 
 # Detector for the injection segment. Deliberately simple and deliberately NOT given the
@@ -457,6 +461,9 @@ class RetainingDecoding(Retaining):
             for match in pattern.finditer(decoded):
                 original = match.group(0)
                 # Redact the value in whatever surface form it appears in.
+                # The two quote calls are identical for the current fixtures (none
+                # contains '/'). The duplicate is harmless historical evidence-code
+                # debt; removing it awaits the next frozen-instrument evidence round.
                 for surface in (original, quote(original, safe=""), quote(original)):
                     out = out.replace(surface, "[REDACTED]")
         return out
@@ -2058,6 +2065,11 @@ def run_case(
     and the case leaks if ANY enumerated partition leaks. See `injection_partitions` for
     why the midpoint alone is a weak oracle and why the cap turns a family inconclusive
     rather than shortening it.
+
+    Direct callers must use `iterations=1`. The historical multi-iteration path retains
+    only the last response for leak inspection, so `run_policy` rejects larger values
+    until the next evidence round can change this instrumented function and regenerate
+    every affected report.
     """
     points, families, attempted, capped = injection_partitions(
         segments, case, oracle=oracle, cap=partition_cap
@@ -2295,6 +2307,11 @@ def _rate(flags: Iterable[bool]) -> float:
 
 
 def _percentile(values: list[float], q: float) -> float:
+    """V2's recorded round-to-nearest order statistic; v1 uses nearest-rank floor.
+
+    The estimators remain unchanged while published evidence is frozen. Harmonising them
+    is an evidence-regenerating change, not a documentation cleanup.
+    """
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -2706,9 +2723,10 @@ def build_report(
     `axes`, `corpus`, `scope` and `schema_id` are what make one instrument serve two
     profiles. They are ARGUMENTS rather than module globals on purpose: the FIDE profile
     adds a sixth axis, and a global would mean importing that profile silently changed
-    what a v2 run measures. The functions that decide numbers are shared, so both
-    profiles carry the same `inspector_sha256` -- which is the evidence that a PII row
-    and a secret row were scored by identical code.
+    what a v2 run measures. Both profiles share the listed scoring path and therefore
+    carry the same selected-source `inspector_sha256`. That fingerprint is one
+    change-detection check; the full source tag, corpus metadata, report validation, and
+    completeness gates are also required for a cross-profile claim.
     """
     context = context or {}
     axes = AXES if axes is None else axes
@@ -3027,6 +3045,10 @@ def build_report(
         "fixture": fixture or {
             "varies_per_run": True,
             "values_published": False,
+            # Frozen-report metadata debt: USPHONE is enabled and represented in
+            # value_space_nominal but is missing from this descriptive formats map.
+            # Adding it changes instrumented build_report source and therefore requires
+            # a new evidence release rather than an in-place metadata rewrite.
             "formats": {
                 "EMAIL": "local@example.com",
                 "SSN": "AAA-GG-SSSS",
@@ -3064,11 +3086,11 @@ def build_report(
                 "adversarial": len(by_frag["adversarial"]),
             },
             "cases_scored": len(results),
-        # The denominator behind fidelity_rate at the top level, for the same reason.
-        "cases_echo_observable": len(observable),
-        # Entities the target did not detect even unfragmented. DeltaFrag for these is a
-        # difference between two totals, not a fragmentation penalty.
-        "detector_blind_entities": sorted(k for k, v in detector_blind.items() if v),
+            # The denominator behind fidelity_rate at the top level, for the same reason.
+            "cases_echo_observable": len(observable),
+            # Entities the target did not detect even unfragmented. DeltaFrag for these is a
+            # difference between two totals, not a fragmentation penalty.
+            "detector_blind_entities": sorted(k for k, v in detector_blind.items() if v),
             "cases_applicable": len(scored),
             "cases_inconclusive": len(inconclusive),
             # Set below, from `_assert_derivations`, AFTER this block exists -- because
@@ -3162,6 +3184,11 @@ def _derive_outcome(
     forbids `no-leak-profile-not-met` alongside a non-empty
     `configured_upstream_boundary.leaked_entity_types`, and it rejected the first real
     report the fixed check produced.
+
+    Historical-name warning: callers pass the overall leak rate as `leak_adv`, so any
+    leak in either response arm fails the report. Renaming this instrumented parameter is
+    deferred to an evidence-regenerating release; passing only the adversarial rate would
+    be a behavioral regression.
     """
     if not separated:
         return "inconclusive"
@@ -3304,7 +3331,7 @@ BOUNDARY_INSPECTION_SCOPE = "; ".join(c.clause for c in BOUNDARY_INSPECTION_CAPA
 
 
 # --------------------------------------------------------------------------------------
-# WHAT THE INSTRUMENT ACTUALLY DOES, as a digest of the code that decides every number.
+# SELECTED SCORER FINGERPRINT: an enumerated, non-transitive source digest.
 #
 # `inspection_scope` is generated from the capability registries, which is what makes it
 # a good anchor for a CLAIM -- and a bad one for BEHAVIOUR. The two registries describe
@@ -3320,11 +3347,14 @@ BOUNDARY_INSPECTION_SCOPE = "; ".join(c.clause for c in BOUNDARY_INSPECTION_CAPA
 #   * Deleting the residue scan, which is a false pass, left both scope strings unchanged
 #     (that one is caught by test_v2_sse_parsing.py, not by the guard).
 #
-# So the report carries a digest of the SOURCE of every function that decides a number,
-# normalised through the AST so that reformatting, comments and docstrings do not move it
-# but behaviour does. It over-invalidates rather than under-invalidating: a refactor that
-# changes nothing observable still marks rows stale, which is the safe direction for a
-# field whose whole job is to say "these numbers came from a different instrument".
+# So the report carries a digest of the SOURCE of an explicitly enumerated scorer subset,
+# plus three named v1 normalization helpers. It is intentionally non-transitive: helpers,
+# reference-policy methods, transport setup, and other producers outside that list are not
+# covered. The selected source is normalized through the AST so reformatting, comments, and
+# docstrings do not move it, while behavior-bearing edits to a listed function do. A match is
+# a change-detection fingerprint for that selected source, not proof of complete execution,
+# configuration identity, target identity, or report eligibility; the full evidence tag and
+# validation gates carry those separate responsibilities.
 # --------------------------------------------------------------------------------------
 
 _INSTRUMENTED = (
@@ -3406,7 +3436,12 @@ def _behaviour_source(function: Any) -> str:
 
 
 def inspector_digest() -> str:
-    """Digest of every function that decides a published number. 16 hex characters."""
+    """Fingerprint the enumerated scorer source; return 16 SHA-256 hex characters.
+
+    This non-transitive digest is a change detector for `_INSTRUMENTED` and the three
+    named v1 normalization helpers below. It is not a completeness, execution-validity,
+    configuration-identity, or target-identity proof.
+    """
     from pii_leak_benchmark import http_profile
 
     parts = [_behaviour_source(globals()[name]) for name in _INSTRUMENTED]
@@ -3922,11 +3957,17 @@ def run_policy(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run one policy across the whole covering array and emit its v2 report.
 
-    `seed` reproduces a previous run exactly. Omitted, a fresh one is drawn from
-    `secrets` so successive runs still vary.
+    Within a pinned implementation, `seed` reproduces the generated fixture selection.
+    It does not freeze target binaries, environment, timestamps, ports, or timings.
+    Omitted, a fresh seed is drawn from `secrets` so successive runs still vary.
     """
     import secrets
 
+    if iterations != 1:
+        raise ValueError(
+            "v2 run_policy supports exactly one response observation per case; "
+            "multi-iteration leak aggregation requires a new instrument/evidence release"
+        )
     seed = seed or secrets.token_hex(8)
     if gateway_url is None and policy_name not in POLICIES:
         raise ValueError(
@@ -3998,14 +4039,36 @@ def run_policy(
     return report, summary
 
 
+def _write_report(path: Any, report: dict[str, Any]) -> None:
+    """Write canonical UTF-8 JSON with LF endings and one trailing newline.
+
+    Kept as a named local alias because `main` is not the only thing that has ever
+    written a report here, and because the round-two review found that fixing this
+    hazard in one writer at a time is how it keeps coming back. The implementation
+    lives in `artifact` so the v2/FIDE emitters and their sweep drivers share one
+    implementation. V1 retains its own explicit-LF writer.
+    """
+    from pii_leak_benchmark.artifact import write_json_artifact
+
+    write_json_artifact(path, report, indent=1)
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="benchmarks/results/v2-response-split")
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="output directory (REQUIRED; use a scratch directory for verification runs)",
+    )
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--only", default="", help="comma-separated policy names")
-    parser.add_argument("--seed", default=None, help="hex seed; reproduces a prior run")
+    parser.add_argument(
+        "--seed",
+        default=None,
+        help="hex seed; reproduces fixture selection within the pinned implementation",
+    )
     parser.add_argument("--gateway-url", default=None, help="external gateway chat-completions URL")
     parser.add_argument("--upstream-port", type=int, default=0, help="fixed capture port")
     parser.add_argument("--model", default="test", help="model name the gateway routes on")
@@ -4095,7 +4158,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         errors = validator(report) if validator else []
         path = outdir / f"{name}.json"
-        path.write_text(json.dumps(report, indent=1), encoding="utf-8")
+        _write_report(path, report)
         rows.append((name, summary, report["outcome"], errors))
         status = "VALID" if validator and not errors else ("INVALID" if errors else "-")
         print(

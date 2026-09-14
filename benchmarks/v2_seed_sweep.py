@@ -14,13 +14,13 @@ row can be reproduced with `--seed`.
 from __future__ import annotations
 
 import argparse
-import json
 import statistics
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pii-leak-benchmark"))
 
+from pii_leak_benchmark.artifact import write_json_artifact  # noqa: E402
 from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     DEFAULT_POLICIES,
     run_policy,
@@ -169,7 +169,9 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
     )
 
-    Path(args.out).write_text(json.dumps(results, indent=1), encoding="utf-8")
+    # The README calls this file "the numbers to cite", so its bytes must not depend on
+    # which host produced it.
+    write_json_artifact(args.out, results, indent=1)
 
     print("\n" + "=" * 96)
     print(f"{'policy':<26}{'fidelity':>18}{'leak(1chunk)':>18}{'leak(adv)':>18}{'DeltaFrag':>18}")

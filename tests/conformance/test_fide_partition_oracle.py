@@ -13,6 +13,7 @@ thousands of near-identical requests, and there are exactly four ways for it to 
 from __future__ import annotations
 
 import itertools
+import json
 import math
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pii-leak-benchmark"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks"))
 
+import fide_numeric_audit as numeric_audit  # noqa: E402
 import fide_sweep  # noqa: E402
 from fide_sweep import claim_scoped_metrics, publishable_fide_files  # noqa: E402
 from llm_guard_exhaustive import publishable_llm_guard_files  # noqa: E402
@@ -357,6 +359,54 @@ def test_a_capped_family_does_not_make_the_union_look_smaller_than_a_component()
     assert worst["cases_excluded_by_cap"] == 1
     assert worst["component_leak_rates_on_union_denominator"] == {two: 0.0, three: 0.0}
     assert worst["never_below_components"] is True
+
+
+def _published_union_report() -> dict:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "benchmarks/results/v2-response-split/exhaustive-splits/bounded-retention.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_numeric_audit_rejects_a_union_below_a_union_denominator_component(
+    tmp_path: Path,
+) -> None:
+    """A printed mismatch must enter Audit.failures and make the CLI exit nonzero."""
+    report = _published_union_report()
+    worst = report["metrics"]["partition_oracle"]["worst_case"]
+    family = worst["families_in_union"][0]
+    worst["leak_rate_adversarial"] = 0.0
+    worst["component_leak_rates_on_union_denominator"][family] = 0.5
+    path = tmp_path / "invalid-union.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    audit = numeric_audit.Audit()
+    numeric_audit.audit_report(audit, path, tmp_path)
+    assert any("union floor" in failure for failure in audit.failures)
+    assert numeric_audit.main([
+        "--v2", str(tmp_path), "--fide", str(tmp_path / "absent")
+    ]) == 1
+
+
+def test_numeric_audit_accepts_a_capped_unequal_denominator_union(tmp_path: Path) -> None:
+    """A native 0.5 family rate does not floor a union whose shared-denominator rate is 0."""
+    report = _published_union_report()
+    block = report["metrics"]["partition_oracle"]
+    worst = block["worst_case"]
+    family = worst["families_in_union"][0]
+    arm = block["families"][family]
+    arm["leak_rate_adversarial"] = 0.5
+    arm["delta_frag"] = round(0.5 - arm["leak_rate_single_chunk_paired"], 4)
+    worst["leak_rate_adversarial"] = 0.0
+    worst["component_leak_rates_on_union_denominator"][family] = 0.0
+    worst["cases_excluded_by_cap"] = 1
+    path = tmp_path / "valid-capped-union.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    audit = numeric_audit.Audit()
+    numeric_audit.audit_report(audit, path, tmp_path)
+    assert not audit.failures
 
 
 def test_the_worst_case_definition_travels_with_the_number() -> None:

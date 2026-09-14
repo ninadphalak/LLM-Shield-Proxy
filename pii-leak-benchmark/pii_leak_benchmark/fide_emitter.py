@@ -10,12 +10,13 @@ side.
 
 WHAT IT DELIBERATELY DOES NOT DO.
 
-  * It does not fork the instrument. Every function that decides a number --
-    `run_case`, `_haystacks`, `_leak_tier`, `_parse_sse`, `build_report`,
-    `injection_partitions` -- is imported from `v2_emitter`, so a FIDE report and a v2
-    report carry the SAME `inspector_sha256`. That identity is the evidence that a PII
-    row and a secret row were scored by identical code, and it is the whole basis on
-    which the two may be compared.
+  * It does not fork the shared scoring path. Functions including `run_case`,
+    `_haystacks`, `_leak_tier`, `_parse_sse`, `build_report`, and
+    `injection_partitions` are imported from `v2_emitter`, so FIDE and v2 reports carry
+    the same enumerated-source `inspector_sha256`. That non-transitive fingerprint is a
+    change-detection check, not the whole basis for comparison. The shared call path,
+    full source tag, corpus metadata, report validity, completeness, and configuration
+    provenance carry the remaining burden.
   * It does not touch the v2 corpus. `spec/v2.0.0` and
     `benchmarks/results/v2-response-split/` remain the PII baseline. A sixth axis moves
     every case definition, so a six-axis row sitting beside a five-axis one would be two
@@ -48,6 +49,7 @@ import sys
 from typing import Any, Callable
 
 from . import needle_registry as nr
+from .artifact import write_json_artifact
 from .needle_registry import NEEDLES, class_of, measurable_ids, needle_values
 from .v2_emitter import (
     _DETECTORS,
@@ -527,7 +529,19 @@ def run_fide_policy(
     oracle: str = "midpoint",
     partition_cap: int = DEFAULT_PARTITION_CAP,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """One policy across the whole FIDE covering array, emitted as a v2.1.0 report."""
+    """One policy across the whole FIDE covering array, emitted as a v2.1.0 report.
+
+    Like `v2_emitter.run_policy`, this refuses `iterations != 1`. `run_case` keeps only
+    the LAST response for leak inspection, so a multi-iteration run would silently score
+    one observation while reporting the latency of several. The FIDE CLI never exposed
+    `--iterations`, which is why no published report is affected; the guard closes the
+    programmatic path that v2 already closes, so the two profiles fail the same way.
+    """
+    if iterations != 1:
+        raise ValueError(
+            "FIDE run_fide_policy supports exactly one response observation per case; "
+            "multi-iteration leak aggregation requires a new instrument/evidence release"
+        )
     segments = build_fide_segments(seed)
     cases = fide_covering_array()
     all_bodies = json.dumps(
@@ -719,12 +733,8 @@ def main(argv: list[str] | None = None) -> int:
             partition_cap=args.partition_cap,
         )
         errors = validator(report) if validator else []
-        (outdir / f"{name}.json").write_text(
-            json.dumps(report, indent=1), encoding="utf-8"
-        )
-        (outdir / f"{name}.summary.json").write_text(
-            json.dumps(summary, indent=1), encoding="utf-8"
-        )
+        write_json_artifact(outdir / f"{name}.json", report, indent=1)
+        write_json_artifact(outdir / f"{name}.summary.json", summary, indent=1)
         status = "VALID" if validator and not errors else ("INVALID" if errors else "-")
         print(
             f"{name:32} fidelity={summary['fidelity_rate']:<6} "

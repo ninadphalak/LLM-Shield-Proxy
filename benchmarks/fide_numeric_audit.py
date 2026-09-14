@@ -78,6 +78,15 @@ class Audit:
         self.failures.append(f"{label}: published {got!r}, recomputed {want!r}")
         return f"**MISMATCH** {got!r} vs {want!r}"
 
+    def check_at_least(self, label: str, got: float, floor: float) -> str:
+        """Register an inequality failure just as strictly as an equality failure."""
+        if got >= floor:
+            return "OK"
+        self.failures.append(
+            f"{label}: published {got!r}, below recomputed floor {floor!r}"
+        )
+        return f"**MISMATCH** {got!r} < {floor!r}"
+
 
 def audit_report(audit: Audit, path: pathlib.Path, root: pathlib.Path) -> None:
     """Every headline of one report, each recomputed from a sibling field where possible."""
@@ -173,16 +182,21 @@ def audit_report(audit: Audit, path: pathlib.Path, root: pathlib.Path) -> None:
             ])
         worst = block["worst_case"]
         if worst["families_in_union"]:
+            # Component rates must use the UNION'S case denominator. A capped family can
+            # have a larger native rate simply because its own denominator excludes a
+            # case that the union also has to exclude. Comparing native family rates to
+            # the union would reject a valid report.
             floor = max(
-                block["families"][f]["leak_rate_adversarial"]
+                worst["component_leak_rates_on_union_denominator"][f]
                 for f in worst["families_in_union"]
             )
             audit.row([
                 rel, "partition_oracle.worst_case.leak_rate_adversarial",
                 worst["leak_rate_adversarial"],
-                f"must be >= max component ({floor})",
-                "OK" if worst["leak_rate_adversarial"] >= floor
-                else f"**MISMATCH** union {worst['leak_rate_adversarial']} < {floor}",
+                f"must be >= max component on union denominator ({floor})",
+                audit.check_at_least(
+                    f"{rel} union floor", worst["leak_rate_adversarial"], floor
+                ),
             ])
 
     # FidelityRate's real denominator, which the manuscript states as 128 and which is a

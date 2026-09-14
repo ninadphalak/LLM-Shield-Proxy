@@ -53,7 +53,6 @@ from pii_leak_benchmark.v2_emitter import (  # noqa: E402
     _gcp_retry_delay,
 )
 
-
 # --------------------------------------------------------------------------------------
 # A scripted transport. No network, no credentials, no billing -- the retry rules are
 # decisions about status codes and the status codes can be handed over directly.

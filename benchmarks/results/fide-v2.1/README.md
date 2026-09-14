@@ -12,13 +12,15 @@ between classes is a contrast within one row rather than two directories read si
 They are a different corpus generation. This corpus has six axes and 64 cases; v2 has five
 axes and 32. Their `corpus.sha256` values differ and they are deliberately in separate
 directories. `tests/conformance/test_published_profiles.py` checks each directory on its
-own terms and asserts nothing across them — except one thing.
+own terms and asserts nothing across them, except one thing.
 
 **The one thing asserted across both**: the two profiles carry the **same**
-`instrument.inspector_sha256`. The FIDE emitter imports every function that decides a
-number from `v2_emitter` rather than forking it. That identity is the entire basis on which
-a PII result and a secret result may be discussed in one sentence, and a test fails if the
-two directories ever drift onto different inspectors.
+`instrument.inspector_sha256`. The FIDE emitter imports the shared scoring path from
+`v2_emitter` rather than forking it. The digest is a non-transitive fingerprint of an
+enumerated source subset, not proof of complete or valid execution. Cross-class discussion
+also depends on the full source tag, corpus and configuration records, schema/derivation
+checks, complete observations, and the within-run design. A test fails if the directories
+drift onto different selected scorer fingerprints.
 
 ## The corpus
 
@@ -53,7 +55,7 @@ must not arrive as a side effect of a change that lands the secret family.
 
 The four PII needles are drawn per seed by the same generator the v2 corpus uses, so the
 two corpora cannot drift on the entity both measure. The four secret needles are **fixed
-literals**, and `corpus.needle_registry_sha256` pins them — `corpus.seed` says nothing
+literals**, and `corpus.needle_registry_sha256` pins them; `corpus.seed` says nothing
 about a value that does not vary.
 
 Full provenance for every fixture, including the retrieved primary source, the
@@ -64,7 +66,7 @@ non-liveness argument and the documented detector claim, is in
 **Seed variation is zero for half this corpus, by construction.** The secret rates and
 their DeltaFrag are single-valued point results, so no seed-level interval is identified
 for them and none is reported. `fixture.value_space_nominal` publishes `1` for each fixed
-needle, which is the schema's own encoding for "this entity does not vary" — so the claim
+needle, which is the schema's own encoding for "this entity does not vary", so the claim
 is checkable from the artefact rather than only from prose.
 
 ## The targets
@@ -93,7 +95,7 @@ One shipping product is eligible for the secret family: **LLM-Shield-Proxy 1.6.0
 published documentation names `AWS_API_KEY`, `GITHUB_PAT` and `SSH_PRIVATE_KEY`. It
 documents no Slack pattern, so `SLACKBOT` is `not-applicable` for it. The author maintains
 that gateway; see the claim-scope audit for how that conflict is handled. Every other
-measured integration is a PII scanner and is `not-applicable` for this family — which is
+measured integration is a PII scanner and is `not-applicable` for this family, which is
 recorded as a claim fact, not measured as a miss.
 
 ## Reference-control result

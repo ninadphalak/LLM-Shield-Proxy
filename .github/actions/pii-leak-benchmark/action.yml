@@ -41,7 +41,7 @@ inputs:
     required: false
     default: "conformance-model"
   target-header:
-    description: "Extra request headers for the target, one NAME=VALUE per line. Values are never written to the report."
+    description: "Extra request headers for the target, one NAME=VALUE per line. Values are passed through the environment and never written to the report."
     required: false
     default: ""
   iterations:
@@ -138,16 +138,19 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v7
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
       with:
         python-version: ${{ inputs.python-version }}
 
     - name: Install the harness
       shell: bash
+      env:
+        HARNESS_SOURCE: ${{ inputs.source }}
       run: |
+        set -euo pipefail
         python -m pip install --upgrade pip
         # Standard library plus httpx. Installing this never installs a gateway.
-        python -m pip install "${{ inputs.source }}"
+        python -m pip install "$HARNESS_SOURCE"
         python -m pip list --format=freeze
 
     - name: Run the profile
@@ -155,45 +158,54 @@ runs:
       shell: bash
       env:
         CONFORMANCE_CAPTURE_TOKEN: ${{ inputs.capture-token }}
+        CONFORMANCE_TARGET_API_KEY: ${{ inputs.target-api-key }}
+        CONFORMANCE_TARGET_HEADERS: ${{ inputs.target-header }}
+        INPUT_CAPTURE_HOST: ${{ inputs.capture-host }}
+        INPUT_CAPTURE_PORT: ${{ inputs.capture-port }}
+        INPUT_CAPTURE_PUBLIC_URL: ${{ inputs.capture-public-url }}
+        INPUT_ITERATIONS: ${{ inputs.iterations }}
+        INPUT_JSON_OUT: ${{ inputs.json-out }}
+        INPUT_REDACTION_CLAIM_CITATION: ${{ inputs.redaction-claim-citation }}
+        INPUT_REDACTION_CLAIM_QUOTE: ${{ inputs.redaction-claim-quote }}
+        INPUT_REDACTION_CLAIMED: ${{ inputs.redaction-claimed }}
+        INPUT_REDACTION_CONFIG_REFERENCE: ${{ inputs.redaction-config-reference }}
+        INPUT_REDACTION_ENABLED: ${{ inputs.redaction-enabled }}
+        INPUT_TARGET_BASE_URL: ${{ inputs.target-base-url }}
+        INPUT_TARGET_MODEL: ${{ inputs.target-model }}
+        INPUT_TARGET_NAME: ${{ inputs.target-name }}
+        INPUT_TARGET_VERSION: ${{ inputs.target-version }}
       run: |
-        set -o pipefail
+        set -euo pipefail
         args=(
-          --target-base-url "${{ inputs.target-base-url }}"
-          --target-name "${{ inputs.target-name }}"
-          --target-version "${{ inputs.target-version }}"
-          --target-api-key "${{ inputs.target-api-key }}"
-          --target-model "${{ inputs.target-model }}"
-          --iterations "${{ inputs.iterations }}"
-          --capture-host "${{ inputs.capture-host }}"
-          --capture-port "${{ inputs.capture-port }}"
-          --redaction-claimed "${{ inputs.redaction-claimed }}"
-          --json-out "${{ inputs.json-out }}"
+          --target-base-url "$INPUT_TARGET_BASE_URL"
+          --target-name "$INPUT_TARGET_NAME"
+          --target-version "$INPUT_TARGET_VERSION"
+          --target-model "$INPUT_TARGET_MODEL"
+          --iterations "$INPUT_ITERATIONS"
+          --capture-host "$INPUT_CAPTURE_HOST"
+          --capture-port "$INPUT_CAPTURE_PORT"
+          --redaction-claimed "$INPUT_REDACTION_CLAIMED"
+          --json-out "$INPUT_JSON_OUT"
         )
         # `if`, not `[ ... ] && ...`: the runner runs this with `set -e`, and a false
         # test as the last command of a line exits the whole step.
-        if [ -n "${{ inputs.capture-public-url }}" ]; then
-          args+=(--capture-public-url "${{ inputs.capture-public-url }}")
+        if [ -n "$INPUT_CAPTURE_PUBLIC_URL" ]; then
+          args+=(--capture-public-url "$INPUT_CAPTURE_PUBLIC_URL")
         fi
-        if [ -n "${{ inputs.redaction-claim-citation }}" ]; then
-          args+=(--redaction-claim-citation "${{ inputs.redaction-claim-citation }}")
+        if [ -n "$INPUT_REDACTION_CLAIM_CITATION" ]; then
+          args+=(--redaction-claim-citation "$INPUT_REDACTION_CLAIM_CITATION")
         fi
-        if [ -n "${{ inputs.redaction-claim-quote }}" ]; then
-          args+=(--redaction-claim-quote "${{ inputs.redaction-claim-quote }}")
+        if [ -n "$INPUT_REDACTION_CLAIM_QUOTE" ]; then
+          args+=(--redaction-claim-quote "$INPUT_REDACTION_CLAIM_QUOTE")
         fi
-        if [ -n "${{ inputs.redaction-config-reference }}" ]; then
-          args+=(--redaction-config-reference "${{ inputs.redaction-config-reference }}")
+        if [ -n "$INPUT_REDACTION_CONFIG_REFERENCE" ]; then
+          args+=(--redaction-config-reference "$INPUT_REDACTION_CONFIG_REFERENCE")
         fi
-        if [ "${{ inputs.redaction-enabled }}" = "true" ]; then
+        if [ "$INPUT_REDACTION_ENABLED" = "true" ]; then
           args+=(--redaction-enabled)
         fi
-        while IFS= read -r header; do
-          if [ -n "$header" ]; then
-            args+=(--target-header "$header")
-          fi
-        done <<< "${{ inputs.target-header }}"
-
-        # The token goes through the environment, never argv: process listings are
-        # readable by every other process on the runner.
+        # Credentials and additional headers go through the environment, never argv:
+        # process listings are readable by every other process on the runner.
         set +e
         pii-leak-benchmark "${args[@]}"
         status=$?
@@ -205,20 +217,31 @@ runs:
           exit "$status"
         fi
 
-        python - "${{ inputs.json-out }}" <<'PY' >> "$GITHUB_OUTPUT"
-        import json, sys
+        python - "$INPUT_JSON_OUT" <<'PY' >> "$GITHUB_OUTPUT"
+        import json, sys, uuid
+
         report = json.load(open(sys.argv[1], encoding="utf-8"))
         boundary = report["checks"]["configured_upstream_boundary"]
-        print("outcome=" + report["outcome"])
-        print("passed=" + str(report["passed"]).lower())
-        print("leaked=" + ",".join(boundary["leaked_entity_types"]))
-        print("report=" + sys.argv[1])
+
+        def output(name, value):
+            delimiter = "ghadelimiter_" + uuid.uuid4().hex
+            print(f"{name}<<{delimiter}")
+            print(value)
+            print(delimiter)
+
+        output("outcome", report["outcome"])
+        output("passed", str(report["passed"]).lower())
+        output("leaked", ",".join(boundary["leaked_entity_types"]))
+        output("report", sys.argv[1])
         PY
 
     - name: Summarise
       shell: bash
+      env:
+        INPUT_JSON_OUT: ${{ inputs.json-out }}
       run: |
-        python - "${{ inputs.json-out }}" <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        set -euo pipefail
+        python - "$INPUT_JSON_OUT" <<'PY' >> "$GITHUB_STEP_SUMMARY"
         import json, sys
         report = json.load(open(sys.argv[1], encoding="utf-8"))
         boundary = report["checks"]["configured_upstream_boundary"]
@@ -248,13 +271,13 @@ runs:
     - name: Attest the raw report
       id: attest
       if: ${{ inputs.attest-report == 'true' }}
-      uses: actions/attest@v4
+      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
       with:
         subject-path: ${{ inputs.json-out }}
 
     - name: Upload the raw report
       if: ${{ inputs.artifact-name != '' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.json-out }}
@@ -263,8 +286,12 @@ runs:
     - name: Fail on a non-pass
       if: ${{ inputs.fail-on-non-pass == 'true' }}
       shell: bash
+      env:
+        RUN_OUTCOME: ${{ steps.run.outputs.outcome }}
+        RUN_PASSED: ${{ steps.run.outputs.passed }}
       run: |
-        if [ "${{ steps.run.outputs.passed }}" != "true" ]; then
-          echo "::error::Outcome ${{ steps.run.outputs.outcome }} - see the job summary."
+        set -euo pipefail
+        if [ "$RUN_PASSED" != "true" ]; then
+          echo "::error::Outcome $RUN_OUTCOME - see the job summary."
           exit 1
         fi

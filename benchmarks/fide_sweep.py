@@ -38,6 +38,7 @@ PUBLISHED_SEED = "a1b2c3d4e5f60001"
 # repository package first here as well, or a standalone summarise invocation can import
 # an older installed benchmark and silently classify a newer registry with stale code.
 sys.path.insert(0, str(ROOT / "pii-leak-benchmark"))
+from pii_leak_benchmark.artifact import write_json_artifact  # noqa: E402
 from pii_leak_benchmark.needle_registry import class_of  # noqa: E402
 
 CONTROLS = [
@@ -384,10 +385,9 @@ def summarise(root: pathlib.Path = STAGING) -> int:
             "therefore have zero seed variance BY CONSTRUCTION and no seed-level interval "
             "is identified for them."
         )
-    target = root / "fide-sweep.json"
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    temporary.write_text(json.dumps(out, indent=1), encoding="utf-8")
-    temporary.replace(target)
+    # `write_json_artifact` keeps the temp-then-replace this call site already had, and
+    # adds the LF normalisation it did not: this aggregate is published evidence.
+    target = write_json_artifact(root / "fide-sweep.json", out, indent=1)
     print(f"\nwrote {target}")
     for key, block in sorted(out.items()):
         s = block["summary"]

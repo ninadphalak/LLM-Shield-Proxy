@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from pii_leak_benchmark.cli import build_parser
+from pii_leak_benchmark.cli import build_parser, headers_from_args
 from pii_leak_benchmark.http_profile import (
     extract_fixture,
     run_http_conformance,
@@ -105,6 +105,30 @@ def test_capture_public_url_reads_its_environment_variable(monkeypatch):
     monkeypatch.setenv("CONFORMANCE_CAPTURE_PUBLIC_URL", "https://tunnel.example/v1")
     args = build_parser(require_target=False).parse_args([])
     assert args.capture_public_url == "https://tunnel.example/v1"
+
+
+def test_target_headers_read_newline_delimited_environment_without_entering_argv(monkeypatch):
+    monkeypatch.setenv(
+        "CONFORMANCE_TARGET_HEADERS",
+        "Authorization=Bearer secret\nx-routing=alpha=beta\n\n",
+    )
+
+    args = build_parser(require_target=False).parse_args([])
+
+    assert headers_from_args(args) == {
+        "Authorization": "Bearer secret",
+        "x-routing": "alpha=beta",
+    }
+
+
+def test_cli_target_headers_extend_environment_headers(monkeypatch):
+    monkeypatch.setenv("CONFORMANCE_TARGET_HEADERS", "x-from-env=yes")
+
+    args = build_parser(require_target=False).parse_args(
+        ["--target-header", "x-from-cli=yes"]
+    )
+
+    assert headers_from_args(args) == {"x-from-env": "yes", "x-from-cli": "yes"}
 
 
 # ------------------------------------------------- the dead end that was created

@@ -61,9 +61,9 @@ inside `build_report`, which is part of the instrument digest, so correcting it 
 `inspector_sha256` and every report in this tree was re-measured. The reports now carry a
 `metrics.partition_oracle` block that publishes the three numbers separately:
 
-- `adversarial_partitions` — 236, the internal partitions actually driven
-- `uncut_single_chunk_requests` — 16, the baseline arm, which splits nothing
-- `captured_requests_total` — 252
+- `adversarial_partitions`: 236, the internal partitions actually driven
+- `uncut_single_chunk_requests`: 16, the baseline arm, which splits nothing
+- `captured_requests_total`: 252
 
 Three places in each report describe the oracle: that block, the `fragmentation_strategy`
 enum, and the `method_limits` sentence. `tests/conformance/test_published_profiles.py`

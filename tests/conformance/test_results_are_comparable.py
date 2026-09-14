@@ -16,9 +16,18 @@ missing row is visibly absent, a stale one looks like evidence.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pii-leak-benchmark"))
+
+from pii_leak_benchmark.v2_emitter import (  # noqa: E402
+    BOUNDARY_INSPECTION_SCOPE,
+    CLIENT_INSPECTION_SCOPE,
+    instrument_block,
+)
 
 RESULTS = Path(__file__).resolve().parents[2] / "benchmarks" / "results" / "v2-response-split"
 
@@ -106,16 +115,6 @@ def test_the_corpus_digest_is_identical_across_artefacts() -> None:
 # exactly when the inspector's declared reach does -- no version number to remember to
 # bump.
 # --------------------------------------------------------------------------------------
-
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pii-leak-benchmark"))
-
-from pii_leak_benchmark.v2_emitter import (  # noqa: E402
-    BOUNDARY_INSPECTION_SCOPE,
-    CLIENT_INSPECTION_SCOPE,
-    instrument_block,
-)
 
 _SCOPES = {
     ("checks", "response_injection_containment", "inspection_scope"): CLIENT_INSPECTION_SCOPE,
@@ -220,9 +219,10 @@ def test_every_sweep_records_which_instrument_produced_it() -> None:
 #      held two emitter builds side by side. Nothing here noticed.
 #   3. Deleting the residue scan -- a false pass -- left both scope strings identical.
 #
-# `instrument.inspector_sha256` digests the source of every function that decides a
-# number, normalised through the AST so comments and formatting do not move it. It
-# over-invalidates rather than under-invalidating, which is the safe direction here.
+# `instrument.inspector_sha256` digests an enumerated, non-transitive source subset,
+# normalized through the AST so comments and formatting do not move it. This test checks
+# that selected-source fingerprint; it does not replace report eligibility, completeness,
+# configuration/target provenance, or the full evidence tag.
 # --------------------------------------------------------------------------------------
 
 

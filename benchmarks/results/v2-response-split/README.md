@@ -246,10 +246,9 @@
 - Emitter: `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py` (committed)
 - Reproduce: `python -m pii_leak_benchmark.v2_emitter --validate --out <scratch-dir>`
   **`--validate` WRITES.** It is not a dry run: it emits each policy's report to the
-  output directory like a normal run, and `--out` defaults to *this directory*, so
-  invoking it without one overwrites the published artefacts in place. This line used to
-  omit `--out` and was measured doing exactly that. Run it from the repo root; the schema
-  path is CWD-relative.
+  output directory like a normal run. `--out` is now required because the earlier default
+  was *this published directory* and a verification command was measured overwriting its
+  artefacts in place. Run it from the repo root; the schema path is CWD-relative.
 - Schema: `spec/v2.0.0/http-profile.schema.json`
 - Reports on the current instrument (95): all 19 single-seed JSON reports in this
   directory, all nine reports under `exhaustive-splits/`, 26 archived Presidio reports
@@ -893,12 +892,11 @@ they arrived the same way, and no key name is special.
 - `limitations.method_limits` said "Three entity types" for as long as there have been
   four. It is derived from `AXES` now.
 
-**Still fabricated, and not fixed here:** `capture.self_probe` reports
-`performed: true, recorded: true, round_trip_ms: 0.0` and no self-probe is performed;
-`target.base_url`, `target.model`, `capture.port` and `capture.authentication_required`
-are hardcoded to the in-process defaults in every external-gateway row, and
-`redaction_claim.claim_citation` cites this emitter's own policy docstrings as the source
-of a third-party vendor's redaction claim.
+**Status at this historical audit point (subsequently fixed):** `capture.self_probe` was
+fabricated, target and capture metadata were hardcoded, and claim citations came from
+policy docstrings. The active reports now carry measured self-probe timing, the supplied
+external target/model/capture values, and operator-supplied claim/configuration provenance;
+the current-instrument and schema guards reject the obsolete report shape.
 
 ---
 
@@ -906,7 +904,7 @@ of a third-party vendor's redaction claim.
 
 ```bash
 # 1. Re-run. Values are drawn fresh each run; rates should reproduce, values will not.
-python -m pii_leak_benchmark.v2_emitter --validate
+python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/v2
 
 # 2. Confirm the covering-array proof independently.
 python -c "
