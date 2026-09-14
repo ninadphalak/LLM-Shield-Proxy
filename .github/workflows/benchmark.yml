@@ -28,6 +28,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e "./pii-leak-benchmark[validate]" pytest pyyaml
+          # The four test files below verify published JSON evidence and need nothing
+          # from the proxy, but they live under `tests/`, so pytest loads
+          # `tests/conftest.py`, which imports the application at module scope. Without
+          # the proxy installed that is a collection error, not a test failure:
+          # `ModuleNotFoundError: No module named 'orjson'` before a single check runs.
+          #
+          # Installing the proxy here rather than loosening that import on purpose. A
+          # conftest that tolerates a missing application would turn a real import
+          # regression into a silent skip in the main CI job, which is the more expensive
+          # failure. The harness's own dependency floor is asserted separately by
+          # `test_harness_install_weight.py`, in a job with its own environment, so
+          # nothing about that guarantee depends on this step.
+          python -m pip install -e .
 
       - name: Verify schemas, provenance, pairing, and bounded oracles
         run: |
