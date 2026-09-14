@@ -116,8 +116,16 @@ def _request_path(report: dict[str, Any]) -> str:
         return "not configured" + (f" ({len(leaked)} types seen)" if leaked else "")
     if claim == "configured":
         return "configured, leaked: " + ", ".join(leaked) if leaked else "configured, clean"
-    # Reference policies make no request-path claim; they are in-process models.
-    return "not claimed" + (f" ({len(leaked)} types seen)" if leaked else "")
+
+    # Everything else is `unknown` or a missing field, and the right label depends on who
+    # the report is about. A reference policy is an in-process model that genuinely has no
+    # request-path claim to make. A MEASURED PRODUCT with no recorded claim is an evidence
+    # gap, and rendering it identically to the reference policies would hide that gap
+    # behind a label the page defines as intentional.
+    seen = f" ({len(leaked)} types seen)" if leaked else ""
+    if report["implementation"]["name"].startswith("reference-policy:"):
+        return "not applicable" + seen
+    return "claim not recorded" + seen
 
 
 def _count_reports(root: pathlib.Path) -> int:

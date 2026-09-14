@@ -29,8 +29,11 @@ configured to prevent that:
 - `not configured (N types seen)` is **not** a finding. Request redaction was never
   enabled for that run, so the values were expected to pass through. Counting it against
   the product would be accusing it of a defect it was not asked to prevent.
-- `not claimed` marks the reference policies, which are in-process models with no
-  request-path claim at all.
+- `not applicable` marks the reference policies, which are in-process models with no
+  request-path claim to make.
+- `claim not recorded` marks a measured product whose report did not record whether request
+  redaction was configured. That is a gap in the evidence, not a result, and the row cannot
+  be read either way until someone re-runs it with the claim supplied.
 
 This is why `litellm-presidio` and `nemo-guardrails-0.24.0` both read `fail` while showing
 `0` in both response leak columns, and why they are not the same result: LiteLLM had
@@ -66,17 +69,17 @@ Corpus `30efa2eb65888844...` at seed `a1b2c3d4e5f60001`, inspector `94262e29a492
 
 | Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag | Request path | Inconclusive | Outcome |
 | :--- | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
-| `bounded-retention` | 1 | 0.125 | 0.125 | 0 | not claimed | 0/32 | `fail` |
-| `chunk-local` | 1 | 0.125 | 1 | 0.875 | not claimed | 0/32 | `fail` |
-| `gcp-dlp-chunk-local` | 1 | 0.5 | 1 | 0.5 | not claimed | 0/32 | `fail` |
-| `gcp-dlp-retention` | 1 | 0.5 | 0.5 | 0 | not claimed | 0/32 | `fail` |
-| `gcp-model-armor-chunk-local` | 1 | 0.75 | 1 | 0.25 | not claimed | 0/32 | `fail` |
-| `gcp-model-armor-retention` | 1 | 0.75 | 0.75 | 0 | not claimed | 0/32 | `fail` |
-| `passthrough` | 0 | 1 | 1 | 0 | not claimed | 0/32 | `fail` |
-| `presidio-chunk-local` | 1 | 0.125 | 0.5 | 0.375 | not claimed | 0/32 | `fail` |
-| `presidio-retention` | 1 | 0.125 | 0.125 | 0 | not claimed | 0/32 | `fail` |
-| `redact-all` | 0 | 0.125 | 1 | 0.875 | not claimed | 0/32 | `fail` |
-| `retention-plus-decoding` | 1 | 0 | 0 | 0 | not claimed | 0/32 | `pass` |
+| `bounded-retention` | 1 | 0.125 | 0.125 | 0 | not applicable | 0/32 | `fail` |
+| `chunk-local` | 1 | 0.125 | 1 | 0.875 | not applicable | 0/32 | `fail` |
+| `gcp-dlp-chunk-local` | 1 | 0.5 | 1 | 0.5 | not applicable | 0/32 | `fail` |
+| `gcp-dlp-retention` | 1 | 0.5 | 0.5 | 0 | not applicable | 0/32 | `fail` |
+| `gcp-model-armor-chunk-local` | 1 | 0.75 | 1 | 0.25 | not applicable | 0/32 | `fail` |
+| `gcp-model-armor-retention` | 1 | 0.75 | 0.75 | 0 | not applicable | 0/32 | `fail` |
+| `passthrough` | 0 | 1 | 1 | 0 | not applicable | 0/32 | `fail` |
+| `presidio-chunk-local` | 1 | 0.125 | 0.5 | 0.375 | not applicable | 0/32 | `fail` |
+| `presidio-retention` | 1 | 0.125 | 0.125 | 0 | not applicable | 0/32 | `fail` |
+| `redact-all` | 0 | 0.125 | 1 | 0.875 | not applicable | 0/32 | `fail` |
+| `retention-plus-decoding` | 1 | 0 | 0 | 0 | not applicable | 0/32 | `pass` |
 
 ### Measured gateways and libraries
 
