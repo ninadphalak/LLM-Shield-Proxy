@@ -20,7 +20,12 @@ jobs:
     name: Build, Sign & Attach SBOM Attestation
     # Release events for independently versioned companion packages are not
     # LLM-Shield-Proxy container releases. Manual dispatches remain supported.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    # `startsWith(tag, 'v')` alone also matches the evidence tags, which begin
+    # `v2-evidence-round-N`. Publishing a GitHub Release on one of those (the
+    # supported way to mint a Zenodo DOI for the measurement snapshot the paper
+    # cites) would otherwise build, sign and push PROXY artifacts from an
+    # evidence commit, and tag a container image `v2-evidence-round-8`.
+    if: github.event_name == 'workflow_dispatch' || (startsWith(github.event.release.tag_name, 'v') && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ubuntu-latest
 
     steps:

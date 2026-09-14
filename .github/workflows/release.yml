@@ -12,7 +12,12 @@ jobs:
     name: Build & Sign Release Artifacts
     # This repository now has an independently versioned benchmark distribution.
     # Publishing a benchmark release must not build proxy artifacts under that tag.
-    if: startsWith(github.event.release.tag_name, 'v')
+    # `startsWith(tag, 'v')` alone also matches the evidence tags, which begin
+    # `v2-evidence-round-N`. Publishing a GitHub Release on one of those (the
+    # supported way to mint a Zenodo DOI for the measurement snapshot the paper
+    # cites) would otherwise build, sign and push PROXY artifacts from an
+    # evidence commit, and tag a container image `v2-evidence-round-8`.
+    if: startsWith(github.event.release.tag_name, 'v') && !contains(github.event.release.tag_name, 'evidence')
     runs-on: ubuntu-latest
     env:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
