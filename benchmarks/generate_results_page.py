@@ -88,6 +88,23 @@ def _mean_range(stat: dict[str, Any] | None) -> str:
     return f"{mean} [{_fmt(low)}--{_fmt(high)}]"
 
 
+def _request_path(report: dict[str, Any]) -> str:
+    """What the target sent UPSTREAM, which the four response rates do not describe.
+
+    Without this column the page is actively misleading. `litellm-presidio` and
+    `nemo-guardrails-0.24.0` both show leak 0.00 in both response arms and still read
+    `fail`, and nothing in the row said why: all four entity types reached the capture
+    server on the REQUEST path. A reader could only conclude the outcome was arbitrary.
+    """
+    check = report.get("checks", {}).get("configured_upstream_boundary")
+    if not isinstance(check, dict):
+        return "not measured"
+    leaked = check.get("leaked_entity_types") or []
+    if leaked:
+        return "leak: " + ", ".join(leaked)
+    return "clean" if check.get("passed") else "not clean"
+
+
 def _count_reports(root: pathlib.Path) -> int:
     """Reports in the tree, excluding sweep aggregates, which are not reports."""
     return sum(
@@ -120,14 +137,31 @@ def _render() -> str:
     )
     out.append("")
 
+    # A report whose `implementation.name` matches no prefix would vanish from every table
+    # and from the pass-rate line below, while generation and CI both stayed green. The
+    # schema permits any non-empty name, so this is reachable by committing a valid report.
+    ungrouped = [
+        f"{n} ({r['implementation']['name']})"
+        for n, r in singles
+        if not any(r["implementation"]["name"].startswith(p) for p, _ in GROUP_ORDER)
+    ]
+    if ungrouped:
+        raise SystemExit(
+            "these reports match no group in GROUP_ORDER and would be dropped from the "
+            "published page:\n  " + "\n  ".join(ungrouped)
+        )
+
     for prefix, heading in GROUP_ORDER:
         group = [(n, r) for n, r in singles if r["implementation"]["name"].startswith(prefix)]
         if not group:
             continue
         out.append(f"### {heading}")
         out.append("")
-        out.append("| Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag | Inconclusive | Outcome |")
-        out.append("| :--- | ---: | ---: | ---: | ---: | ---: | :--- |")
+        out.append(
+            "| Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag "
+            "| Request path | Inconclusive | Outcome |"
+        )
+        out.append("| :--- | ---: | ---: | ---: | ---: | :--- | ---: | :--- |")
         for name, report in group:
             metrics = report["metrics"]
             out.append(
@@ -135,6 +169,7 @@ def _render() -> str:
                 f"| {_fmt(metrics['leak_rate']['single_chunk'])} "
                 f"| {_fmt(metrics['leak_rate']['adversarial'])} "
                 f"| {_fmt(metrics['delta_frag'])} "
+                f"| {_request_path(report)} "
                 f"| {metrics['cases_inconclusive']}/{metrics['cases_scored']} "
                 f"| `{report['outcome']}` |"
             )

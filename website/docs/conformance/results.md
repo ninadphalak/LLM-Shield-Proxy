@@ -19,6 +19,16 @@ offline.
 It is not a quality judgement, and a non-`pass` is not automatically a leak - see the
 [outcome table](./reproducing#4-read-outcome) for what each value means.
 
+**Request path** is a separate finding from the four response rates, and a row can be
+clean on one and not the other. It reports whether unmasked test values reached the capture
+server on the way *out* to the model provider. This is why `litellm-presidio` and
+`nemo-guardrails-0.24.0` read `fail` while showing `0` in both response leak columns: the
+response path leaked nothing, and all four entity types left on the request path.
+
+One of the measured products is this project's own. Read the request-path column with that
+in mind; the [benchmark readme](./benchmark_readme) states the conflict and the other limits
+in full.
+
 Two groups appear below and they are not comparable with each other:
 
 - **Reference policies** are inspectors written inside the benchmark to isolate one
@@ -43,32 +53,32 @@ Corpus `30efa2eb65888844...` at seed `a1b2c3d4e5f60001`, inspector `94262e29a492
 
 ### Reference policies (study controls, not products)
 
-| Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag | Inconclusive | Outcome |
-| :--- | ---: | ---: | ---: | ---: | ---: | :--- |
-| `bounded-retention` | 1 | 0.125 | 0.125 | 0 | 0/32 | `fail` |
-| `chunk-local` | 1 | 0.125 | 1 | 0.875 | 0/32 | `fail` |
-| `gcp-dlp-chunk-local` | 1 | 0.5 | 1 | 0.5 | 0/32 | `fail` |
-| `gcp-dlp-retention` | 1 | 0.5 | 0.5 | 0 | 0/32 | `fail` |
-| `gcp-model-armor-chunk-local` | 1 | 0.75 | 1 | 0.25 | 0/32 | `fail` |
-| `gcp-model-armor-retention` | 1 | 0.75 | 0.75 | 0 | 0/32 | `fail` |
-| `passthrough` | 0 | 1 | 1 | 0 | 0/32 | `fail` |
-| `presidio-chunk-local` | 1 | 0.125 | 0.5 | 0.375 | 0/32 | `fail` |
-| `presidio-retention` | 1 | 0.125 | 0.125 | 0 | 0/32 | `fail` |
-| `redact-all` | 0 | 0.125 | 1 | 0.875 | 0/32 | `fail` |
-| `retention-plus-decoding` | 1 | 0 | 0 | 0 | 0/32 | `pass` |
+| Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag | Request path | Inconclusive | Outcome |
+| :--- | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| `bounded-retention` | 1 | 0.125 | 0.125 | 0 | clean | 0/32 | `fail` |
+| `chunk-local` | 1 | 0.125 | 1 | 0.875 | clean | 0/32 | `fail` |
+| `gcp-dlp-chunk-local` | 1 | 0.5 | 1 | 0.5 | clean | 0/32 | `fail` |
+| `gcp-dlp-retention` | 1 | 0.5 | 0.5 | 0 | clean | 0/32 | `fail` |
+| `gcp-model-armor-chunk-local` | 1 | 0.75 | 1 | 0.25 | clean | 0/32 | `fail` |
+| `gcp-model-armor-retention` | 1 | 0.75 | 0.75 | 0 | clean | 0/32 | `fail` |
+| `passthrough` | 0 | 1 | 1 | 0 | clean | 0/32 | `fail` |
+| `presidio-chunk-local` | 1 | 0.125 | 0.5 | 0.375 | clean | 0/32 | `fail` |
+| `presidio-retention` | 1 | 0.125 | 0.125 | 0 | clean | 0/32 | `fail` |
+| `redact-all` | 0 | 0.125 | 1 | 0.875 | clean | 0/32 | `fail` |
+| `retention-plus-decoding` | 1 | 0 | 0 | 0 | clean | 0/32 | `pass` |
 
 ### Measured gateways and libraries
 
-| Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag | Inconclusive | Outcome |
-| :--- | ---: | ---: | ---: | ---: | ---: | :--- |
-| `guardrails-ai-stream-validate` | 0 | 0.125 | 0.125 | 0 | 0/32 | `fail` |
-| `litellm-presidio` | 0 | 0 | 0 | 0 | 0/32 | `fail` |
-| `llm-guard-buffered` | 1 | 0.3125 | 0.3125 | 0 | 0/32 | `fail` |
-| `llm-guard-chunk-local` | 1 | 0.25 | 0.75 | 0.5 | 0/32 | `fail` |
-| `llm-shield-proxy-1.6.0-response-off` | 1 | 1 | 1 | 0 | 0/32 | `fail` |
-| `llm-shield-proxy-1.6.0-response-on` | 1 | 0.125 | 0.25 | 0.125 | 0/32 | `fail` |
-| `nemo-guardrails-0.24.0` | 0 | 0 | 0 | 0 | 8/32 | `fail` |
-| `portkey-gateway-oss` | 1 | 1 | 1 | 0 | 0/32 | `fail` |
+| Configuration | Fidelity | Leak, single | Leak, fragmented | DeltaFrag | Request path | Inconclusive | Outcome |
+| :--- | ---: | ---: | ---: | ---: | :--- | ---: | :--- |
+| `guardrails-ai-stream-validate` | 0 | 0.125 | 0.125 | 0 | leak: CARDPAN, EMAIL, SSN, USPHONE | 0/32 | `fail` |
+| `litellm-presidio` | 0 | 0 | 0 | 0 | leak: CARDPAN, EMAIL, SSN, USPHONE | 0/32 | `fail` |
+| `llm-guard-buffered` | 1 | 0.3125 | 0.3125 | 0 | leak: USPHONE | 0/32 | `fail` |
+| `llm-guard-chunk-local` | 1 | 0.25 | 0.75 | 0.5 | leak: USPHONE | 0/32 | `fail` |
+| `llm-shield-proxy-1.6.0-response-off` | 1 | 1 | 1 | 0 | clean | 0/32 | `fail` |
+| `llm-shield-proxy-1.6.0-response-on` | 1 | 0.125 | 0.25 | 0.125 | clean | 0/32 | `fail` |
+| `nemo-guardrails-0.24.0` | 0 | 0 | 0 | 0 | leak: CARDPAN, EMAIL, SSN, USPHONE | 8/32 | `fail` |
+| `portkey-gateway-oss` | 1 | 1 | 1 | 0 | leak: CARDPAN, EMAIL, SSN, USPHONE | 0/32 | `fail` |
 
 **0 of 8 measured gateway and library configurations pass.** The only passing rows are reference policies: `retention-plus-decoding`.
 

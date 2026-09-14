@@ -99,12 +99,19 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Regenerate the results page
-        # Generates from JSON with the standard library only; nothing to install.
-        run: python benchmarks/generate_results_page.py
-
       - name: Fail if the committed page drifted from the committed reports
+        # MUST run before anything regenerates the file. This job previously regenerated
+        # first and checked second, which made the gate unfalsifiable: the first step
+        # repaired a stale page in the runner's workspace, so `--check` compared the
+        # freshly written file against itself and could never fail. A gate that cannot
+        # fail is worse than no gate, because the green tick is read as evidence.
+        # Generates from JSON with the standard library only; nothing to install.
         run: python benchmarks/generate_results_page.py --check
+
+      - name: Regenerate the page for the artifact
+        # After the gate, and on failure too, so a red run hands you the page it wanted.
+        if: always()
+        run: python benchmarks/generate_results_page.py
 
       - name: Upload the regenerated page
         if: always()
