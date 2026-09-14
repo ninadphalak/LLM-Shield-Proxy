@@ -1,0 +1,153 @@
+{
+ "schema": "mode-regression-probe/1",
+ "generated_at": "2026-09-14T02:30:41Z",
+ "label": "nemo-context-size-50",
+ "target": {
+  "url": "http://127.0.0.1:9001/v1/chat/completions",
+  "model": "config",
+  "direct": false
+ },
+ "corpus": {
+  "seed": "a1b2c3d4e5f60001",
+  "case": {
+   "entity": "EMAIL",
+   "encoding": "plain",
+   "carrier": "sse-delta-content",
+   "request_site": "chat-content",
+   "fragmentation": "adversarial"
+  },
+  "cases": 1,
+  "measured_passes_per_condition": 3,
+  "discarded_warmup_passes": 1
+ },
+ "conditions": [
+  "whole-response",
+  "single-chunk",
+  "adversarial-midpoint"
+ ],
+ "rows": [
+  {
+   "condition": "whole-response",
+   "stream_requested_by_client": false,
+   "stream_requested_of_upstream": false,
+   "transport": {
+    "ok": true,
+    "status": 200,
+    "error": null
+   },
+   "upstream_saw_request": true,
+   "echo_observable": true,
+   "echo_restored": false,
+   "injection_leaked": false,
+   "injection_leak_tier": null,
+   "request_path_leaked_caller_value": true,
+   "response_side_masking": {
+    "new_mask_tokens_in_client_text": [],
+    "suspected": false,
+    "upstream_emitted_mask_tokens": []
+   },
+   "delivery": {
+    "repeats": 3,
+    "ttfb_ms_median": 78.042,
+    "ttfe_ms_median": 78.042,
+    "ttfuc_ms_median": 78.042,
+    "total_ms_median": 78.049,
+    "ttfuc_ms_samples": [
+     76.536,
+     80.083,
+     78.042
+    ]
+   },
+   "stable_across_repeats": true,
+   "upstream_data_events_written": 1,
+   "response_bytes": 278
+  },
+  {
+   "condition": "single-chunk",
+   "stream_requested_by_client": true,
+   "stream_requested_of_upstream": true,
+   "transport": {
+    "ok": true,
+    "status": 200,
+    "error": null
+   },
+   "upstream_saw_request": true,
+   "echo_observable": true,
+   "echo_restored": false,
+   "injection_leaked": false,
+   "injection_leak_tier": null,
+   "request_path_leaked_caller_value": true,
+   "response_side_masking": {
+    "new_mask_tokens_in_client_text": [],
+    "suspected": false,
+    "upstream_emitted_mask_tokens": []
+   },
+   "delivery": {
+    "repeats": 3,
+    "ttfb_ms_median": 32.57,
+    "ttfe_ms_median": 32.57,
+    "ttfuc_ms_median": 32.57,
+    "total_ms_median": 79.831,
+    "ttfuc_ms_samples": [
+     53.984,
+     31.975,
+     32.57
+    ]
+   },
+   "stable_across_repeats": true,
+   "upstream_data_events_written": 3,
+   "response_bytes": 543
+  },
+  {
+   "condition": "adversarial-midpoint",
+   "stream_requested_by_client": true,
+   "stream_requested_of_upstream": true,
+   "transport": {
+    "ok": true,
+    "status": 200,
+    "error": null
+   },
+   "upstream_saw_request": true,
+   "echo_observable": true,
+   "echo_restored": false,
+   "injection_leaked": false,
+   "injection_leak_tier": null,
+   "request_path_leaked_caller_value": true,
+   "response_side_masking": {
+    "new_mask_tokens_in_client_text": [],
+    "suspected": false,
+    "upstream_emitted_mask_tokens": []
+   },
+   "delivery": {
+    "repeats": 3,
+    "ttfb_ms_median": 43.657,
+    "ttfe_ms_median": 43.657,
+    "ttfuc_ms_median": 43.657,
+    "total_ms_median": 89.424,
+    "ttfuc_ms_samples": [
+     43.331,
+     44.027,
+     43.657
+    ]
+   },
+   "stable_across_repeats": true,
+   "upstream_data_events_written": 4,
+   "response_bytes": 543
+  }
+ ],
+ "verdict": {
+  "mode_regression": "none",
+  "reasons": [
+   "the whole-response arm did not restore either: this target does not restore in any mode, which is a coverage finding and not a mode regression"
+  ]
+ },
+ "limitations": [
+  "One case, one seed, one entity per run. A probe, not a profile run: it emits no outcome, no DeltaFrag, and validates against no published schema.",
+  "Timings are medians over the measured passes after one discarded warm-up. A condition whose repeats disagreed on restoration or leakage is reported with stable_across_repeats=false and must not be quoted as a result.",
+  "Not comparable with any v2 or FIDE report: this module has its own capture and client and is deliberately outside v2_emitter._INSTRUMENTED, so no inspector_sha256 applies to it.",
+  "The scorer IS the published one: _haystacks, _present and _leak_tier are imported from v2_emitter unchanged, so the three arms are scored alike.",
+  "Delivery times are loopback with a synthetic upstream on one machine. They exclude model inference and wide-area network time by construction and are not an end-to-end latency claim.",
+  "response_side_masking records mask LABELS only (<URL>, <EMAIL_ADDRESS>), never the text a detector matched, so no content is published by it. A true value means the target introduced redaction tokens the capture never sent; it does not by itself prove which text was redacted.",
+  "The non-streaming arm maps the sse-json-field carrier onto one sibling key of a single message, because a whole response has no second sibling for a value to be split across."
+ ]
+}
