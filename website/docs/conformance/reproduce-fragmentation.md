@@ -93,7 +93,7 @@ directly.
 If you would rather not trust a run on your own laptop either, run it on infrastructure
 neither of us controls.
 
-1. Fork <https://github.com/ninadphalak/LLM-Shield-Proxy>.
+1. Fork [ninadphalak/LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy).
 2. In your fork, open the **Actions** tab and click **I understand my workflows, go ahead
    and enable them**. GitHub disables workflows in new forks until you do this.
 3. Select **Reproducible Public Benchmark** in the left sidebar, then **Run workflow**.
