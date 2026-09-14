@@ -33,7 +33,11 @@ git rev-parse HEAD
 
 ### 2. Install
 
-Python 3.9 or newer. The only third-party dependency is `httpx`.
+Any CPython from 3.11 onward. The only third-party dependency is `httpx`.
+
+CI verifies 3.11 and 3.12; 3.14 is verified locally. The harness package declares
+3.9+, but this experiment has not been run there — if you only have 3.9 or 3.10,
+run it anyway and tell us what happened.
 
 ```bash
 python -m venv .venv
