@@ -444,8 +444,15 @@ def run_condition(
         # Assert the partition is a real fragmentation, using the emitter's own checker.
         _partition_pieces(rendered, cuts)
 
+    if repeats < 1:
+        # NOT `max(1, repeats)`. Clamping ran one pass while the artifact went on
+        # recording the number the operator asked for, so the provenance disagreed with
+        # the measurement. `run_policy` rejects an unsupported `iterations` rather than
+        # coping with it, for the same reason.
+        raise ValueError(f"repeats must be at least 1, got {repeats}")
+
     attempts: list[tuple[dict[str, Any], ProbeState]] = []
-    for _ in range(max(1, repeats)):
+    for _ in range(repeats):
         state = ProbeState(segments, case, cuts)
         server, _url = _serve(_make_probe_upstream(state), upstream_port)
         try:
@@ -574,6 +581,32 @@ def derive_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     if not whole or not single:
         return {"mode_regression": "not-evaluated", "reasons": ["a condition is missing"]}
+
+    # STABILITY IS A PRECONDITION FOR A VERDICT, NOT A FOOTNOTE. `run_condition` keeps
+    # the LAST attempt's scores, so when repeats disagreed the surviving row was whichever
+    # way the final attempt happened to fall. Reading those scores without checking
+    # `stable_across_repeats` let a transient attempt publish a definitive
+    # mode_regression while the same artifact printed the row as UNSTABLE and its own
+    # limitations said such a row must not be quoted. A report that contradicts itself is
+    # the defect the outcome derivation exists to prevent.
+    #
+    # Missing means unconfirmed, which is not the same as stable, so the default is
+    # fail-closed.
+    unstable = [
+        row["condition"]
+        for row in (whole, single)
+        if not row.get("stable_across_repeats", False)
+    ]
+    if unstable:
+        return {
+            "mode_regression": "inconclusive",
+            "reasons": [
+                "repeated attempts disagreed on restoration or leakage in "
+                + ", ".join(unstable)
+                + "; a condition that does not reproduce cannot carry a verdict"
+            ],
+        }
+
     if not whole["transport"]["ok"]:
         reasons.append(
             "whole-response arm did not transport "
@@ -615,6 +648,14 @@ def derive_verdict(rows: list[dict[str, Any]]) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------
 
 
+def _positive_int(raw: str) -> int:
+    """`--repeats 0` used to run one pass and report zero. Refuse it at the boundary."""
+    value = int(raw)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gateway-url", default=None, help="target chat-completions URL")
@@ -640,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument(
         "--repeats",
-        type=int,
+        type=_positive_int,
         default=3,
         help="measured passes per condition; the median is reported (default 3)",
     )

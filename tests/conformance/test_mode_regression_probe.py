@@ -23,6 +23,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "pii-leak-benchmark"))
 sys.path.insert(0, str(ROOT / "benchmarks"))
@@ -104,12 +106,13 @@ def test_the_probe_scores_a_non_streaming_body_with_the_published_inspector() ->
     assert probe._present("absent@example.invalid", probe._haystacks(body)) is False
 
 
-def _row(condition: str, *, restored, leaked, ok: bool = True) -> dict:
+def _row(condition: str, *, restored, leaked, ok: bool = True, stable: bool = True) -> dict:
     return {
         "condition": condition,
         "transport": {"ok": ok, "status": 200 if ok else None, "error": None},
         "echo_restored": restored,
         "injection_leaked": leaked,
+        "stable_across_repeats": stable,
     }
 
 
@@ -252,3 +255,63 @@ def test_client_text_includes_sibling_carrier_fields() -> None:
     body = 'data: {"choices":[{"delta":{"content":"","record_field":"<EMAIL_ADDRESS>"}}]}\n\n'
 
     assert probe._mask_tokens(probe._client_text(body)) == ["EMAIL_ADDRESS"]
+
+
+def test_an_unstable_arm_cannot_carry_a_verdict() -> None:
+    """Greptile P1. `run_condition` keeps the LAST attempt's scores, so when repeats
+    disagreed the surviving row was whichever way the final attempt fell. Reading those
+    scores without checking stability let a transient attempt publish a definitive
+    mode_regression while the same artifact printed the row as UNSTABLE and its own
+    limitations said such a row must not be quoted.
+    """
+    rows = [
+        _row("whole-response", restored=True, leaked=False),
+        _row("single-chunk", restored=False, leaked=False, stable=False),
+    ]
+
+    verdict = probe.derive_verdict(rows)
+
+    assert verdict["mode_regression"] == "inconclusive"
+    assert any("cannot carry a verdict" in r for r in verdict["reasons"])
+
+
+def test_missing_stability_is_treated_as_unconfirmed() -> None:
+    """Fail closed: absent is not the same as stable."""
+    rows = [
+        _row("whole-response", restored=True, leaked=False),
+        _row("single-chunk", restored=False, leaked=False),
+    ]
+    del rows[0]["stable_across_repeats"]
+
+    assert probe.derive_verdict(rows)["mode_regression"] == "inconclusive"
+
+
+def test_non_positive_repeats_are_rejected_not_clamped() -> None:
+    """Greptile P2. `max(1, repeats)` ran one pass while the artifact recorded the number
+    the operator asked for, so provenance disagreed with the measurement."""
+    segments = probe.build_segments("a1b2c3d4e5f60001")
+    case = {
+        "entity": "EMAIL",
+        "encoding": "plain",
+        "carrier": "sse-delta-content",
+        "request_site": "chat-content",
+        "fragmentation": "adversarial",
+    }
+
+    with pytest.raises(ValueError, match="at least 1"):
+        probe.run_condition(
+            "single-chunk",
+            segments,
+            case,
+            target_url="http://127.0.0.1:1/v1/chat/completions",
+            model="capture",
+            token=None,
+            upstream_port=8817,
+            timeout=1.0,
+            repeats=0,
+        )
+
+
+def test_the_cli_rejects_zero_repeats() -> None:
+    with pytest.raises(SystemExit):
+        probe.main(["--direct", "--repeats", "0"])
