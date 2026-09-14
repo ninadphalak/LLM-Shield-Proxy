@@ -187,3 +187,36 @@ def test_invalid_json_is_rejected(open_auth):
         content=b"{not json",
     )
     assert response.status_code == 400
+
+
+def test_a_refused_delta_does_not_echo_the_exception_text(open_auth, monkeypatch):
+    """Invariant 4, on the response path rather than the log.
+
+    `/v1/guard/rehydrate/stream` returns plaintext PII, and the handler catches
+    ValueError from anywhere inside `process_delta_text` -- including stdlib raises
+    whose messages embed the value being parsed. Forwarding `str(exc)` to the caller
+    is the client-visible twin of the `exc_info=exc` hazard the project already
+    forbids for logs, and CodeQL flagged it as py/stack-trace-exposure.
+    """
+    from llm_shield_proxy.streaming import streaming as streaming_module
+
+    secret = "lylyfwzv@example.com"
+
+    def _raise_with_the_value(self, *args, **kwargs):
+        raise ValueError(f"invalid literal for int() with base 10: '{secret}'")
+
+    monkeypatch.setattr(
+        streaming_module.SSERehydrationBuffer,
+        "process_delta_text",
+        _raise_with_the_value,
+    )
+
+    response = client.post(
+        "/v1/guard/rehydrate/stream",
+        headers=SESSION,
+        json={"text": "anything", "carry": "", "is_final": False},
+    )
+
+    assert response.status_code == 413
+    assert secret not in response.text
+    assert "int()" not in response.text

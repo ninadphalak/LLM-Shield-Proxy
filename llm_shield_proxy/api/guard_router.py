@@ -309,7 +309,20 @@ async def guard_rehydrate_stream(
     except ValueError as ve:
         # Backpressure ceiling or output-bound breach. Both are fail-closed by
         # design; do not emit the buffer.
-        return _error(413, str(ve), "invalid_request_error")
+        #
+        # AND DO NOT ECHO THE EXCEPTION TEXT. Every ValueError this path raises
+        # today carries a limit name and a number, but the handler catches
+        # ValueError from ANYWHERE inside `process_delta_text`, including stdlib
+        # raises whose messages embed the value that was being parsed. This
+        # endpoint returns plaintext PII, so that is the client-visible twin of
+        # the `exc_info=exc` hazard invariant 4 already forbids for logs: the
+        # value under inspection ends up in the error envelope. The caller gets
+        # the limit class, which is all it can act on; the operator gets the type
+        # name, and the frame locations remain available from the access log.
+        logger.warning(
+            "guard.rehydrate_stream refused a delta: %s", type(ve).__name__
+        )
+        return _error(413, "Rehydration limit exceeded", "invalid_request_error")
     except Exception:
         logger.exception("guard.rehydrate_stream failed")
         return _error(500, "Rehydration failed", "rehydration_error")
