@@ -102,10 +102,20 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
         "preferred because process listings expose argv.",
     )
     parser.add_argument("--target-model", default="conformance-model")
+    # Deferred: `cli` imports this module to dispatch the subcommand, so importing it at
+    # module scope is circular. `build_parser` runs long after both are loaded.
+    from pii_leak_benchmark.cli import _target_headers_from_env
+
     parser.add_argument(
         "--target-header",
         action="append",
-        default=None,
+        # The SAME default the flat command uses, so `append` adds to the environment
+        # rather than replacing it. With `default=None` and a post-hoc fallback, supplying
+        # one CLI header silently discarded every header in CONFORMANCE_TARGET_HEADERS --
+        # which is where credentials and routing headers are supposed to live. The check
+        # then runs unauthenticated, or against a different route, and reports NOT
+        # MEASURED for a reason that has nothing to do with the gateway.
+        default=_target_headers_from_env(),
         metavar="NAME=VALUE",
         help="Additional request header; repeat as needed. Values are not written to the "
         "report. Prefer newline-delimited CONFORMANCE_TARGET_HEADERS for credentials.",
@@ -258,12 +268,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from pii_leak_benchmark.http_profile import run_http_conformance
 
     args = build_parser().parse_args(argv)
-    if args.target_header is None:
-        args.target_header = [
-            line
-            for line in os.getenv("CONFORMANCE_TARGET_HEADERS", "").splitlines()
-            if line.strip()
-        ]
 
     try:
         report = run_http_conformance(
@@ -294,7 +298,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     destination = None
     if args.json_out:
-        destination = write_conformance_report(report, args.json_out)
+        # Inside the untrusted-run handling, not outside it. An unwritable path raises
+        # OSError, and an uncaught exception exits 1 -- the status this command documents
+        # as LEAK. An operator would read "raw values reached your upstream" when what
+        # actually happened is that a directory was missing.
+        try:
+            destination = write_conformance_report(report, args.json_out)
+        except (OSError, ValueError) as exc:
+            print(f"\n  {VERDICT_NOT_MEASURED}\n", file=sys.stderr)
+            print(
+                f"  The measurement ran, but its report could not be written: {exc}",
+                file=sys.stderr,
+            )
+            print(
+                "\n  Treat this as no measurement. Fix the path and re-run.\n",
+                file=sys.stderr,
+            )
+            return EXIT_NOT_MEASURED
 
     verdict, reason = verdict_for(report)
     _print_report(report, verdict, reason, destination)

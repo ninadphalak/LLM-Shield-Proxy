@@ -187,6 +187,59 @@ def test_the_documented_floor_reports_a_leak(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
+def test_an_unwritable_report_path_is_not_measured_rather_than_a_leak(tmp_path: Path) -> None:
+    """An I/O failure must not borrow the exit status that means "your gateway leaked".
+
+    The write used to sit outside the error handling, so an unwritable `--json-out` let
+    the OSError escape and the process exited 1 -- the documented LEAK status. An operator
+    would have read "raw values reached your upstream" when a directory was missing.
+
+    `--json-out` points at a path whose parent is a FILE, which cannot be created as a
+    directory on any platform.
+    """
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "pii_leak_benchmark.cli", "selfcheck",
+            "--target-base-url", "capture://self",
+            "--iterations", "1",
+            "--json-out", str(blocker / "report.json"),
+        ],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=False, timeout=300,
+    )
+    assert result.returncode == selfcheck.EXIT_NOT_MEASURED, result.stdout + result.stderr
+    assert selfcheck.VERDICT_NOT_MEASURED in result.stderr
+    # `capture://self` really does leak, so without the fix this would exit 1 for the
+    # right-looking reason and the regression would be invisible.
+    assert selfcheck.VERDICT_LEAK not in result.stdout
+
+
+def test_cli_headers_add_to_the_environment_rather_than_replacing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Credentials and routing headers live in CONFORMANCE_TARGET_HEADERS.
+
+    The flat command merges both sources. `selfcheck` used to read the environment only
+    when no `--target-header` was passed, so adding one CLI header dropped every
+    environment header -- running the check unauthenticated, or against a different route,
+    and then blaming the gateway for the resulting NOT MEASURED.
+    """
+    monkeypatch.setenv("CONFORMANCE_TARGET_HEADERS", "X-Env-One=1\nX-Env-Two=2")
+    args = selfcheck.build_parser().parse_args(
+        ["--target-base-url", "http://x/v1", "--target-header", "X-Cli=3"]
+    )
+    assert args.target_header == ["X-Env-One=1", "X-Env-Two=2", "X-Cli=3"]
+
+
+def test_the_environment_alone_still_supplies_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFORMANCE_TARGET_HEADERS", "X-Only=1")
+    args = selfcheck.build_parser().parse_args(["--target-base-url", "http://x/v1"])
+    assert args.target_header == ["X-Only=1"]
+
+
+@pytest.mark.slow
 def test_a_gateway_that_never_forwards_is_reported_as_not_measured(tmp_path: Path) -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _NeverForwards)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
