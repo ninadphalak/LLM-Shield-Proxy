@@ -186,6 +186,62 @@ def test_the_documented_floor_reports_a_leak(tmp_path: Path) -> None:
     assert selfcheck.VERDICT_LEAK in result.stdout
 
 
+def _with_fixture(**kwargs: Any) -> dict[str, Any]:
+    report = _report(**kwargs)
+    report["fixture"] = {"formats": {"EMAIL": "x", "SSN": "y", "CREDIT_CARD": "z"}}
+    return report
+
+
+def test_every_tested_type_is_listed_not_only_the_ones_that_leaked(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A bare verdict cannot tell an operator which data types were actually handled.
+
+    Printing only leaks makes a clean run unreadable: nothing separates "SSN was tested
+    and contained" from "SSN was never tested", and those support opposite decisions.
+    """
+    report = _with_fixture(leaked=["EMAIL"])
+    selfcheck._print_per_entity(report, report["checks"]["configured_upstream_boundary"])
+    out = capsys.readouterr().out
+
+    assert "EMAIL" in out and "LEAK" in out
+    for contained in ("SSN", "CREDIT_CARD"):
+        assert contained in out
+    assert out.count("contained") == 2
+
+
+def test_an_unattributable_run_never_reports_a_type_as_contained(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The NOT MEASURED trap, in its second hiding place.
+
+    If no traffic was inspected, no entity was contained -- it was not looked at. Marking
+    them "contained" here would reintroduce, per row, exactly the false assurance the
+    verdict ordering exists to prevent.
+    """
+    report = _with_fixture(correlated=0)
+    selfcheck._print_per_entity(report, report["checks"]["configured_upstream_boundary"])
+    out = capsys.readouterr().out
+
+    assert "contained" not in out
+    assert out.count("not measured") == 3
+
+
+def test_the_report_names_what_it_did_not_test(capsys: pytest.CaptureFixture[str]) -> None:
+    """The dangerous reading of a clean run is "my gateway handles sensitive data".
+
+    The fixture covers three shapes. Credentials and health data are the categories an
+    operator will assume were included unless the output says otherwise.
+    """
+    report = _with_fixture()
+    selfcheck._print_per_entity(report, report["checks"]["configured_upstream_boundary"])
+    out = capsys.readouterr().out
+
+    assert "Not tested by this profile" in out
+    assert "credentials" in out
+    assert "health" in out
+
+
 @pytest.mark.slow
 def test_an_unwritable_report_path_is_not_measured_rather_than_a_leak(tmp_path: Path) -> None:
     """An I/O failure must not borrow the exit status that means "your gateway leaked".

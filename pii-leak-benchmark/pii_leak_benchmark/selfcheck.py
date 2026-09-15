@@ -198,6 +198,56 @@ def verdict_for(report: dict[str, Any]) -> tuple[str, str]:
     return (VERDICT_CLEAN, "No fixture value reached the upstream and every check passed.")
 
 
+# What the v1 fixture does NOT carry. Printed with every result, because the dangerous
+# reading of a clean run is not "EMAIL was fine" -- it is "my gateway handles sensitive
+# data". These are the categories an operator will assume were covered unless told.
+_NOT_COVERED = (
+    "API keys, tokens and other credentials",
+    "health and clinical data",
+    "government IDs other than a US SSN",
+    "names, addresses and free-text identifiers",
+)
+
+
+def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
+    """One row per entity TESTED, not just the ones that leaked.
+
+    Printing only the leaks makes a clean run unreadable: nothing distinguishes "SSN was
+    tested and your gateway contained it" from "SSN was never tested". Those support
+    opposite decisions, and the second one is the reading that gets someone hurt.
+
+    Both halves come from the report as it already stands -- `fixture.formats` is the set
+    that was sent, `leaked_entity_types` the subset that escaped -- so this is a reporting
+    change and not a second measurement.
+    """
+    tested = sorted(report.get("fixture", {}).get("formats", {}))
+    if not tested:
+        return
+    leaked = set(boundary["leaked_entity_types"]) | set(
+        boundary["unattributed_leaked_entity_types"]
+    )
+    attributable = bool(boundary["correlated_requests"])
+
+    print("  Data types tested")
+    print(f"    {'TYPE':<16}{'RESULT':<14}WHAT IT MEANS")
+    for entity in tested:
+        if not attributable:
+            # NOT "contained". Nothing was inspected, so nothing was contained -- saying
+            # otherwise reintroduces per row the false assurance the verdict ordering
+            # exists to prevent.
+            state, meaning = "not measured", "no traffic from your gateway was inspected"
+        elif entity in leaked:
+            state, meaning = "LEAK", "sent to the upstream unmasked"
+        else:
+            state, meaning = "contained", "never reached the upstream in this run"
+        print(f"    {entity:<16}{state:<14}{meaning}")
+    print()
+    print("  Not tested by this profile, so a clean result says nothing about them:")
+    for item in _NOT_COVERED:
+        print(f"    - {item}")
+    print()
+
+
 def _print_report(report: dict[str, Any], verdict: str, reason: str, destination: Optional[str]) -> None:
     boundary = report["checks"][_BOUNDARY]
     capture = report["capture"]
@@ -218,9 +268,11 @@ def _print_report(report: dict[str, Any], verdict: str, reason: str, destination
     )
     print()
 
+    _print_per_entity(report, boundary)
+
     evidence = boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]
     if evidence:
-        print("  What leaked")
+        print("  How it leaked")
         print(f"    {'ENTITY':<14}{'MATCH':<12}{'SCOPE':<14}CHANNEL")
         for item in sorted(evidence, key=lambda e: (e["entity_type"], e["channel"])):
             print(
