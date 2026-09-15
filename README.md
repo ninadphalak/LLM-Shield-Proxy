@@ -84,6 +84,26 @@ timings. The same command runs in CI on Ubuntu, macOS and Windows across Python 
 Full walkthrough and what the numbers mean:
 [reproduce the fragmentation result](website/docs/conformance/reproduce-fragmentation.md).
 
+### Check your own gateway
+
+One question, one command: does your deployment send raw personal data to its upstream?
+
+```bash
+pip install pii-leak-benchmark
+
+# Establish the floor first. No gateway at all: this MUST report LEAK.
+pii-leak-benchmark selfcheck --target-base-url capture://self
+
+# Then your own gateway, already configured to use the capture as its upstream.
+pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
+```
+
+Exit `0` CLEAN, `1` LEAK, `2` NOT MEASURED. The third is the one that matters: a gateway that
+answers your client but was never pointed at the capture inspects nothing, so every check passes
+vacuously. That gets its own exit code instead of reading as a pass. `selfcheck` requires no vendor
+claim and its report is deliberately not publishable as a row about a product; to publish a
+comparative result, use the flat command and record the claim.
+
 The only third-party Python dependency is `httpx`; you do not need to install one gateway to test
 another. You configure the gateway to use the benchmark's local capture server as its model
 provider. The benchmark then checks the URL, headers, HTTP framing, and JSON body for the test values. If

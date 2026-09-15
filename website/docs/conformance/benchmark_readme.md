@@ -179,9 +179,13 @@ directory.
   Exhaustive and union oracles are separate, longer runs under `exhaustive-splits/` and
   `worst-case-splits/`.
 - **The capture is not a model.** The upstream is a synthetic SSE emitter, so the injection
-  segment is what the harness chose to inject. That is what makes the values known ground
-  truth, but it means leak rates are conditional on an injection pattern rather than on
-  observed model output.
+  segment is what the harness chose to inject. This is a limit on *generalization*, not on
+  measurement. Every needle is known exactly, so the gateway's handling of it is measured
+  rather than estimated: `LeakRate` answers "when this value arrives, split this way, does
+  the gateway remove it before the client sees it?" and the answer is exact. What a
+  synthetic upstream cannot supply is how often a real model emits such a value unprompted.
+  That frequency is the missing quantity, which is why leak rates are conditional on an
+  injection pattern rather than on observed model output.
 - **It is not a leaderboard.** One version and one configuration each, run by the author of
   one of the measured products. A leaderboard needs replication, version ranges, more
   carriers, and someone else running it.
