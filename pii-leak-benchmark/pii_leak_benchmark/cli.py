@@ -30,6 +30,12 @@ def _target_headers_from_env() -> list[str]:
     ]
 
 EPILOG = """\
+This command PUBLISHES a comparative row, so it requires the vendor's claim and a
+citation for it. To smoke-test your own deployment instead, where there is no vendor to
+cite, use the subcommand -- same measurement, no claim flags, operator-facing verdict:
+
+  pii-leak-benchmark selfcheck --target-base-url http://your-gateway/v1
+
 The gateway under test must already be configured to send its upstream traffic to the
 capture this command starts (default http://127.0.0.1:8765/v1). Nothing is measured
 about a gateway that never reaches the capture: that run reports
@@ -225,7 +231,17 @@ def print_summary(report: dict[str, Any], destination: str) -> None:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+
+    # One subcommand, dispatched before the flat parser sees anything, so the
+    # publishing command line is byte-for-byte what it was. `selfcheck` is the
+    # operator smoke test and deliberately takes no claim flags.
+    if arguments and arguments[0] == "selfcheck":
+        from pii_leak_benchmark.selfcheck import main as selfcheck_main
+
+        return selfcheck_main(arguments[1:])
+
+    args = build_parser().parse_args(arguments)
     from pii_leak_benchmark.artifact import write_conformance_report
 
     try:
