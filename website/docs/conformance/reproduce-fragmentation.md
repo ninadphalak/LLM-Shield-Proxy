@@ -230,7 +230,7 @@ Use `selfcheck`. It answers one question - *does my deployment leak?* - and it d
 you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
 
 ```bash
-pip install pii-leak-benchmark
+pip install "pii-leak-benchmark>=0.2.0"
 
 # Establish the floor FIRST. No gateway at all: this must report LEAK.
 pii-leak-benchmark selfcheck --target-base-url capture://self
@@ -238,6 +238,8 @@ pii-leak-benchmark selfcheck --target-base-url capture://self
 # Then your gateway, already configured to use the capture as its upstream.
 pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 ```
+
+`selfcheck` was added in 0.2.0; earlier releases do not have the subcommand.
 
 If the floor run reports anything but `LEAK`, your capture is not seeing traffic and no
 other run from that setup means anything.
@@ -253,6 +255,19 @@ was never pointed at the capture inspects nothing, so every needle check passes 
 That is the result that would mislead someone into shipping, so it gets its own state and
 its own exit code rather than being folded into either of the others.
 `tests/conformance/test_selfcheck.py` fails the build if that ordering is ever reversed.
+
+### Running it in your own CI
+
+The exit codes are the integration. A copy-paste GitHub Actions job is in
+[`examples/ci/gateway-pii-check.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/examples/ci/gateway-pii-check.yml):
+it runs the floor first and fails the build unless that reports `LEAK`, then checks your
+gateway and treats exit 2 as a failure rather than a pass.
+
+That job brings the gateway up inside the job, which is what lets it reach a capture on
+loopback. A deployment running elsewhere cannot, so it needs a capture it can actually
+reach - `--capture-host 0.0.0.0` behind your own tunnel, with `--capture-public-url` and a
+token from `CONFORMANCE_CAPTURE_TOKEN`. Exposing a capture server so production can reach
+it is a deliberate decision: the values it sends are synthetic, but the endpoint is real.
 
 The report `selfcheck` writes is **not publishable as a row about a product**: it records no
 vendor claim, so its `outcome` derives to `claim-unstated` by design. The operator verdict

@@ -89,7 +89,7 @@ Full walkthrough and what the numbers mean:
 One question, one command: does your deployment send raw personal data to its upstream?
 
 ```bash
-pip install pii-leak-benchmark
+pip install "pii-leak-benchmark>=0.2.0"
 
 # Establish the floor first. No gateway at all: this MUST report LEAK.
 pii-leak-benchmark selfcheck --target-base-url capture://self
@@ -97,6 +97,9 @@ pii-leak-benchmark selfcheck --target-base-url capture://self
 # Then your own gateway, already configured to use the capture as its upstream.
 pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 ```
+
+`selfcheck` needs 0.2.0 or newer. A copy-paste GitHub Actions job that fails your build on a
+leak is in [`examples/ci/gateway-pii-check.yml`](examples/ci/gateway-pii-check.yml).
 
 Exit `0` CLEAN, `1` LEAK, `2` NOT MEASURED. The third is the one that matters: a gateway that
 answers your client but was never pointed at the capture inspects nothing, so every check passes
