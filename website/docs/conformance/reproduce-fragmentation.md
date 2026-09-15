@@ -5,17 +5,33 @@ title: Reproduce the fragmentation result
 
 # Reproduce the fragmentation result
 
-One bounded experiment. It compares a chunk-local inspector against a length-bounded
-retaining inspector on the same corpus, and re-derives the published numbers on your
-machine.
+Three tracks. They answer different questions, and the first one is not the finding.
+
+| Track | What it answers | Cost |
+| :--- | :--- | :--- |
+| **1. Verify the instrument** | Does this harness behave on your machine the way it behaved on ours? | ~70 s, no Docker |
+| **2. See it on real software** | Does the effect appear in a real, widely deployed detector? | ~2.5 min, needs Docker |
+| **3. Test your own gateway** | Does *your* proxy leak, including the one in production? | your deployment |
+
+**Track 1 is a calibration run.** Its two policies are reference controls written by this
+project, and `chunk-local` is *written to be boundary-blind* - its own docstring calls it
+"the modelled defect". Measuring a program built to have a property and discovering it has
+that property tells you nothing about the world. What it does tell you is that your copy of
+the instrument reads the way ours does, which is the precondition for believing anything
+else on this page. Earlier versions of this page called it "the central result". It is not;
+that was an overstatement and it is corrected here.
+
+**The finding lives in Track 2**, where the detector is a real Microsoft Presidio container
+and the only thing that changes between the two rows is whether a chunk boundary is allowed
+to fall inside a value.
+
+You do not need to read the paper, run any other gateway, or know anything about SOC 2 or
+HIPAA to do any of them.
+
+## Track 1 - Verify the instrument
 
 It runs offline on a laptop. Nothing to install but the harness, no cloud account, no API
 key, no model, no network egress. Two policies, about 35 seconds each.
-
-You do not need to read the paper, run any other gateway, or know anything about SOC 2 or
-HIPAA to do this.
-
-## Steps
 
 ### 1. Get the code
 
@@ -101,6 +117,155 @@ neither of us controls.
 No secrets, tokens or configuration are needed. The job installs one dependency from PyPI
 and otherwise touches no network. Six runners report separately; each uploads its
 regenerated reports as a downloadable artifact.
+
+### What the controls are for
+
+Track 1 ships two of five reference policies. They are not findings and they are not
+products - Table I of the manuscript calls them "reference controls". They are the known
+standards you calibrate an instrument against, and each one fails the harness in a
+different, diagnostic way:
+
+| Control | Known to be | If the harness disagrees, it |
+| :--- | :--- | :--- |
+| `passthrough` | leaks everything | cannot see a leak at all |
+| `redact-all` | destroys the echo | cannot detect broken restoration |
+| `chunk-local` | boundary-blind by construction | cannot see fragmentation |
+| `bounded-retention` | boundary-safe by construction | reports phantom differences |
+| `retention-plus-decoding` | fully correct | cannot recognise containment |
+
+Without `passthrough` at 1.00 and `retention-plus-decoding` at 0.00, a rate in the middle
+is uninterpretable - you do not know the scale has endpoints. `bounded-retention` scoring
+identical rates in both arms is what demonstrates the 16-vs-16 pairing is sound; broken
+pairing would show a spurious gap.
+
+This is how ten instrument defects were caught, each recorded in the
+[revision history](./benchmark-revision-history). A control that should read 1.00 reading
+0.33 is how the Portkey socket-reuse bug surfaced.
+
+To run all five rather than the two:
+
+```bash
+python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/v2 \
+  --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
+```
+
+## Track 2 - See it on real software
+
+Same corpus, same seed, same wrappers, same one field different. The detector is no longer
+a reference policy written here - it is a stock
+[Microsoft Presidio](https://microsoft.github.io/presidio/) analyzer in its published
+container.
+
+About two and a half minutes including the image pull. This is the only track that costs
+you a Docker install, and it is the one that answers "does this happen to real software".
+
+### 1. Start a real Presidio analyzer
+
+Nothing else is needed - no LiteLLM, no Postgres, no shared Docker network. Those are only
+required for the external *gateway* rows.
+
+```bash
+docker run -d --name presidio-analyzer -p 5002:3000 \
+  mcr.microsoft.com/presidio-analyzer:latest
+```
+
+The harness expects it on `127.0.0.1:5002`; `benchmarks/presidio_partition_probe.py` reads
+`PRESIDIO_ANALYZER_API_BASE` if you put it elsewhere. Wait until it answers:
+
+```bash
+curl -s -X POST http://127.0.0.1:5002/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"call me at 939-38-8264","language":"en"}'
+```
+
+### 2. Run the pair
+
+```bash
+PYTHONPATH=pii-leak-benchmark python -m pii_leak_benchmark.v2_emitter --validate \
+  --only presidio-chunk-local,presidio-retention \
+  --seed a1b2c3d4e5f60001 --out ./reproduction-presidio
+```
+
+### 3. Read the result
+
+One seed, midpoint split oracle:
+
+| Wrapper | Leak, whole | Leak, split | DeltaFrag |
+| :--- | ---: | ---: | ---: |
+| `presidio-chunk-local` | 0.125 | 0.50 | 0.375 |
+| `presidio-retention` | 0.125 | 0.125 | 0.00 |
+
+Across the published twelve-seed sweep the chunk-local wrapper runs 0.1667 single-chunk to
+0.7188 adversarial, DeltaFrag 0.5521; the retaining wrapper holds DeltaFrag at exactly
+0.0000 on every seed. Those numbers and their ranges are in
+[`exhaustive-presidio-seed-sweep/README.md`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/v2-response-split/exhaustive-presidio-seed-sweep/README.md).
+
+Add `--exhaustive-splits` to cut at every internal offset instead of the midpoint. It moves
+`presidio-chunk-local` to adversarial 1.00 on every seed (DeltaFrag 0.8333) and leaves
+`presidio-retention` unmoved. Use it before quoting a DeltaFrag from any validating
+detector, because a midpoint cut is one sample and a weak one.
+
+### What this is not
+
+**It is not a defect report against Presidio, and not a ranking.** Presidio makes no
+streaming claim. Applying a whole-string scanner per chunk is the *integrator's* decision,
+and both wrappers here are this project's, not Microsoft's - the detector is Presidio's, the
+streaming integration and the rehydration half are the wrapper's. The claim under test is a
+property of the integration pattern, which any whole-string scanner inherits.
+
+The same shape is measured against LLM Guard 0.3.16 (DeltaFrag 0.5833), Guardrails AI
+0.10.2, LiteLLM 1.99, NeMo 0.24.0 and Portkey OSS - all real, all pinned versions, each with
+its own profile directory under `benchmarks/`.
+
+## Track 3 - Test your own gateway
+
+The harness measures any OpenAI-compatible endpoint, including one already in production.
+Nothing about it is specific to this project's proxy; `pii-leak-benchmark` is a separate
+distribution that is forbidden from importing the proxy, and a test fails the build if that
+changes.
+
+```bash
+# Request path: does your gateway send raw values to its upstream?
+pii-leak-benchmark --target-base-url http://your-gateway.internal/v1 \
+  --target-name your-gateway --target-version 1.2.3 \
+  --redaction-claimed claimed --redaction-claim-citation https://vendor.example/docs \
+  --redaction-enabled --redaction-config-reference "guardrail: pii-redact"
+
+# Response path: does it strip values the model emits, including split ones?
+PYTHONPATH=pii-leak-benchmark python -m pii_leak_benchmark.v2_emitter --validate \
+  --only my-gateway --gateway-url http://your-gateway.internal/v1/chat/completions \
+  --upstream-port 8799 --out ./my-gateway
+```
+
+**One constraint, and it is the whole operational story.** Your gateway must already be
+configured to send its upstream traffic to the capture this command starts. The harness
+never reconfigures your gateway - that is deliberate, because a harness that could
+reconfigure the thing it measures could also configure it to pass. A run whose traffic never
+reaches the capture reports `inconclusive`, not `pass`, because the harness cannot
+distinguish "never configured" from "sent it somewhere else".
+
+For a hosted or production gateway that cannot reach your laptop, bind the capture behind
+your own tunnel with `--capture-public-url` and `--capture-token`; put credentials in
+`CONFORMANCE_CAPTURE_TOKEN` and `CONFORMANCE_TARGET_API_KEY` rather than argv, which is
+visible in process listings. See the
+[hosted-gateway runbook](./hosted-gateway-runbook).
+
+Establish the floor first. The negative control has no gateway at all and **must** report
+`outcome=fail`; if it does not, your capture is not seeing traffic and no other row from
+that setup means anything:
+
+```bash
+pii-leak-benchmark --target-base-url capture://self \
+  --target-name raw-pass-through-negative-control --target-version 1 \
+  --redaction-claimed claimed \
+  --redaction-claim-citation https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/reproducing.md \
+  --redaction-enabled \
+  --redaction-config-reference "synthetic control: declared redaction intentionally absent"
+```
+
+Exit status is `0` when every check passed, `1` when one did not, and `2` when the run
+itself could not be trusted - an unreachable capture, or something already listening on its
+port. Treat `2` as "no measurement", never as a pass.
 
 ## Explanation
 
@@ -211,13 +376,17 @@ against a machine that is not the author's before reporting anything.
 If your machine disagrees with all six of those, that is worth knowing and is exactly what
 item 4 above is asking for.
 
-### What a green run proves, and what it does not
+### What a green Track 1 run proves, and what it does not
 
-Running this in your own CI raises the claim from *the author says the numbers reproduce*
+Running Track 1 in your own CI raises the claim from *the author says the numbers reproduce*
 to *the numbers reproduce on infrastructure the author does not control*. Concretely, a
 green run in your fork shows that the published JSON in this repository is what this code
 produces, that the result does not depend on hidden machine state, and that nothing
 reaches the network to fetch an answer.
+
+What it does **not** show is that the effect exists outside this repository. Both Track 1
+policies were written here, and `chunk-local` was written to be boundary-blind. That is
+Track 2's job, and no amount of green in Track 1 substitutes for it.
 
 It does not show that the instrument is honest. The corpus, the two policies and the leak
 inspector all live in this repository and were all written by the same person who
@@ -237,14 +406,19 @@ Those four are the whole argument. If the two policies differ anywhere except re
 the comparison is not measuring what it claims to measure, and that is a finding worth
 reporting.
 
-### What this experiment does not establish
+### What these experiments do not establish
 
-- It is not a measurement of any product. Both policies are reference inspectors.
+- **Track 1 is not a measurement of any product.** Both policies are reference inspectors
+  written by this project. It calibrates the instrument; it is not evidence about software
+  anyone ships.
+- **Track 2 is not a defect report or a ranking.** It measures a real detector inside a
+  wrapper written here. Presidio makes no streaming claim, and the integration pattern under
+  test is the integrator's choice, not the detector's.
 - It is 32 cases in four entity types and two encodings. It does not measure detector
   accuracy on real traffic.
-- The fragmentation is a two-part split at the value midpoint, not every possible split
-  point. The exhaustive oracles are a separate, longer run.
-- Reproducing these numbers says the instrument is deterministic and the published files
+- The fragmentation is a two-part split at the value midpoint by default, not every possible
+  split point. `--exhaustive-splits` and the union oracle are separate, longer runs.
+- Reproducing Track 1's numbers says the instrument is deterministic and the published files
   are what the code produces. It does not independently validate the method. Disagreeing
   with the method is a separate and welcome contribution.
 

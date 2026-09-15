@@ -165,7 +165,7 @@ Scope: in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and mod
 
 None submitted yet. The six CI runners that reproduce the fragmentation rows on every push
 are not independent - they run the author's code from the author's repository. See
-[what a green run proves, and what it does not](./reproduce-fragmentation#what-a-green-run-proves-and-what-it-does-not).
+[what a green Track 1 run proves, and what it does not](./reproduce-fragmentation#what-a-green-track-1-run-proves-and-what-it-does-not).
 
 To add yours, see [submitting a result](./submitting).
 
