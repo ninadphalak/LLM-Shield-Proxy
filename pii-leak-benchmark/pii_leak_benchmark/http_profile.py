@@ -139,6 +139,11 @@ _PROMPT_TEMPLATE = (
 # published quote, and its non-live basis. Change them there, not here.
 CREDENTIAL_ENTITY_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
 
+# Bandit flags these as B105 hardcoded_password_string, and it is RIGHT to: they are shaped
+# exactly like credentials, which is the whole point of a fixture a secret scanner should
+# catch. Each is suppressed individually rather than by silencing B105 for the file, so a
+# genuinely hardcoded secret added here later is still reported. The non-live basis of every
+# value is recorded in `needle_registry.py`.
 _CREDENTIAL_VALUES = {
     # AWS's own credential-file documentation example. An access key ID is half a
     # credential; it authenticates nothing without the secret access key, which is not in
@@ -146,18 +151,18 @@ _CREDENTIAL_VALUES = {
     "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
     # Prefix plus exactly 36 characters, per the detect-secrets pattern. The random region
     # is a fixed English literal and ten zeros; a generator emitting that is about 62**-10.
-    "GITHUB_TOKEN": "ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",
+    "GITHUB_TOKEN": "ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",  # nosec B105 -- fixture
     # The numeric fields are deliberately SHORTER than an issued token's. A real bot token
     # carries long decimal ids, and a run of 13+ digits also matches this corpus's own card
     # pattern -- a realistic fixture would have been caught by the PII recognizer and the
     # credential result would have been carried by the wrong detector.
-    "SLACK_TOKEN": "xoxb-00000-00000-EXAMPLENOTAREALTOKEN",
+    "SLACK_TOKEN": "xoxb-00000-00000-EXAMPLENOTAREALTOKEN",  # nosec B105 -- fixture
 }
 
 CREDENTIAL_VALUE_FORMATS = {
     "AWS_ACCESS_KEY_ID": "AKIA + 16 uppercase alphanumerics",
-    "GITHUB_TOKEN": "ghp_ + 36 characters",
-    "SLACK_TOKEN": "xoxb- + numeric fields + secret",
+    "GITHUB_TOKEN": "ghp_ + 36 characters",  # nosec B105 -- a shape, not a value
+    "SLACK_TOKEN": "xoxb- + numeric fields + secret",  # nosec B105 -- a shape, not a value
 }
 CREDENTIAL_VALUE_PATTERNS = {
     "AWS_ACCESS_KEY_ID": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
