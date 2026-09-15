@@ -9,8 +9,8 @@ One bounded experiment. It compares a chunk-local inspector against a length-bou
 retaining inspector on the same corpus, and re-derives the published numbers on your
 machine.
 
-It runs offline on a laptop. No gateway, no cloud account, no API key, no model, no
-network egress. Two policies, about 35 seconds each.
+It runs offline on a laptop. Nothing to install but the harness, no cloud account, no API
+key, no model, no network egress. Two policies, about 35 seconds each.
 
 You do not need to read the paper, run any other gateway, or know anything about SOC 2 or
 HIPAA to do this.
@@ -106,16 +106,40 @@ regenerated reports as a downloadable artifact.
 
 Everything below is context. None of it is needed to run the steps.
 
-### What the two policies are
+### What is actually running
 
-Both are reference inspectors implemented inside the benchmark. Neither is a product.
-They exist to hold one variable apart from everything else.
+There **is** a gateway, and the corpus does flow through it over real HTTP. What you are
+not installing is a *third-party* gateway: the harness starts its own small reference one,
+so the experiment can change a single field of its behaviour and hold everything else fixed.
 
-- **`chunk-local`** inspects each streamed chunk on its own and forgets it.
-- **`bounded-retention`** carries a bounded number of trailing characters from one chunk
-  into the next, so a value split across a chunk boundary is still visible as one string.
+1. **The client** sends a request carrying fake personal data, then inspects what comes back.
+2. **The gateway** (`_make_gateway` in `v2_emitter.py`) masks the values, remembers them in a
+   vault, and forwards the masked request. On the way back it applies its **response-path
+   policy** to every streamed event: strip values the user never sent, restore the ones they
+   did.
+3. **The capture server** stands in for the model provider. It records exactly what the
+   gateway forwarded, which is how a request-path leak is measured, then streams back a reply.
 
-They are otherwise the same inspector on the same 32-case corpus.
+That reply is built to be a trap. One segment echoes the user's own data, which the gateway
+must put *back*. Another injects data the user never sent, which the gateway must take
+*out* - and the harness deliberately cuts those injected values across two SSE events.
+
+The cut is the whole experiment. The two policies are two settings of one field on that
+gateway:
+
+- **`chunk-local`** inspects each streamed event on its own and forgets it, so a value split
+  across the boundary is invisible to it.
+- **`bounded-retention`** carries a bounded number of trailing characters into the next
+  event, so both halves are still one string when inspected.
+
+Same gateway, same corpus, same masking, same vault, same everything else. One field
+different, which is what licenses attributing the difference to fragmentation.
+
+Testing a real product swaps only the middle box for LiteLLM, Portkey or your own proxy and
+leaves the client, the capture server, the corpus and the cuts untouched. That is what makes
+those rows comparable with these. A measuring instrument that needed the product installed
+to run at all would not be neutral, so `pii-leak-benchmark` is a separate distribution
+forbidden from importing the proxy, and a test fails the build if that ever changes.
 
 ### What the four numbers mean
 
