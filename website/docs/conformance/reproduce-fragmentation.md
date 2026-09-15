@@ -224,6 +224,48 @@ Nothing about it is specific to this project's proxy; `pii-leak-benchmark` is a 
 distribution that is forbidden from importing the proxy, and a test fails the build if that
 changes.
 
+### Checking your own deployment
+
+Use `selfcheck`. It answers one question - *does my deployment leak?* - and it does not ask
+you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
+
+```bash
+pip install pii-leak-benchmark
+
+# Establish the floor FIRST. No gateway at all: this must report LEAK.
+pii-leak-benchmark selfcheck --target-base-url capture://self
+
+# Then your gateway, already configured to use the capture as its upstream.
+pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
+```
+
+If the floor run reports anything but `LEAK`, your capture is not seeing traffic and no
+other run from that setup means anything.
+
+| Verdict | Exit | What it means for you |
+| :--- | ---: | :--- |
+| `CLEAN` | `0` | Every check passed and the run was attributable to your gateway. |
+| `LEAK` | `1` | Raw values reached the upstream, **or** a behavioural check failed. Read the reason: a gateway that masks without restoring is breaking the response, not leaking. |
+| `NOT MEASURED` | `2` | Nothing reached the capture, or part of the traffic could not be inspected. **Never read this as a pass.** |
+
+`NOT MEASURED` is the one worth dwelling on. A gateway that answers your client normally but
+was never pointed at the capture inspects nothing, so every needle check passes vacuously.
+That is the result that would mislead someone into shipping, so it gets its own state and
+its own exit code rather than being folded into either of the others.
+`tests/conformance/test_selfcheck.py` fails the build if that ordering is ever reversed.
+
+The report `selfcheck` writes is **not publishable as a row about a product**: it records no
+vendor claim, so its `outcome` derives to `claim-unstated` by design. The operator verdict
+and the publishable outcome are separate fields answering separate questions, and a run can
+legitimately be `LEAK` for you and `claim-unstated` for a table.
+
+### Publishing a comparative row instead
+
+To publish a result about a named product, use the flat command and record the claim. Those
+flags are what stop a published table saying "Fail" about a product that never offered
+redaction.
+
+
 ```bash
 # Request path: does your gateway send raw values to its upstream?
 pii-leak-benchmark --target-base-url http://your-gateway.internal/v1 \
