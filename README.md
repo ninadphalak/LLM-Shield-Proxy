@@ -101,6 +101,23 @@ pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 `selfcheck` needs 0.2.0 or newer. A copy-paste GitHub Actions job that fails your build on a
 leak is in [`examples/ci/gateway-pii-check.yml`](examples/ci/gateway-pii-check.yml).
 
+It reports one row per data type, so you can see what your gateway handled and what it missed:
+
+```
+    TYPE               RESULT        WHAT IT MEANS
+    AWS_ACCESS_KEY_ID  LEAK          sent to the upstream unmasked
+    CREDIT_CARD        contained     never reached the upstream in this run
+    EMAIL              LEAK          sent to the upstream unmasked
+    GITHUB_TOKEN       LEAK          sent to the upstream unmasked
+    SLACK_TOKEN        LEAK          sent to the upstream unmasked
+    SSN                contained     never reached the upstream in this run
+```
+
+That is a real result from a gateway that redacts SSNs and card numbers and forwards every
+credential, which is the common shape. Six types: email, SSN, card, plus AWS, GitHub and Slack
+credential specimens. Every run also prints what it did **not** test, because the dangerous
+reading of a clean result is "my gateway handles sensitive data".
+
 Exit `0` CLEAN, `1` LEAK, `2` NOT MEASURED. The third is the one that matters: a gateway that
 answers your client but was never pointed at the capture inspects nothing, so every check passes
 vacuously. That gets its own exit code instead of reading as a pass. `selfcheck` requires no vendor

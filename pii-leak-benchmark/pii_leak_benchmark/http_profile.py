@@ -115,6 +115,63 @@ _PROMPT_TEMPLATE = (
     "Synthetic conformance record {nonce}: contact {email}, SSN {ssn}, card {card}"
 )
 
+# --------------------------------------------------------------------------- credentials
+#
+# ADDITIVE AND OPT-IN, and the reason matters. `PROTECTED_ENTITY_TYPES` above is what every
+# published v1 row was measured against; adding to it would silently change what an old row
+# means. These are requested explicitly instead, and `selfcheck` is the caller that asks,
+# because its report records no vendor claim and is not publishable as a row.
+#
+# WHY CREDENTIALS FIRST, AHEAD OF MORE PII. The leak inspector normalizes by stripping
+# separators, so a digit-only needle can be manufactured by unrelated digits in the traffic
+# -- that is what `_ipv4_can_produce` exists to prevent, after 123.45.67.89 folded onto the
+# old SSN fixture. Every value below is alphanumeric behind a distinctive literal prefix, so
+# no digit haystack can produce one. They carry no collision risk at all, which is what makes
+# them the cheap tranche.
+#
+# THESE ARE FIXED, NOT GENERATED, and that is deliberate. The PII values vary per run so that
+# three string replacements cannot pass. A credential's safety argument is about the exact
+# literal -- AWS publishing this specific key ID, ten consecutive zeros where a real GitHub
+# token carries base62 -- so generating a variant would void the argument that makes it safe
+# to ship. Secret scanners match prefix and shape anyway, which is what is being measured.
+#
+# Values are copied from `needle_registry.py`, where each carries its format source, a
+# published quote, and its non-live basis. Change them there, not here.
+CREDENTIAL_ENTITY_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
+
+_CREDENTIAL_VALUES = {
+    # AWS's own credential-file documentation example. An access key ID is half a
+    # credential; it authenticates nothing without the secret access key, which is not in
+    # this repository in any form.
+    "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+    # Prefix plus exactly 36 characters, per the detect-secrets pattern. The random region
+    # is a fixed English literal and ten zeros; a generator emitting that is about 62**-10.
+    "GITHUB_TOKEN": "ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",
+    # The numeric fields are deliberately SHORTER than an issued token's. A real bot token
+    # carries long decimal ids, and a run of 13+ digits also matches this corpus's own card
+    # pattern -- a realistic fixture would have been caught by the PII recognizer and the
+    # credential result would have been carried by the wrong detector.
+    "SLACK_TOKEN": "xoxb-00000-00000-EXAMPLENOTAREALTOKEN",
+}
+
+CREDENTIAL_VALUE_FORMATS = {
+    "AWS_ACCESS_KEY_ID": "AKIA + 16 uppercase alphanumerics",
+    "GITHUB_TOKEN": "ghp_ + 36 characters",
+    "SLACK_TOKEN": "xoxb- + numeric fields + secret",
+}
+CREDENTIAL_VALUE_PATTERNS = {
+    "AWS_ACCESS_KEY_ID": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    "GITHUB_TOKEN": re.compile(r"\bghp_[A-Za-z0-9_]{36}\b"),
+    "SLACK_TOKEN": re.compile(r"\bxoxb-(?:\d+-)+[A-Za-z0-9]+\b"),
+}
+
+# The PEM private-key block is NOT here. It is the only needle containing newlines, which
+# makes it a different transport case from a single-line token, and it is planned as part of
+# the structured-secret tranche rather than bolted onto a single-line prompt template.
+_CREDENTIAL_PROMPT_SUFFIX = (
+    ", aws key {AWS_ACCESS_KEY_ID}, github token {GITHUB_TOKEN}, slack token {SLACK_TOKEN}"
+)
+
 
 def _ipv4_can_produce(digits: str) -> bool:
     """Could some dotted-quad IPv4 address normalize to exactly these digits?
@@ -170,8 +227,11 @@ def _make_ssn() -> str:
         return value
 
 
-def make_fixture() -> dict[str, str]:
+def make_fixture(*, include_credentials: bool = False) -> dict[str, str]:
     """One run's protected values. Same format every run, different values.
+
+    `include_credentials` adds the fixed credential specimens. It defaults to False so the
+    published three-type fixture, and therefore every published row, is unchanged.
 
     Variation does not prevent format-specific handling on its own -- a target that redacts by FORMAT
     passes either way, which is the point. It raises the cheapest way to pass without
@@ -188,11 +248,14 @@ def make_fixture() -> dict[str, str]:
         for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH)
     )
     card = _FIXTURE_TEST_CARDS[secrets.randbelow(len(_FIXTURE_TEST_CARDS))]
-    return {
+    fixture = {
         "EMAIL": f"{local}@{_FIXTURE_EMAIL_DOMAIN}",
         "SSN": _make_ssn(),
         "CREDIT_CARD": "-".join(card[index : index + 4] for index in range(0, 16, 4)),
     }
+    if include_credentials:
+        fixture.update(_CREDENTIAL_VALUES)
+    return fixture
 
 
 def fixture_value_space() -> dict[str, int]:
@@ -229,7 +292,7 @@ def extract_fixture(prompt: str) -> dict[str, str]:
     rather than compare against a constant.
     """
     found: dict[str, str] = {}
-    for entity, pattern in PROTECTED_VALUE_PATTERNS.items():
+    for entity, pattern in {**PROTECTED_VALUE_PATTERNS, **CREDENTIAL_VALUE_PATTERNS}.items():
         match = pattern.search(prompt)
         if match:
             found[entity] = match.group(0)
@@ -358,12 +421,20 @@ def _make_nonce() -> str:
 
 
 def _build_prompt(nonce: str, fixture: dict[str, str]) -> str:
-    return _PROMPT_TEMPLATE.format(
+    prompt = _PROMPT_TEMPLATE.format(
         nonce=nonce,
         email=fixture["EMAIL"],
         ssn=fixture["SSN"],
         card=fixture["CREDIT_CARD"],
     )
+    # Appended rather than woven into the template, so the three published values keep their
+    # exact positions and surrounding words. A row measured without credentials and one
+    # measured with them differ by a suffix and nothing else.
+    if any(entity in fixture for entity in CREDENTIAL_ENTITY_TYPES):
+        prompt += _CREDENTIAL_PROMPT_SUFFIX.format(
+            **{entity: fixture[entity] for entity in CREDENTIAL_ENTITY_TYPES}
+        )
+    return prompt
 
 
 # The digit fold is the ASCII fold plus the zero and one families redirected to `0`
@@ -1446,6 +1517,7 @@ def run_http_conformance(
     capture_public_url: Optional[str] = None,
     extra_headers: Optional[dict[str, str]] = None,
     redaction_claim: Optional[dict[str, Any]] = None,
+    include_credentials: bool = False,
 ) -> dict[str, Any]:
     """Evaluate an OpenAI-compatible endpoint against a controlled capture upstream.
 
@@ -1517,7 +1589,7 @@ def run_http_conformance(
     # Values vary per run; the FORMAT does not. A target that redacts by shape is
     # unaffected. See make_fixture() for why the card is drawn from a published list
     # instead of generated, and why an SSN an IPv4 could collide with is rejected.
-    fixture = make_fixture()
+    fixture = make_fixture(include_credentials=include_credentials)
     prompt = _build_prompt(nonce, fixture)
 
     probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
@@ -1763,9 +1835,24 @@ def run_http_conformance(
         # publishing nothing left a reader unable to tell a varied-valid fixture from
         # the fixed-invalid one this replaced.
         "fixture": {
-            "varies_per_run": True,
+            # NOT unconditionally True once credentials are in play: their specimens are
+            # fixed on purpose, because the safety argument is about the exact literal.
+            # Reporting "varies_per_run" over a fixture half of which does not vary would
+            # misdescribe the very property this field exists to disclose.
+            #
+            # There is no `credentials_included` flag beside it, and there must not be:
+            # `fixture` is `additionalProperties: false` in the FROZEN v1.0.0 schema, so a
+            # new key makes every report invalid. The fact is carried by `formats`, which
+            # the schema leaves open, and spelled out in `specimens_are_non_real` below.
+            "varies_per_run": not include_credentials,
             "values_published": False,
-            "formats": dict(PROTECTED_VALUE_FORMATS),
+            # What was ACTUALLY sent, so a reader -- and the operator table in selfcheck --
+            # can tell "tested and contained" from "never tested". A constant three-type
+            # list here would report SSN as covered on a run that never sent one.
+            "formats": {
+                **PROTECTED_VALUE_FORMATS,
+                **(dict(CREDENTIAL_VALUE_FORMATS) if include_credentials else {}),
+            },
             "value_space_nominal": fixture_value_space(),
             "specimens_are_valid": (
                 "Every value is a valid specimen a validating detector recognises: "
@@ -1775,6 +1862,16 @@ def run_http_conformance(
             "specimens_are_non_real": (
                 "Reserved space only: example.com (RFC 2606 s3), the SSA "
                 "never-issued 900-999 SSN area, and published test card numbers."
+                + (
+                    " Credential specimens are FIXED, not generated, because each one's "
+                    "non-live basis is an exact literal: the AWS key ID is AWS's own "
+                    "published documentation example and authenticates nothing without "
+                    "the paired secret, and the GitHub and Slack values carry EXAMPLE and "
+                    "NOTAREAL tokens with zeroed regions. None was ever presented to any "
+                    "endpoint."
+                    if include_credentials
+                    else ""
+                )
             ),
             "ssn_ipv4_collision_rejection": (
                 "Generated SSNs whose digits any valid dotted-quad IPv4 address "

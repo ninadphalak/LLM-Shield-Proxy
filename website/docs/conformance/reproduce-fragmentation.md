@@ -244,6 +244,28 @@ pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 If the floor run reports anything but `LEAK`, your capture is not seeing traffic and no
 other run from that setup means anything.
 
+It reports one row per data type, so a result is actionable rather than a bare verdict:
+
+```
+    TYPE               RESULT        WHAT IT MEANS
+    AWS_ACCESS_KEY_ID  LEAK          sent to the upstream unmasked
+    CREDIT_CARD        contained     never reached the upstream in this run
+    EMAIL              LEAK          sent to the upstream unmasked
+    GITHUB_TOKEN       LEAK          sent to the upstream unmasked
+    SLACK_TOKEN        LEAK          sent to the upstream unmasked
+    SSN                contained     never reached the upstream in this run
+```
+
+Six types by default: three personal-data shapes plus AWS, GitHub and Slack credential
+specimens, added in 0.2.2. The credential values are FIXED rather than generated, unlike the
+personal-data ones, because each specimen's safety rests on an exact literal - AWS's own
+published example key ID, and values carrying `EXAMPLE` and `NOTAREAL` with zeroed regions.
+`--no-credentials` sends only the three published types.
+
+Every run also prints what it did **not** test, and that list shrinks only when a type is
+genuinely sent. Private keys, connection strings and other multi-line secrets are not covered:
+they are a different transport case from a single-line token, not a missing regex.
+
 | Verdict | Exit | What it means for you |
 | :--- | ---: | :--- |
 | `CLEAN` | `0` | Every check passed and the run was attributable to your gateway. |

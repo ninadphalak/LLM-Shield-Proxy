@@ -72,6 +72,10 @@ the flat command and record the claim.
 # from the outcome derivation without a test noticing.
 _BOUNDARY = "configured_upstream_boundary"
 
+# Named here rather than imported at module scope: `cli` imports this module, and
+# `http_profile` is the heavy import the flat command already defers.
+_CREDENTIAL_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
+
 VERDICT_CLEAN = "CLEAN"
 VERDICT_LEAK = "LEAK"
 VERDICT_NOT_MEASURED = "NOT MEASURED"
@@ -137,6 +141,12 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
         help="Bearer token the capture requires. Required in public mode. Prefer the "
         "CONFORMANCE_CAPTURE_TOKEN environment variable.",
     )
+    parser.add_argument(
+        "--no-credentials",
+        action="store_true",
+        help="Send only the three personal-data types, matching the published profile. "
+        "By default the check also sends AWS, GitHub and Slack credential specimens.",
+    )
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument(
@@ -201,12 +211,13 @@ def verdict_for(report: dict[str, Any]) -> tuple[str, str]:
 # What the v1 fixture does NOT carry. Printed with every result, because the dangerous
 # reading of a clean run is not "EMAIL was fine" -- it is "my gateway handles sensitive
 # data". These are the categories an operator will assume were covered unless told.
-_NOT_COVERED = (
-    "API keys, tokens and other credentials",
+_NOT_COVERED_ALWAYS = (
     "health and clinical data",
     "government IDs other than a US SSN",
     "names, addresses and free-text identifiers",
+    "private keys, connection strings and other multi-line secrets",
 )
+_NOT_COVERED_WITHOUT_CREDENTIALS = "API keys, tokens and other credentials"
 
 
 def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
@@ -228,8 +239,11 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
     )
     attributable = bool(boundary["correlated_requests"])
 
+    # Sized from the data, not a constant: AWS_ACCESS_KEY_ID is 17 characters and ran
+    # straight into the RESULT column at a hardcoded 16.
+    width = max(len(entity) for entity in tested) + 2
     print("  Data types tested")
-    print(f"    {'TYPE':<16}{'RESULT':<14}WHAT IT MEANS")
+    print(f"    {'TYPE':<{width}}{'RESULT':<14}WHAT IT MEANS")
     for entity in tested:
         if not attributable:
             # NOT "contained". Nothing was inspected, so nothing was contained -- saying
@@ -240,10 +254,16 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
             state, meaning = "LEAK", "sent to the upstream unmasked"
         else:
             state, meaning = "contained", "never reached the upstream in this run"
-        print(f"    {entity:<16}{state:<14}{meaning}")
+        print(f"    {entity:<{width}}{state:<14}{meaning}")
     print()
     print("  Not tested by this profile, so a clean result says nothing about them:")
-    for item in _NOT_COVERED:
+    # The list shrinks only when a type is GENUINELY sent. Deriving the credential line
+    # from the fixture rather than hardcoding it means `--no-credentials` puts the warning
+    # back, instead of a narrower run silently inheriting a wider run's coverage claim.
+    missing = list(_NOT_COVERED_ALWAYS)
+    if not any(entity in tested for entity in _CREDENTIAL_TYPES):
+        missing.insert(0, _NOT_COVERED_WITHOUT_CREDENTIALS)
+    for item in sorted(missing):
         print(f"    - {item}")
     print()
 
@@ -335,6 +355,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             capture_token=os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token,
             capture_public_url=args.capture_public_url,
             extra_headers=headers_from_args(args),
+            # Credentials ON by default here, OFF in the flat command. An operator asking
+            # "does my deployment leak?" means secrets as much as personal data -- a
+            # developer pasting an API key into a prompt is the likelier incident. The flat
+            # command keeps the published three-type fixture so old rows stay comparable;
+            # a selfcheck report is `claim-unstated` and not publishable as a row, so
+            # widening it cannot corrupt a table.
+            include_credentials=not args.no_credentials,
             # No claim, on purpose. See the module docstring: this declines to
             # participate in the publishable-row machinery rather than weakening it.
             redaction_claim=None,

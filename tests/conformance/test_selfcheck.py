@@ -186,6 +186,85 @@ def test_the_documented_floor_reports_a_leak(tmp_path: Path) -> None:
     assert selfcheck.VERDICT_LEAK in result.stdout
 
 
+def test_the_published_fixture_is_unchanged_by_the_credential_option() -> None:
+    """Every published v1 row was measured against exactly three types.
+
+    If `make_fixture()` ever starts returning more by default, those rows silently change
+    meaning -- the stale-row failure this project refuses everywhere else. The credential
+    set is additive and must stay opt-in.
+    """
+    from pii_leak_benchmark.http_profile import PROTECTED_ENTITY_TYPES, make_fixture
+
+    assert sorted(make_fixture()) == ["CREDIT_CARD", "EMAIL", "SSN"]
+    assert PROTECTED_ENTITY_TYPES == ("EMAIL", "SSN", "CREDIT_CARD")
+
+
+def test_credential_specimens_round_trip_and_collide_with_nothing() -> None:
+    """The two invariants that let a needle ship at all.
+
+    Recoverable: the capture must be able to find the value it sent, or a leak reads as
+    containment. Non-overlapping: no needle may be a substring of another, or one
+    entity's finding can be satisfied by decoding a different entity -- which is exactly
+    how the old SSN, a substring of the old card, masked a real decoder defect.
+    """
+    from pii_leak_benchmark.http_profile import _build_prompt, extract_fixture, make_fixture
+
+    fixture = make_fixture(include_credentials=True)
+    assert sorted(fixture) == [
+        "AWS_ACCESS_KEY_ID", "CREDIT_CARD", "EMAIL", "GITHUB_TOKEN", "SLACK_TOKEN", "SSN",
+    ]
+    assert extract_fixture(_build_prompt("a-b-c-d-e", fixture)) == fixture
+
+    values = list(fixture.values())
+    overlapping = [(a, b) for a in values for b in values if a != b and a in b]
+    assert overlapping == []
+
+
+def test_credential_specimens_carry_their_non_live_markers() -> None:
+    """Shipping a value that could be a live credential is the one unrecoverable mistake.
+
+    Each specimen's safety rests on a literal -- AWS's own published example, and the
+    EXAMPLE/NOTAREAL tokens with zeroed regions. Asserting the markers is a cheap tripwire
+    against someone "improving" a fixture into something that could authenticate.
+    """
+    from pii_leak_benchmark.http_profile import _CREDENTIAL_VALUES
+
+    assert _CREDENTIAL_VALUES["AWS_ACCESS_KEY_ID"] == "AKIAIOSFODNN7EXAMPLE"
+    for entity in ("GITHUB_TOKEN", "SLACK_TOKEN"):
+        assert "NOTAREAL" in _CREDENTIAL_VALUES[entity], entity
+    # A Slack bot token's numeric fields are short ON PURPOSE: 13+ consecutive digits also
+    # match this corpus's card pattern, which would have the credential result carried by
+    # the PII detector instead.
+    assert "-00000-00000-" in _CREDENTIAL_VALUES["SLACK_TOKEN"]
+
+
+def test_a_run_without_credentials_still_warns_that_they_were_not_tested(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Coverage claims must follow the fixture, not the version of the tool.
+
+    With `--no-credentials` the warning has to come back, or a narrower run inherits a
+    wider run's coverage claim and an operator reads "credentials fine" from a run that
+    sent none.
+    """
+    report = _report()
+    report["fixture"] = {"formats": {"EMAIL": "x", "SSN": "y", "CREDIT_CARD": "z"}}
+    selfcheck._print_per_entity(report, report["checks"]["configured_upstream_boundary"])
+    assert "credentials" in capsys.readouterr().out
+
+
+def test_a_credential_run_stops_claiming_credentials_are_untested(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = _report()
+    report["fixture"] = {"formats": {"EMAIL": "x", "AWS_ACCESS_KEY_ID": "y"}}
+    selfcheck._print_per_entity(report, report["checks"]["configured_upstream_boundary"])
+    out = capsys.readouterr().out
+    assert "API keys" not in out
+    # The categories that are still genuinely absent must survive.
+    assert "health and clinical data" in out
+
+
 def _with_fixture(**kwargs: Any) -> dict[str, Any]:
     report = _report(**kwargs)
     report["fixture"] = {"formats": {"EMAIL": "x", "SSN": "y", "CREDIT_CARD": "z"}}
