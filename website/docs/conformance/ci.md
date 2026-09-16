@@ -49,20 +49,39 @@ jobs:
 
 ## 3. Open a pull request
 
-The job sends synthetic personal data through your gateway and watches what reaches the
-provider. It fails if anything arrives unmasked, and the job summary names the data type and
-the next step:
+It runs on every pull request from now on, takes about a minute, and shows up as a green or
+red check in the PR's checks list. Click **Details** on it to see what it found:
 
 | Data type | Baseline | Current | Next step |
 | :--- | :--- | :--- | :--- |
 | EMAIL | contained | leak | Enable or repair request redaction for this format. |
 | SSN | contained | contained | No leak observed for this test shape. |
 
+Red means your gateway sent that value to the provider unmasked, and the job blocks the merge
+if you require the check. Nobody is emailed and nothing is sent anywhere: the result lives in
+the pull request.
+
 That is the whole setup. Everything below is optional.
 
 ---
 
 ## Optional: the rest
+
+<details>
+<summary><b>Show the result on your README</b></summary>
+
+GitHub publishes a status badge for the workflow. Add it to your README, replacing
+`OWNER/REPO`:
+
+```markdown
+[![PII leak check](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
+```
+
+It tracks the default branch and turns red the moment a leak lands there. On a public
+repository anyone can see it, which is the point: it is a claim a reader can click and check
+for themselves rather than take your word for.
+
+</details>
 
 <details>
 <summary><b>The four possible results</b></summary>
@@ -160,15 +179,21 @@ pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 \
 ```
 
 `pii-leak-benchmark ci --help` lists every input, with the same meanings as the Action. Use a
-fresh `--out` directory each time. To pin the source rather than the package, install
-`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark`.
+fresh `--out` directory each time.
+
+To pin the Git source instead of the PyPI package:
+
+```bash
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark"
+```
 
 </details>
 
 <details>
 <summary><b>Files the job leaves behind</b></summary>
 
-Uploaded as an artifact, on failure too:
+The job uploads these for you, on failures too. Open the workflow run and download the
+`pii-leak-benchmark` artifact:
 
 | File | Purpose |
 | :--- | :--- |
