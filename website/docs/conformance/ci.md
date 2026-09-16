@@ -1,12 +1,13 @@
 ---
-title: Catch gateway regressions in CI
-sidebar_position: 3
+title: Catch PII leaks before they merge
+sidebar_position: 1
 ---
 
-# Add a PII leak check to your CI
+# Catch PII leaks before they merge
 
 Your gateway is meant to strip personal data before it reaches the model provider. This job
-proves it still does, on every pull request. Setup is three lines and no account.
+checks that it still does, on every pull request, and fails the build when it does not.
+Setup is one file and three lines. No account, no API key, no paid model.
 
 ## 1. Add the workflow
 

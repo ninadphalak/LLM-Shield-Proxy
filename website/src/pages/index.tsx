@@ -43,13 +43,13 @@ function HomepageHeader() {
           same evidence and replication rules as every other result.
         </p>
         <div className={styles.buttons}>
-          <Link className="button button--secondary button--lg" to="/docs/conformance/results">
-            See what it measured
+          <Link className="button button--secondary button--lg" to="/docs/conformance/ci">
+            Test your own gateway
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            to="/docs/conformance/ci">
-            Add a gateway CI check
+            to="/docs/conformance/results">
+            See what it measured
           </Link>
         </div>
         <p className={styles.heroMeta}>
