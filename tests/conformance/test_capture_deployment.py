@@ -508,8 +508,25 @@ def test_capture_answers_before_the_target_is_started(capture_port):
     assert boundary["passed"] is True
 
 
+def test_a_session_measures_one_run_and_refuses_a_second(capture_port):
+    """Records start at the bind and are never sliced, so reuse would fold the first
+    run's captured traffic into the second one's counts, joins and leak haystacks.
+    The two runs do not even share a fixture. A fresh session per measurement is the
+    only shape that keeps startup traffic measured AND each run its own.
+    """
+    with capture_session(capture_port=capture_port) as session:
+        first = _run_in(session, _gateway(capture_port))
+        assert first["checks"]["configured_upstream_boundary"]["passed"] is True
+        with pytest.raises(ValueError, match="already measured a run"):
+            _run_in(session, _gateway(capture_port))
+
+
 def test_conflicting_capture_arguments_are_refused_not_ignored(capture_port):
-    """Two capture endpoints in one call is a setup error, not a preference."""
+    """Two capture endpoints in one call is a setup error, not a preference.
+
+    Checked before the session is claimed, so a rejected call does not burn the
+    session an operator is about to fix their arguments and reuse.
+    """
     with capture_session(capture_port=capture_port) as session:
         for conflict in (
             {"capture_port": _free_port()},
@@ -521,6 +538,9 @@ def test_conflicting_capture_arguments_are_refused_not_ignored(capture_port):
                 run_http_conformance(
                     "capture://self", iterations=1, session=session, **conflict
                 )
+        # Still usable: none of those calls measured anything.
+        report = _run_in(session, _gateway(capture_port))
+        assert report["checks"]["configured_upstream_boundary"]["passed"] is True
 
 
 def test_a_refused_session_releases_the_port(capture_port):
@@ -545,7 +565,9 @@ def test_a_refused_session_releases_the_port(capture_port):
 
 
 def test_sequential_sessions_on_one_port_do_not_share_a_record(capture_port):
-    """Baseline then candidate on one --capture-port: no double bind, no mixing."""
+    """Baseline then candidate on one --capture-port: a new session each time, which
+    is what ci.measure does. No double bind, and no record crosses between them.
+    """
     probe_paths, snapshots = [], []
     for _ in range(2):
         with capture_session(capture_port=capture_port) as session:
