@@ -1523,6 +1523,7 @@ def run_http_conformance(
     extra_headers: Optional[dict[str, str]] = None,
     redaction_claim: Optional[dict[str, Any]] = None,
     include_credentials: bool = False,
+    fixture_seed: Optional[str] = None,
 ) -> dict[str, Any]:
     """Evaluate an OpenAI-compatible endpoint against a controlled capture upstream.
 
@@ -1563,6 +1564,8 @@ def run_http_conformance(
     # Validated before the capture server binds: a malformed claim should cost nothing
     # and must never be silently defaulted into a verdict.
     claim_block = normalize_claim(redaction_claim)
+    if fixture_seed is not None and redaction_claim is not None:
+        raise ValueError("Seeded operator runs cannot publish a vendor verdict")
 
     bind_is_loopback = capture_host in _LOOPBACK_HOSTS
     capture_mode = "loopback" if bind_is_loopback and not capture_public_url else "public"
@@ -1595,6 +1598,10 @@ def run_http_conformance(
     # unaffected. See make_fixture() for why the card is drawn from a published list
     # instead of generated, and why an SSN an IPv4 could collide with is rejected.
     fixture = make_fixture(include_credentials=include_credentials)
+    if fixture_seed is not None:
+        from .operator_profile import seeded_fixture
+
+        fixture, nonce = seeded_fixture(fixture_seed, include_credentials)
     prompt = _build_prompt(nonce, fixture)
 
     probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
@@ -1849,7 +1856,7 @@ def run_http_conformance(
             # `fixture` is `additionalProperties: false` in the FROZEN v1.0.0 schema, so a
             # new key makes every report invalid. The fact is carried by `formats`, which
             # the schema leaves open, and spelled out in `specimens_are_non_real` below.
-            "varies_per_run": not include_credentials,
+            "varies_per_run": fixture_seed is None and not include_credentials,
             "values_published": False,
             # What was ACTUALLY sent, so a reader -- and the operator table in selfcheck --
             # can tell "tested and contained" from "never tested". A constant three-type

@@ -17,6 +17,61 @@ permissions:
   contents: read
 
 jobs:
+  operator-action:
+    name: Operator Action Detects a Gateway Regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Compare a contained baseline with an email-leaking candidate
+        id: regression
+        continue-on-error: true
+        uses: ./
+        with:
+          target-base-url: http://127.0.0.1:4000/v1
+          start-command: python tests/fixtures/ci_gateway.py --port 4000 --leak-email
+          baseline-base-url: http://127.0.0.1:4001/v1
+          baseline-start-command: python tests/fixtures/ci_gateway.py --port 4001
+          duty: anonymize
+      - name: Verify the action failed for the measured regression
+        env:
+          REPORT_DIRECTORY: ${{ steps.regression.outputs.report-directory }}
+          ACTION_OUTCOME: ${{ steps.regression.outcome }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          report = json.loads((pathlib.Path(os.environ['REPORT_DIRECTORY']) / 'current.json').read_text())
+          assert os.environ['ACTION_OUTCOME'] == 'failure'
+          assert report['verdict'] == 'LEAK'
+          assert 'EMAIL' in report['comparison']['regressions']
+          assert report['entities']['SSN'] == 'contained'
+          PY
+
+  presidio-reproduction:
+    name: Pinned Presidio Integration Reproduction
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install './pii-leak-benchmark[validate]'
+      - name: Start the pinned detector
+        run: |
+          docker run -d --name benchmark-presidio -p 127.0.0.1:5002:3000 \
+            mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+          for i in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:5002/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs benchmark-presidio
+          exit 1
+      - run: python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: presidio-reproduction
+          path: reproduction-presidio/
+
   evidence-integrity:
     name: Recompute Published Evidence
     runs-on: ubuntu-latest
@@ -47,6 +102,11 @@ jobs:
           # `test_harness_install_weight.py`, in a job with its own environment, so
           # nothing about that guarantee depends on this step.
           python -m pip install -e .
+
+      - name: Verify the frozen artifact manifest against its source commit
+        run: |
+          git fetch --depth=1 origin 6cbfee39af93909a0d3aba77622ea67af63f84c4
+          python benchmarks/verify_frozen_evidence.py
 
       - name: Verify schemas, provenance, pairing, and bounded oracles
         run: |
@@ -122,7 +182,7 @@ jobs:
           retention-days: 90
 
   fragmentation-reproduction:
-    # Re-measures the paper's central result from source on a clean runner and diffs the
+    # Calibrates study-owned reference policies on a clean runner and diffs the
     # regenerated reports against the published JSON, field by field. The
     # `evidence-integrity` job above recomputes statistics FROM the published files and so
     # cannot see the experiment itself drifting; this job runs the experiment.

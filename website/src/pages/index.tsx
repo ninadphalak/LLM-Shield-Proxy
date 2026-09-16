@@ -48,8 +48,8 @@ function HomepageHeader() {
           </Link>
           <Link
             className="button button--outline button--secondary button--lg"
-            to="/docs/conformance/reproducing">
-            Run it against your gateway
+            to="/docs/conformance/ci">
+            Add a gateway CI check
           </Link>
         </div>
         <p className={styles.heroMeta}>

@@ -51,7 +51,7 @@ to pass.
 
 Exit status:
   0  CLEAN        every check passed and the run was attributable
-  1  LEAK         raw values reached the upstream, or a behavioural check failed
+  1  LEAK / CHECK FAILED  observed leakage or a separate behavioural failure
   2  NOT MEASURED nothing reached the capture, or the run could not be trusted
 
 Establish the floor first. With no gateway at all, this MUST report LEAK:
@@ -78,6 +78,7 @@ _CREDENTIAL_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
 
 VERDICT_CLEAN = "CLEAN"
 VERDICT_LEAK = "LEAK"
+VERDICT_CHECK_FAILED = "CHECK FAILED"
 VERDICT_NOT_MEASURED = "NOT MEASURED"
 
 EXIT_CLEAN = 0
@@ -148,6 +149,10 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
         "By default the check also sends AWS, GitHub and Slack credential specimens.",
     )
     parser.add_argument("--iterations", type=int, default=3)
+    parser.add_argument("--duty", choices=("restore", "anonymize"), default="restore",
+                        help="Whether your gateway must restore values or only anonymize requests.")
+    parser.add_argument("--profile", choices=("pii-v1", "pii-secrets-v1"), default="pii-secrets-v1",
+                        help="Explicit smoke-test coverage; published paper profiles are separate.")
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument(
         "--json-out",
@@ -159,7 +164,7 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
     return parser
 
 
-def verdict_for(report: dict[str, Any]) -> tuple[str, str]:
+def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).
 
     Deliberately ordered attributability first. A run that never reached the capture
@@ -193,31 +198,21 @@ def verdict_for(report: dict[str, Any]) -> tuple[str, str]:
             "Raw fixture values reached the upstream: " + ", ".join(leaked) + ".",
         )
 
-    if not report["passed"]:
-        failed = sorted(
-            name for name, check in report["checks"].items() if not check.get("passed", True)
-        )
+    ignored = {"response_fidelity", "fragmentation_safety"} if duty == "anonymize" else set()
+    if duty not in {"restore", "anonymize"}:
+        raise ValueError("duty must be restore or anonymize")
+    failed = sorted(name for name, check in report["checks"].items()
+                    if name not in ignored and not check.get("passed", True))
+    if failed:
         return (
-            VERDICT_LEAK,
+            VERDICT_CHECK_FAILED,
             "Nothing leaked upstream, but these checks did not pass: "
             + ", ".join(failed)
             + ". A gateway that masks without restoring is not leaking -- it is breaking "
             "the response. Read the report before treating it as a privacy failure.",
         )
 
-    return (VERDICT_CLEAN, "No fixture value reached the upstream and every check passed.")
-
-
-# What the v1 fixture does NOT carry. Printed with every result, because the dangerous
-# reading of a clean run is not "EMAIL was fine" -- it is "my gateway handles sensitive
-# data". These are the categories an operator will assume were covered unless told.
-_NOT_COVERED_ALWAYS = (
-    "health and clinical data",
-    "government IDs other than a US SSN",
-    "names, addresses and free-text identifiers",
-    "private keys, connection strings and other multi-line secrets",
-)
-_NOT_COVERED_WITHOUT_CREDENTIALS = "API keys, tokens and other credentials"
+    return (VERDICT_CLEAN, f"No fixture value reached the upstream; required {duty} checks passed.")
 
 
 def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
@@ -238,6 +233,9 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
         boundary["unattributed_leaked_entity_types"]
     )
     attributable = bool(boundary["correlated_requests"])
+    complete = attributable and not (
+        boundary["uninspectable_requests"] or boundary["unattributed_uninspectable_requests"]
+    )
 
     # Sized from the data, not a constant: AWS_ACCESS_KEY_ID is 17 characters and ran
     # straight into the RESULT column at a hardcoded 16.
@@ -252,19 +250,19 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
             state, meaning = "not measured", "no traffic from your gateway was inspected"
         elif entity in leaked:
             state, meaning = "LEAK", "sent to the upstream unmasked"
+        elif not complete:
+            state, meaning = "not measured", "some traffic could not be inspected"
         else:
             state, meaning = "contained", "never reached the upstream in this run"
         print(f"    {entity:<{width}}{state:<14}{meaning}")
     print()
-    print("  Not tested by this profile, so a clean result says nothing about them:")
-    # The list shrinks only when a type is GENUINELY sent. Deriving the credential line
-    # from the fixture rather than hardcoding it means `--no-credentials` puts the warning
-    # back, instead of a narrower run silently inheriting a wider run's coverage claim.
-    missing = list(_NOT_COVERED_ALWAYS)
+    print("  Not tested by this profile: every format beyond the rows above.")
+    print("    Do not infer broad coverage of health and clinical data, government IDs,")
+    print("    names, addresses, private keys or connection strings from these rows.")
     if not any(entity in tested for entity in _CREDENTIAL_TYPES):
-        missing.insert(0, _NOT_COVERED_WITHOUT_CREDENTIALS)
-    for item in sorted(missing):
-        print(f"    - {item}")
+        print("    API keys, tokens and other credentials were not sent.")
+    if any(entity in tested for entity in _CREDENTIAL_TYPES):
+        print("    - credential formats beyond the three fixed synthetic specimens")
     print()
 
 
@@ -361,7 +359,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # command keeps the published three-type fixture so old rows stay comparable;
             # a selfcheck report is `claim-unstated` and not publishable as a row, so
             # widening it cannot corrupt a table.
-            include_credentials=not args.no_credentials,
+            include_credentials=args.profile == "pii-secrets-v1" and not args.no_credentials,
             # No claim, on purpose. See the module docstring: this declines to
             # participate in the publishable-row machinery rather than weakening it.
             redaction_claim=None,
@@ -395,11 +393,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             return EXIT_NOT_MEASURED
 
-    verdict, reason = verdict_for(report)
+    verdict, reason = verdict_for(report, duty=args.duty)
     _print_report(report, verdict, reason, destination)
 
     if verdict == VERDICT_CLEAN:
         return EXIT_CLEAN
-    if verdict == VERDICT_LEAK:
+    if verdict in (VERDICT_LEAK, VERDICT_CHECK_FAILED):
         return EXIT_LEAK
     return EXIT_NOT_MEASURED

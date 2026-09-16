@@ -1,104 +1,23 @@
-# Fail your build when your gateway sends raw personal data to its upstream.
-#
-# Copy this into your OWN repository as .github/workflows/pii-check.yml. It is not run by
-# this project; it is an example for people who deploy a gateway and want the check in the
-# pipeline that ships it.
-#
-# HOW IT WORKS, because the one constraint decides everything else. The benchmark must BE
-# your gateway's upstream: that is the only way to see what your gateway forwarded. So the
-# job brings your gateway up with its upstream pointed at the capture the check starts, on
-# 127.0.0.1:8765. The harness never reconfigures your gateway, deliberately -- something
-# that could reconfigure the thing it measures could also configure it to pass.
-#
-# THE FLOOR RUN IS NOT CEREMONY. With no gateway at all, selfcheck must report LEAK. If it
-# does not, your capture is not seeing traffic and the real run that follows it means
-# nothing, because a check that inspects no traffic passes every assertion it makes.
-
-name: Gateway PII check
-
+# Set the gateway-specific inputs once; the Action manages measurement and reporting.
+name: Gateway privacy check
 on:
   pull_request:
   push:
     branches: [main]
-
 permissions:
   contents: read
-
 jobs:
-  pii-check:
+  privacy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Build/install your gateway before this step.
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
         with:
-          python-version: "3.12"
-
-      - name: Install the benchmark
-        run: python -m pip install "pii-leak-benchmark>=0.2.0"
-
-      - name: Establish the floor
-        # No gateway. This MUST report LEAK (exit 1), so a clean exit here means the
-        # capture is not seeing traffic and every later result is meaningless.
-        run: |
-          set +e
-          pii-leak-benchmark selfcheck --target-base-url capture://self --iterations 1
-          status=$?
-          set -e
-          if [ "$status" -ne 1 ]; then
-            echo "::error::Floor run exited $status, expected 1 (LEAK)."
-            echo "The capture is not seeing traffic. Nothing measured after this is trustworthy."
-            exit 1
-          fi
-          echo "Floor established: the capture sees traffic and leaks are detectable."
-
-      - name: Start your gateway
-        # REPLACE THIS with however you bring your own gateway up. The only requirement is
-        # that its upstream / model-provider base URL is http://127.0.0.1:8765/v1 -- that
-        # is the capture the next step starts.
-        run: |
-          echo "Start your gateway here, with its upstream set to http://127.0.0.1:8765/v1"
-          exit 1
-
-      - name: Check the gateway
-        # Exit 0 CLEAN, 1 LEAK, 2 NOT MEASURED. Exit 2 is NOT a pass: it means nothing
-        # reached the capture, or some traffic could not be inspected. Letting it through
-        # would turn a misconfigured job into a green build.
-        run: |
-          set +e
-          pii-leak-benchmark selfcheck \
-            --target-base-url http://127.0.0.1:4000/v1 \
-            --iterations 3 \
-            --json-out pii-check.json
-          status=$?
-          set -e
-          case "$status" in
-            0) echo "CLEAN: no raw values reached the upstream." ;;
-            1) echo "::error::LEAK or failed check. Read the report before calling it a leak -- a gateway that masks without restoring is breaking the response, not leaking."; exit 1 ;;
-            2) echo "::error::NOT MEASURED. Your gateway was not pointed at the capture, or traffic could not be inspected. This is not a pass."; exit 1 ;;
-            *) echo "::error::Unexpected exit $status"; exit 1 ;;
-          esac
-
-      - name: Keep the report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pii-check
-          path: pii-check.json
-          if-no-files-found: ignore
-
-# TESTING A DEPLOYMENT THAT IS NOT IN THIS JOB.
-#
-# The steps above work because the gateway runs inside the job, so it can reach a capture
-# on loopback. A gateway running somewhere else cannot, and no amount of configuration in
-# this file changes that.
-#
-# For a staging or production deployment, the capture needs an address that deployment can
-# reach: bind it with --capture-host 0.0.0.0, publish it through your own tunnel or host,
-# and pass --capture-public-url plus a token. Put the token in CONFORMANCE_CAPTURE_TOKEN
-# and the gateway credential in CONFORMANCE_TARGET_API_KEY rather than on the command line,
-# because argv is visible in process listings. See the hosted-gateway runbook in the docs.
-#
-# Be deliberate about that: exposing a capture server to the internet so a production
-# gateway can reach it is a real decision, not a detail. The values it sends are synthetic,
-# but the endpoint is real.
+          target-base-url: http://127.0.0.1:4000/v1
+          start-command: ./scripts/start-test-gateway.sh
+          upstream-env: UPSTREAM_BASE_URL
+          duty: restore
+        # Optional gateway authentication:
+        # env:
+        #   CONFORMANCE_TARGET_API_KEY: ${{ secrets.TEST_GATEWAY_KEY }}

@@ -232,6 +232,10 @@ def print_summary(report: dict[str, Any], destination: str) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "ci":
+        from pii_leak_benchmark.ci import main as ci_main
+
+        return ci_main(arguments[1:])
 
     # One subcommand, dispatched before the flat parser sees anything, so the
     # publishing command line is byte-for-byte what it was. `selfcheck` is the

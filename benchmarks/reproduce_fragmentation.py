@@ -1,9 +1,10 @@
 """Re-run the published fragmentation experiment and diff it against the published JSON.
 
-This is the smallest self-contained reproduction of the paper's central result: one
-chunk-local inspector and one length-bounded retaining inspector, on the same corpus, at
+This calibrates two study-owned reference policies: one
+chunk-local inspector and one whitespace-retaining inspector, on the same corpus, at
 the published seed, under the midpoint oracle. Both run against a loopback capture server
-started by the harness. No gateway, no account, no network egress, no model.
+and reference gateway started by the harness. No external gateway, account or model.
+It verifies the instrument, not the external-detector findings or a memory bound.
 
 WHAT IT COMPARES, AND WHY IT COMPARES EVERYTHING.
 
@@ -16,7 +17,7 @@ whose drift would invalidate the published rates without changing them.
 `NONDETERMINISTIC` is an ignore list measured on this repository, not a guess: a
 chunk-local and a bounded-retention run reproduced their published reports with these
 eleven fields differing and nothing else. Each one records WHERE and WHEN the run
-happened, not what it measured. Anything that starts differing outside this list is a
+happened or timing observations. Timing reproducibility is not tested. Drift outside this list is a
 finding, and the exit status says so.
 
 The list was wrong when first written, and the way it was wrong is worth keeping. It was
@@ -34,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -51,6 +53,9 @@ from pii_leak_benchmark.artifact import write_json_artifact  # noqa: E402
 PUBLISHED = ROOT / "benchmarks" / "results" / "v2-response-split"
 PUBLISHED_SEED = "a1b2c3d4e5f60001"
 POLICIES = ("chunk-local", "bounded-retention")
+SUPPORTED_POLICIES = (*POLICIES, "presidio-chunk-local", "presidio-retention")
+EVIDENCE_COMMIT = "6cbfee39af93909a0d3aba77622ea67af63f84c4"
+MANIFEST = ROOT / "benchmarks" / "evidence-round-8.manifest.json"
 
 # Report paths that cannot reproduce because they record when, where and how fast the run
 # went, not what it measured. Every other leaf must match the published one exactly.
@@ -148,6 +153,38 @@ def _git_revision() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
+def load_baselines(policies: list[str], outdir: pathlib.Path) -> dict[str, Any]:
+    """Validate all destinations and snapshot immutable baselines before starting work."""
+    if not policies or len(set(policies)) != len(policies):
+        raise ValueError("select at least one policy, with no duplicates")
+    if any(name not in SUPPORTED_POLICIES for name in policies):
+        raise ValueError("supported reproduction policies: " + ", ".join(SUPPORTED_POLICIES))
+    protected = (ROOT / "benchmarks" / "results").resolve()
+    if outdir == protected or protected in outdir.parents or outdir in protected.parents:
+        raise ValueError("output must be outside the published evidence tree and its ancestors")
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    if manifest["source_commit"] != EVIDENCE_COMMIT:
+        raise ValueError("the evidence manifest must identify the frozen source commit")
+    baseline_paths = [PUBLISHED / f"{name}.json" for name in policies]
+    destinations = [outdir / f"{name}.json" for name in policies]
+    destinations.append(outdir / "reproduction-summary.json")
+    for destination in destinations:
+        resolved = destination.resolve()
+        if resolved == protected or protected in resolved.parents:
+            raise ValueError("output alias points into published evidence")
+        # Refuse existing artifacts, including hard links and stale successful summaries.
+        if destination.exists() or destination.is_symlink():
+            raise ValueError(f"output already exists; choose a fresh directory: {destination}")
+    baselines = {}
+    for name, path in zip(policies, baseline_paths):
+        payload = path.read_bytes().replace(b"\r\n", b"\n")
+        relative = path.relative_to(ROOT).as_posix()
+        if hashlib.sha256(payload).hexdigest() != manifest["sha256"][relative]:
+            raise ValueError(f"frozen baseline changed: {relative}")
+        baselines[name] = json.loads(payload)
+    return baselines
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -164,8 +201,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     outdir = pathlib.Path(args.out).resolve()
-    outdir.mkdir(parents=True, exist_ok=True)
     policies = [name.strip() for name in args.policies.split(",") if name.strip()]
+    try:
+        baselines = load_baselines(policies, outdir)
+    except (OSError, ValueError, KeyError) as exc:
+        parser.error(str(exc))
+    if args.seed != PUBLISHED_SEED:
+        parser.error("calibration must use the frozen published seed")
+    outdir.mkdir(parents=True, exist_ok=True)
 
     for policy in policies:
         _run_policy(policy, args.seed, outdir)
@@ -175,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     for policy in policies:
         published_path = PUBLISHED / f"{policy}.json"
         produced_path = outdir / f"{policy}.json"
-        published = json.loads(published_path.read_text(encoding="utf-8"))
+        published = baselines[policy]
         produced = json.loads(produced_path.read_text(encoding="utf-8"))
         drift = [
             {"path": path, "published": left, "produced": right}
@@ -213,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "reproduced": failures == 0,
         "seed": args.seed,
+        "evidence_commit": EVIDENCE_COMMIT,
         "policies": policies,
         "command": " ".join([sys.executable, *sys.argv]),
         "environment": {

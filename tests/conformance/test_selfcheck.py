@@ -123,9 +123,26 @@ def test_a_failed_check_without_a_leak_says_so_rather_than_crying_leak() -> None
     verdict, reason = selfcheck.verdict_for(
         _report(passed=False, failing_checks=("response_fidelity",))
     )
-    assert verdict == selfcheck.VERDICT_LEAK
+    assert verdict == selfcheck.VERDICT_CHECK_FAILED
     assert "response_fidelity" in reason
     assert "not leaking" in reason
+
+
+@pytest.mark.parametrize("counter", ["uninspectable", "unattributed_uninspectable"])
+def test_partial_inspection_never_claims_containment(counter, capsys):
+    report = _with_fixture(**{counter: 1}, leaked=["EMAIL"])
+    selfcheck._print_per_entity(report, report["checks"]["configured_upstream_boundary"])
+    output = capsys.readouterr().out
+    assert "contained" not in output
+    assert output.count("not measured") == 2
+    assert "LEAK" in output
+
+
+def test_anonymize_duty_does_not_require_restoration():
+    report = _report(passed=False, failing_checks=("response_fidelity",))
+    assert selfcheck.verdict_for(report, duty="anonymize")[0] == selfcheck.VERDICT_CLEAN
+    report["checks"]["sse_validity"]["passed"] = False
+    assert selfcheck.verdict_for(report, duty="anonymize")[0] == selfcheck.VERDICT_CHECK_FAILED
 
 
 def test_the_exit_statuses_are_the_ones_the_documentation_promises() -> None:

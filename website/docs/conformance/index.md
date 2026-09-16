@@ -1,5 +1,8 @@
 # Streaming Privacy Gateway Tests
 
+**Check your gateway on every pull request:** the [CI guide](./ci) provides a GitHub Action
+with automatic controls, actionable summaries, retained reports and baseline comparisons.
+
 The [specification governance process](/docs/conformance/governance) defines normative changes, independent review, conflicts, versioning, and result labels.
 
 These tests verify how a streaming privacy gateway handles known test values. They report functional results separately from timing, memory, and deployment-specific security claims.
