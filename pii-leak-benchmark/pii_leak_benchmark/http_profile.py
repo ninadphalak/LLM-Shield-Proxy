@@ -1437,6 +1437,12 @@ class CaptureSession:
     iteration. A window in which traffic reached the boundary and counted as clean
     because nobody was looking is exactly what this class exists to close.
 
+    One session therefore measures exactly ONE run. Its record set starts at the bind
+    and is never sliced, which is what lets startup traffic count; a second run over
+    the same session would inherit the first one's requests, and the two runs do not
+    even share a fixture. ``claim`` refuses that rather than quietly reporting the
+    earlier target's traffic against the later one.
+
     The session never stores the capture token; ``_CaptureState`` holds it, and the
     report publishes only whether one was required.
     """
@@ -1463,6 +1469,26 @@ class CaptureSession:
         # Filled in by capture_session once the probe has proved the channel, so a
         # report can never publish a self_probe block the session did not earn.
         self.self_probe: dict[str, Any] = {}
+        self._claimed = False
+
+    def claim(self) -> None:
+        """Take this session for one measurement. A second attempt is refused.
+
+        Every record since the bind belongs to the run, which is the whole point:
+        traffic a target sent during startup is egress to the boundary under test.
+        The same property makes reuse unsound. A second run would inherit the first
+        one's captured requests into its counts and its cross-request joins, and a
+        fixture value that happened to repeat would be read as a leak the second
+        target never sent. Slicing the records instead would reopen the startup
+        window this class exists to close, so the answer is a fresh session.
+        """
+        if self._claimed:
+            raise ValueError(
+                "This capture session has already measured a run. Open one "
+                "capture_session() per measurement: its records start at the bind, so "
+                "a second run would inherit the first one's captured traffic."
+            )
+        self._claimed = True
 
     def capture_block(self) -> dict[str, Any]:
         """The report's ``capture`` object. FROZEN v1.0.0 shape -- no new keys."""
@@ -1772,6 +1798,7 @@ def run_http_conformance(
             "configure the capture socket, which the supplied session already owns. "
             "Pass them to capture_session() instead."
         )
+    session.claim()
     capture_mode = session.mode
 
     # Per-run nonce. Without it nothing ties a captured request to THIS run, so a
