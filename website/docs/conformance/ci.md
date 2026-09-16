@@ -131,10 +131,36 @@ context, model, profile, seed and expectations. Record the code, policy and depe
 versions too: any of them can cause a difference.
 
 A scheduled or push job needs an explicitly selected baseline commit or released image.
-Alternatively, download `current.json` from a trusted prior main-branch run and pass its path
-as `baseline-report`. That is cheaper and weaker: it compares across environments and time.
-Different benchmark code, profile, model, iterations, seed, duty or incomplete measurements
-are rejected. Remeasure the baseline after upgrading the benchmark.
+
+The cheaper option is to reuse the last result from your default branch instead of building
+the old gateway at all. The job fetches it itself; nobody downloads anything:
+
+```yaml
+permissions:
+  contents: read
+  actions: read          # needed to read the earlier run
+
+steps:
+  - name: Fetch the last main-branch result
+    env:
+      GH_TOKEN: ${{ github.token }}
+    run: |
+      id=$(gh run list --workflow pii-leak-check.yml --branch main --status success              --limit 1 --json databaseId --jq '.[0].databaseId')
+      gh run download "$id" --name pii-leak-benchmark --dir baseline || echo "no baseline yet"
+  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+    with:
+      target-base-url: http://127.0.0.1:4000/v1
+      start-command: ./scripts/start-test-gateway.sh
+      upstream-env: UPSTREAM_BASE_URL
+      baseline-report: baseline/current.json
+```
+
+Two things to know before you rely on it. It compares across environments and time, so an
+unrelated runner change can look like a gateway change; measuring both versions in one job
+does not have that problem. And a baseline is rejected outright, as `NOT MEASURED`, if the
+benchmark version, profile, model, iterations, seed or duty differ, or if either run was
+incomplete. That is deliberate, but it means the job fails after you upgrade the benchmark
+until your default branch has produced a fresh baseline.
 
 </details>
 
@@ -193,8 +219,12 @@ pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-
 <details>
 <summary><b>Files the job leaves behind</b></summary>
 
-The job uploads these for you, on failures too. Open the workflow run and download the
-`pii-leak-benchmark` artifact:
+You do not need any of these to read the result. The table above is written straight into the
+workflow run page, so you read it in the browser and there is nothing to fetch.
+
+The job also uploads the underlying reports as an artifact called `pii-leak-benchmark`, on
+failures too, and they are worth opening in two cases: feeding `current.json` back as a
+baseline, and looking at exactly what arrived upstream when a result surprises you.
 
 | File | Purpose |
 | :--- | :--- |
