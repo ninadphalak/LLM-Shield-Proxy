@@ -1,0 +1,108 @@
+name: PII Leak Benchmark
+description: Check your gateway for upstream leaks and compare a previous version, with a job summary.
+branding:
+  icon: shield
+  color: blue
+inputs:
+  target-base-url:
+    description: Gateway's OpenAI-compatible /v1 URL
+    required: true
+  start-command:
+    description: Optional foreground command to start the gateway; stopped after measurement
+    default: ''
+  upstream-env:
+    description: Gateway environment variable that receives the benchmark capture URL
+    default: ''
+  target-model:
+    description: Gateway model or routing alias
+    default: conformance-model
+  target-version:
+    description: Version or commit of the gateway under test
+    default: current
+  duty:
+    description: restore (reversible masking) or anonymize (one-way masking)
+    default: restore
+  profile:
+    description: pii-v1 or pii-secrets-v1
+    default: pii-secrets-v1
+  seed:
+    description: Repeatable test fixture seed; keep constant for comparisons
+    default: gateway-ci-v1
+  baseline-base-url:
+    description: Optional previous gateway endpoint
+    default: ''
+  baseline-start-command:
+    description: Optional foreground command for the previous gateway
+    default: ''
+  baseline-version:
+    description: Previous gateway version or commit
+    default: baseline
+  baseline-report:
+    description: Path to a downloaded current.json from a compatible earlier run
+    default: ''
+  artifact-name:
+    description: Unique artifact name when invoking the action multiple times
+    default: pii-leak-benchmark
+outputs:
+  report-directory:
+    description: Directory with operator reports, raw measurements and summary.md
+    value: ${{ steps.setup.outputs.out }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      with:
+        python-version: '3.12'
+    - id: setup
+      shell: bash
+      env:
+        BENCHMARK_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        work=$(mktemp -d "$RUNNER_TEMP/pii-benchmark.XXXXXXXX")
+        python -m venv "$work/venv"
+        if [ -x "$work/venv/bin/python" ]; then
+          py="$work/venv/bin/python"
+        else
+          py="$work/venv/Scripts/python.exe"
+        fi
+        "$py" -m pip install --disable-pip-version-check "$BENCHMARK_ACTION_PATH/pii-leak-benchmark"
+        echo "python=$py" >> "$GITHUB_OUTPUT"
+        echo "out=$work/reports" >> "$GITHUB_OUTPUT"
+    - name: Measure gateway and summarize
+      shell: bash
+      env:
+        BENCHMARK_PYTHON: ${{ steps.setup.outputs.python }}
+        BENCHMARK_OUT: ${{ steps.setup.outputs.out }}
+        BENCHMARK_TARGET_BASE_URL: ${{ inputs.target-base-url }}
+        BENCHMARK_START_COMMAND: ${{ inputs.start-command }}
+        BENCHMARK_UPSTREAM_ENV: ${{ inputs.upstream-env }}
+        BENCHMARK_TARGET_MODEL: ${{ inputs.target-model }}
+        BENCHMARK_TARGET_VERSION: ${{ inputs.target-version }}
+        BENCHMARK_DUTY: ${{ inputs.duty }}
+        BENCHMARK_PROFILE: ${{ inputs.profile }}
+        BENCHMARK_SEED: ${{ inputs.seed }}
+        BENCHMARK_BASELINE_BASE_URL: ${{ inputs.baseline-base-url }}
+        BENCHMARK_BASELINE_START_COMMAND: ${{ inputs.baseline-start-command }}
+        BENCHMARK_BASELINE_VERSION: ${{ inputs.baseline-version }}
+        BENCHMARK_BASELINE_REPORT: ${{ inputs.baseline-report }}
+      run: |
+        "$BENCHMARK_PYTHON" - <<'PY'
+        import os
+        from pii_leak_benchmark.ci import main
+        flags = ['out', 'target-base-url', 'start-command', 'upstream-env', 'target-model',
+                 'target-version', 'duty', 'profile', 'seed', 'baseline-base-url',
+                 'baseline-start-command', 'baseline-version', 'baseline-report']
+        argv = []
+        for flag in flags:
+            value = os.environ.get('BENCHMARK_' + flag.upper().replace('-', '_'))
+            if value:
+                argv.extend(['--' + flag, value])
+        raise SystemExit(main(argv))
+        PY
+    - name: Keep benchmark reports
+      if: always() && steps.setup.outputs.out != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.setup.outputs.out }}
+        if-no-files-found: warn

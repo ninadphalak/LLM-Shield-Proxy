@@ -141,3 +141,52 @@ def test_the_documented_seed_and_policies_match_the_published_reports() -> None:
     assert checker.POLICIES == POLICIES
     for policy in POLICIES:
         assert _published(policy)["corpus"]["seed"] == checker.PUBLISHED_SEED
+
+
+@pytest.mark.parametrize("policies", [[], ["chunk-local", "chunk-local"], ["../../escape"]])
+def test_invalid_selection_is_rejected_before_running(policies, tmp_path):
+    with pytest.raises(ValueError):
+        checker.load_baselines(policies, tmp_path)
+
+
+@pytest.mark.parametrize("destination", [PUBLISHED, PUBLISHED.parent, ROOT])
+def test_published_outputs_and_ancestors_are_refused(destination):
+    with pytest.raises(ValueError, match="published evidence"):
+        checker.load_baselines(list(POLICIES), destination)
+
+
+def test_existing_output_including_hard_links_is_refused(tmp_path):
+    import os
+
+    target = tmp_path / "chunk-local.json"
+    os.link(PUBLISHED / "chunk-local.json", target)
+    with pytest.raises(ValueError, match="already exists"):
+        checker.load_baselines(list(POLICIES), tmp_path)
+
+
+def test_baselines_are_read_before_the_experiment(tmp_path, monkeypatch):
+    captured = checker.load_baselines(list(POLICIES), tmp_path)
+    assert captured["chunk-local"] == _published("chunk-local")
+    # A mutable working-tree baseline cannot change the already loaded comparison.
+    captured["chunk-local"]["metrics"]["delta_frag"] = 123
+    assert _published("chunk-local")["metrics"]["delta_frag"] == 0.875
+
+
+def test_changed_baseline_cannot_be_blessed_by_reproduction(tmp_path, monkeypatch):
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    changed = _published("chunk-local")
+    changed["metrics"]["delta_frag"] = 123
+    (baseline / "chunk-local.json").write_text(json.dumps(changed))
+    monkeypatch.setattr(checker, "PUBLISHED", baseline)
+    # Use a scratch manifest with the original digest and a root containing both paths.
+    import hashlib
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"source_commit": checker.EVIDENCE_COMMIT,
+                                   "sha256": {"baseline/chunk-local.json": hashlib.sha256(
+                                       (PUBLISHED / "chunk-local.json").read_bytes().replace(b"\r\n", b"\n")).hexdigest()}}))
+    monkeypatch.setattr(checker, "ROOT", tmp_path)
+    monkeypatch.setattr(checker, "MANIFEST", manifest)
+    with pytest.raises(ValueError, match="baseline changed"):
+        checker.load_baselines(["chunk-local"], tmp_path / "output")

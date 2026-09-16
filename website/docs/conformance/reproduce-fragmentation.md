@@ -49,7 +49,7 @@ git rev-parse HEAD
 
 ### 2. Install
 
-Any CPython from 3.11 onward. The only third-party dependency is `httpx`.
+Any CPython from 3.11 onward. The runner uses `httpx`; validation also installs `jsonschema`.
 
 CI verifies 3.11 and 3.12; 3.14 is verified locally. The harness package declares
 3.9+, but this experiment has not been run there - if you only have 3.9 or 3.10,
@@ -59,7 +59,7 @@ run it anyway and tell us what happened.
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
-python -m pip install ./pii-leak-benchmark
+python -m pip install "./pii-leak-benchmark[validate]"
 ```
 
 Do not install the proxy. This experiment does not use it.
@@ -166,7 +166,7 @@ required for the external *gateway* rows.
 
 ```bash
 docker run -d --name presidio-analyzer -p 5002:3000 \
-  mcr.microsoft.com/presidio-analyzer:latest
+  mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
 ```
 
 The harness expects it on `127.0.0.1:5002`; `benchmarks/presidio_partition_probe.py` reads
@@ -187,6 +187,14 @@ PYTHONPATH=pii-leak-benchmark python -m pii_leak_benchmark.v2_emitter --validate
 ```
 
 ### 3. Read the result
+
+The pinned image reproduced both stored reports on 2026-09-16, matching every compared
+field. CI now runs that pair too. This verifies the image as a reproduction target without
+rewriting historical target metadata. For the recursive comparison, run:
+
+```bash
+python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio-compared
+```
 
 One seed, midpoint split oracle:
 
@@ -230,7 +238,7 @@ Use `selfcheck`. It answers one question - *does my deployment leak?* - and it d
 you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
 
 ```bash
-pip install "pii-leak-benchmark>=0.2.0"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark"
 
 # Establish the floor FIRST. No gateway at all: this must report LEAK.
 pii-leak-benchmark selfcheck --target-base-url capture://self
@@ -269,7 +277,8 @@ they are a different transport case from a single-line token, not a missing rege
 | Verdict | Exit | What it means for you |
 | :--- | ---: | :--- |
 | `CLEAN` | `0` | Every check passed and the run was attributable to your gateway. |
-| `LEAK` | `1` | Raw values reached the upstream, **or** a behavioural check failed. Read the reason: a gateway that masks without restoring is breaking the response, not leaking. |
+| `LEAK` | `1` | Raw test values were observed upstream. |
+| `CHECK FAILED` | `1` | A required behavior check failed without an observed upstream leak. |
 | `NOT MEASURED` | `2` | Nothing reached the capture, or part of the traffic could not be inspected. **Never read this as a pass.** |
 
 `NOT MEASURED` is the one worth dwelling on. A gateway that answers your client normally but
@@ -280,9 +289,9 @@ its own exit code rather than being folded into either of the others.
 
 ### Running it in your own CI
 
-The exit codes are the integration. A copy-paste GitHub Actions job is in
+The [CI Action](./ci) handles controls, startup, summaries, artifacts and baseline comparisons. A short workflow example is in
 [`examples/ci/gateway-pii-check.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/examples/ci/gateway-pii-check.yml):
-it runs the floor first and fails the build unless that reports `LEAK`, then checks your
+it runs the floor first and fails unless every fixture type is detected, then checks your
 gateway and treats exit 2 as a failure rather than a pass.
 
 That job brings the gateway up inside the job, which is what lets it reach a capture on
@@ -506,3 +515,8 @@ reporting.
 - [Reproduce the conformance report](./reproducing) - the v1.0.0 local and HTTP profiles.
 - [Published results](./results)
 - [Submit a run](./submitting)
+
+Use a fresh output directory. The checker rejects existing artifacts and destinations inside
+published evidence. The historical `bounded-retention` name stays for compatibility, but its
+whitespace-based buffer has no general hard cap for arbitrarily long text without spaces.
+The calibration does not establish production memory bounds or repeatable timing.

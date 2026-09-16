@@ -74,3 +74,5 @@ repomix-output.xml
 # root. An independent reproducer's regenerated reports are THEIR evidence to send back,
 # not a candidate for commit next to the published ones they were diffed against.
 /reproduction/
+/pii-check/
+/reproduction-presidio/

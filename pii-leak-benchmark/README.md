@@ -9,6 +9,37 @@ pii-leak-benchmark --target-base-url http://127.0.0.1:8899/v1
 
 Standard library plus `httpx`. You should not have to install one gateway to measure another.
 
+## A gateway check in your pull request
+
+Use the [GitHub Action and regression guide](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/ci.md).
+The Action starts your test gateway when given a startup command, checks the capture with
+a negative control, and writes a job summary with results for each tested data type.
+It saves reports even when the check fails. An optional baseline shows new failures and fixes.
+
+```yaml
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+  with:
+    target-base-url: http://127.0.0.1:4000/v1
+    start-command: ./scripts/start-test-gateway.sh
+    upstream-env: UPSTREAM_BASE_URL
+```
+
+Provide your gateway's startup script and upstream environment variable once. Run it in the
+foreground and configure its redaction policy in your project. Choose `duty: anonymize` for
+intentional one-way masking; the default is `restore`. `CHECK FAILED` identifies behavior
+failures without an observed leak. `NOT MEASURED` identifies incomplete runs. Both fail CI.
+
+Install the 0.3.0 Git source release without depending on PyPI publication timing:
+
+```bash
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark"
+pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --out pii-check
+```
+
+The local command expects upstream routing to `http://127.0.0.1:8765/v1`. It writes a Markdown
+summary, raw measurements and a versioned operator report. These smoke checks are separate
+from the paper's response-injection and fragmentation experiments.
+
 ## What changed after the first benchmark run
 
 All current results were produced by this project on one workstation. No outside contributor has repeated them yet. The results table marks each product result as `unreplicated` and links to the configuration and report for that run.
