@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import gzip
 import json
 import os
@@ -19,7 +20,7 @@ import unicodedata
 import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 from urllib.parse import unquote_plus, urljoin
 
 import httpx
@@ -405,6 +406,8 @@ _PROBE_PATH_TEMPLATE = "/__conformance_capture_probe__/{token}"
 _PROBE_TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyz"  # nosec B105 - an alphabet, not a secret
 _PROBE_TOKEN_LENGTH = 24
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})
+_DEFAULT_CAPTURE_HOST = "127.0.0.1"
+_DEFAULT_CAPTURE_PORT = 8765
 
 
 def _make_probe_token() -> str:
@@ -1415,6 +1418,160 @@ def _self_probe(
     return probe
 
 
+class CaptureSession:
+    """A bound, recording capture server whose lifetime the caller controls.
+
+    The capture has to be listening when the target STARTS, not only when the client
+    iterations begin. A gateway that talks to its configured upstream before it opens
+    its own port -- model discovery, a provider health check, a credential probe --
+    finds nothing there when the capture binds later, and exits or times out before
+    the harness ever sends it a request. Binding first and holding the socket open
+    across the whole target lifecycle is the only ordering under which such a gateway
+    can be measured at all.
+
+    Everything that arrives while the session is open is recorded and inspected on
+    the same terms, whenever it arrived. Startup traffic is deliberately NOT bucketed
+    out of the measurement: the capture answers ``GET /v1/models`` so ordinary
+    discovery succeeds on its own, and anything else a target sends to its configured
+    upstream is egress to that origin whether it left before or after the first
+    iteration. A window in which traffic reached the boundary and counted as clean
+    because nobody was looking is exactly what this class exists to close.
+
+    The session never stores the capture token; ``_CaptureState`` holds it, and the
+    report publishes only whether one was required.
+    """
+
+    def __init__(
+        self,
+        server: ThreadingHTTPServer,
+        state: _CaptureState,
+        *,
+        bind_host: str,
+        mode: str,
+        authentication_required: bool,
+        advertised_base_url: str,
+        local_base_url: str,
+    ) -> None:
+        self.server = server
+        self.state = state
+        self.bind_host = bind_host
+        self.mode = mode
+        self.authentication_required = authentication_required
+        self.advertised_base_url = advertised_base_url
+        self.local_base_url = local_base_url
+        self.port = server.server_address[1]
+        # Filled in by capture_session once the probe has proved the channel, so a
+        # report can never publish a self_probe block the session did not earn.
+        self.self_probe: dict[str, Any] = {}
+
+    def capture_block(self) -> dict[str, Any]:
+        """The report's ``capture`` object. FROZEN v1.0.0 shape -- no new keys."""
+        return {
+            "mode": self.mode,
+            "bind_host": self.bind_host,
+            "port": self.port,
+            "authentication_required": self.authentication_required,
+            "target_must_be_preconfigured_for": self.advertised_base_url,
+            # Proof the capture was reachable and recording at the address the target
+            # was configured with, taken before the target was even started.
+            "self_probe": self.self_probe,
+        }
+
+
+@contextlib.contextmanager
+def capture_session(
+    *,
+    capture_host: str = _DEFAULT_CAPTURE_HOST,
+    capture_port: int = _DEFAULT_CAPTURE_PORT,
+    capture_token: Optional[str] = None,
+    capture_public_url: Optional[str] = None,
+    timeout_seconds: float = 30.0,
+) -> Iterator[CaptureSession]:
+    """Bind, self-probe, then serve the capture until the caller is finished with it.
+
+    Enter this BEFORE starting the target -- see ``CaptureSession`` for why. The
+    self-probe runs here, so a hijacked, firewalled or dead capture aborts before a
+    target process is launched rather than after a run has already blamed it.
+
+    ``run_http_conformance`` opens one of these for itself when no session is passed,
+    which is what every single-shot caller wants. Pass a session when the target's
+    lifecycle is yours to manage, as the CI command's managed startup is.
+    """
+    bind_is_loopback = capture_host in _LOOPBACK_HOSTS
+    capture_mode = "loopback" if bind_is_loopback and not capture_public_url else "public"
+    if not bind_is_loopback and not capture_public_url:
+        raise ValueError(
+            f"capture_host={capture_host!r} is not loopback, so capture_public_url is "
+            "required (CLI: --capture-public-url URL, env: "
+            "CONFORMANCE_CAPTURE_PUBLIC_URL). A wildcard bind has no address anything "
+            "can connect to, so publishing it as the URL the target must be configured "
+            "for is simply wrong. Pass the externally reachable /v1 base URL the target "
+            "will use -- your tunnel, your VPS, or http://host.docker.internal:PORT/v1 "
+            "for a container. A public bind also requires capture_token (CLI: "
+            "--capture-token, env: CONFORMANCE_CAPTURE_TOKEN)."
+        )
+    if capture_mode == "public" and not capture_token:
+        raise ValueError(
+            "capture_token is required when the capture is reachable beyond loopback "
+            "(CLI: --capture-token TOKEN, env: CONFORMANCE_CAPTURE_TOKEN -- prefer the "
+            f"env var, process listings show argv). bind_host={capture_host!r}, "
+            f"public_url={capture_public_url!r}. Without a token any internet traffic "
+            "could enter the capture record. Configure the target's upstream API key to "
+            "the same value so its requests are attributable."
+        )
+
+    probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
+    state = _CaptureState(probe_path, capture_token)
+
+    # SO_REUSEADDR is left at HTTPServer's default on every platform. Clearing it on
+    # Windows was tried and measured not to prevent a hijack -- the steal happens
+    # when the two sockets bind DIFFERENT addresses, where the flag is irrelevant,
+    # and the matching-address case was already refused without it. Keeping the flag
+    # is also what lets a repeat run rebind over the previous run's TIME_WAIT
+    # entries, which a baseline-then-candidate CI run does on one port. The post-bind
+    # self-probe below is what actually fails closed here.
+    server = ThreadingHTTPServer((capture_host, capture_port), _handler_for(state))
+    actual_host, actual_port = server.server_address[:2]
+    local_base_url = f"http://{actual_host}:{actual_port}/v1"
+    # What the TARGET must be pointed at. In public mode that is the tester's own
+    # externally reachable address, not the bind address -- a capture bound to
+    # 0.0.0.0 has no usable URL of its own.
+    advertised_base_url = (capture_public_url or local_base_url).rstrip("/")
+    # The local probe must use an address the harness can actually connect to. A
+    # wildcard bind is not one, so normalize it to loopback for the probe only.
+    probe_host = "127.0.0.1" if actual_host in ("0.0.0.0", "::", "") else actual_host
+    session = CaptureSession(
+        server,
+        state,
+        bind_host=capture_host,
+        mode=capture_mode,
+        authentication_required=capture_token is not None,
+        advertised_base_url=advertised_base_url,
+        local_base_url=local_base_url,
+    )
+    thread = threading.Thread(target=server.serve_forever, name="conformance-capture", daemon=True)
+    thread.start()
+    try:
+        # Before any target traffic, and before the target has even been started. A
+        # run whose capture cannot be reached measures nothing, and the report it
+        # would otherwise emit is schema-valid and blames the target.
+        session.self_probe = _self_probe(
+            f"http://{probe_host}:{actual_port}/v1{probe_path}",
+            advertised_base_url + probe_path,
+            probe_path,
+            state,
+            capture_token,
+            min(timeout_seconds, 30.0),
+        )
+        yield session
+    finally:
+        # Runs on the probe's own failure too, so a refused session never leaves the
+        # port bound for the retry or for the next measurement on the same port.
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 async def _exercise_target(
     target_base_url: str,
     api_key: str,
@@ -1516,10 +1673,11 @@ def run_http_conformance(
     implementation_version: str = "unspecified",
     iterations: int = 3,
     timeout_seconds: float = 30.0,
-    capture_host: str = "127.0.0.1",
-    capture_port: int = 8765,
+    capture_host: str = _DEFAULT_CAPTURE_HOST,
+    capture_port: int = _DEFAULT_CAPTURE_PORT,
     capture_token: Optional[str] = None,
     capture_public_url: Optional[str] = None,
+    session: Optional[CaptureSession] = None,
     extra_headers: Optional[dict[str, str]] = None,
     redaction_claim: Optional[dict[str, Any]] = None,
     include_credentials: bool = False,
@@ -1529,6 +1687,14 @@ def run_http_conformance(
 
     Configure the target gateway's upstream base URL to the capture server before running.
     Use ``capture://self`` as the target to record an explicit raw-pass-through baseline.
+
+    ``session`` accepts a ``CaptureSession`` the caller has already opened, for the
+    case where the target is STARTED by the caller: the capture must be listening
+    before a gateway that contacts its configured upstream during startup, or that
+    gateway never reaches the point of serving a request. Without one, this binds and
+    tears down its own capture around the run, and the remaining ``capture_*``
+    arguments configure it; with one, they belong to ``capture_session`` instead and
+    passing them here is refused rather than silently ignored.
 
     Two capture modes:
 
@@ -1567,28 +1733,46 @@ def run_http_conformance(
     if fixture_seed is not None and redaction_claim is not None:
         raise ValueError("Seeded operator runs cannot publish a vendor verdict")
 
-    bind_is_loopback = capture_host in _LOOPBACK_HOSTS
-    capture_mode = "loopback" if bind_is_loopback and not capture_public_url else "public"
-    if not bind_is_loopback and not capture_public_url:
+    if session is None:
+        # The ordinary single-shot call: the target is already running, so binding
+        # the capture here is soon enough. Re-entered with the session so there is
+        # one measurement path rather than two that can drift apart.
+        with capture_session(
+            capture_host=capture_host,
+            capture_port=capture_port,
+            capture_token=capture_token,
+            capture_public_url=capture_public_url,
+            timeout_seconds=timeout_seconds,
+        ) as owned:
+            return run_http_conformance(
+                target_base_url,
+                api_key=api_key,
+                model=model,
+                implementation_name=implementation_name,
+                implementation_version=implementation_version,
+                iterations=iterations,
+                timeout_seconds=timeout_seconds,
+                session=owned,
+                extra_headers=extra_headers,
+                redaction_claim=redaction_claim,
+                include_credentials=include_credentials,
+                fixture_seed=fixture_seed,
+            )
+    if (
+        capture_host != _DEFAULT_CAPTURE_HOST
+        or capture_port != _DEFAULT_CAPTURE_PORT
+        or capture_token is not None
+        or capture_public_url is not None
+    ):
+        # Refused, not ignored. A caller who passes both is describing two different
+        # capture endpoints, and quietly measuring against the session's would report
+        # an address the target was never configured for.
         raise ValueError(
-            f"capture_host={capture_host!r} is not loopback, so capture_public_url is "
-            "required (CLI: --capture-public-url URL, env: "
-            "CONFORMANCE_CAPTURE_PUBLIC_URL). A wildcard bind has no address anything "
-            "can connect to, so publishing it as the URL the target must be configured "
-            "for is simply wrong. Pass the externally reachable /v1 base URL the target "
-            "will use -- your tunnel, your VPS, or http://host.docker.internal:PORT/v1 "
-            "for a container. A public bind also requires capture_token (CLI: "
-            "--capture-token, env: CONFORMANCE_CAPTURE_TOKEN)."
+            "capture_host, capture_port, capture_public_url and the capture token "
+            "configure the capture socket, which the supplied session already owns. "
+            "Pass them to capture_session() instead."
         )
-    if capture_mode == "public" and not capture_token:
-        raise ValueError(
-            "capture_token is required when the capture is reachable beyond loopback "
-            "(CLI: --capture-token TOKEN, env: CONFORMANCE_CAPTURE_TOKEN -- prefer the "
-            f"env var, process listings show argv). bind_host={capture_host!r}, "
-            f"public_url={capture_public_url!r}. Without a token any internet traffic "
-            "could enter the capture record. Configure the target's upstream API key to "
-            "the same value so its requests are attributable."
-        )
+    capture_mode = session.mode
 
     # Per-run nonce. Without it nothing ties a captured request to THIS run, so a
     # target can exfiltrate raw PII to its real upstream and satisfy the boundary
@@ -1604,62 +1788,29 @@ def run_http_conformance(
         fixture, nonce = seeded_fixture(fixture_seed, include_credentials)
     prompt = _build_prompt(nonce, fixture)
 
-    probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
-    state = _CaptureState(probe_path, capture_token)
-
-    # SO_REUSEADDR is left at HTTPServer's default on every platform. Clearing it on
-    # Windows was tried and measured not to prevent a hijack -- the steal happens
-    # when the two sockets bind DIFFERENT addresses, where the flag is irrelevant,
-    # and the matching-address case was already refused without it. Keeping the flag
-    # is also what lets a repeat run rebind over the previous run's TIME_WAIT
-    # entries. The post-bind self-probe below is what actually fails closed here.
-    server = ThreadingHTTPServer((capture_host, capture_port), _handler_for(state))
-    actual_host, actual_port = server.server_address[:2]
-    local_base_url = f"http://{actual_host}:{actual_port}/v1"
-    # What the TARGET must be pointed at. In public mode that is the tester's own
-    # externally reachable address, not the bind address -- a capture bound to
-    # 0.0.0.0 has no usable URL of its own.
-    advertised_base_url = (capture_public_url or local_base_url).rstrip("/")
-    # The local probe must use an address the harness can actually connect to. A
-    # wildcard bind is not one, so normalize it to loopback for the probe only.
-    probe_host = "127.0.0.1" if actual_host in ("0.0.0.0", "::", "") else actual_host
-    local_probe_url = f"http://{probe_host}:{actual_port}/v1{probe_path}"
-    advertised_probe_url = advertised_base_url + probe_path
     effective_target = (
-        advertised_base_url if target_base_url == "capture://self" else target_base_url
+        session.advertised_base_url
+        if target_base_url == "capture://self"
+        else target_base_url
     )
-    thread = threading.Thread(target=server.serve_forever, name="conformance-capture", daemon=True)
-    thread.start()
-    try:
-        # Before any target traffic. A run whose capture cannot be reached measures
-        # nothing, and the report it would otherwise emit is schema-valid and blames
-        # the target.
-        self_probe = _self_probe(
-            local_probe_url,
-            advertised_probe_url,
-            probe_path,
-            state,
-            capture_token,
-            min(timeout_seconds, 30.0),
+    exercise = asyncio.run(
+        _exercise_target(
+            effective_target,
+            api_key,
+            model,
+            iterations,
+            timeout_seconds,
+            extra_headers or {},
+            prompt,
+            nonce,
         )
-        exercise = asyncio.run(
-            _exercise_target(
-                effective_target,
-                api_key,
-                model,
-                iterations,
-                timeout_seconds,
-                extra_headers or {},
-                prompt,
-                nonce,
-            )
-        )
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    )
 
-    all_records = state.snapshot()
+    # Everything the session has seen, which on a managed startup includes whatever
+    # the target sent to its configured upstream before it began serving. That is
+    # egress to the boundary under test and is inspected as such; the capture serves
+    # GET /v1/models itself, so ordinary discovery is answered rather than excused.
+    all_records = session.state.snapshot()
     # The probe is the harness's own traffic. It is bucketed out of everything a
     # verdict is computed from -- captured_requests, correlation, and the leak
     # haystacks -- so it can neither pollute the record nor move a result. Its path
@@ -1900,16 +2051,7 @@ def run_http_conformance(
             "platform": platform.platform(),
             "processor": platform.processor(),
         },
-        "capture": {
-            "mode": capture_mode,
-            "bind_host": capture_host,
-            "port": actual_port,
-            "authentication_required": capture_token is not None,
-            "target_must_be_preconfigured_for": advertised_base_url,
-            # Proof the capture was reachable and recording at the address the target
-            # was configured with, taken before any target traffic.
-            "self_probe": self_probe,
-        },
+        "capture": session.capture_block(),
         "checks": checks,
         # The raw measurement: did all five checks pass. Never overwritten by the
         # claim logic, so a negative finding is preserved even when the outcome says

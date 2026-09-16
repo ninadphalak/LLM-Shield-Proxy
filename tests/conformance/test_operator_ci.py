@@ -93,6 +93,16 @@ def test_managed_gateways_produce_actionable_regression_and_exit_one(tmp_path):
     assert "EMAIL" in report["comparison"]["regressions"]
     assert report["entities"]["SSN"] == "contained"
     assert "Enable or repair request redaction" in summary.read_text()
+    # Both managed gateways reach their configured upstream BEFORE they bind their
+    # own port, so a capture opened only once measurement began would have killed
+    # them during startup instead of measuring them. Their discovery request in the
+    # observed paths is the evidence that it was listening the whole time, and that
+    # startup traffic is inspected rather than bucketed out of the record.
+    for label in ("baseline", "current"):
+        raw = json.loads((output / f"{label}.raw.json").read_text())
+        boundary = raw["checks"]["configured_upstream_boundary"]
+        assert "/v1/models" in boundary["upstream_paths_observed"], label
+        assert boundary["uninspectable_requests"] == 0, label
     for port in (current_port, baseline_port):
         with pytest.raises(OSError):
             socket.create_connection(("127.0.0.1", port), timeout=0.3)
@@ -112,6 +122,28 @@ def test_no_regression_does_not_waive_current_leaks(tmp_path, monkeypatch):
     path = tmp_path / "incompatible.json"
     path.write_text(json.dumps(incompatible))
     assert ci.main(args + ["--out", str(tmp_path / "third"), "--baseline-report", str(path)]) == 2
+
+
+def test_a_capture_that_cannot_be_opened_never_starts_the_gateway(tmp_path):
+    """Ordering, end to end. The capture is opened first, so when opening it fails
+    the managed startup command must not run at all. Starting a gateway and handing
+    it an upstream address that nothing answers is the failure this order prevents,
+    and a wildcard bind with no advertised URL is the cheapest way to fail closed
+    on every platform without depending on who wins a contested port.
+    """
+    marker = tmp_path / "started"
+    command = f"\"{sys.executable}\" -c \"open(r'{marker}', 'w').close()\""
+    exit_code = ci.main([
+        "--target-base-url", f"http://127.0.0.1:{_port()}/v1",
+        "--start-command", command, "--capture-host", "0.0.0.0",
+        "--readiness-timeout", "5", "--iterations", "1",
+        "--out", str(tmp_path / "unopenable"),
+    ])
+    assert exit_code == 2
+    assert not marker.exists(), "the gateway was started before the capture existed"
+    summary = (tmp_path / "unopenable/summary.md").read_text()
+    assert "NOT MEASURED" in summary
+    assert "LEAK" not in summary
 
 
 def test_startup_failure_has_a_summary_and_is_not_a_leak(tmp_path):

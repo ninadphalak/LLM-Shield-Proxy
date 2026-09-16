@@ -19,6 +19,8 @@ product.
 Public API:
 
 - ``run_http_conformance`` - run the profile against a base URL, return a report.
+- ``capture_session`` - hold the capture endpoint open across a target you start
+  yourself, so a gateway that contacts its upstream during startup finds it there.
 - ``write_conformance_report`` - write a report as LF-terminated JSON.
 - ``build_attestation`` - self-reported CI provenance for a run, or ``None``.
 - ``derive_outcome`` / ``rationale_for`` - what a published row is ALLOWED to say.
@@ -29,13 +31,20 @@ name; only this tool carries the searchable one.
 """
 
 from pii_leak_benchmark.artifact import write_conformance_report
-from pii_leak_benchmark.http_profile import CaptureUnreachableError, run_http_conformance
+from pii_leak_benchmark.http_profile import (
+    CaptureSession,
+    CaptureUnreachableError,
+    capture_session,
+    run_http_conformance,
+)
 from pii_leak_benchmark.provenance import build_attestation, source_revision
 from pii_leak_benchmark.redaction_claim import derive_outcome, rationale_for
 
 __all__ = [
+    "CaptureSession",
     "CaptureUnreachableError",
     "build_attestation",
+    "capture_session",
     "derive_outcome",
     "rationale_for",
     "run_http_conformance",

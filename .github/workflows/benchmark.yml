@@ -39,11 +39,20 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, pathlib
-          report = json.loads((pathlib.Path(os.environ['REPORT_DIRECTORY']) / 'current.json').read_text())
+          reports = pathlib.Path(os.environ['REPORT_DIRECTORY'])
+          report = json.loads((reports / 'current.json').read_text())
           assert os.environ['ACTION_OUTCOME'] == 'failure'
           assert report['verdict'] == 'LEAK'
           assert 'EMAIL' in report['comparison']['regressions']
           assert report['entities']['SSN'] == 'contained'
+          # Both gateways contact the configured upstream before binding their own
+          # port, so their discovery request is proof the capture was listening
+          # through startup and not only during the measured iterations.
+          for label in ('baseline', 'current'):
+              raw = json.loads((reports / f'{label}.raw.json').read_text())
+              boundary = raw['checks']['configured_upstream_boundary']
+              assert '/v1/models' in boundary['upstream_paths_observed'], label
+              assert boundary['uninspectable_requests'] == 0, label
           PY
 
   presidio-reproduction:

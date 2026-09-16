@@ -170,12 +170,50 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float) 
             process.wait(timeout=5)
 
 
+EPILOG = """\
+Two one-time project inputs, then the checks run themselves:
+
+  --start-command   how CI starts your gateway in the foreground
+  --upstream-env    the environment variable your gateway reads its upstream /v1 URL
+                    from, if it is not BENCHMARK_UPSTREAM_BASE_URL
+
+Both are passed to the gateway with the capture address already listening, so a
+gateway that checks or contacts its provider during startup finds it there. Without
+--start-command the gateway must already be running and already be configured to send
+its upstream traffic to the capture (default http://127.0.0.1:8765/v1); nothing here
+reconfigures a gateway it did not start.
+
+A negative control runs first on every invocation. It measures the no-gateway floor
+and must report LEAK; if it does not, no verdict from this run is trusted.
+
+Comparing against the previous version, either way round:
+
+  --baseline-base-url URL [--baseline-start-command CMD]   measure both, this run
+  --baseline-report PATH                                   reuse a stored current.json
+
+A live baseline survives environment drift; a stored one is cheaper and weaker.
+Comparison never waives a current failure: an existing leak fails this job whether or
+not it is new.
+
+Exit status:
+  0  CLEAN        every required check passed and the run was attributable
+  1  LEAK / CHECK FAILED  observed leakage or a separate behavioural failure
+  2  NOT MEASURED nothing reached the capture, or the run could not be trusted
+
+Artifacts land in --out: summary.md, current.json, the raw report per measurement, and
+baseline.json when one was used. The summary is appended to GITHUB_STEP_SUMMARY.
+"""
+
+
 def main(argv: list[str] | None = None) -> int:
     from .cli import headers_from_args
-    from .http_profile import run_http_conformance
+    from .http_profile import capture_session, run_http_conformance
 
     parser = build_parser("pii-leak-benchmark ci")
     parser.description = "Check a gateway, compare an optional previous version, and write a CI summary."
+    # selfcheck's epilog tells the operator to configure their gateway's upstream
+    # themselves and promises nothing is started for them. Both are wrong here.
+    parser.epilog = EPILOG
     parser.add_argument("--out", default="pii-check", help="Fresh artifact directory")
     parser.add_argument("--seed", default="gateway-ci-v1", help="Identical fixtures across baseline and current")
     parser.add_argument("--target-version", default="current")
@@ -207,26 +245,39 @@ def main(argv: list[str] | None = None) -> int:
                 "seed": args.seed, "model": args.target_model, "iterations": args.iterations,
                 "harness_version": __version__, "instrument_sha256": instrument_digest(),
                 "fixture_sha256": hashlib.sha256(json.dumps([fixture, nonce], sort_keys=True).encode()).hexdigest()}
-    env = dict(os.environ)
-    upstream = args.capture_public_url or f"http://{args.capture_host}:{args.capture_port}/v1"
-    env["BENCHMARK_UPSTREAM_BASE_URL"] = upstream
-    if args.upstream_env:
-        env[args.upstream_env] = upstream
+    base_env = dict(os.environ)
     baseline = None
     run: dict[str, Any] = {"schema": "pii-leak-benchmark/operator-run/v1", "verdict": VERDICT_NOT_MEASURED,
                            "reason": "Run did not complete."}
     exit_code = 2
 
     def measure(url: str, command: str | None, label: str, version: str) -> dict[str, Any]:
-        with gateway(command, url, env, args.readiness_timeout):
-            report = run_http_conformance(
-                url, api_key=args.target_api_key, model=args.target_model, iterations=args.iterations,
-                timeout_seconds=args.timeout_seconds, capture_host=args.capture_host,
-                capture_port=args.capture_port, capture_public_url=args.capture_public_url,
-                capture_token=os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token,
-                extra_headers=headers_from_args(args), include_credentials=credentials,
-                fixture_seed=args.seed, implementation_version=version,
-            )
+        # Capture first, gateway second. A managed gateway is handed the capture URL
+        # as its upstream and a real one resolves, health-checks or lists models there
+        # BEFORE it opens its own port; with the capture bound only once measurement
+        # began, that gateway exited or timed out and the run blamed the operator.
+        # A fresh session per measurement also keeps the baseline's captured traffic
+        # out of the candidate's record.
+        with capture_session(
+            capture_host=args.capture_host, capture_port=args.capture_port,
+            capture_public_url=args.capture_public_url,
+            capture_token=os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token,
+            timeout_seconds=args.timeout_seconds,
+        ) as capture:
+            # The bound address, not the requested one, so the gateway is told where
+            # the capture actually is.
+            env = dict(base_env)
+            env["BENCHMARK_UPSTREAM_BASE_URL"] = capture.advertised_base_url
+            if args.upstream_env:
+                env[args.upstream_env] = capture.advertised_base_url
+            with gateway(command, url, env, args.readiness_timeout):
+                report = run_http_conformance(
+                    url, api_key=args.target_api_key, model=args.target_model,
+                    iterations=args.iterations, timeout_seconds=args.timeout_seconds,
+                    session=capture, extra_headers=headers_from_args(args),
+                    include_credentials=credentials, fixture_seed=args.seed,
+                    implementation_version=version,
+                )
         write_json_artifact(out / f"{label}.raw.json", report, indent=2)
         verdict, reason = verdict_for(report, duty=args.duty)
         ignored = {"response_fidelity", "fragmentation_safety"} if args.duty == "anonymize" else set()

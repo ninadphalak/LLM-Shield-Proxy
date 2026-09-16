@@ -190,3 +190,56 @@ def test_changed_baseline_cannot_be_blessed_by_reproduction(tmp_path, monkeypatc
     monkeypatch.setattr(checker, "MANIFEST", manifest)
     with pytest.raises(ValueError, match="baseline changed"):
         checker.load_baselines(["chunk-local"], tmp_path / "output")
+
+
+
+def test_an_output_directory_symlinked_into_published_evidence_is_refused(tmp_path):
+    """The alias check resolves the destination, so a link is not a way around it.
+
+    Skipped where the platform will not create one: on Windows an unprivileged process
+    cannot, and the guard being untestable there is not the guard being absent.
+    """
+    import pytest as _pytest
+
+    link = tmp_path / "out"
+    try:
+        link.symlink_to(PUBLISHED, target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError) as exc:
+        _pytest.skip(f"symlinks are not available here: {type(exc).__name__}")
+    with pytest.raises(ValueError, match="published evidence"):
+        checker.load_baselines(list(POLICIES), link)
+
+
+def test_a_baseline_rewritten_mid_experiment_cannot_move_the_comparison(tmp_path, monkeypatch):
+    """The snapshot is the comparison. A reproduction run takes about a minute per
+    policy, and a baseline file rewritten in that window -- by a concurrent checkout, by
+    a second run, by an editor -- must not become what the result is judged against.
+    The published tree is never touched here: the whole check runs against a copy.
+    """
+    import hashlib
+
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    original = (PUBLISHED / "chunk-local.json").read_bytes()
+    (baseline / "chunk-local.json").write_bytes(original)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "source_commit": checker.EVIDENCE_COMMIT,
+        "sha256": {"baseline/chunk-local.json": hashlib.sha256(
+            original.replace(b"\r\n", b"\n")).hexdigest()},
+    }))
+    monkeypatch.setattr(checker, "PUBLISHED", baseline)
+    monkeypatch.setattr(checker, "ROOT", tmp_path)
+    monkeypatch.setattr(checker, "MANIFEST", manifest)
+
+    loaded = checker.load_baselines(["chunk-local"], tmp_path / "output")
+    # The experiment is running. The file underneath it changes.
+    tampered = json.loads(original)
+    tampered["metrics"]["delta_frag"] = 123
+    (baseline / "chunk-local.json").write_text(json.dumps(tampered), encoding="utf-8")
+
+    assert loaded["chunk-local"]["metrics"]["delta_frag"] == 0.875
+    # A regenerated report matching the REWRITTEN file is drift against the snapshot,
+    # which is the only outcome that keeps the exit status meaningful.
+    drift = list(checker._diff(loaded["chunk-local"], tampered))
+    assert any("delta_frag" in str(entry) for entry in drift), drift
