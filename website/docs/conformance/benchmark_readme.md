@@ -54,9 +54,12 @@ nothing, which is equally true of perfect protection and of total failure.
 ### A negative DeltaFrag is possible and does not mean safety
 
 `presidio-chunk-local` reaches `-0.125` on one seed of twelve: the value leaked *more* when
-not fragmented. The detector missed a complete US phone number but matched one fragment of
-it for an unrelated reason. A negative difference must be read beside the single-chunk
-baseline and the report's `detector_blind_entities` field.
+it arrived whole. On that seed an entire phone number slipped past the detector, while a
+piece of the split version happened to trip a different rule. Splitting therefore looked
+protective purely by coincidence.
+
+Treat a negative number as an artefact until you have checked two things: the unfragmented
+arm, and `detector_blind_entities` in the report. On its own it says nothing about safety.
 
 ## Findings a reviewer should check
 
