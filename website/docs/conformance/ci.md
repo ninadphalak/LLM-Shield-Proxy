@@ -9,29 +9,77 @@ Test your gateway in the workflow that ships it. Each run gives you a table of t
 types, failing behaviors and next steps. An optional previous version makes new failures
 and improvements visible in the GitHub job summary.
 
-## Set up once
+The check runs entirely on the GitHub runner. It needs no account, no API key for this
+project, no write token and no paid model.
 
-The benchmark acts as a synthetic model provider at `http://127.0.0.1:8765/v1`. Your test
-gateway must send upstream requests there; no paid model is needed. Configure the same
-redaction policy you intend to ship. The benchmark does not enable protection for you.
+## What you need before you start
 
-After your existing dependency-install or image-build steps, add:
+1. **An OpenAI-compatible gateway in a GitHub repository.** Anything that accepts
+   `POST /v1/chat/completions` with `"stream": true` and forwards to a model provider.
+2. **A command that starts it in the foreground** and keeps running, such as a script in
+   your repository. The Action runs this command and stops the process afterwards.
+3. **A way to tell it where its provider is**, normally an environment variable such as
+   `OPENAI_BASE_URL` or `UPSTREAM_BASE_URL`. This is the one setting you have to name,
+   because no two gateways spell it the same way.
+
+That is the whole list. If your gateway is already running somewhere the runner can reach,
+and already points at the capture, you can skip items 2 and 3.
+
+## The complete workflow
+
+Copy this into your repository as `.github/workflows/pii-leak-check.yml`, then change the
+three marked lines to match your gateway:
 
 ```yaml
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
-  with:
-    target-base-url: http://127.0.0.1:4000/v1
-    start-command: ./scripts/start-test-gateway.sh
-    upstream-env: UPSTREAM_BASE_URL
-    target-model: conformance-model
-    duty: restore
+name: PII leak check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pii-leak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Build or install YOUR gateway here, however your project does it.
+      # This example is a Python project; substitute your own steps.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+        with:
+          # 1. Where your gateway will listen.
+          target-base-url: http://127.0.0.1:4000/v1
+          # 2. How to start it, in the foreground.
+          start-command: ./scripts/start-test-gateway.sh
+          # 3. The variable it reads for its provider URL.
+          upstream-env: UPSTREAM_BASE_URL
+          duty: restore
 ```
 
-Set `start-command` to your foreground startup command and `upstream-env` to the variable
-your gateway reads for its provider URL. A startup script can instead read
-`BENCHMARK_UPSTREAM_BASE_URL` to generate a temporary YAML routing configuration.
-These inputs are gateway-specific; the remaining steps are automatic. Pin the Action to
-an immutable commit SHA when your organization requires it.
+The job fails when a synthetic value reaches the upstream, and the summary names which data
+type and what to do about it. Nothing else is required to get a first result.
+
+### What the three lines mean
+
+`target-base-url` is your gateway's own `/v1` address on the runner. `start-command` is run
+in the foreground and stopped after measurement; startup logs are suppressed, so run the
+command locally if startup fails. `upstream-env` receives the address of a synthetic model
+provider the Action stands up for the run, in place of the real one. A startup script can
+instead read `BENCHMARK_UPSTREAM_BASE_URL`, which is always set, and write a temporary
+routing configuration from it.
+
+Configure the same redaction policy you intend to ship. The benchmark measures your gateway.
+It does not enable protection for you. Pin the Action to an immutable commit SHA when your
+organization requires it.
 
 The synthetic provider is listening before your startup command runs, so a gateway that
 contacts its provider while starting up, to list models or to check its credentials, finds
@@ -40,10 +88,9 @@ any other request it sends to the configured upstream. The provider answers `GET
 with a one-entry list, and any other startup path with a 404 it records.
 
 The Action runs a negative control, waits for the gateway's port, measures it, writes the
-summary, uploads reports, and stops processes it started. It needs no account or write token.
-Startup logs are suppressed; run your command locally if startup fails. For a gateway already
-running with capture routing configured, omit `start-command` and `upstream-env`.
-Supply authentication through `CONFORMANCE_TARGET_API_KEY` and `CONFORMANCE_TARGET_HEADERS`.
+summary, uploads reports, and stops processes it started. For a gateway already running with
+capture routing configured, omit `start-command` and `upstream-env`. Supply authentication to
+your gateway through `CONFORMANCE_TARGET_API_KEY` and `CONFORMANCE_TARGET_HEADERS`.
 
 ## Understand the result
 
@@ -130,14 +177,18 @@ runner's local capture. It cannot inspect arbitrary production traffic just from
 
 ## Local runs and artifacts
 
-Install the Git source release without depending on PyPI upload timing:
+Run the same check on your own machine before you commit a workflow:
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark>=0.3.0"
 pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 \
   --start-command ./scripts/start-test-gateway.sh --upstream-env UPSTREAM_BASE_URL \
   --out privacy-check
 ```
+
+`pii-leak-benchmark ci --help` lists every input with the same meanings as the Action. To pin
+the source instead of the package, install
+`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark`.
 
 Use a fresh output directory each time. Exit 0 means clean, 1 means a measured failure, and
 2 means incomplete measurement. Artifacts are retained on failure too:

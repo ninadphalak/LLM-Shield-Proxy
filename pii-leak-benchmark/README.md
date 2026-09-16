@@ -29,12 +29,15 @@ foreground and configure its redaction policy in your project. Choose `duty: ano
 intentional one-way masking; the default is `restore`. `CHECK FAILED` identifies behavior
 failures without an observed leak. `NOT MEASURED` identifies incomplete runs. Both fail CI.
 
-Install the 0.3.0 Git source release without depending on PyPI publication timing:
+Run the same check locally:
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark>=0.3.0"
 pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --out pii-check
 ```
+
+To pin the source rather than the package, install
+`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark`.
 
 The local command expects upstream routing to `http://127.0.0.1:8765/v1`. It writes a Markdown
 summary, raw measurements and a versioned operator report. These smoke checks are separate

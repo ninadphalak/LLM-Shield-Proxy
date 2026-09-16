@@ -98,8 +98,13 @@ pii-leak-benchmark selfcheck --target-base-url capture://self
 pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 ```
 
-`selfcheck` needs 0.2.0 or newer. A copy-paste GitHub Actions job that fails your build on a
-leak is in [`examples/ci/gateway-pii-check.yml`](examples/ci/gateway-pii-check.yml).
+`selfcheck` needs 0.2.0 or newer.
+
+To fail your own build on a leak, the complete workflow file and the three settings you have
+to change are in the [CI setup guide](website/docs/conformance/ci.md), with a shorter copy in
+[`examples/ci/gateway-pii-check.yml`](examples/ci/gateway-pii-check.yml). That path needs
+0.3.0 or newer, which adds the `ci` subcommand, the GitHub Action, and baseline comparison
+against your previous version.
 
 It reports one row per data type, so you can see what your gateway handled and what it missed:
 
