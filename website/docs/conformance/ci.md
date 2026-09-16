@@ -33,6 +33,12 @@ your gateway reads for its provider URL. A startup script can instead read
 These inputs are gateway-specific; the remaining steps are automatic. Pin the Action to
 an immutable commit SHA when your organization requires it.
 
+The synthetic provider is listening before your startup command runs, so a gateway that
+contacts its provider while starting up, to list models or to check its credentials, finds
+it there. Requests your gateway sends during startup are part of the measured record, like
+any other request it sends to the configured upstream. The provider answers `GET /v1/models`
+with a one-entry list, and any other startup path with a 404 it records.
+
 The Action runs a negative control, waits for the gateway's port, measures it, writes the
 summary, uploads reports, and stops processes it started. It needs no account or write token.
 Startup logs are suppressed; run your command locally if startup fails. For a gateway already

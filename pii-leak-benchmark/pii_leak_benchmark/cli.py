@@ -31,10 +31,17 @@ def _target_headers_from_env() -> list[str]:
 
 EPILOG = """\
 This command PUBLISHES a comparative row, so it requires the vendor's claim and a
-citation for it. To smoke-test your own deployment instead, where there is no vendor to
-cite, use the subcommand -- same measurement, no claim flags, operator-facing verdict:
+citation for it. Two subcommands measure the same thing without publishing one:
 
   pii-leak-benchmark selfcheck --target-base-url http://your-gateway/v1
+      One run against a gateway you are already running. Operator-facing verdict,
+      no claim flags.
+
+  pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 \\
+      --start-command 'your-gateway --port 4000'
+      The same check for a pipeline: it starts the gateway, runs a negative control,
+      compares an optional previous version and writes a Markdown summary and
+      artifacts. See `pii-leak-benchmark ci --help`.
 
 The gateway under test must already be configured to send its upstream traffic to the
 capture this command starts (default http://127.0.0.1:8765/v1). Nothing is measured

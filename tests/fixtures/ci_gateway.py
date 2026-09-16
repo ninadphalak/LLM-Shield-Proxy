@@ -1,4 +1,11 @@
-"""Test-only HTTP gateway: a one-way masker with an optional email regression."""
+"""Test-only HTTP gateway: a one-way masker with an optional email regression.
+
+It also does what a real gateway does and the earlier fixture did not: it contacts
+its configured upstream BEFORE binding its own listener. A harness that starts the
+capture only once measurement begins leaves nothing at that address during startup,
+so this gateway exits and the run reports a startup failure. Every managed-startup
+test therefore exercises the capture lifecycle rather than assuming it.
+"""
 
 import argparse
 import json
@@ -13,6 +20,16 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=4000)
     parser.add_argument("--leak-email", action="store_true")
     args = parser.parse_args()
+
+    # Model discovery against the configured upstream, first thing, exactly as a
+    # provider-backed gateway does. Failing here must kill the process: a gateway
+    # that cannot reach its upstream has nothing to serve.
+    discovery = Request(os.environ["BENCHMARK_UPSTREAM_BASE_URL"] + "/models")
+    try:
+        with urlopen(discovery, timeout=20) as response:  # noqa: S310
+            json.loads(response.read())
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"upstream model discovery failed: {type(exc).__name__}") from exc
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):

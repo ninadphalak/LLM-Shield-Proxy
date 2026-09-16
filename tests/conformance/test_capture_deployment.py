@@ -26,9 +26,11 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import httpx
 import pytest
 from pii_leak_benchmark.http_profile import (
     CaptureUnreachableError,
+    capture_session,
     extract_fixture,
     run_http_conformance,
 )
@@ -459,3 +461,101 @@ def test_capture_token_is_never_published(capture_port):
         capture_public_url=f"http://127.0.0.1:{capture_port}/v1",
     )
     assert token not in json.dumps(report)
+
+
+# --------------------------------------------------------------------------
+# Session lifecycle: the capture must be listening before the target starts
+# --------------------------------------------------------------------------
+
+
+def _run_in(session, handler_class, **kwargs):
+    """Measure a gateway against a capture the caller already opened."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_class)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        return run_http_conformance(
+            f"http://127.0.0.1:{server.server_address[1]}/v1",
+            iterations=1,
+            session=session,
+            **kwargs,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_capture_answers_before_the_target_is_started(capture_port):
+    """The whole point of a session: bind first, start the target second.
+
+    A gateway that resolves, health-checks or lists models against its configured
+    upstream before opening its own port found nothing there while the capture bound
+    inside the measurement call, and exited or timed out. Traffic sent in that window
+    is recorded and published like any other upstream traffic; it is not bucketed out
+    of the result, because a window nobody was looking at must not count as clean.
+    """
+    with capture_session(capture_port=capture_port) as session:
+        assert session.port == capture_port
+        assert session.self_probe["recorded"] is True
+        with httpx.Client(timeout=5.0, trust_env=False) as client:
+            discovery = client.get(session.advertised_base_url + "/models")
+        assert discovery.status_code == 200
+        assert discovery.json()["data"][0]["id"] == "conformance-model"
+        report = _run_in(session, _gateway(capture_port))
+    boundary = report["checks"]["configured_upstream_boundary"]
+    assert "/v1/models" in boundary["upstream_paths_observed"]
+    assert boundary["captured_requests"] >= 2
+    assert boundary["correlated_requests"] >= 1
+    assert boundary["passed"] is True
+
+
+def test_conflicting_capture_arguments_are_refused_not_ignored(capture_port):
+    """Two capture endpoints in one call is a setup error, not a preference."""
+    with capture_session(capture_port=capture_port) as session:
+        for conflict in (
+            {"capture_port": _free_port()},
+            {"capture_host": "0.0.0.0"},
+            {"capture_token": "token"},  # nosec B106 - a literal for the refusal path
+            {"capture_public_url": "http://tunnel.example/v1"},
+        ):
+            with pytest.raises(ValueError, match="session already owns"):
+                run_http_conformance(
+                    "capture://self", iterations=1, session=session, **conflict
+                )
+
+
+def test_a_refused_session_releases_the_port(capture_port):
+    """Cleanup on failure. Otherwise the retry, or the next measurement on the same
+    port, fails to bind for a reason that has nothing to do with the target.
+
+    Both platform shapes end here: POSIX refuses the duplicate bind outright, Windows
+    binds and the post-bind self-probe refuses the session. Neither may enter the body
+    and neither may leave the socket behind.
+    """
+    squatter = ThreadingHTTPServer(("127.0.0.1", capture_port), _Squatter)
+    threading.Thread(target=squatter.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(OSError):
+            with capture_session(capture_port=capture_port, timeout_seconds=2.0):
+                pytest.fail("the session must not be entered when the probe fails")
+    finally:
+        squatter.shutdown()
+        squatter.server_close()
+    with capture_session(capture_port=capture_port) as reopened:
+        assert reopened.self_probe["recorded"] is True
+
+
+def test_sequential_sessions_on_one_port_do_not_share_a_record(capture_port):
+    """Baseline then candidate on one --capture-port: no double bind, no mixing."""
+    probe_paths, snapshots = [], []
+    for _ in range(2):
+        with capture_session(capture_port=capture_port) as session:
+            assert session.port == capture_port
+            _run_in(session, _gateway(capture_port))
+            snapshot = session.state.snapshot()
+        snapshots.append(snapshot)
+        probe_paths.append(session.state.probe_path)
+    assert probe_paths[0] != probe_paths[1]
+    # Each run's per-session probe secret appears only in that run's own records.
+    for index, snapshot in enumerate(snapshots):
+        other = probe_paths[1 - index]
+        assert not any(other in str(record["path"]) for record in snapshot)
