@@ -161,22 +161,17 @@ def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     (
-        # The repetitions are BOUNDED, and that is a denial-of-service fix rather than a
-        # tidiness preference. With `+`, a long run of characters the local-part class
-        # accepts but that holds no `@` -- `%41%41%41...`, a base64 blob, a hex digest --
-        # makes the engine retry from every permitted start and rescan to the end of the
-        # run each time, which is quadratic in the run length. Measured on the unbounded
-        # pattern: 30k characters 0.27s, 60k 1.11s, 120k 4.36s, doubling the input
-        # quadrupling the time. Bounding the local-part caps the work each start position
-        # can do, so the same 120k input costs 0.008s and scales linearly.
+        # The repetition limits stop a denial of service. With `+`, a long run of
+        # characters the local part accepts but with no `@` in it -- a base64 blob, a hex
+        # digest, `%41%41%41...` -- makes the engine retry from every start position and
+        # rescan to the end each time. That is quadratic: 30k characters took 0.27s, 60k
+        # 1.11s, 120k 4.36s. With the limits, 120k takes 0.008s.
         #
-        # A possessive quantifier is NOT sufficient here and was measured too: it removes
-        # the backtracking within one attempt but not the retry from every start, so 120k
-        # still cost 2.9s.
+        # A possessive quantifier does not fix this. It was measured: 120k still took
+        # 2.9s, because it only stops backtracking within one attempt, not the retries.
         #
-        # The bounds are the RFC 5321 s4.5.3.1 maxima, 64 octets of local-part and 255 of
-        # domain, so nothing a real address can carry is lost. An address longer than the
-        # RFC permits is not deliverable and is not a person's contact detail.
+        # The limits are the RFC 5321 maxima, 64 for the local part and 255 for the
+        # domain, so no address anyone can actually receive mail at stops matching.
         "EMAIL",
         re.compile(
             _ASCII_LEFT_BOUNDARY
