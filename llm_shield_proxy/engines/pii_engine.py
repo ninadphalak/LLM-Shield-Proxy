@@ -17,6 +17,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import unquote
 
 import yaml
 
@@ -52,6 +53,20 @@ INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u2
 BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}(?![A-Za-z0-9+/=])")
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
+
+# Percent-encoding hides structured PII from every Tier 1 pattern: `bob%40example.com`
+# matches no email regex, and the client decodes it back to an address. The v2
+# conformance profile measured this as a 0.40 leak rate on percent-encoded cases against
+# 0.09 on plain ones, while the benchmark's own inspector decodes before matching. The
+# asymmetry, not the encoding, was the defect.
+#
+# This anchors on the escape and expands outward in Python rather than matching the run
+# with a regex. A pattern of the shape `[^\s]*%[0-9A-Fa-f]{2}[^\s]*` backtracks
+# quadratically over a long unbroken run that holds no valid escape, and this function
+# runs per SSE event on the streaming hot path.
+PERCENT_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"%[0-9A-Fa-f]{2}")
+MAX_PERCENT_INSPECTION_CHARS = 8_192
+_PERCENT_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[],;()")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
@@ -630,6 +645,39 @@ class PIIEngine:
                             break
             except Exception as exc:
                 logger.debug("Base64 candidate decode failed: %s", exc)
+
+        # Obfuscated Percent-Encoded Candidate Inspection.
+        #
+        # Same shape as the base64 block above, and the same conservative span: the whole
+        # source run is redacted rather than the decoded substring, because decoding
+        # changes offsets and mapping them back is fragile. Redacting a few extra
+        # percent-encoded characters around a hit is the safe direction to be wrong in.
+        run_end = -1
+        for escape in PERCENT_ESCAPE_PATTERN.finditer(text):
+            if escape.start() < run_end:
+                continue  # already inside a run this loop captured
+            start = escape.start()
+            while start > 0 and text[start - 1] not in _PERCENT_RUN_DELIMITERS:
+                start -= 1
+            end = escape.end()
+            while end < len(text) and text[end] not in _PERCENT_RUN_DELIMITERS:
+                end += 1
+            run_end = end
+            if end - start > MAX_PERCENT_INSPECTION_CHARS:
+                continue
+            token = text[start:end]
+            try:
+                decoded_text = unquote(token, errors="ignore")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Percent candidate decode failed: %s", exc)
+                continue
+            # Nothing actually decoded, so Tier 1 already saw this text as-is.
+            if decoded_text == token or len(decoded_text) < 6:
+                continue
+            for entity_type, pattern in active_profile.tier1_patterns:
+                if pattern.search(decoded_text):
+                    raw_spans.append((start, end, "PERCENT_OBFUSCATED_PII", token))
+                    break
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org).
         # Model-backed only. With no session loaded this block does nothing and no PERSON
