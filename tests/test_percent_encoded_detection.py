@@ -86,3 +86,46 @@ def test_oversized_run_is_skipped_not_decoded() -> None:
     pii_engine.detect_spans("bob%40example.com " + oversized)
     elapsed = time.perf_counter() - start
     assert elapsed < 2.0
+
+
+def test_oversized_run_still_scans_its_edges() -> None:
+    """Greptile P1 on PR #38: an oversized run was skipped, so the bound was a recipe.
+
+    Padding a percent-encoded value past MAX_PERCENT_INSPECTION_CHARS used to disable
+    the decoder for that run entirely. The edges are now decoded, matching what
+    BASE64_BOUNDARY_SCAN_CHARS already did for attachment-sized base64 bodies.
+    """
+    from llm_shield_proxy.engines.pii_engine import MAX_PERCENT_INSPECTION_CHARS
+
+    padding = "x" * MAX_PERCENT_INSPECTION_CHARS
+    leading = "bob%40example.com" + padding
+    trailing = padding + "bob%40example.com"
+    assert len(leading) > MAX_PERCENT_INSPECTION_CHARS
+    assert "PERCENT_OBFUSCATED_PII" in _types(leading), "value at the head was missed"
+    assert "PERCENT_OBFUSCATED_PII" in _types(trailing), "value at the tail was missed"
+
+
+def test_oversized_run_decodes_only_its_two_edges(monkeypatch) -> None:
+    """Bounded work, asserted structurally rather than by the clock.
+
+    A wall-clock assertion here measured the wrong thing: `detect_spans` has a
+    pre-existing quadratic in the EMAIL pattern on long `[A-Za-z0-9._%+-]` runs, which
+    dominates any timing and has nothing to do with this code path. What this block owes
+    is that an arbitrarily large run costs at most two bounded decodes.
+    """
+    from llm_shield_proxy.engines import pii_engine as module
+
+    decoded: list[int] = []
+    real_unquote = module.unquote
+
+    def counting_unquote(value, *args, **kwargs):
+        decoded.append(len(value))
+        return real_unquote(value, *args, **kwargs)
+
+    monkeypatch.setattr(module, "unquote", counting_unquote)
+    oversized = "bob%40example.com" + ("%41" * module.MAX_PERCENT_INSPECTION_CHARS)
+    module.pii_engine.detect_spans(oversized)
+
+    assert decoded, "the oversized run was skipped entirely, which is the bypass"
+    assert len(decoded) <= 2, f"decoded {len(decoded)} times, expected at most two edges"
+    assert max(decoded) <= module.PERCENT_BOUNDARY_SCAN_CHARS

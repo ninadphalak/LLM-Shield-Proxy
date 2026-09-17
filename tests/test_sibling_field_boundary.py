@@ -357,3 +357,55 @@ def test_the_module_level_cap_is_what_the_stream_uses():
     monkeypatch it. A stream that built its own number would make both impossible."""
     assert streaming_module.MAX_SIBLING_PATHS == MAX_SIBLING_PATHS
     assert _SiblingPathTails()._max_paths == MAX_SIBLING_PATHS
+
+
+# --------------------------------------------------------------------------------------
+# Greptile P1 on PR #38: cross-event state must follow semantic choice identity
+# --------------------------------------------------------------------------------------
+
+
+def test_tails_follow_the_choice_index_not_its_position_in_the_list(response_redaction_on):
+    """A provider may put the same choice at a different list position between events.
+
+    `choices` is a list and each entry carries its own `index`. A provider that sends
+    only the choice that changed, or batches them in a different order, puts choice 1 at
+    `choices[0]` in one event and `choices[1]` in the next. Keying the cross-event tail
+    by list position would splice two different answers together: it misses the real
+    split and can invent a join across choices that no client ever performs.
+    """
+    tails = _SiblingPathTails()
+    buffer = _buffer()
+    # Both halves belong to choice 1, but it sits at position 0 in the first event and
+    # position 1 in the second.
+    first = {"choices": [{"index": 1, "delta": {"content": "x", "note": "ref 456-78"}}]}
+    second = {
+        "choices": [
+            {"index": 0, "delta": {"content": "x", "note": "unrelated"}},
+            {"index": 1, "delta": {"content": "x", "note": "-9012 filed"}},
+        ]
+    }
+    scanned = _drive_events([first, second], buffer=buffer, tails=tails)
+
+    completing = scanned[1]["choices"][1]["delta"]["note"]
+    assert "9012" not in completing, (
+        "the fragment completing choice 1's SSN was not redacted, so the tail was "
+        "keyed by list position rather than by the choice's own index"
+    )
+    # And the unrelated choice at position 0 is untouched.
+    assert scanned[1]["choices"][0]["delta"]["note"] == "unrelated"
+
+
+def test_two_choices_in_one_event_do_not_share_a_tail(response_redaction_on):
+    """Different `index` values are different answers and must never be joined."""
+    tails = _SiblingPathTails()
+    buffer = _buffer()
+    event = {
+        "choices": [
+            {"index": 0, "delta": {"content": "x", "note": "ref 456-78"}},
+            {"index": 1, "delta": {"content": "x", "note": "-9012 filed"}},
+        ]
+    }
+    scanned = _drive_events([event], buffer=buffer, tails=tails)
+    # Two separate fields in one event: no join exists, so nothing is redacted.
+    assert scanned[0]["choices"][1]["delta"]["note"] == "-9012 filed"
+    assert len(tails.tracked_paths) == 2

@@ -416,9 +416,22 @@ def _redact_sibling_strings(
             for key, value in node.items()
         }
     if isinstance(node, list):
+        # Keyed by the entry's OWN `index` where it has one, not by its position in this
+        # event's list. A provider is free to send `choices` in a different order between
+        # events, or to send only the choice that changed, so position is not a stable
+        # identity: `choices[0]` can be index 0 in one event and index 1 in the next.
+        # Keying cross-event tails by position would then splice two different choices'
+        # text together, which both misses real splits and invents joins no client makes.
+        # `_entry_index` is the same identity the retention windows are keyed by.
         return [
-            _redact_sibling_strings(v, buffer, skip_content, tails, f"{path}[{i}]")
-            for i, v in enumerate(node)
+            _redact_sibling_strings(
+                item,
+                buffer,
+                skip_content,
+                tails,
+                f"{path}[{_entry_index(item) if isinstance(item, dict) else position}]",
+            )
+            for position, item in enumerate(node)
         ]
     if isinstance(node, str):
         # Chunk-local first: a value whole inside this fragment is redacted here, and the
@@ -1026,6 +1039,31 @@ async def rehydrate_sse_stream(
                                             # one: a finishing event needs no new channel.
                                             sibling_buffer = sibling_buffer or drained
                                         choice["delta"] = delta
+                                    if sibling_buffer is None:
+                                        # An event can carry sibling fields and no content,
+                                        # no tool arguments and no finish: a provider's
+                                        # `refusal`, `reasoning_content` or custom field
+                                        # arriving alone. Those events opened no window, so
+                                        # the scan used to be skipped entirely and the event
+                                        # forwarded unscanned -- the same bypass this scan
+                                        # exists to close, reachable by splitting a value so
+                                        # its completing fragment rides one of these events.
+                                        #
+                                        # The scan is vault-scoped, so ANY open window
+                                        # answers for the event. Reuse one rather than open a
+                                        # channel this event does not have; only open the
+                                        # choice-0 content window when the stream has none
+                                        # yet, and never let a window-exhausted stream turn
+                                        # a scan into a 500.
+                                        sibling_buffer = next(iter(buffers.values()), None)
+                                        if sibling_buffer is None:
+                                            try:
+                                                sibling_buffer = _buffer_for((0, None))
+                                            except ValueError:
+                                                logger.warning(
+                                                    "SSE window ceiling reached; sibling "
+                                                    "fields in this event were not scanned"
+                                                )
                                     if sibling_buffer is not None:
                                         if settings.ENABLE_RESPONSE_PII_REDACTION:
                                             # Sibling fields of the event, which were
