@@ -769,9 +769,15 @@ async def rehydrate_sse_stream(
                                 yield ready
                             continue
 
-                        if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                        # The space after `data:` is optional in the SSE spec and clients
+                        # strip it, so the payload is what follows the colon with leading
+                        # whitespace removed. Requiring the space meant a spec-legal event
+                        # skipped this whole block and reached the client unscanned.
+                        sse_payload = stripped[5:].lstrip() if stripped.startswith("data:") else None
+                        if sse_payload is not None and sse_payload != "[DONE]":
                             try:
-                                json_str = stripped[6:]
+                                original_line = line
+                                json_str = sse_payload
                                 data_obj = json.loads(json_str)
 
                                 if isinstance(data_obj, dict) and data_obj.get("type") in (
@@ -946,6 +952,25 @@ async def rehydrate_sse_stream(
                                             pre_lines.append(_tool_call_line(stopped, stopped_tail))
                                 elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
                                     pass  # We let [DONE] be handled at stream end
+
+                                # Scan by default. The branches above route the shapes we
+                                # know into the retention buffer; everything else used to
+                                # be forwarded untouched, which is how a reasoning-model
+                                # delta, a list of content parts, an Anthropic
+                                # `message_start` and a legacy `text` choice all reached
+                                # the client unscanned. `scanned_line` is set by a branch
+                                # that already handled the event; if none did, the whole
+                                # object goes through the same walk the non-streaming path
+                                # uses, which skips structural keys and buffered channels.
+                                if (
+                                    line is original_line
+                                    and settings.ENABLE_RESPONSE_PII_REDACTION
+                                ):
+                                    swept = _redact_sibling_strings(
+                                        data_obj, _buffer_for((0, None)), skip_content=False
+                                    )
+                                    if swept != data_obj:
+                                        line = f"data: {json.dumps(swept).decode('utf-8')}"
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
 
@@ -1064,7 +1089,18 @@ async def rehydrate_sse_stream(
                     watermark_text = ""
 
                 if line_accumulator:
-                    yield line_accumulator.encode("utf-8")
+                    # An upstream that stops mid-line leaves a fragment here. It used to
+                    # be yielded as-is, so a dropped connection forwarded whatever the
+                    # model was writing at the time, unscanned and with the caller's
+                    # placeholder unrestored. A fragment is not a complete SSE event and
+                    # no compliant client can parse it, so the safe end is to drop it and
+                    # say so rather than to hand it over.
+                    logger.warning(
+                        "Upstream stream ended mid-line; dropped %d unterminated bytes "
+                        "rather than forwarding them unscanned",
+                        len(line_accumulator.encode("utf-8")),
+                    )
+                    line_accumulator = ""
 
     # One span for the whole stream, replacing one span per delta. Started
     # explicitly rather than as a context manager because this generator yields

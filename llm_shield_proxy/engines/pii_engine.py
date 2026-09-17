@@ -78,6 +78,14 @@ INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
 # glued directly to non-Latin script text with no whitespace (e.g. "邮箱是john@x.com没有")
 # silently fails to match with `\b`. These assertions only block adjacency to ASCII
 # alphanumerics/underscore, permitting adjacency to non-Latin scripts.
+# Separators that appear between the groups of a structured identifier. A plain hyphen
+# is not the only one people actually send: Word and Outlook autocorrect a typed hyphen
+# into an en dash, and PDF extraction produces non-breaking hyphens. An SSN pasted from
+# an ordinary document was not recognised at all, which needs no attacker to happen.
+# U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash,
+# U+2014 em dash, U+2212 minus sign.
+_DASH = r"[-\u2010-\u2014\u2212]"
+
 _ASCII_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
 _ASCII_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
 
@@ -179,16 +187,30 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
             + _ASCII_RIGHT_BOUNDARY
         ),
     ),
-    ("SSN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{4}" + _ASCII_RIGHT_BOUNDARY)),
+    ("SSN", re.compile(
+        _ASCII_LEFT_BOUNDARY + r"\d{3}" + _DASH + r"\d{2}" + _DASH + r"\d{4}" + _ASCII_RIGHT_BOUNDARY
+    )),
     (
         "PHONE",
         re.compile(
             _ASCII_LEFT_BOUNDARY
-            + r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?(?:\d{3}[-.\s]?)?\d{4}"
+            + r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[.\s]?" + _DASH + r"?(?:\d{3}[.\s]?" + _DASH + r"?)?\d{4}"
             + _ASCII_RIGHT_BOUNDARY
         ),
     ),
-    ("CREDIT_CARD", re.compile(_ASCII_LEFT_BOUNDARY + r"(?:\d[ -]?){13,19}" + _ASCII_RIGHT_BOUNDARY)),
+    ("CREDIT_CARD", re.compile(
+        _ASCII_LEFT_BOUNDARY + r"(?:\d[ ]?" + _DASH + r"?){13,19}" + _ASCII_RIGHT_BOUNDARY
+    )),
+    (
+        # A digit run longer than any card. The pattern above accepts 13 to 19
+        # digits and then requires a non-alphanumeric to follow, so a 20-digit run
+        # -- a PAN with an expiry typed after it -- failed at every candidate length
+        # and was not redacted at all. Missing it entirely is the worst outcome, so
+        # the whole run is redacted. The same reasoning as the comment above: an
+        # observation cannot safely prove a number is not PII.
+        "LONG_DIGIT_RUN",
+        re.compile(_ASCII_LEFT_BOUNDARY + r"\d{20,}" + _ASCII_RIGHT_BOUNDARY),
+    ),
     (
         "IP_ADDRESS",
         re.compile(
