@@ -54,27 +54,17 @@ BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=])[A-Z
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
 
-# Percent-encoding hides structured PII from every Tier 1 pattern: `bob%40example.com`
-# matches no email regex, and the client decodes it back to an address. The v2
-# conformance profile measured this as a 0.40 leak rate on percent-encoded cases against
-# 0.09 on plain ones, while the benchmark's own inspector decodes before matching. The
-# asymmetry, not the encoding, was the defect.
-#
-# This anchors on the escape and expands outward in Python rather than matching the run
-# with a regex. A pattern of the shape `[^\s]*%[0-9A-Fa-f]{2}[^\s]*` backtracks
-# quadratically over a long unbroken run that holds no valid escape, and this function
-# runs per SSE event on the streaming hot path.
+# Percent-encoding hides PII from every Tier 1 pattern. `bob%40example.com` matches no
+# email regex, and the client decodes it back to an address. The v2 profile measured a
+# 0.40 leak rate on percent-encoded cases against 0.09 on plain ones.
 PERCENT_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"%[0-9A-Fa-f]{2}")
 MAX_PERCENT_INSPECTION_CHARS = 8_192
-# An oversized run is NOT skipped. Skipping it would make the bound an instruction:
-# pad a percent-encoded value past the ceiling and it is never decoded. The edges are
-# still decoded and scanned, exactly as `BASE64_BOUNDARY_SCAN_CHARS` does for an
-# attachment-sized base64 body, so the cheap bypass costs an attacker the interior only.
+# A run longer than the limit is not skipped, or the limit would just tell an attacker
+# how much padding to add. Its edges are still decoded, same as base64 does.
 PERCENT_BOUNDARY_SCAN_CHARS = 256
-# One C-level pass over runs of non-delimiter characters. The first version walked out
-# from each escape in a Python `while` loop, which is O(run length) in interpreted code:
-# a single 120k-character run with no delimiter took 4.4 seconds. A single character
-# class with one quantifier cannot backtrack, so this stays linear on hostile input.
+# Finds runs of non-delimiter characters in one C-level pass. Do not replace this with a
+# pattern that scans outward from each escape: that form backtracks, and one 120k run
+# with no delimiter took 4.4 seconds. This runs per SSE event.
 PERCENT_RUN_PATTERN: re.Pattern[str] = re.compile(r"[^\s\"'<>{}\[\],;()]+")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts

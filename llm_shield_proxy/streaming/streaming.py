@@ -72,6 +72,25 @@ def _entry_index(entry: Any) -> int:
     return 0
 
 
+def _list_entry_identity(item: Any, position: int) -> str:
+    """Identifies one list entry so its path stays the same across events.
+
+    Entries with an `index` are keyed by it. `choices` and `tool_calls` can arrive in a
+    different order, or one at a time, so their position in the list is not stable.
+
+    Entries without an `index` are keyed by position. Do not use `_entry_index` here: it
+    returns 0 when there is no index, so a list of index-less dicts would all get the
+    same path and share one tail.
+
+    The `i` and `p` prefixes keep index 0 and position 0 from colliding.
+    """
+    if isinstance(item, dict):
+        raw = item.get("index")
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+            return f"i{raw}"
+    return f"p{position}"
+
+
 def _tool_argument_fragments(delta: Any) -> Iterator[tuple]:
     """Yields `(tool-call index, function object)` for each argument fragment in a delta.
 
@@ -416,20 +435,16 @@ def _redact_sibling_strings(
             for key, value in node.items()
         }
     if isinstance(node, list):
-        # Keyed by the entry's OWN `index` where it has one, not by its position in this
-        # event's list. A provider is free to send `choices` in a different order between
-        # events, or to send only the choice that changed, so position is not a stable
-        # identity: `choices[0]` can be index 0 in one event and index 1 in the next.
-        # Keying cross-event tails by position would then splice two different choices'
-        # text together, which both misses real splits and invents joins no client makes.
-        # `_entry_index` is the same identity the retention windows are keyed by.
+        # Keyed by the entry's own `index`, not its position. `choices[0]` can be index 0
+        # in one event and index 1 in the next, and keying by position would then join
+        # text from two different answers.
         return [
             _redact_sibling_strings(
                 item,
                 buffer,
                 skip_content,
                 tails,
-                f"{path}[{_entry_index(item) if isinstance(item, dict) else position}]",
+                f"{path}[{_list_entry_identity(item, position)}]",
             )
             for position, item in enumerate(node)
         ]
@@ -1040,21 +1055,14 @@ async def rehydrate_sse_stream(
                                             sibling_buffer = sibling_buffer or drained
                                         choice["delta"] = delta
                                     if sibling_buffer is None:
-                                        # An event can carry sibling fields and no content,
-                                        # no tool arguments and no finish: a provider's
-                                        # `refusal`, `reasoning_content` or custom field
-                                        # arriving alone. Those events opened no window, so
-                                        # the scan used to be skipped entirely and the event
-                                        # forwarded unscanned -- the same bypass this scan
-                                        # exists to close, reachable by splitting a value so
-                                        # its completing fragment rides one of these events.
+                                        # An event can carry only sibling fields, with no
+                                        # content and no tool arguments. Those events open
+                                        # no window, and used to skip this scan entirely,
+                                        # so splitting a value onto one of them bypassed it.
                                         #
-                                        # The scan is vault-scoped, so ANY open window
-                                        # answers for the event. Reuse one rather than open a
-                                        # channel this event does not have; only open the
-                                        # choice-0 content window when the stream has none
-                                        # yet, and never let a window-exhausted stream turn
-                                        # a scan into a 500.
+                                        # The scan only needs the vault, so any open window
+                                        # will do. Open a new one only if the stream has
+                                        # none, and log rather than raise if it cannot.
                                         sibling_buffer = next(iter(buffers.values()), None)
                                         if sibling_buffer is None:
                                             try:

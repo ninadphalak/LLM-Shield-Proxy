@@ -32,6 +32,7 @@ from llm_shield_proxy.streaming import streaming as streaming_module
 from llm_shield_proxy.streaming.streaming import (
     MAX_SIBLING_PATHS,
     SSERehydrationBuffer,
+    _list_entry_identity,
     _redact_sibling_strings,
     _SiblingPathTails,
     rehydrate_sse_stream,
@@ -206,7 +207,9 @@ def test_structural_keys_are_never_tracked(response_redaction_on):
     assert scanned[1]["id"] == "chatcmpl-456-78"
     assert scanned[1]["model"] == "-9012", "a structural key was rewritten"
     tracked = tails.tracked_paths
-    assert tracked == (".choices[0].delta.note",), f"unexpected tracked paths: {tracked}"
+    # `i0` is the choice's own index; see `_list_entry_identity` for why an explicit
+    # index and a list position live in separate namespaces.
+    assert tracked == (".choices[i0].delta.note",), f"unexpected tracked paths: {tracked}"
 
 
 def test_exceeding_the_path_cap_evicts_and_records_the_eviction(response_redaction_on):
@@ -409,3 +412,36 @@ def test_two_choices_in_one_event_do_not_share_a_tail(response_redaction_on):
     # Two separate fields in one event: no join exists, so nothing is redacted.
     assert scanned[0]["choices"][1]["delta"]["note"] == "-9012 filed"
     assert len(tails.tracked_paths) == 2
+
+
+def test_index_less_list_entries_do_not_share_a_tail(response_redaction_on):
+    """Greptile P1 on PR #38 round 2: `_entry_index` answers 0 for an index-less entry.
+
+    That is right for opening a retention window and wrong for path identity. A nested
+    array of index-less dicts, such as list-valued content parts, would collapse onto
+    one path and let unrelated entries contaminate each other's cross-event tail.
+    """
+    tails = _SiblingPathTails()
+    buffer = _buffer()
+    # Two index-less entries in a nested list, each carrying half of a different value.
+    first = {
+        "choices": [{"index": 0, "delta": {"content": "x",
+                                           "parts": [{"note": "ref 456-78"}, {"note": "clean"}]}}]
+    }
+    second = {
+        "choices": [{"index": 0, "delta": {"content": "x",
+                                           "parts": [{"note": "unrelated"}, {"note": "-9012 filed"}]}}]
+    }
+    scanned = _drive_events([first, second], buffer=buffer, tails=tails)
+
+    # The halves live at DIFFERENT positions, so no client reassembles them and nothing
+    # should be redacted. If both collapsed onto one path they would appear joined.
+    assert scanned[1]["choices"][0]["delta"]["parts"][1]["note"] == "-9012 filed"
+    assert len(tails.tracked_paths) == 2, f"paths collapsed: {tails.tracked_paths}"
+
+
+def test_an_explicit_index_zero_and_position_zero_are_different_keys(response_redaction_on):
+    """The `i`/`p` prefixes exist so these two namespaces cannot alias."""
+    assert _list_entry_identity({"index": 0}, 7) == "i0"
+    assert _list_entry_identity({}, 0) == "p0"
+    assert _list_entry_identity({"index": True}, 3) == "p3"
