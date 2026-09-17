@@ -102,3 +102,61 @@ def test_the_bounds_are_the_rfc_maxima() -> None:
     local_65 = "a" * 65
     assert EMAIL_PATTERN.search(f"{local_64}@example.com")
     assert not EMAIL_PATTERN.search(f"{local_65}@example.com")
+
+
+# --------------------------------------------------------------------------------------
+# Whole-engine sweep. The EMAIL bug was found by accident; this looks for the next one.
+# --------------------------------------------------------------------------------------
+
+_ATTACK_SEEDS = {
+    "percent": "%41",
+    "dotted_alnum": "a1.b2.c3.",
+    "dashes": "12-34-56-",
+    "alnum_pct_plus": "a1%2B",
+    "hexish": "abcdef0123",
+    "digits": "1234567890",
+    "b64ish": "QUJDREVG",
+}
+
+
+def _all_compiled_patterns() -> list[tuple[str, re.Pattern[str]]]:
+    from llm_shield_proxy.engines import pii_engine as module
+
+    found = list(module.TIER1_PATTERNS)
+    for name in dir(module):
+        if not name.endswith("_PATTERN"):
+            continue
+        obj = getattr(module, name)
+        if isinstance(obj, re.Pattern):
+            found.append((name, obj))
+    return found
+
+
+@pytest.mark.parametrize("seed_name,seed", sorted(_ATTACK_SEEDS.items()))
+def test_no_pattern_grows_superlinearly(seed_name: str, seed: str) -> None:
+    """No compiled pattern may backtrack on a long run of plausible input.
+
+    Every pattern here scans attacker-supplied request bodies. One that retries from
+    each start position and rescans to the end is a denial of service, which is what
+    EMAIL was: four of these seeds triggered it, at about 4x growth per doubling.
+
+    Growth ratio rather than absolute time, because absolute thresholds are flaky on
+    shared runners and the shape of the growth is the thing that matters.
+    """
+    small_text = seed * (20_000 // len(seed))
+    large_text = seed * (40_000 // len(seed))
+    offenders = []
+    for name, pattern in _all_compiled_patterns():
+        small = min(_time_search(pattern, small_text) for _ in range(3))
+        if small < 2e-5:
+            continue  # too fast to form a meaningful ratio
+        large = min(_time_search(pattern, large_text) for _ in range(3))
+        if large / small >= 3.0 and large > 0.05:
+            offenders.append(f"{name} grew {large / small:.1f}x to {large:.3f}s")
+    assert not offenders, f"superlinear on {seed_name!r}: " + "; ".join(offenders)
+
+
+def _time_search(pattern: re.Pattern[str], text: str) -> float:
+    start = time.perf_counter()
+    pattern.search(text)
+    return time.perf_counter() - start
