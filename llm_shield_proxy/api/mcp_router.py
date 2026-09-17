@@ -257,6 +257,40 @@ async def _process_single_call(
         return _jsonrpc_error(req_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}") if has_id else None
 
     # Fail-Closed Gate: tool authorization is checked BEFORE any upstream routing or sanitization work.
+    # SSRF / DNS-rebinding gate, for EVERY supported method rather than only
+    # `tools/call`. `resources/read` exists to fetch a URI, and it used to skip this
+    # gate entirely: a `resources/read` naming the cloud metadata endpoint was forwarded
+    # upstream unchecked. The scan also covers the whole of `params`, not just
+    # `params["arguments"]`, because a URL in a sibling field such as `_meta` reaches an
+    # upstream tool exactly as readily as one inside `arguments`.
+    try:
+        await scan_arguments(params, egress_policy)
+    except EgressPolicyViolationError as exc:
+        AuditLogger.log_security_event(
+            event_type="mcp_egress_policy_violation",
+            severity="CRITICAL",
+            details={
+                "reason": exc.reason,
+                "tool_name": params.get("name"),
+                "method": method,
+                "blocked_url": _redact_url_for_audit(exc.url),
+                "blocked_host": exc.host,
+                "resolved_ip": exc.matched_ip,
+                "matched_rule": exc.matched_rule,
+                "applied_role_name": egress_policy.get("role_name", virtual_key),
+            },
+            virtual_key_id=virtual_key,
+        )
+        return (
+            _jsonrpc_error(
+                req_id,
+                JSONRPC_EGRESS_FORBIDDEN,
+                "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
+            )
+            if has_id
+            else None
+        )
+
     if method == "tools/call":
         tool_name = params.get("name")
         if not tool_name or _is_tool_forbidden(tool_name, allowed, blocked):
@@ -268,10 +302,8 @@ async def _process_single_call(
             )
             return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Tool forbidden for active role") if has_id else None
 
-        # SSRF / DNS-Rebinding Gate: every http(s) URL found anywhere in the raw (pre-sanitization)
-        # arguments is resolved and checked against the active egress policy before any upstream
-        # routing. Runs on the raw arguments, not the PII-sanitized copy below, so the host actually
-        # being evaluated is the one an upstream tool would actually receive.
+        # Arguments were already covered by the gate above, which scans the whole of
+        # `params`. This second pass stays because it names the tool in the audit record.
         try:
             await scan_arguments(params.get("arguments", {}), egress_policy)
         except EgressPolicyViolationError as exc:
