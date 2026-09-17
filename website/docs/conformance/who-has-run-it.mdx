@@ -1,0 +1,104 @@
+---
+title: Can your LLM gateway pass?
+sidebar_position: 9
+---
+
+import ResultsWall from '@site/src/components/ResultsWall';
+import DefinedTerm from '@site/src/components/DefinedTerm';
+
+# Can your LLM gateway pass?
+
+An LLM gateway sits between your application and the model provider. This check asks whether
+yours does three things:
+
+1. **Keep the caller's data away from the provider.** If you configured it to redact an email
+   address, that address should not appear in the request it sends upstream.
+2. **Give the caller their own data back.** The response should still read correctly to the
+   person who sent it.
+3. **Keep out data the caller never sent.** If the model produces someone else's phone number, it
+   must not reach the client. Including when the stream splits it across two chunks.
+
+Do all three and you pass. **No shipping gateway has passed yet.** Ours does not either, and we wrote
+the check.
+
+Here is everything we have tested.
+
+<ResultsWall rows={[
+  {"date": "2026-09-09", "project": "LLM-Shield-Proxy (ours)", "version": "1.6.0, default settings", "sent": "none", "sentN": 0, "restored": "all", "restoredN": 1.0, "leakWhole": "16 of 16", "leakWholeN": 1.0, "leakSplit": "16 of 16", "leakSplitN": 1.0, "note": "Kept everything out of the provider request, then handed every value back to the client.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-10", "project": "LLM-Shield-Proxy (ours)", "version": "1.6.0, response scan on", "sent": "none", "sentN": 0, "restored": "all", "restoredN": 1.0, "leakWhole": "2 of 16", "leakWholeN": 0.125, "leakSplit": "4 of 16", "leakSplitN": 0.25, "note": "Kept everything out of the provider request. Still leaks some back to the client, and twice as much once a value is split.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-10", "project": "LLM Guard", "version": "0.3.16, scanned per chunk", "sent": "phone", "sentN": 1, "restored": "all", "restoredN": 1.0, "leakWhole": "4 of 16", "leakWholeN": 0.25, "leakSplit": "12 of 16", "leakSplitN": 0.75, "note": "Phone numbers reached the provider. Gave the caller their data back. Splitting a value tripled what leaked to the client.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-10", "project": "LLM Guard", "version": "0.3.16, whole response buffered", "sent": "phone", "sentN": 1, "restored": "all", "restoredN": 1.0, "leakWhole": "5 of 16", "leakWholeN": 0.3125, "leakSplit": "5 of 16", "leakSplitN": 0.3125, "note": "Phone numbers reached the provider. Splitting changed nothing, because it waits for the whole response before sending any of it.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-10", "project": "Guardrails AI", "version": "0.10.2, sentence retention", "sent": "all 4 types", "sentN": 4, "restored": "none", "restoredN": 0.0, "leakWhole": "2 of 16", "leakWholeN": 0.125, "leakSplit": "2 of 16", "leakSplitN": 0.125, "note": "All four data types reached the provider, and none of the caller’s own data came back.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-09", "project": "LiteLLM", "version": "1.99 with Presidio", "sent": "all 4 types", "sentN": 4, "restored": "none", "restoredN": 0.0, "leakWhole": "0 of 16", "leakWholeN": 0.0, "leakSplit": "0 of 16", "leakSplitN": 0.0, "note": "All four data types reached the provider even though redaction was switched on, and none of the caller’s data came back.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-09", "project": "NeMo Guardrails", "version": "0.24.0", "sent": "all 4 types", "sentN": 4, "restored": "none", "restoredN": 0.0, "leakWhole": "0 of 12", "leakWholeN": 0.0, "leakSplit": "0 of 12", "leakSplitN": 0.0, "note": "All four data types reached the provider. Nothing was restored, and 8 of 32 cases produced no stream at all.", "source": "measured", "reportUrl": "./results"},
+  {"date": "2026-09-09", "project": "Portkey", "version": "OSS gateway", "sent": "all 4 types", "sentN": 4, "restored": "all", "restoredN": 1.0, "leakWhole": "16 of 16", "leakWholeN": 1.0, "leakSplit": "16 of 16", "leakSplitN": 1.0, "note": "All four data types reached the provider, and everything it should have withheld went through to the client.", "source": "measured", "reportUrl": "./results"}
+]} />
+
+Read the middle columns together, because any one of them alone will mislead you. A gateway
+showing `0` leaked to the client may simply have returned nothing at all, and it may still have
+sent the caller's data straight to the provider. Every gateway here was configured to redact, so
+a value reaching the provider is a control that was switched on and did not hold.
+
+None of these are product defects. Each row is one version in one configuration, tested once.
+There are three ways to build this, and each one costs something:
+
+- **Check each chunk on its own.** Fast, but it cannot see a value split across two chunks.
+- **Wait for the whole response.** Sees everything, but the user waits for the whole answer.
+- **Hold back a short tail.** Keeps both, and still leaks if the tail is too short.
+
+There is no free option. That is why it is worth measuring.
+
+## Add yours
+
+About ten minutes, and you do not need an account, an API key, or a paid model.
+
+**1. Run it.** Copy [the CI setup](./ci) into your repository and change three lines: where your
+gateway listens, the command that starts it, and the environment variable it reads for its
+provider URL.
+
+**2. Make the result checkable.** Run `pii-leak-benchmark cite` on the report. It prints a short
+block naming the version of the check and the test data it used, so someone else can repeat your
+exact run.
+
+**3. Post it.** [Open a prefilled issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?title=Result%3A%20%3Cyour%20gateway%20name%3E&body=Gateway%20and%20version%3A%0ALink%20to%20the%20project%3A%0AHow%20it%20inspects%20streaming%20responses%20%28one%20chunk%20at%20a%20time%2C%20buffered%2C%20other%29%3A%0A%0A%23%23%23%20Citation%20block%0A%0AOutput%20of%20%60pii-leak-benchmark%20cite%60%3A%0A%0A%60%60%60%0Apaste%20here%0A%60%60%60%0A%0A%23%23%23%20The%20result%0A%0A-%20Outcome%20%28CLEAN%20%2F%20LEAK%20%2F%20CHECK%20FAILED%20%2F%20NOT%20MEASURED%29%3A%0A-%20If%20something%20changed%20since%20a%20previous%20run%2C%20what%20and%20in%20which%20version%3A%0A-%20Anything%20that%20looked%20wrong%20or%20that%20you%20think%20the%20check%20got%20wrong%3A%0A&labels=conformance-result) and paste the block in. We add your row.
+
+## What to send
+
+Send your result whatever it says.
+
+- **It passed.** You would be the first. That is worth saying loudly.
+- **It failed.** Post it, then post again when you fix it. A row going from `leak` to `contained
+  in 1.4.2` says your team fixed a real bug.
+- **You think the check is wrong.** Say so. That is our bug, we will fix it, and we will credit
+  you here.
+
+One thing to leave out: request or response bodies from a real deployment. The block from step 2
+carries no customer data, but a captured payload might.
+
+## Show it on your README
+
+```markdown
+[![PII leak check](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
+```
+
+GitHub builds that badge from your own workflow, so a reader can click it and check rather than
+take your word.
+
+## Why we do not rank these
+
+Click any heading to sort the table for yourself. We do not publish it in a ranked order:
+
+- **Rows are not comparable.** Each result is one version, one configuration, one set of test values.
+- **A scoreboard starts arguments about fairness instead of getting gateways tested.**
+- **The same leak count can mean two different bugs, which need different fixes:**
+
+| | Sent whole<br/>`user@example.com` | Split across two chunks<br/>`user@exa` + `mple.com` |
+| :--- | :--- | :--- |
+| <DefinedTerm term="Detector gap" definition="The gateway never spots the value, so it leaks whether the stream splits it or not." /> | leaks | leaks |
+| <DefinedTerm term="Boundary bug" definition="The gateway spots the whole value but not its halves, so it only leaks when the stream splits it." /> | caught | leaks |
+
+Full numbers for every run above, including the reference policies we use to calibrate the
+instrument, are on the [published results](./results) page, generated from the report files in
+the repository.
+
+Questions about any of this are welcome in the same issue tracker.
