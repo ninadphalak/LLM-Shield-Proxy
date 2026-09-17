@@ -161,9 +161,27 @@ def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     (
+        # The repetitions are BOUNDED, and that is a denial-of-service fix rather than a
+        # tidiness preference. With `+`, a long run of characters the local-part class
+        # accepts but that holds no `@` -- `%41%41%41...`, a base64 blob, a hex digest --
+        # makes the engine retry from every permitted start and rescan to the end of the
+        # run each time, which is quadratic in the run length. Measured on the unbounded
+        # pattern: 30k characters 0.27s, 60k 1.11s, 120k 4.36s, doubling the input
+        # quadrupling the time. Bounding the local-part caps the work each start position
+        # can do, so the same 120k input costs 0.008s and scales linearly.
+        #
+        # A possessive quantifier is NOT sufficient here and was measured too: it removes
+        # the backtracking within one attempt but not the retry from every start, so 120k
+        # still cost 2.9s.
+        #
+        # The bounds are the RFC 5321 s4.5.3.1 maxima, 64 octets of local-part and 255 of
+        # domain, so nothing a real address can carry is lost. An address longer than the
+        # RFC permits is not deliverable and is not a person's contact detail.
         "EMAIL",
         re.compile(
-            _ASCII_LEFT_BOUNDARY + r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}" + _ASCII_RIGHT_BOUNDARY
+            _ASCII_LEFT_BOUNDARY
+            + r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,}"
+            + _ASCII_RIGHT_BOUNDARY
         ),
     ),
     ("SSN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{4}" + _ASCII_RIGHT_BOUNDARY)),
