@@ -701,6 +701,28 @@ class PIIEngine:
                 interior_end = end - BASE64_BOUNDARY_SCAN_CHARS
                 if interior_start < interior_end:
                     excluded_interiors.append((interior_start, interior_end))
+
+                # The boundary guards were kept in the plaintext scan segments but never
+                # decoded, and no text detector matches base64, so they guarded against
+                # nothing encoded. A 12,000-char attachment beginning `bob@example.com `
+                # produced no spans at all.
+                #
+                # Decode each guard on its own. The head is 4-aligned by construction;
+                # the tail is aligned back to the blob's own framing so it decodes to
+                # real bytes instead of a shifted smear. Each guard carries its OWN
+                # source span, so the span and its matched text agree and rehydration
+                # stays exact. The interior stays undecoded: that bound is the point.
+                blob = match.group(0)
+                tail_offset = len(blob) - BASE64_BOUNDARY_SCAN_CHARS
+                tail_offset -= tail_offset % 4
+                for guard_start, guard_text in (
+                    (start, blob[:BASE64_BOUNDARY_SCAN_CHARS]),
+                    (start + tail_offset, blob[tail_offset:]),
+                ):
+                    if len(guard_text) >= 8:
+                        base64_candidates.append(
+                            (guard_start, guard_start + len(guard_text), guard_text)
+                        )
                 continue
             base64_candidates.append((start, end, match.group(0)))
 
