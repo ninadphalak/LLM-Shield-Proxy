@@ -130,6 +130,9 @@ MAX_ENTITY_INSPECTION_CHARS = 8_192
 # A run longer than the limit is not skipped, or the limit would just tell an attacker
 # how much padding to add. Its edges are still decoded, same as percent and base64 do.
 ENTITY_BOUNDARY_SCAN_CHARS = 256
+# The same 256-char edge probe, for a blob in a field no policy claims. See
+# `_handle_unmapped_blob`: this path was the only oversized input that skipped it.
+BLOB_BOUNDARY_SCAN_CHARS = 256
 # Deliberately NOT `_PERCENT_RUN_DELIMITERS`: that set contains `;`, which terminates
 # every entity, so reusing it would cut each run at the first entity and decode nothing.
 _ENTITY_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[](),")
@@ -1242,7 +1245,7 @@ class PIIEngine:
 
         if isinstance(node, str):
             if len(node) > max_string_length or node.startswith("data:"):
-                return self._handle_unmapped_blob(node, json_path)
+                return self._handle_unmapped_blob(node, json_path, active_profile)
             return self.redact_text(node, vault, active_profile)
 
         if isinstance(node, dict):
@@ -1281,18 +1284,80 @@ class PIIEngine:
 
         return node
 
-    def _handle_unmapped_blob(self, blob: str, json_path: str) -> str:
+    def _handle_unmapped_blob(
+        self,
+        blob: str,
+        json_path: str,
+        active_profile: Optional[CompiledProfile] = None,
+    ) -> str:
         """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
 
-        A blob here is unexamined either way: no text detector matches base64. The
-        question is only whether an unexamined field is allowed to leave, and that
-        is a deployment decision, not a detection one.
+        The blob's EDGES are inspected first. This used to be the only oversized input in
+        the engine that was not edge-scanned: percent runs, base64 candidates and HTML
+        entity runs all decode their two 256-char edges past their own caps, each for the
+        reason written beside it -- a limit that skips is a recipe for how much padding to
+        add. Measured: a 12 KB base64 blob carrying `bob@example.com` at its head was
+        caught as BASE64_OBFUSCATED_PII when it reached `detect_spans` and forwarded
+        VERBATIM from an unclaimed field, because `PAYLOAD_MAX_REDACT_STRING_LENGTH` stops
+        it before `MAX_BASE64_INSPECTION_CHARS` ever gets to look.
+
+        The interior is still not decoded. That bound is the cost this ceiling exists to
+        avoid and a control test pins it.
+
+        A `data:` URI is skipped as before: declared media with a known shape, not an
+        unknown field. Rewriting one breaks vision models, which is a worse failure than
+        the risk it removes.
         """
         policy = settings.UNMAPPED_BLOB_POLICY
         if policy == "block":
             raise UnmappedBlobError(json_path or "<root>", len(blob))
-        if policy == "warn":
-            AuditLogger.log_unmapped_blob(json_path=json_path or "<root>", size_bytes=len(blob))
+
+        # `skip` is an explicit opt-out. Do not spend the probe on it.
+        if policy == "skip" or blob.startswith("data:"):
+            return blob
+
+        # The tail offset is aligned back to the blob's OWN 4-character framing, exactly
+        # as the oversized-base64 path does. An unpadded blob whose length is not a
+        # multiple of four otherwise starts its tail slice mid-group, and the slice
+        # decodes to a shifted smear that matches nothing -- so tail PII would have been
+        # forwarded while the code looked like it had checked.
+        tail_offset = len(blob) - BLOB_BOUNDARY_SCAN_CHARS
+        tail_offset -= tail_offset % 4
+        # Joined with a newline so a match cannot straddle the seam and manufacture a hit
+        # out of two unrelated fragments.
+        probe = blob[:BLOB_BOUNDARY_SCAN_CHARS] + "\n" + blob[tail_offset:]
+
+        try:
+            edge_scan = "pii_found" if self.detect_spans(probe, active_profile) else "clean"
+        except Exception:  # noqa: BLE001  # nosec B110 - a probe failure must not take
+            # down the request. Recorded as its own outcome: `clean` means the probe ran
+            # and found nothing, and an operator who cannot tell that apart from "the
+            # probe blew up" may suppress a path that was never inspected at all.
+            logger.warning("Unmapped-blob edge scan failed at %s", json_path or "<root>")
+            edge_scan = "failed"
+
+        AuditLogger.log_unmapped_blob(
+            json_path=json_path or "<root>",
+            size_bytes=len(blob),
+            # "could not inspect this" and "inspected the edges and found PII" are
+            # different events. An operator tuning payload_skip_keys has to tell them
+            # apart, and one record type conflated them.
+            edge_scan=edge_scan,
+        )
+
+        if edge_scan == "pii_found":
+            # `warn` means "forward what I could not inspect, but tell me". Once the edges
+            # ARE inspected and PII is found, forwarding is no longer that -- it is
+            # "found PII and shipped it anyway", which no DLP product should do.
+            #
+            # A FIXED marker, not a vault token. Minting one would hash and retain the
+            # whole blob in both token maps and push it to Redis, so a field near the
+            # request-size limit would cost work and PLAINTEXT RETENTION proportional to
+            # the entire value -- including the interior this function never looked at.
+            # That is the opposite of what a bounded probe is for. Nothing round-trips an
+            # unclaimed vendor field, so there is no restoration to preserve.
+            return "[UNMAPPED_BLOB_PII_REDACTED]"
+
         return blob
 
     def _redact_nested_content(
