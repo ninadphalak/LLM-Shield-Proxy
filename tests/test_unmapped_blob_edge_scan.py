@@ -154,3 +154,63 @@ def test_the_audit_record_distinguishes_inspected_from_uninspected(deep_redactio
 
     assert found.get("size_bytes") == clean.get("size_bytes"), "fixture sizes must match"
     assert found != clean, "the audit record cannot distinguish the two cases"
+
+
+@pytest.mark.parametrize("trim", [0, 1, 2, 3])
+def test_tail_alignment_holds_for_unpadded_blobs(deep_redaction, trim: int):
+    """Greptile P1 on #46: the tail slice must be aligned to the blob's own framing.
+
+    An unpadded blob whose length is not a multiple of four starts its tail slice
+    mid-group, and the slice then decodes to a shifted smear that matches nothing. Tail
+    PII would be forwarded while the code looked like it had checked it. The oversized
+    base64 path already aligns its tail offset; this one did not.
+
+    Parametrised across all four length remainders, because only some of them misalign.
+    """
+    payload = FILLER + b" " + EMAIL.encode() + (b"x" * trim)
+    blob = _oversized(payload).rstrip("=")
+
+    assert _forward(blob) != blob, f"tail PII forwarded at length remainder {len(blob) % 4}"
+
+
+def test_a_matched_blob_is_not_retained_in_the_vault(deep_redaction):
+    """Greptile P1 on #46: the bounded probe must not cause unbounded retention.
+
+    Minting a vault token for the match would hash and keep the WHOLE blob in both token
+    maps, and push it to Redis where one is configured. A field near the request-size
+    limit would then cost work and plaintext retention proportional to the entire value,
+    including the interior this scan never looked at, which is the opposite of what a
+    bounded probe is for.
+    """
+    blob = _oversized(EMAIL.encode() + b" " + FILLER)
+    vault = Vault(synthetic=False)
+
+    out = pii_engine.redact_payload({"model": "gpt-4", "vendor_extra": blob}, vault)
+
+    assert out["vendor_extra"] != blob
+    assert blob not in vault.token_to_original.values(), "the blob was retained in the vault"
+    assert blob not in vault.original_to_token, "the blob was retained in the vault"
+
+
+def test_a_failed_edge_scan_is_not_recorded_as_clean(deep_redaction, monkeypatch):
+    """Greptile P1 on #46: `clean` must mean the probe ran and found nothing.
+
+    An operator who cannot tell a failed inspection from a successful clean one may
+    suppress a path that was never inspected at all. Request behaviour stays fail-open;
+    only the record changes.
+    """
+    from unittest.mock import patch
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("detector unavailable")
+
+    monkeypatch.setattr(pii_engine, "detect_spans", _boom)
+    blob = _oversized(EMAIL.encode() + b" " + FILLER)
+
+    with patch(
+        "llm_shield_proxy.engines.pii_engine.AuditLogger.log_unmapped_blob"
+    ) as logged:
+        out = _forward(blob)
+
+    assert out == blob, "a probe failure must stay fail-open for the request"
+    assert logged.call_args.kwargs["edge_scan"] == "failed"

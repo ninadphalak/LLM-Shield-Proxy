@@ -1245,7 +1245,7 @@ class PIIEngine:
 
         if isinstance(node, str):
             if len(node) > max_string_length or node.startswith("data:"):
-                return self._handle_unmapped_blob(node, json_path, vault, active_profile)
+                return self._handle_unmapped_blob(node, json_path, active_profile)
             return self.redact_text(node, vault, active_profile)
 
         if isinstance(node, dict):
@@ -1288,7 +1288,6 @@ class PIIEngine:
         self,
         blob: str,
         json_path: str,
-        vault: Optional[Vault] = None,
         active_profile: Optional[CompiledProfile] = None,
     ) -> str:
         """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
@@ -1317,21 +1316,25 @@ class PIIEngine:
         if policy == "skip" or blob.startswith("data:"):
             return blob
 
-        carries_pii = False
-        if vault is not None:
-            # Joined with a newline so a match cannot straddle the seam and manufacture a
-            # hit out of two unrelated fragments.
-            probe = (
-                blob[:BLOB_BOUNDARY_SCAN_CHARS]
-                + "\n"
-                + blob[-BLOB_BOUNDARY_SCAN_CHARS:]
-            )
-            try:
-                carries_pii = bool(self.detect_spans(probe, active_profile))
-            except Exception:  # noqa: BLE001  # nosec B110 - a probe failure must not
-                # take down the request; the blob is then treated as uninspected, which
-                # is the behaviour that predates this scan.
-                carries_pii = False
+        # The tail offset is aligned back to the blob's OWN 4-character framing, exactly
+        # as the oversized-base64 path does. An unpadded blob whose length is not a
+        # multiple of four otherwise starts its tail slice mid-group, and the slice
+        # decodes to a shifted smear that matches nothing -- so tail PII would have been
+        # forwarded while the code looked like it had checked.
+        tail_offset = len(blob) - BLOB_BOUNDARY_SCAN_CHARS
+        tail_offset -= tail_offset % 4
+        # Joined with a newline so a match cannot straddle the seam and manufacture a hit
+        # out of two unrelated fragments.
+        probe = blob[:BLOB_BOUNDARY_SCAN_CHARS] + "\n" + blob[tail_offset:]
+
+        try:
+            edge_scan = "pii_found" if self.detect_spans(probe, active_profile) else "clean"
+        except Exception:  # noqa: BLE001  # nosec B110 - a probe failure must not take
+            # down the request. Recorded as its own outcome: `clean` means the probe ran
+            # and found nothing, and an operator who cannot tell that apart from "the
+            # probe blew up" may suppress a path that was never inspected at all.
+            logger.warning("Unmapped-blob edge scan failed at %s", json_path or "<root>")
+            edge_scan = "failed"
 
         AuditLogger.log_unmapped_blob(
             json_path=json_path or "<root>",
@@ -1339,17 +1342,21 @@ class PIIEngine:
             # "could not inspect this" and "inspected the edges and found PII" are
             # different events. An operator tuning payload_skip_keys has to tell them
             # apart, and one record type conflated them.
-            edge_scan="pii_found" if carries_pii else "clean",
+            edge_scan=edge_scan,
         )
 
-        # `carries_pii` can only be true when a vault was supplied, since the probe above
-        # runs under that same condition. Saying so explicitly rather than leaving the
-        # correlation implicit: the type checker cannot prove it, and neither can a reader.
-        if carries_pii and vault is not None:
+        if edge_scan == "pii_found":
             # `warn` means "forward what I could not inspect, but tell me". Once the edges
             # ARE inspected and PII is found, forwarding is no longer that -- it is
             # "found PII and shipped it anyway", which no DLP product should do.
-            return vault.get_or_create_token(blob, "UNMAPPED_BLOB_PII")
+            #
+            # A FIXED marker, not a vault token. Minting one would hash and retain the
+            # whole blob in both token maps and push it to Redis, so a field near the
+            # request-size limit would cost work and PLAINTEXT RETENTION proportional to
+            # the entire value -- including the interior this function never looked at.
+            # That is the opposite of what a bounded probe is for. Nothing round-trips an
+            # unclaimed vendor field, so there is no restoration to preserve.
+            return "[UNMAPPED_BLOB_PII_REDACTED]"
 
         return blob
 
