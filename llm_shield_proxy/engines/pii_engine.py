@@ -50,9 +50,22 @@ INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u2
 # lookaround boundaries (instead of `\b`) keep trailing '=' padding inside the
 # match so padded base64 actually decodes -- the old trailing `\b` stripped the
 # padding, which made every padded value fail the validate=True decode.
-BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}(?![A-Za-z0-9+/=])")
+#
+# `-` and `_` are the URL-safe alphabet's substitutes for `+` and `/`. Without them
+# no candidate was formed at all for a URL-safe blob, padded or not:
+# `YWJvYkBleGFtcGxlLmNvbT8_` decodes to `abob@example.com??` and was invisible.
+# Including them means ordinary `snake_case` and `hyphen-joined` words now form
+# candidates too; they are filtered by the decode and the >= 6 / tier-1 gate below,
+# which is where prose was always separated from payload.
+BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{8,}={0,2}(?![A-Za-z0-9+/=_-])")
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
+# How many times a candidate is decoded before giving up. A twice-encoded value
+# decodes once into more base64, which no tier-1 pattern matches, so a single pass
+# stopped there and the PII underneath stayed hidden. Each extra pass is taken ONLY
+# when the previous one produced something that is itself base64-shaped, so the cost
+# is bounded to actual nesting rather than charged to every candidate.
+MAX_BASE64_DECODE_DEPTH = 3
 
 # Percent-encoding hides PII from every Tier 1 pattern. `bob%40example.com` matches no
 # email regex, and the client decodes it back to an address. The v2 profile measured a
@@ -330,6 +343,33 @@ def _extend_span_over_digit_run(text: str, end: int, limit: int) -> int:
         else:
             break
     return end
+
+
+def _decode_base64_candidate(token: str) -> Optional[bytes]:
+    """Decodes a base64 candidate in either alphabet, padded or not.
+
+    The decode used to be a bare `b64decode(token, validate=True)`, which rejected
+    two entirely ordinary spellings:
+
+    - **Unpadded.** Encoders drop `=` routinely (JWT segments, URL parameters, a
+      value that was `.rstrip("=")`-ed). `aaa@aaa.com` becomes `YWFhQGFhYS5jb20`,
+      length 15, and `validate=True` raises on the length rather than decoding it.
+    - **URL-safe**, which uses `-` and `_` where the standard alphabet uses `+`
+      and `/`.
+
+    Padding is restored arithmetically and the standard alphabet is tried first,
+    since it is far more common. `validate=True` stays on in both cases: it is what
+    stops ordinary prose from being decoded into noise and scanned.
+
+    Returns the decoded bytes, or None if this is not base64 in either alphabet.
+    """
+    padded = token + "=" * (-len(token) % 4)
+    for altchars in (None, b"-_"):
+        try:
+            return base64.b64decode(padded, altchars=altchars, validate=True)
+        except Exception:  # noqa: BLE001 - not base64 in this alphabet; try the next
+            continue
+    return None
 
 
 def normalize_and_desmuggle(text: str) -> str:
@@ -669,16 +709,31 @@ class PIIEngine:
 
         # Obfuscated Base64 Candidate Inspection
         for start, end, token in base64_candidates:
-            try:
-                decoded_bytes = base64.b64decode(token, validate=True)
+            probe = token
+            for _ in range(MAX_BASE64_DECODE_DEPTH):
+                decoded_bytes = _decode_base64_candidate(probe)
+                if decoded_bytes is None:
+                    break
                 decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
-                if decoded_text and len(decoded_text) >= 6:
-                    for entity_type, pattern in active_profile.tier1_patterns:
-                        if pattern.search(decoded_text):
-                            raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
-                            break
-            except Exception as exc:
-                logger.debug("Base64 candidate decode failed: %s", exc)
+                if len(decoded_text) < 6:
+                    break
+
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
+                    # The span stays the whole source run, as it was. Mapping a hit
+                    # inside the decoded text back to source offsets is fragile, and
+                    # more so once the value has been decoded more than once.
+                    raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
+                    break
+
+                # Nothing found. Go round again only if this decode produced another
+                # base64 blob, which is what a double-encoded value looks like.
+                nested = decoded_text.strip()
+                if not BASE64_CANDIDATE_PATTERN.fullmatch(nested):
+                    break
+                probe = nested
 
         # Obfuscated Percent-Encoded Candidate Inspection.
         #
