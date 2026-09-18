@@ -1027,7 +1027,12 @@ async def rehydrate_sse_stream(
                         sse_payload = stripped[5:].lstrip() if stripped.startswith("data:") else None
                         if sse_payload is not None and sse_payload != "[DONE]":
                             try:
-                                original_line = line
+                                # True once a branch has routed this event's content into a retention
+                                # window, i.e. actually scanned it. `line is original_line` used to stand
+                                # in for this and stopped working the moment a branch rebuilt `line`
+                                # unconditionally: the sibling-field scan does that even when it changed
+                                # nothing, which silently disabled the fallback below.
+                                scanned_line = False
                                 json_str = sse_payload
                                 data_obj = json.loads(json_str)
 
@@ -1092,6 +1097,7 @@ async def rehydrate_sse_stream(
                                             continue
                                         choice_index = _entry_index(choice)
                                         if isinstance(delta.get("content"), str):
+                                            scanned_line = True
                                             content_window = _buffer_for((choice_index, None))
                                             delta["content"] = content_window.process_delta_text(delta["content"])
                                             sibling_buffer = content_window
@@ -1102,6 +1108,7 @@ async def rehydrate_sse_stream(
                                         # redact-without-restore failure in a field the
                                         # shape-following walk never visited.
                                         for tool_index, function in _tool_argument_fragments(delta):
+                                            scanned_line = True
                                             tool_window = _buffer_for((choice_index, tool_index))
                                             function["arguments"] = tool_window.process_delta_text(
                                                 function["arguments"]
@@ -1147,6 +1154,7 @@ async def rehydrate_sse_stream(
                                 elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
                                     delta = data_obj["delta"]
                                     if "text" in delta and isinstance(delta["text"], str):
+                                        scanned_line = True
                                         raw_content = delta["text"]
                                         # One window for the whole Anthropic stream. Its
                                         # `index` counts content BLOCKS, which are emitted
@@ -1169,6 +1177,7 @@ async def rehydrate_sse_stream(
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
                                     elif isinstance(delta.get("partial_json"), str):
+                                        scanned_line = True
                                         # Anthropic streams tool input as `partial_json`
                                         # fragments on the block -- the shape OpenAI carries
                                         # as `function.arguments`. It is JSON text on its own
@@ -1185,6 +1194,7 @@ async def rehydrate_sse_stream(
                                 elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
                                     cb = data_obj["content_block"]
                                     if "text" in cb and isinstance(cb["text"], str):
+                                        scanned_line = True
                                         raw_content = cb["text"]
                                         # Same single window as the delta branch above.
                                         rehydrated_content = _buffer_for((0, None)).process_delta_text(raw_content)
@@ -1202,6 +1212,7 @@ async def rehydrate_sse_stream(
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
                                     elif cb.get("type") == "tool_use":
+                                        scanned_line = True
                                         # Opens the call so the client learns its id and name
                                         # once. `input` is empty here; the arguments arrive
                                         # as `input_json_delta` fragments.
@@ -1234,14 +1245,32 @@ async def rehydrate_sse_stream(
                                 # object goes through the same walk the non-streaming path
                                 # uses, which skips structural keys and buffered channels.
                                 if (
-                                    line is original_line
+                                    not scanned_line
                                     and settings.ENABLE_RESPONSE_PII_REDACTION
                                 ):
-                                    swept = _redact_sibling_strings(
-                                        data_obj, _buffer_for((0, None)), skip_content=False
-                                    )
-                                    if swept != data_obj:
-                                        line = f"data: {json.dumps(swept).decode('utf-8')}"
+                                    # This scan is vault-scoped, so ANY open window answers
+                                    # for the event. Calling `_buffer_for` straight away
+                                    # would OPEN one, and on a finishing event -- which
+                                    # carries no content of its own -- that trips the
+                                    # fail-closed window cap and cuts off a stream that was
+                                    # completing normally. Borrow first, open only if the
+                                    # stream has no window at all, and skip rather than
+                                    # abort if the ceiling is reached.
+                                    sweep_buffer = next(iter(buffers.values()), None)
+                                    if sweep_buffer is None:
+                                        try:
+                                            sweep_buffer = _buffer_for((0, None))
+                                        except ValueError:
+                                            logger.warning(
+                                                "SSE window ceiling reached; this event was "
+                                                "not scanned"
+                                            )
+                                    if sweep_buffer is not None:
+                                        swept = _redact_sibling_strings(
+                                            data_obj, sweep_buffer, skip_content=False
+                                        )
+                                        if swept != data_obj:
+                                            line = f"data: {json.dumps(swept).decode('utf-8')}"
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
 
