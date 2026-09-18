@@ -50,11 +50,12 @@ class CompiledProfile:
 #
 # This class is deleted from text that is FORWARDED upstream, not only from text that
 # is scanned -- `redact_text` returns `working_text`. So membership is limited to
-# characters that are invisible AND have no role in ordinary prose. Two known hiding
+# characters that are invisible AND have no role in ordinary prose. Three known hiding
 # places are deliberately left out for that reason: variation selectors U+FE00-U+FE0F,
 # because U+FE0F is emoji presentation and stripping it rewrites every emoji in the
-# user's prompt, and U+2800, which is a legitimate blank braille cell. Both remain open
-# gaps by decision, pinned by a test.
+# user's prompt; U+2800, a legitimate blank braille cell; and U+180B-U+180D, the
+# Mongolian Free Variation Selectors, which select glyph variants in ordinary Mongolian.
+# All three remain open gaps by decision, pinned by a test.
 INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
     "["
     "\u00AD"  # soft hyphen
@@ -62,7 +63,12 @@ INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
     "\u061C"  # Arabic letter mark
     "\u115F\u1160"  # Hangul choseong/jungseong fillers
     "\u17B4\u17B5"  # Khmer inherent vowels, invisible
-    "\u180B-\u180E"  # Mongolian free variation selectors and vowel separator
+    "\u180E"  # Mongolian vowel separator, a format character with no glyph
+    # NOT U+180B-U+180D. Those are Mongolian Free Variation Selectors and they SELECT
+    # GLYPH VARIANTS in ordinary Mongolian text. This class is deleted from what gets
+    # FORWARDED, so including them silently rewrote real Mongolian input before it
+    # reached the provider. Same rule that keeps U+FE0F and U+2800 out: invisible is
+    # not sufficient, the character must also have no role in ordinary prose.
     "\u200B-\u200F"  # zero-width space through RTL mark
     "\u202A-\u202E"  # bidi embedding and override
     "\u2060-\u206F"  # word joiner, invisible operators, deprecated format chars
@@ -121,6 +127,9 @@ HTML_ENTITY_PATTERN: re.Pattern[str] = re.compile(
     r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});"
 )
 MAX_ENTITY_INSPECTION_CHARS = 8_192
+# A run longer than the limit is not skipped, or the limit would just tell an attacker
+# how much padding to add. Its edges are still decoded, same as percent and base64 do.
+ENTITY_BOUNDARY_SCAN_CHARS = 256
 # Deliberately NOT `_PERCENT_RUN_DELIMITERS`: that set contains `;`, which terminates
 # every entity, so reusing it would cut each run at the first entity and decode nothing.
 _ENTITY_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[](),")
@@ -889,19 +898,34 @@ class PIIEngine:
             while end < len(text) and text[end] not in _ENTITY_RUN_DELIMITERS:
                 end += 1
             run_end = end
-            if end - start > MAX_ENTITY_INSPECTION_CHARS:
-                continue
             token = text[start:end]
-            try:
-                decoded_text = html.unescape(token)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("HTML entity candidate decode failed: %s", exc)
-                continue
-            # Nothing actually decoded, so Tier 1 already saw this text as-is.
-            if decoded_text == token or len(decoded_text) < 6:
-                continue
-            for entity_type, pattern in active_profile.tier1_patterns:
-                if pattern.search(decoded_text):
+            if end - start > MAX_ENTITY_INSPECTION_CHARS:
+                # Decode the edges only, rather than skipping the run. Skipping made the
+                # cap a recipe: pad an entity-encoded address with enough non-delimiter
+                # characters and raw Tier 1 cannot see it either, so the whole run went
+                # to the provider unchanged. Percent runs and base64 blobs both already
+                # inspect their boundaries past their own caps; this matches them.
+                # A slice can cut an entity in half; `html.unescape` leaves the stub as
+                # literal text, which matches nothing and is safe.
+                probes = (
+                    token[:ENTITY_BOUNDARY_SCAN_CHARS],
+                    token[-ENTITY_BOUNDARY_SCAN_CHARS:],
+                )
+            else:
+                probes = (token,)
+            for probe in probes:
+                try:
+                    decoded_text = html.unescape(probe)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("HTML entity candidate decode failed: %s", exc)
+                    continue
+                # Nothing actually decoded, so Tier 1 already saw this text as-is.
+                if decoded_text == probe or len(decoded_text) < 6:
+                    continue
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
                     raw_spans.append((start, end, "ENTITY_OBFUSCATED_PII", token))
                     break
 

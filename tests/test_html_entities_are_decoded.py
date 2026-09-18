@@ -106,3 +106,31 @@ def test_a_lone_ampersand_is_not_a_run():
     text = "sales & marketing discussed the plan at length today"
 
     assert _redact(text) == text
+
+
+def test_an_oversized_entity_run_still_scans_its_edges():
+    """Greptile P1 on #43: padding past the cap disabled the decoder for the whole run.
+
+    Percent runs edge-scan past their cap and base64 blobs edge-decode past theirs. This
+    block skipped the run outright, so the cap was a recipe: pad
+    `bob&commat;example.com` with enough non-delimiter characters and raw Tier 1 cannot
+    see the encoded address either, so the whole run is forwarded unchanged.
+    """
+    from llm_shield_proxy.engines.pii_engine import MAX_ENTITY_INSPECTION_CHARS
+
+    padding = "x" * MAX_ENTITY_INSPECTION_CHARS
+    leading = "bob&commat;example.com" + padding
+    trailing = padding + "%20bob&commat;example.com"
+    assert len(leading) > MAX_ENTITY_INSPECTION_CHARS
+
+    assert _PLACEHOLDER.search(_redact(leading)), "value at the head was missed"
+    assert _PLACEHOLDER.search(_redact(trailing)), "value at the tail was missed"
+
+
+def test_an_oversized_run_with_no_pii_is_untouched():
+    """Control: edge-decoding must not start flagging ordinary long runs."""
+    from llm_shield_proxy.engines.pii_engine import MAX_ENTITY_INSPECTION_CHARS
+
+    text = "a&amp;b" + ("y" * MAX_ENTITY_INSPECTION_CHARS)
+
+    assert not _PLACEHOLDER.search(_redact(text))

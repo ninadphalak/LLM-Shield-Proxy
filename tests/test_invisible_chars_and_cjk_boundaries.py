@@ -38,7 +38,6 @@ INVISIBLE = {
     "U+3164 hangul filler": "\u3164",
     "U+FFA0 halfwidth hangul filler": "\uffa0",
     "U+17B4 khmer vowel inherent aq": "\u17b4",
-    "U+180B mongolian free variation selector one": "\u180b",
     "U+061C arabic letter mark": "\u061c",
     "U+2061 function application": "\u2061",
     "U+206A inhibit symmetric swapping": "\u206a",
@@ -112,13 +111,15 @@ def test_an_ordinary_word_is_still_not_a_secret():
 # --- deliberate exclusions -------------------------------------------------------
 
 
-@pytest.mark.parametrize("char", ["\ufe0f", "\u2800"])
+@pytest.mark.parametrize("char", ["\ufe0f", "\u2800", "\u180b", "\u180c", "\u180d"])
 def test_emoji_and_braille_characters_are_deliberately_preserved(char: str):
     """These are NOT stripped, on purpose, and this pins the decision.
 
     `normalize_and_desmuggle` output is forwarded upstream, so stripping is not free.
     U+FE0F is emoji presentation: removing it rewrites every emoji in the user's
-    prompt. U+2800 is a legitimate blank braille cell. Both can still hide a value,
+    prompt. U+2800 is a legitimate blank braille cell. U+180B-U+180D are Mongolian Free
+    Variation Selectors, which SELECT GLYPH VARIANTS in ordinary Mongolian text, so
+    stripping them rewrote real Mongolian input. All can still hide a value,
     so this is an accepted open gap rather than a closed one, recorded in the fix
     worklog. If that trade is ever revisited, this test is the thing to change.
     """
