@@ -9,6 +9,7 @@ Implements a high-throughput multi-tier detection cascade:
 from __future__ import annotations
 
 import base64
+import html
 import logging
 import math
 import os
@@ -42,7 +43,6 @@ class CompiledProfile:
     tier3_ner_entities: Set[str] = field(default_factory=set)
 
 
-# Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
 # Characters that render as nothing and so hide a value from every pattern while the
 # client still displays the real thing. NFKC does not deal with them: U+3164 merely
 # folds to U+1160, which is equally invisible.
@@ -106,6 +106,17 @@ PERCENT_BOUNDARY_SCAN_CHARS = 256
 # pattern that scans outward from each escape: that form backtracks, and one 120k run
 # with no delimiter took 4.4 seconds. This runs per SSE event.
 PERCENT_RUN_PATTERN: re.Pattern[str] = re.compile(r"[^\s\"'<>{}\[\],;()]+")
+
+# HTML entities hide the same structured PII percent-encoding did: `bob&commat;example.com`
+# matches no email pattern, and every browser, chat client and markdown renderer shows
+# `bob@example.com`. Named, decimal and hexadecimal forms all appear in the wild.
+HTML_ENTITY_PATTERN: re.Pattern[str] = re.compile(
+    r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});"
+)
+MAX_ENTITY_INSPECTION_CHARS = 8_192
+# Deliberately NOT `_PERCENT_RUN_DELIMITERS`: that set contains `;`, which terminates
+# every entity, so reusing it would cut each run at the first entity and decode nothing.
+_ENTITY_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[](),")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
@@ -807,6 +818,36 @@ class PIIEngine:
                     for _entity_type, pattern in active_profile.tier1_patterns
                 ):
                     raw_spans.append((start, end, "PERCENT_OBFUSCATED_PII", token))
+                    break
+
+        # Obfuscated HTML-Entity Candidate Inspection.
+        #
+        # Same shape and the same conservative whole-run span as the percent block above.
+        run_end = -1
+        for entity in HTML_ENTITY_PATTERN.finditer(text):
+            if entity.start() < run_end:
+                continue  # already inside a run this loop captured
+            start = entity.start()
+            while start > 0 and text[start - 1] not in _ENTITY_RUN_DELIMITERS:
+                start -= 1
+            end = entity.end()
+            while end < len(text) and text[end] not in _ENTITY_RUN_DELIMITERS:
+                end += 1
+            run_end = end
+            if end - start > MAX_ENTITY_INSPECTION_CHARS:
+                continue
+            token = text[start:end]
+            try:
+                decoded_text = html.unescape(token)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("HTML entity candidate decode failed: %s", exc)
+                continue
+            # Nothing actually decoded, so Tier 1 already saw this text as-is.
+            if decoded_text == token or len(decoded_text) < 6:
+                continue
+            for entity_type, pattern in active_profile.tier1_patterns:
+                if pattern.search(decoded_text):
+                    raw_spans.append((start, end, "ENTITY_OBFUSCATED_PII", token))
                     break
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org).
