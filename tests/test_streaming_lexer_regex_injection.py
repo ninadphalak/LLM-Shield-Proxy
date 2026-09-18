@@ -71,18 +71,38 @@ def test_a_metacharacter_in_a_property_name_does_not_raise(prop: str):
     _feed(prop)
 
 
-def test_a_nested_quantifier_does_not_backtrack():
-    """The ReDoS. Kept small deliberately; unfixed, this class of input hangs.
+def test_a_nested_quantifier_is_matched_literally():
+    """The deterministic guard. No clock involved, so it cannot flake.
 
-    24 characters is already ~0.5s unfixed and grows about fourfold every two
-    characters, so a generous ceiling here still fails loudly on a regression
-    without risking a CI hang.
+    Escaped, `(a+)+b` is a literal property name and matches the property literally
+    called `(a+)+b`. Unescaped it is a pattern, which does NOT match that text (it
+    would be looking for `aaa...b`), so the value is never rehydrated. Asserting the
+    rehydration happened is therefore a direct assertion that the name was escaped,
+    which is the property the ReDoS depends on.
+    """
+    out = _feed("(a+)+b")
+
+    assert "PLAINTEXT" in out
+    assert "masked" not in out
+
+
+def test_a_nested_quantifier_does_not_backtrack():
+    """The ReDoS itself, as a secondary signal to the literal-match test above.
+
+    Timing, so the bound is deliberately loose. Measured unfixed, padding length to
+    wall clock: 22 -> 0.143s, growing about fourfold every two characters, so 28 is
+    about 9s. A 3s ceiling therefore has roughly threefold headroom on a loaded runner
+    while still failing loudly on a regression, and the fixed path returns in
+    microseconds rather than anywhere near the bound.
+
+    Kept at 28 rather than 40: at 40 an unfixed run would not finish inside two
+    minutes, which would hang CI instead of failing it.
     """
     started = time.perf_counter()
-    _feed("(a+)+b", value="a" * 24)
+    _feed("(a+)+b", value="a" * 28)
     elapsed = time.perf_counter() - started
 
-    assert elapsed < 1.0, f"took {elapsed:.3f}s; the property name is being compiled again"
+    assert elapsed < 3.0, f"took {elapsed:.3f}s; the property name is being compiled again"
 
 
 def test_a_metacharacter_property_still_rehydrates():
