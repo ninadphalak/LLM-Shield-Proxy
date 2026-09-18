@@ -796,6 +796,13 @@ async def rehydrate_sse_stream(
                                 virtual_key_id=getattr(vault, "virtual_key_id", "unknown"),
                                 request_id=request_id
                             )
+                            # Abort means abort. Without this the `finally` block below
+                            # saw all three of its flags still False, took the ordinary
+                            # end-of-stream path, and flushed the retention window to the
+                            # attacker: the tail deliberately withheld from the previous
+                            # chunk, which on a prompt-extraction attack is the last words
+                            # of the prompt being extracted. It appended the watermark too.
+                            stream_aborted = True
                             break
                         if chunk_text:
                             canary_tail = (canary_tail + chunk_text)[-(canary_len - 1):] if canary_len > 1 else ""
@@ -1092,11 +1099,37 @@ async def rehydrate_sse_stream(
                             yield ready
 
                     if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
-                        logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_CLOSED): {e}")
+                        # Type name only. The old f-string rendered `str(e)`, and an
+                        # exception raised while handling a payload can quote that
+                        # payload in its message. Invariant 4 applies to this sink too.
+                        logging.getLogger(__name__).error(
+                            "Streaming rehydration failed (FAIL_CLOSED): %s", type(e).__name__
+                        )
                         stream_aborted = True
+                        # Fail closed, but not silently. This used to `return`, so the
+                        # response body just stopped: no terminator and no error event,
+                        # which a client cannot tell apart from a stalled network. It
+                        # waits for a [DONE] that is never coming.
+                        #
+                        # Nothing unscanned is released here. The error text is a fixed
+                        # string, never the exception's own message.
+                        error_event = {
+                            "error": {
+                                "message": (
+                                    "The response stream was stopped by LLM-Shield-Proxy "
+                                    "because it could not be safely processed."
+                                ),
+                                "type": "shield_stream_aborted",
+                                "code": "stream_aborted",
+                            }
+                        }
+                        yield f"data: {json.dumps(error_event).decode('utf-8')}\n\n".encode()
+                        yield b"data: [DONE]\n\n"
                         return
                     else:
-                        logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_OPEN): {e}")
+                        logging.getLogger(__name__).error(
+                            "Streaming rehydration failed (FAIL_OPEN): %s", type(e).__name__
+                        )
                         failed_open = True
                         if line_accumulator:
                             yield line_accumulator.encode("utf-8")
