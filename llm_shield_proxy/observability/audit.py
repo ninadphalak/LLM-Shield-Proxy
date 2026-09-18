@@ -426,12 +426,19 @@ class AuditLogger:
         size_bytes: int,
         virtual_key_id: str = "BYOK",
         request_id: Optional[str] = None,
+        edge_scan: str = "not_run",
     ) -> None:
-        """Records a blob forwarded without inspection from an unclaimed field.
+        """Records a blob from an unclaimed field, and what the edge scan made of it.
 
         This is the onboarding signal for UNMAPPED_BLOB_POLICY=warn: it names the
         exact JSON path so an operator can add it to that key's `payload_skip_keys`
         and stop paying to walk it, or investigate why a blob is arriving there.
+
+        `edge_scan` separates two events a single record type used to conflate:
+        `clean` means the bounded edge probe found nothing and the blob went on
+        untouched, `pii_found` means it found PII and the blob was redacted rather
+        than forwarded. An operator tuning `payload_skip_keys` needs to tell a noisy
+        path apart from a leaking one.
         """
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -443,14 +450,24 @@ class AuditLogger:
             "virtual_key_id": virtual_key_id,
             "json_path": json_path,
             "size_bytes": size_bytes,
-            "severity": "WARNING",
-            "action": "FORWARDED_UNINSPECTED",
+            "severity": "CRITICAL" if edge_scan == "pii_found" else "WARNING",
+            "edge_scan": edge_scan,
+            "action": (
+                "REDACTED_EDGE_PII" if edge_scan == "pii_found" else "FORWARDED_UNINSPECTED"
+            ),
             "message": (
-                "Blob past the inspection ceiling in a field no policy claims. Add this path to "
-                "payload_skip_keys for this key, or set UNMAPPED_BLOB_POLICY=block to reject it."
+                "Blob past the inspection ceiling in a field no policy claims, and its edges "
+                "carry PII. The blob was redacted rather than forwarded; investigate what is "
+                "writing to this path."
+                if edge_scan == "pii_found"
+                else "Blob past the inspection ceiling in a field no policy claims. Add this "
+                "path to payload_skip_keys for this key, or set UNMAPPED_BLOB_POLICY=block "
+                "to reject it."
             ),
         }
-        AuditLogger._enqueue_log("WARNING", log_entry)
+        AuditLogger._enqueue_log(
+            "CRITICAL" if edge_scan == "pii_found" else "WARNING", log_entry
+        )
 
     @staticmethod
     def log_tripwire_event(
