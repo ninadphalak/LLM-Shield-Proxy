@@ -68,3 +68,34 @@ def test_a_vault_token_is_still_left_alone(vault: Vault) -> None:
     token = vault.get_or_create_token("bob@example.com", "EMAIL")
     text = f"write to {token} today"
     assert redact_model_originated_text(text, vault) == text
+
+
+def test_an_obfuscated_copy_is_redacted_even_beside_a_plain_one():
+    """Greptile P1 on #42: the reveal test was per-value, so a duplicate defeated it.
+
+    The old condition asked whether a normalized match's VALUE appeared anywhere in the
+    raw text. A response carrying both `bob@example.com` and `bob<FULLWIDTH @>example.com`
+    made that true for both normalized matches, so the raw-scan result was returned and
+    the obfuscated copy went to the client, where it renders as an ordinary address.
+
+    Counting occurrences is what distinguishes the two cases: normalization revealing
+    something means strictly MORE matches of a value than the raw scan found, not a value
+    the raw scan never saw at all.
+    """
+    fullwidth = "bob＠example.com"
+    out = redact_model_originated_text(
+        f"mail bob@example.com and also {fullwidth}", Vault(synthetic=False)
+    )
+
+    assert fullwidth not in out
+    assert "bob@example.com" not in out
+    assert out.count("[EMAIL_REDACTED]") == 2
+
+
+def test_two_obfuscated_copies_are_both_redacted():
+    """Two hidden copies and no plain one; neither may survive."""
+    fullwidth = "bob＠example.com"
+    out = redact_model_originated_text(f"{fullwidth} and {fullwidth}", Vault(synthetic=False))
+
+    assert fullwidth not in out
+    assert out.count("[EMAIL_REDACTED]") == 2

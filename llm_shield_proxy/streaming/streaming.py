@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import logging
+from collections import Counter
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, Iterator, Optional
 
 import orjson as json
@@ -250,12 +251,20 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
         except Exception:  # noqa: BLE001
             logger.warning("Normalized response scan failed; forwarding raw scan", exc_info=True)
             return redacted
-        hidden = [
-            span
-            for span in normalized_spans
-            if span[3] not in known and span[3] not in text
-        ]
-        if hidden:
+        # Compare OCCURRENCE COUNTS, not membership. The test used to be "does this
+        # value appear anywhere in the raw text", which a duplicate defeats: a response
+        # carrying both `bob@example.com` and its fullwidth-@ twin made that true for
+        # every normalized match, so the raw result was returned and the obfuscated copy
+        # reached the client, where it renders as an ordinary address.
+        #
+        # Normalization revealing something means strictly MORE matches of a value than
+        # the raw scan found, which is true for the duplicate case and false for text
+        # with nothing hidden in it.
+        raw_counts = Counter(span[3] for span in spans if span[3] not in known)
+        normalized_counts = Counter(
+            span[3] for span in normalized_spans if span[3] not in known
+        )
+        if any(count > raw_counts[value] for value, count in normalized_counts.items()):
             return _apply(normalized, normalized_spans)
 
     return redacted
@@ -895,23 +904,37 @@ async def rehydrate_sse_stream(
         # it. Clients concatenate by index, so ordinals are handed out densely from 0.
         anthropic_tool_ordinals: Dict[int, int] = {}
 
-        def _anthropic_tool_ordinal(block_index: int) -> int:
-            """The tool-call ordinal for one Anthropic content block, stable per stream."""
+        def _anthropic_tool_ordinal(block_index: int) -> Optional[int]:
+            """The tool-call ordinal for one Anthropic content block, or None past the cap.
+
+            Stop allocating rather than grow: a real message never reaches the cap, so
+            anything that does is an upstream inventing indices.
+
+            Past it the answer is NO ordinal, not a recycled one. Handing back
+            `MAX_ANTHROPIC_TOOL_ORDINALS - 1` kept the stream well-formed but that
+            ordinal already belongs to the last block that was allocated one, so every
+            over-cap block shared its retention window and its client-visible tool-call
+            index: two distinct tool calls silently merged into one. The over-cap block
+            was also absent from the map, so `content_block_stop` could not flush its
+            tail either. Bounding memory is not worth misrouting a tool call.
+
+            A block with no ordinal is left untranslated. Its strings still go through
+            the scan-by-default sweep, so nothing reaches the client unscanned; it
+            simply is not presented as an OpenAI tool call.
+            """
             existing = anthropic_tool_ordinals.get(block_index)
             if existing is not None:
                 return existing
-            assigned = len(anthropic_tool_ordinals)
-            if assigned >= MAX_ANTHROPIC_TOOL_ORDINALS:
-                # Stop allocating rather than grow. A real message never reaches this,
-                # so anything that does is an upstream inventing indices. Reusing the
-                # last ordinal keeps the stream valid for the client instead of failing
-                # it, and the event is still scanned either way.
+            if len(anthropic_tool_ordinals) >= MAX_ANTHROPIC_TOOL_ORDINALS:
                 logger.warning(
-                    "Anthropic stream opened more than %d tool-block indices; reusing the "
-                    "last ordinal rather than growing the map",
+                    "Anthropic stream opened more than %d tool-block indices; block %s is "
+                    "not being translated to a tool call rather than sharing another "
+                    "block's ordinal",
                     MAX_ANTHROPIC_TOOL_ORDINALS,
+                    block_index,
                 )
-                return MAX_ANTHROPIC_TOOL_ORDINALS - 1
+                return None
+            assigned = len(anthropic_tool_ordinals)
             anthropic_tool_ordinals[block_index] = assigned
             return assigned
 
@@ -1177,17 +1200,23 @@ async def rehydrate_sse_stream(
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
                                     elif isinstance(delta.get("partial_json"), str):
-                                        scanned_line = True
                                         # Anthropic streams tool input as `partial_json`
                                         # fragments on the block -- the shape OpenAI carries
                                         # as `function.arguments`. It is JSON text on its own
                                         # ordered channel, so it gets its own window and,
                                         # through `_channel_vault`, escaped restored values.
+                                        #
+                                        # No ordinal means the cap is reached. The block is
+                                        # left untranslated rather than spliced onto another
+                                        # block's call; `scanned_line` stays False so the
+                                        # sweep still scans its strings.
                                         tool_ordinal = _anthropic_tool_ordinal(_entry_index(data_obj))
-                                        restored = _buffer_for((0, tool_ordinal)).process_delta_text(
-                                            delta["partial_json"]
-                                        )
-                                        line = _tool_call_line(tool_ordinal, restored)
+                                        if tool_ordinal is not None:
+                                            scanned_line = True
+                                            restored = _buffer_for(
+                                                (0, tool_ordinal)
+                                            ).process_delta_text(delta["partial_json"])
+                                            line = _tool_call_line(tool_ordinal, restored)
                                     else:
                                         pass  # Skip deltas carrying neither text nor tool input
                                 # 3. Anthropic Content Block Start / Generic text delta
@@ -1212,12 +1241,14 @@ async def rehydrate_sse_stream(
                                         }
                                         line = f"data: {json.dumps(openai_chunk).decode('utf-8')}"
                                     elif cb.get("type") == "tool_use":
-                                        scanned_line = True
                                         # Opens the call so the client learns its id and name
                                         # once. `input` is empty here; the arguments arrive
-                                        # as `input_json_delta` fragments.
+                                        # as `input_json_delta` fragments. Past the cap there
+                                        # is no ordinal, so no call is opened at all.
                                         tool_ordinal = _anthropic_tool_ordinal(_entry_index(data_obj))
-                                        line = _tool_call_line(tool_ordinal, "", opener=cb)
+                                        if tool_ordinal is not None:
+                                            scanned_line = True
+                                            line = _tool_call_line(tool_ordinal, "", opener=cb)
                                     else:
                                         pass  # Skip start blocks carrying neither
                                 elif data_obj.get("type") == "content_block_stop":
