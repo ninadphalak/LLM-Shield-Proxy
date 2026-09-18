@@ -228,11 +228,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app_state.is_draining = False
     app_state.shutdown_event = asyncio.Event()
 
-    # `settings` is a hot-reloading proxy, so ENABLE_EXT_PROC read here and read again
-    # at the use site are two separate reads that can disagree. Binding the name to None
-    # up front turns a would-be NameError into a clear guard. Flagged by pyright.
+    # ONE read of the flag, shared by the conditional import and the startup below.
+    # `settings` is a hot-reloading proxy, so reading it twice can give two different
+    # answers: the import is skipped and the use site then finds the name unbound.
+    #
+    # Snapshotting is what makes them agree. Binding to None alone was not enough --
+    # it turned a NameError into a SILENT SKIP, leaving ext-proc configured as enabled
+    # and never started, which is worse because nothing says so.
+    enable_ext_proc = settings.ENABLE_EXT_PROC
     serve_ext_proc = None
-    if settings.ENABLE_EXT_PROC:
+    if enable_ext_proc:
         from llm_shield_proxy.api.grpc_service import serve_ext_proc
     from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
     from llm_shield_proxy.security.vault_client import vault_provider
@@ -337,7 +342,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     grpc_server = None
     sock_path = settings.EXT_PROC_SOCK_PATH
 
-    if settings.ENABLE_EXT_PROC and serve_ext_proc is not None:
+    if enable_ext_proc:
+        if serve_ext_proc is None:
+            # Unreachable while the snapshot above is the only reader of the flag.
+            # Loud rather than silent: ext-proc being enabled and absent is a
+            # configuration the operator must know about, not one to paper over.
+            raise RuntimeError(
+                "ENABLE_EXT_PROC is set but the ext-proc service could not be imported"
+            )
         if os.name != "nt":
             sock_dir = os.path.dirname(sock_path)
             # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
