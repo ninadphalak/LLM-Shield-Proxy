@@ -206,9 +206,19 @@ def test_compile_policy_defaults_to_default_block_with_no_allowed_domains():
     assert compiled.allowed_domains == ()
 
 
-def test_compile_policy_rejects_unknown_mode_by_falling_back():
+def test_compile_policy_rejects_unknown_mode_by_failing_closed():
+    """An unrecognised mode now selects the STRICTER mode, not the permissive one.
+
+    This asserted DEFAULT_BLOCK, which is the mode that allows any host whose resolved
+    IP is not in a denied range. That made a typo dangerous: writing `allowlist_only` in
+    lower case silently produced the opposite of what it says and allowed everything
+    public. Invariant 3 says a gate denies on bad configuration.
+
+    An ABSENT key still gets DEFAULT_BLOCK, which is the documented default and not a
+    misconfiguration. See the tests in test_egress_mode_typo_fails_closed.py.
+    """
     compiled = compile_policy({"egress_mode": "NOT_A_REAL_MODE"})
-    assert compiled.mode == "DEFAULT_BLOCK"
+    assert compiled.mode == "ALLOWLIST_ONLY"
 
 
 # ---------------------------------------------------------------------------

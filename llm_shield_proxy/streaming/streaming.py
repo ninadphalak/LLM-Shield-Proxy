@@ -44,6 +44,14 @@ _BUFFERED_CHANNEL_KEYS = frozenset({"content", "text", "arguments"})
 # fan-out and far below a memory concern at 64 KiB of buffer each.
 MAX_STREAM_WINDOWS = 256
 
+# How many distinct Anthropic content-block indices one stream may hand ordinals to.
+# The key comes from the upstream, so an upstream inventing a new index per event grew
+# this map forever: 116 bytes per event, 46.6 MB live in one stream at 400k events.
+# Unlike the retention windows it is populated without going through `_buffer_for`, so
+# MAX_STREAM_WINDOWS never applied to it. 256 matches the window cap and is far above
+# the handful of tool blocks a real message carries.
+MAX_ANTHROPIC_TOOL_ORDINALS = 256
+
 # A retention window's identity: `(choice index, tool-call index or None)`. `None` is that
 # choice's ordered content channel; an int is one tool call's `arguments` fragments. They
 # are separate token streams and must never share a window -- see `_buffer_for`.
@@ -175,7 +183,7 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
     """
     if not text:
         return text
-    from llm_shield_proxy.engines.pii_engine import pii_engine
+    from llm_shield_proxy.engines.pii_engine import normalize_and_desmuggle, pii_engine
 
     try:
         spans = pii_engine.detect_spans(text)
@@ -188,12 +196,41 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
         return text
 
     known = getattr(vault, "token_to_original", None) or {}
-    out = list(text)
-    for start, end, entity_type, matched_text in reversed(spans):
-        if matched_text in known:
-            continue
-        out[start:end] = list(f"[{entity_type}_REDACTED]")
-    return "".join(out)
+
+    def _apply(source: str, found: list) -> str:
+        result = list(source)
+        for start, end, entity_type, matched_text in reversed(found):
+            if matched_text in known:
+                continue
+            result[start:end] = list(f"[{entity_type}_REDACTED]")
+        return "".join(result)
+
+    redacted = _apply(text, spans)
+
+    # The request path normalizes before scanning; this path did not, so a zero-width
+    # space or a fullwidth `@` inside a value passed straight through. Normalizing here
+    # unconditionally is not an option because it shifts the offsets the spans point at.
+    #
+    # So: scan the raw text, then scan the normalized form as well. If normalizing
+    # reveals PII the raw scan missed, the normalized-and-redacted text is what the
+    # client gets. Text with nothing hidden in it takes neither branch and is returned
+    # byte for byte.
+    normalized = normalize_and_desmuggle(text)
+    if normalized != text:
+        try:
+            normalized_spans = pii_engine.detect_spans(normalized)
+        except Exception:  # noqa: BLE001
+            logger.warning("Normalized response scan failed; forwarding raw scan", exc_info=True)
+            return redacted
+        hidden = [
+            span
+            for span in normalized_spans
+            if span[3] not in known and span[3] not in text
+        ]
+        if hidden:
+            return _apply(normalized, normalized_spans)
+
+    return redacted
 
 
 def redact_model_originated_tree(node: Any, vault: "Vault", skip_keys: frozenset = frozenset()) -> Any:
@@ -668,6 +705,17 @@ async def rehydrate_sse_stream(
             if existing is not None:
                 return existing
             assigned = len(anthropic_tool_ordinals)
+            if assigned >= MAX_ANTHROPIC_TOOL_ORDINALS:
+                # Stop allocating rather than grow. A real message never reaches this,
+                # so anything that does is an upstream inventing indices. Reusing the
+                # last ordinal keeps the stream valid for the client instead of failing
+                # it, and the event is still scanned either way.
+                logger.warning(
+                    "Anthropic stream opened more than %d tool-block indices; reusing the "
+                    "last ordinal rather than growing the map",
+                    MAX_ANTHROPIC_TOOL_ORDINALS,
+                )
+                return MAX_ANTHROPIC_TOOL_ORDINALS - 1
             anthropic_tool_ordinals[block_index] = assigned
             return assigned
 
