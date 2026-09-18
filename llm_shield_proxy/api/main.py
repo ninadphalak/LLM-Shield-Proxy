@@ -228,6 +228,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app_state.is_draining = False
     app_state.shutdown_event = asyncio.Event()
 
+    # `settings` is a hot-reloading proxy, so ENABLE_EXT_PROC read here and read again
+    # at the use site are two separate reads that can disagree. Binding the name to None
+    # up front turns a would-be NameError into a clear guard. Flagged by pyright.
+    serve_ext_proc = None
     if settings.ENABLE_EXT_PROC:
         from llm_shield_proxy.api.grpc_service import serve_ext_proc
     from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
@@ -333,7 +337,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     grpc_server = None
     sock_path = settings.EXT_PROC_SOCK_PATH
 
-    if settings.ENABLE_EXT_PROC:
+    if settings.ENABLE_EXT_PROC and serve_ext_proc is not None:
         if os.name != "nt":
             sock_dir = os.path.dirname(sock_path)
             # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
@@ -1003,6 +1007,11 @@ async def _proxy_catch_all_internal(
 
             is_v3 = False
             v3_cipher = None
+            # Pre-bound like the two above. It is assigned further down inside this try,
+            # and read again in the response path, which pyright showed can be reached
+            # without the assignment having run. None falls through to the default
+            # OpenAI-shaped branch, which is the safe answer when the provider is unknown.
+            target_provider = None
             try:
                 is_json_rpc = isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
                 if is_json_rpc:

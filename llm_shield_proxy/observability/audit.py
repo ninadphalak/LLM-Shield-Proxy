@@ -207,6 +207,13 @@ class AuditLogger:
     @classmethod
     def _worker(cls):
         while True:
+            # Bound BEFORE the try. The handler below touches `item`, and if
+            # `get()` itself raised, `item` was unbound: the handler then died of
+            # UnboundLocalError, the inner bare `except` swallowed that, and
+            # `task_done()` never ran. A caller blocking on `item.completion` waited
+            # forever and `queue.join()` never returned -- a silent hang in the audit
+            # path. Found by pyright's reportPossiblyUnboundVariable.
+            item = None
             try:
                 item = cls._log_queue.get()
                 severity, log_entry = item.severity, item.log_entry
@@ -274,6 +281,10 @@ class AuditLogger:
             except Exception as exc:  # nosec B110 noqa: S110
                 logger.exception("Audit worker failed to persist an event")
                 try:
+                    if item is None:
+                        # The queue read itself failed, so there is no work item to
+                        # complete and nothing was taken off the queue to mark done.
+                        continue
                     item.error.append(exc)
                     if item.completion is not None:
                         item.completion.set()

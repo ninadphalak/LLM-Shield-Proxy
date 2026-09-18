@@ -54,7 +54,11 @@ jobs:
           # has not been released yet still builds.
           pip install ./pii-leak-benchmark
           pip install -r requirements.txt
-          pip install ruff bandit pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
+          # PINNED, and they must match `.pre-commit-config.yaml`. These were
+          # unpinned, so CI silently tracked latest while pre-commit pinned ruff
+          # 0.6.1 -- ten minor versions apart, which meant a rule added in between
+          # passed locally and failed here. Bump both in the same commit.
+          pip install ruff==0.16.5 bandit==1.9.4 pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
           # hypercorn is the HTTP/2-capable ASGI server used as the upstream in
           # tests/test_http2_upstream.py; uvicorn cannot serve HTTP/2.
           pip install hypercorn
@@ -67,6 +71,13 @@ jobs:
       - name: Run Bandit Security Vulnerability Scanner
         run: |
           bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ -s B101,B104,B311
+
+      - name: Run Pyright static type checking
+        # The engine Pylance runs, so the editor, the pre-commit hook and this step are
+        # one analysis with one config ([tool.pyright] in pyproject.toml). Pinned to the
+        # same version the hook uses.
+        run: |
+          npx --yes pyright@1.1.406 llm_shield_proxy
 
       - name: Verify the Redis service is reachable
         # Fails loudly rather than letting the Redis tests skip themselves and

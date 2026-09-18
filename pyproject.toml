@@ -188,3 +188,43 @@ filterwarnings = [
     "ignore::DeprecationWarning:fastapi.*:",
     "ignore::DeprecationWarning:starlette.*:",
 ]
+
+[tool.pyright]
+# One source of truth for the editor and the pre-commit hook. Pylance reads this, and
+# so does the pinned pyright hook, so "clean in the editor" and "clean in the hook"
+# cannot disagree -- which is the entire point of enforcing it here.
+include = ["llm_shield_proxy"]
+exclude = ["**/__pycache__", "**/.venv", "venv", "venv-*", ".worktrees"]
+typeCheckingMode = "standard"
+# No `pythonVersion` pin on purpose. Pinning it to the 3.11 floor made pyright analyze
+# the LOCAL interpreter's stdlib under 3.11 rules, so a dev on 3.14 got an error out of
+# `string/templatelib.py` -- a file nobody here wrote. Unpinned, each environment checks
+# itself: 3.14 locally, whatever CI installs in CI. Version-floor compatibility is
+# covered by the test matrix, which actually runs on 3.11 and 3.12.
+
+# `pii-leak-benchmark` is a SEPARATE distribution in this repo, installed with its own
+# `pip install ./pii-leak-benchmark`. Point the analyzer at its source so the
+# conformance modules resolve without requiring it to be installed first.
+extraPaths = ["pii-leak-benchmark"]
+
+# Optional at runtime and guarded by try/except ImportError at every use site.
+# Reporting them as missing is noise, not a finding.
+reportMissingImports = "warning"
+
+# BACKLOG, not a blessing. These 21 are real diagnostics that need individual triage --
+# mostly attribute access on the hot-reloading settings proxy and argument variance --
+# and several may be genuine. They are warnings so the hook BLOCKS today on the class
+# that actually crashes at runtime rather than failing on everything and being
+# uninstalled on day one. Burn them down and delete these lines; do not add to them.
+#
+# What is deliberately left at error, because it is the bug class this was added for:
+# reportPossiblyUnbound. It found an UnboundLocalError in the audit worker that hung the
+# queue silently, plus two latent NameErrors.
+reportAttributeAccessIssue = "warning"
+reportArgumentType = "warning"
+reportInvalidTypeForm = "warning"
+reportReturnType = "warning"
+reportAssignmentType = "warning"
+reportIndexIssue = "warning"
+reportCallIssue = "warning"
+reportOptionalMemberAccess = "warning"
