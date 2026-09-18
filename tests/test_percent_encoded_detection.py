@@ -94,15 +94,40 @@ def test_oversized_run_still_scans_its_edges() -> None:
     Padding a percent-encoded value past MAX_PERCENT_INSPECTION_CHARS used to disable
     the decoder for that run entirely. The edges are now decoded, matching what
     BASE64_BOUNDARY_SCAN_CHARS already did for attachment-sized base64 bodies.
+
+    The trailing fixture ends `%20bob%40example.com`, i.e. the address is preceded by an
+    encoded space, and that separator is load-bearing rather than decoration.
+
+    PR #39 bounded the EMAIL local part to `{1,64}` to kill its quadratic backtracking.
+    Welding an address onto the end of an unbroken 8,192-character run therefore makes
+    something that is not an address: the local part would be the whole run. The engine
+    treats that identically with no percent-encoding anywhere in sight --
+    `("a" * 70) + "bob@example.com"` yields no EMAIL span either -- so asserting on the
+    glued form would be asserting that the edge scan does what the detector deliberately
+    refuses to do. The control below pins exactly that, so this stays a decision rather
+    than drifting back.
+
+    The original fixture predates #39 and passed only against the unbounded pattern.
     """
     from llm_shield_proxy.engines.pii_engine import MAX_PERCENT_INSPECTION_CHARS
 
     padding = "x" * MAX_PERCENT_INSPECTION_CHARS
     leading = "bob%40example.com" + padding
-    trailing = padding + "bob%40example.com"
+    trailing = padding + "%20bob%40example.com"
     assert len(leading) > MAX_PERCENT_INSPECTION_CHARS
+    assert len(trailing) > MAX_PERCENT_INSPECTION_CHARS
     assert "PERCENT_OBFUSCATED_PII" in _types(leading), "value at the head was missed"
     assert "PERCENT_OBFUSCATED_PII" in _types(trailing), "value at the tail was missed"
+
+
+def test_a_value_glued_to_a_long_unbroken_run_is_not_an_address() -> None:
+    """Why the test above needs a separator, pinned independently of percent-encoding.
+
+    #39 bounds the EMAIL local part at 64 characters. An address with 70 junk characters
+    fused to the front of it is not one, and no client would parse it as one either.
+    """
+    assert "EMAIL" not in _types(("a" * 70) + "bob@example.com")
+    assert "EMAIL" in _types(("a" * 70) + " bob@example.com")
 
 
 def test_oversized_run_decodes_only_its_two_edges(monkeypatch) -> None:
