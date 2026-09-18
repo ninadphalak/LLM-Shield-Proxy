@@ -596,3 +596,155 @@ def test_redact_url_for_audit_survives_a_malformed_port():
 
     for bad in ("https://evil.test:abc/x", "https://evil.test:99999/x"):
         assert _redact_url_for_audit(bad) == "<unparseable-url>"
+
+
+def test_every_forwarded_url_was_actually_checked(httpx_mock, monkeypatch):
+    """Defect 20: the URL the guard checked was not the URL the upstream tool receives.
+
+    `scan_arguments` deliberately runs on the RAW arguments. The comment said that made
+    it "the one an upstream tool would actually receive". It does not: what goes upstream
+    is the SANITIZED copy, and inbound sanitization uses `Vault(synthetic=True)`, which
+    substitutes realistic look-alike values rather than bracketed markers. When PII sits
+    inside a URL's authority, the substitution rewrites the host.
+
+    Measured before the fix:
+
+        checked   https://bob@example.com.attacker.example/x
+        forwarded https://jacksondaniel@example.net/x
+
+    A different registrable domain, never resolved, never evaluated against the egress
+    policy, and handed to the upstream tool to dial.
+
+    The assertion is the invariant rather than a predicted hostname, because the
+    substituted value is Faker-generated and deliberately not reproducible: every URL in
+    the payload actually forwarded must have had its host evaluated.
+    """
+    import orjson
+
+    from llm_shield_proxy.security.egress_guard import extract_host, find_urls
+
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    evaluated: list = []
+
+    async def _recording_resolve(host: str):
+        evaluated.append(host)
+        return ["93.184.216.34"]  # public, allowed, so the call proceeds to forwarding
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    def response_callback(request):
+        import httpx
+
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+
+    httpx_mock.add_callback(response_callback, url=UPSTREAM_URL)
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "fetch",
+                "arguments": {"callback": "https://bob@example.com.attacker.example/x"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+
+    forwarded = [r for r in httpx_mock.get_requests() if str(r.url) == UPSTREAM_URL]
+    assert forwarded, "nothing was forwarded upstream"
+    payload = orjson.loads(forwarded[-1].content)
+
+    forwarded_hosts = {extract_host(url) for url in find_urls(payload["params"]["arguments"])}
+    assert forwarded_hosts, "fixture forwarded no URL, so it proves nothing"
+
+    unchecked = forwarded_hosts - set(evaluated)
+    assert not unchecked, (
+        f"forwarded to the upstream tool without ever being evaluated: {sorted(unchecked)}; "
+        f"evaluated were {sorted(set(evaluated))}"
+    )
+
+
+def test_a_rewritten_host_that_is_forbidden_is_blocked(httpx_mock, monkeypatch):
+    """Defect 20, the half that matters: evaluating it is no use unless it also blocks.
+
+    The resolver answers public for the host the client actually sent and link-local for
+    anything else, so only the host sanitization invented is forbidden. The call must be
+    refused and nothing may reach the upstream.
+    """
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    sent_host = "example.com.attacker.example"
+
+    async def _split_resolve(host: str):
+        return ["93.184.216.34"] if host == sent_host else ["169.254.169.254"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _split_resolve
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "fetch",
+                "arguments": {"callback": "https://bob@example.com.attacker.example/x"},
+            },
+        },
+    )
+
+    assert response.json()["error"]["code"] == -32003
+    assert [r for r in httpx_mock.get_requests() if str(r.url) == UPSTREAM_URL] == []
+
+
+def test_an_unrewritten_payload_costs_no_extra_resolution(httpx_mock, monkeypatch):
+    """The second half must be free when sanitization changed nothing.
+
+    A URL with no PII in it is forwarded byte for byte, so the difference set is empty
+    and the host is resolved exactly once, not twice.
+    """
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    evaluated: list = []
+
+    async def _recording_resolve(host: str):
+        evaluated.append(host)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    def response_callback(request):
+        import httpx
+
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 3, "result": {"ok": True}})
+
+    httpx_mock.add_callback(response_callback, url=UPSTREAM_URL)
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "fetch", "arguments": {"callback": "https://docs.example.com/x"}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert evaluated.count("docs.example.com") == 1, (
+        f"host resolved {evaluated.count('docs.example.com')} times, expected once: {evaluated}"
+    )
