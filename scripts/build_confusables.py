@@ -29,11 +29,14 @@ import urllib.request
 from pathlib import Path
 
 SOURCE_URL = "https://www.unicode.org/Public/security/latest/confusables.txt"
-OUTPUT = (
-    Path(__file__).resolve().parents[1]
-    / "pii-leak-benchmark"
-    / "pii_leak_benchmark"
-    / "confusables.py"
+# Two copies, deliberately. `pii-leak-benchmark` is a standalone distribution carrying
+# httpx and otherwise only the stdlib, so the proxy cannot import from it and it cannot
+# import from the proxy. Both are written here, from one source, so the tables cannot
+# drift apart unnoticed; `tests/test_homoglyph_domains.py` asserts they stay identical.
+_ROOT = Path(__file__).resolve().parents[1]
+OUTPUTS = (
+    _ROOT / "pii-leak-benchmark" / "pii_leak_benchmark" / "confusables.py",
+    _ROOT / "llm_shield_proxy" / "engines" / "confusables.py",
 )
 
 
@@ -201,8 +204,10 @@ def main() -> int:
     raw = load(sys.argv[1] if len(sys.argv) > 1 else None)
     digest = hashlib.sha256(raw).hexdigest()
     table, considered = derive(raw)
-    OUTPUT.write_text(render(table, considered, digest), encoding="utf-8", newline="\n")
-    print(f"{OUTPUT}: {len(table)} rows from {considered} considered, source sha256 {digest}")
+    rendered = render(table, considered, digest)
+    for output in OUTPUTS:
+        output.write_text(rendered, encoding="utf-8", newline="\n")
+        print(f"{output}: {len(table)} rows from {considered} considered, source sha256 {digest}")
     return 0
 
 
