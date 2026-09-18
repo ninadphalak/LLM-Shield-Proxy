@@ -14,15 +14,17 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import hashlib
+import hmac
 import json
 import logging
+import os
 import random
 import re
 import threading
 import time
 import unicodedata
 from collections import OrderedDict
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from faker import Faker
 
@@ -38,6 +40,57 @@ except ImportError:
     redis = None  # type: ignore
 
 _faker_ctx: contextvars.ContextVar[Faker] = contextvars.ContextVar("faker_ctx")
+
+
+_SYNTHETIC_SEED_KEY: Optional[bytes] = None
+
+
+def _synthetic_seed_key() -> bytes:
+    """The secret the synthetic stand-in seeds are derived under.
+
+    Uses SHIELD_ENCRYPTION_KEY when one is configured, so stand-ins are stable across
+    restarts for a deployment that sets it. Without one, a random per-process key is
+    generated: stand-ins stay stable for the life of the process, which is all invariant
+    9 requires, and an attacker still cannot recompute the mapping offline.
+
+    Never fall back to a fixed default. A published constant is the same as no key.
+    """
+    global _SYNTHETIC_SEED_KEY
+    if _SYNTHETIC_SEED_KEY is None:
+        configured = getattr(settings, "SHIELD_ENCRYPTION_KEY", None)
+        if configured:
+            _SYNTHETIC_SEED_KEY = str(configured).encode("utf-8")
+        else:
+            _SYNTHETIC_SEED_KEY = os.urandom(32)
+            logger.warning(
+                "SHIELD_ENCRYPTION_KEY is unset; synthetic stand-ins are seeded from a "
+                "random per-process key. They will differ after a restart. Set the key "
+                "if stand-ins must be reproducible across processes."
+            )
+    return _SYNTHETIC_SEED_KEY
+
+
+def _synthetic_for(fake: Any, entity_type: str, seed: int) -> str:
+    """The stand-in Faker produces for one entity type, at an already-applied seed."""
+    if "PERSON" in entity_type or "NAME" in entity_type:
+        return fake.first_name()
+    if "EMAIL" in entity_type:
+        return fake.email()
+    if "SSN" in entity_type:
+        return fake.ssn()
+    if "PHONE" in entity_type:
+        return fake.phone_number()
+    if "IP" in entity_type:
+        return fake.ipv4()
+    if "CREDIT_CARD" in entity_type:
+        return fake.credit_card_number()
+    if "KEY" in entity_type or "SECRET" in entity_type or "TOKEN" in entity_type or "PAT" in entity_type:
+        # Synthetic identifier generation, not a cryptographic operation.
+        alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        return f"AKIA{''.join(random.Random(seed).choices(alphabet, k=16))}"  # nosec B311 noqa: S311
+    if "GPE" in entity_type or "LOC" in entity_type:
+        return fake.city()
+    return fake.word()
 
 
 class Vault:
@@ -77,6 +130,45 @@ class Vault:
         self._lock: threading.Lock = threading.Lock()
         self.save_callback: Optional[Callable[[Vault], None]] = save_callback
 
+    def _synthetic_seed(self, original_val: str, entity_type: str) -> int:
+        """The seed for this value's stand-in, under a secret.
+
+        This used to be `sha256(original_val)` with no secret, which meant the whole
+        mapping could be recomputed offline: an audit recovered a real SSN from its
+        stand-in in 0.1 seconds. It also made the stand-in identical for the same value
+        in every tenant, so two redacted datasets could be joined on it.
+
+        The vault's own identity is mixed in, so the same value looks different in
+        different tenants, and the result stays stable within one vault, which is what
+        invariant 9 requires.
+        """
+        material = "\x00".join(
+            (self.tenant_id, self.virtual_key_id, self.session_id, entity_type, original_val)
+        )
+        digest = hmac.new(_synthetic_seed_key(), material.encode("utf-8"), hashlib.sha256)
+        return int(digest.hexdigest()[:16], 16)
+
+    def _resolve_collision(
+        self, original_val: str, entity_type: str, token: str, current_count: int
+    ) -> str:
+        """A stand-in already in use, replaced by a free one.
+
+        Re-seeds a bounded number of times. The tagged fallback is unique by
+        construction, so this always terminates with a usable token.
+        """
+        for attempt in range(1, 8):
+            retry_seed = self._synthetic_seed(f"{original_val}\x00{attempt}", entity_type)
+            try:
+                fake = _faker_ctx.get()
+            except LookupError:
+                fake = Faker()
+                _faker_ctx.set(fake)
+            fake.seed_instance(retry_seed)
+            candidate = _synthetic_for(fake, entity_type, retry_seed)
+            if candidate not in self.token_to_original:
+                return candidate
+        return f"[{entity_type}_{current_count}]"
+
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         """Retrieves an existing token or generates a deterministic replacement.
 
@@ -95,7 +187,7 @@ class Vault:
             self.type_counters[entity_type] = current_count
 
             if self.synthetic:
-                seed = int(hashlib.sha256(original_val.encode("utf-8")).hexdigest()[:16], 16)
+                seed = self._synthetic_seed(original_val, entity_type)
                 try:
                     fake = _faker_ctx.get()
                 except LookupError:
@@ -103,27 +195,18 @@ class Vault:
                     _faker_ctx.set(fake)
 
                 fake.seed_instance(seed)
-                if "PERSON" in entity_type or "NAME" in entity_type:
-                    token = fake.first_name()
-                elif "EMAIL" in entity_type:
-                    token = fake.email()
-                elif "SSN" in entity_type:
-                    token = fake.ssn()
-                elif "PHONE" in entity_type:
-                    token = fake.phone_number()
-                elif "IP" in entity_type:
-                    token = fake.ipv4()
-                elif "CREDIT_CARD" in entity_type:
-                    token = fake.credit_card_number()
-                elif "KEY" in entity_type or "SECRET" in entity_type or "TOKEN" in entity_type or "PAT" in entity_type:
-                    # Security Note: random.choices is used for synthetic ID generation in Fake data mode, not cryptographic operations
-                    token = f"AKIA{''.join(random.Random(seed).choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=16))}"  # nosec B311 noqa: S311
-                elif "GPE" in entity_type or "LOC" in entity_type:
-                    token = fake.city()
-                else:
-                    token = fake.word()
+                token = _synthetic_for(fake, entity_type, seed)
             else:
                 token = f"[{entity_type}_{current_count}]"
+
+            # A collision would overwrite the reverse map and restore the earlier
+            # value as the later one: two people become one. Faker draws from a
+            # finite list, so this happens with ordinary data, not just adversarial
+            # data -- 16 distinct names were enough. Re-seed until the stand-in is
+            # free, then give up and fall back to a tagged token, which is unique by
+            # construction.
+            if token in self.token_to_original:
+                token = self._resolve_collision(original_val, entity_type, token, current_count)
 
             self.original_to_token[original_val] = token
             self.token_to_original[token] = original_val

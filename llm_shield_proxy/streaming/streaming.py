@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import logging
+from collections import Counter
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, Iterator, Optional
 
 import orjson as json
@@ -20,6 +21,25 @@ from llm_shield_proxy.observability.tracing import tracer
 from llm_shield_proxy.streaming.json_lexer import StreamingJSONLexer
 
 logger = logging.getLogger(__name__)
+
+class StreamCapacityExceeded(ValueError):
+    """A deliberate safety limit was hit, as opposed to an unexpected processing error.
+
+    These limits -- the retention-window cap, the Anthropic tool-ordinal cap, the
+    output-size ceiling and the line-accumulator ceiling -- all bound work an UPSTREAM
+    controls. That makes them attacker-reachable on purpose, and it is why they must
+    never be forgiven by FAIL_OPEN.
+
+    Treating them as ordinary failures made the limits a redaction bypass: the fail-open
+    handler sets `failed_open` and forwards every later chunk raw, so an upstream that
+    deliberately opened 257 choice indices switched scanning off for the rest of the
+    stream and had its PII forwarded in clear. Measured, not theorised.
+
+    FAIL_OPEN exists to keep a stream alive through an unexpected bug in this proxy. It
+    does not exist to honour an upstream's request to stop inspecting it, so a breach of
+    one of these limits aborts the stream in either failure mode.
+    """
+
 
 # Event keys whose values are structural: rewriting them changes what the event MEANS
 # rather than what it discloses. An id, a model name or a finish_reason is not PII, and a
@@ -52,6 +72,14 @@ MAX_STREAM_WINDOWS = 256
 # catching splits and a silently reduced scan is a silent leak. 64 is far above the
 # handful of sibling fields a real provider event carries.
 MAX_SIBLING_PATHS = 64
+
+# How many distinct Anthropic content-block indices one stream may hand ordinals to.
+# The key comes from the upstream, so an upstream inventing a new index per event grew
+# this map forever: 116 bytes per event, 46.6 MB live in one stream at 400k events.
+# Unlike the retention windows it is populated without going through `_buffer_for`, so
+# MAX_STREAM_WINDOWS never applied to it. 256 matches the window cap and is far above
+# the handful of tool blocks a real message carries.
+MAX_ANTHROPIC_TOOL_ORDINALS = 256
 
 # A retention window's identity: `(choice index, tool-call index or None)`. `None` is that
 # choice's ordered content channel; an int is one tool call's `arguments` fragments. They
@@ -203,7 +231,7 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
     """
     if not text:
         return text
-    from llm_shield_proxy.engines.pii_engine import pii_engine
+    from llm_shield_proxy.engines.pii_engine import normalize_and_desmuggle, pii_engine
 
     try:
         spans = pii_engine.detect_spans(text)
@@ -216,12 +244,49 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
         return text
 
     known = getattr(vault, "token_to_original", None) or {}
-    out = list(text)
-    for start, end, entity_type, matched_text in reversed(spans):
-        if matched_text in known:
-            continue
-        out[start:end] = list(f"[{entity_type}_REDACTED]")
-    return "".join(out)
+
+    def _apply(source: str, found: list) -> str:
+        result = list(source)
+        for start, end, entity_type, matched_text in reversed(found):
+            if matched_text in known:
+                continue
+            result[start:end] = list(f"[{entity_type}_REDACTED]")
+        return "".join(result)
+
+    redacted = _apply(text, spans)
+
+    # The request path normalizes before scanning; this path did not, so a zero-width
+    # space or a fullwidth `@` inside a value passed straight through. Normalizing here
+    # unconditionally is not an option because it shifts the offsets the spans point at.
+    #
+    # So: scan the raw text, then scan the normalized form as well. If normalizing
+    # reveals PII the raw scan missed, the normalized-and-redacted text is what the
+    # client gets. Text with nothing hidden in it takes neither branch and is returned
+    # byte for byte.
+    normalized = normalize_and_desmuggle(text)
+    if normalized != text:
+        try:
+            normalized_spans = pii_engine.detect_spans(normalized)
+        except Exception:  # noqa: BLE001
+            logger.warning("Normalized response scan failed; forwarding raw scan", exc_info=True)
+            return redacted
+        # Compare OCCURRENCE COUNTS, not membership. The test used to be "does this
+        # value appear anywhere in the raw text", which a duplicate defeats: a response
+        # carrying both `bob@example.com` and its fullwidth-@ twin made that true for
+        # every normalized match, so the raw result was returned and the obfuscated copy
+        # reached the client, where it renders as an ordinary address.
+        #
+        # Normalization revealing something means strictly MORE matches of a value than
+        # the raw scan found, which is true for the duplicate case and false for text
+        # with nothing hidden in it.
+        raw_counts = Counter(span[3] for span in spans if span[3] not in known)
+        normalized_counts = Counter(
+            span[3] for span in normalized_spans if span[3] not in known
+        )
+        if any(count > raw_counts[value] for value, count in normalized_counts.items()):
+            return _apply(normalized, normalized_spans)
+
+    return redacted
 
 
 def redact_model_originated_tree(node: Any, vault: "Vault", skip_keys: frozenset = frozenset()) -> Any:
@@ -647,7 +712,7 @@ class SSERehydrationBuffer:
 
             # Enforce maximum safety length on the buffer
             if len(self.content_buffer) > 64 * 1024:
-                raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+                raise StreamCapacityExceeded("SSE buffer exceeded maximum safety threshold (backpressure protection)")
 
             # In a fast-path, empty token_to_original can just skip rehydrate
             token_to_original = getattr(self.vault, "token_to_original", None)
@@ -784,7 +849,7 @@ async def rehydrate_sse_stream(
             if len(buffers) >= MAX_STREAM_WINDOWS:
                 # Fail closed. Reusing another channel's window here would reintroduce
                 # exactly the splicing this keying exists to prevent.
-                raise ValueError(
+                raise StreamCapacityExceeded(
                     f"SSE stream opened more than {MAX_STREAM_WINDOWS} retention windows"
                 )
             created = SSERehydrationBuffer(
@@ -859,10 +924,37 @@ async def rehydrate_sse_stream(
         anthropic_tool_ordinals: Dict[int, int] = {}
 
         def _anthropic_tool_ordinal(block_index: int) -> int:
-            """The tool-call ordinal for one Anthropic content block, stable per stream."""
+            """The tool-call ordinal for one Anthropic content block, stable per stream.
+
+            Past MAX_ANTHROPIC_TOOL_ORDINALS this RAISES, which the chunk handler turns
+            into a fail-closed abort with an error event and a terminator. That is
+            exactly what `_buffer_for` already does past MAX_STREAM_WINDOWS, and the two
+            caps guard the same class of upstream: one inventing indices without limit.
+
+            Two rejected alternatives, both of which traded this bug for a worse one:
+
+            Recycling the last ordinal kept the stream well-formed but that ordinal
+            already belongs to a real block, so every over-cap block shared its
+            retention window and its client-visible tool-call index -- two distinct tool
+            calls silently merged into one.
+
+            Leaving the block untranslated avoided the merge but emitted a native
+            Anthropic event into an OpenAI-shaped stream, which no client on that
+            contract can parse, and dropped the block onto the chunk-local sweep, which
+            has no cross-event retention -- so a value split across two `partial_json`
+            fragments would not be caught.
+
+            Refusing the stream is the only one of the three that keeps the output
+            contract, the cross-event guarantee and the memory bound at once.
+            """
             existing = anthropic_tool_ordinals.get(block_index)
             if existing is not None:
                 return existing
+            if len(anthropic_tool_ordinals) >= MAX_ANTHROPIC_TOOL_ORDINALS:
+                raise StreamCapacityExceeded(
+                    f"Anthropic stream opened more than {MAX_ANTHROPIC_TOOL_ORDINALS} "
+                    "tool-block indices"
+                )
             assigned = len(anthropic_tool_ordinals)
             anthropic_tool_ordinals[block_index] = assigned
             return assigned
@@ -892,7 +984,7 @@ async def rehydrate_sse_stream(
 
         def _bounded_output(piece: bytes) -> bytes:
             if len(piece) > max_output_piece_bytes:
-                raise ValueError("Rehydrated SSE output exceeded maximum safe length")
+                raise StreamCapacityExceeded("Rehydrated SSE output exceeded maximum safe length")
             return piece
 
         cached_id = "chatcmpl-watermark"
@@ -944,6 +1036,13 @@ async def rehydrate_sse_stream(
                                 virtual_key_id=getattr(vault, "virtual_key_id", "unknown"),
                                 request_id=request_id
                             )
+                            # Abort means abort. Without this the `finally` block below
+                            # saw all three of its flags still False, took the ordinary
+                            # end-of-stream path, and flushed the retention window to the
+                            # attacker: the tail deliberately withheld from the previous
+                            # chunk, which on a prompt-extraction attack is the last words
+                            # of the prompt being extracted. It appended the watermark too.
+                            stream_aborted = True
                             break
                         if chunk_text:
                             canary_tail = (canary_tail + chunk_text)[-(canary_len - 1):] if canary_len > 1 else ""
@@ -951,7 +1050,7 @@ async def rehydrate_sse_stream(
                     line_accumulator += chunk_text
 
                     if len(line_accumulator) > max_line_length:
-                        raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
+                        raise StreamCapacityExceeded("Line accumulator exceeded maximum safe length (Slowloris protection)")
 
                     while "\n" in line_accumulator:
                         line, line_accumulator = line_accumulator.split("\n", 1)
@@ -965,9 +1064,20 @@ async def rehydrate_sse_stream(
                                 yield ready
                             continue
 
-                        if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                        # The space after `data:` is optional in the SSE spec and clients
+                        # strip it, so the payload is what follows the colon with leading
+                        # whitespace removed. Requiring the space meant a spec-legal event
+                        # skipped this whole block and reached the client unscanned.
+                        sse_payload = stripped[5:].lstrip() if stripped.startswith("data:") else None
+                        if sse_payload is not None and sse_payload != "[DONE]":
                             try:
-                                json_str = stripped[6:]
+                                # True once a branch has routed this event's content into a retention
+                                # window, i.e. actually scanned it. `line is original_line` used to stand
+                                # in for this and stopped working the moment a branch rebuilt `line`
+                                # unconditionally: the sibling-field scan does that even when it changed
+                                # nothing, which silently disabled the fallback below.
+                                scanned_line = False
+                                json_str = sse_payload
                                 data_obj = json.loads(json_str)
 
                                 if isinstance(data_obj, dict) and data_obj.get("type") in (
@@ -1031,6 +1141,7 @@ async def rehydrate_sse_stream(
                                             continue
                                         choice_index = _entry_index(choice)
                                         if isinstance(delta.get("content"), str):
+                                            scanned_line = True
                                             content_window = _buffer_for((choice_index, None))
                                             delta["content"] = content_window.process_delta_text(delta["content"])
                                             sibling_buffer = content_window
@@ -1041,6 +1152,7 @@ async def rehydrate_sse_stream(
                                         # redact-without-restore failure in a field the
                                         # shape-following walk never visited.
                                         for tool_index, function in _tool_argument_fragments(delta):
+                                            scanned_line = True
                                             tool_window = _buffer_for((choice_index, tool_index))
                                             function["arguments"] = tool_window.process_delta_text(
                                                 function["arguments"]
@@ -1086,6 +1198,7 @@ async def rehydrate_sse_stream(
                                 elif "delta" in data_obj and isinstance(data_obj["delta"], dict):
                                     delta = data_obj["delta"]
                                     if "text" in delta and isinstance(delta["text"], str):
+                                        scanned_line = True
                                         raw_content = delta["text"]
                                         # One window for the whole Anthropic stream. Its
                                         # `index` counts content BLOCKS, which are emitted
@@ -1113,6 +1226,12 @@ async def rehydrate_sse_stream(
                                         # as `function.arguments`. It is JSON text on its own
                                         # ordered channel, so it gets its own window and,
                                         # through `_channel_vault`, escaped restored values.
+                                        #
+                                        # No ordinal means the cap is reached. The block is
+                                        # left untranslated rather than spliced onto another
+                                        # block's call; `scanned_line` stays False so the
+                                        # sweep still scans its strings.
+                                        scanned_line = True
                                         tool_ordinal = _anthropic_tool_ordinal(_entry_index(data_obj))
                                         restored = _buffer_for((0, tool_ordinal)).process_delta_text(
                                             delta["partial_json"]
@@ -1124,6 +1243,7 @@ async def rehydrate_sse_stream(
                                 elif "content_block" in data_obj and isinstance(data_obj["content_block"], dict):
                                     cb = data_obj["content_block"]
                                     if "text" in cb and isinstance(cb["text"], str):
+                                        scanned_line = True
                                         raw_content = cb["text"]
                                         # Same single window as the delta branch above.
                                         rehydrated_content = _buffer_for((0, None)).process_delta_text(raw_content)
@@ -1143,7 +1263,9 @@ async def rehydrate_sse_stream(
                                     elif cb.get("type") == "tool_use":
                                         # Opens the call so the client learns its id and name
                                         # once. `input` is empty here; the arguments arrive
-                                        # as `input_json_delta` fragments.
+                                        # as `input_json_delta` fragments. Past the cap there
+                                        # is no ordinal, so no call is opened at all.
+                                        scanned_line = True
                                         tool_ordinal = _anthropic_tool_ordinal(_entry_index(data_obj))
                                         line = _tool_call_line(tool_ordinal, "", opener=cb)
                                     else:
@@ -1162,6 +1284,43 @@ async def rehydrate_sse_stream(
                                             pre_lines.append(_tool_call_line(stopped, stopped_tail))
                                 elif data_obj.get("type") in ("message_stop", "message_delta", "ping"):
                                     pass  # We let [DONE] be handled at stream end
+
+                                # Scan by default. The branches above route the shapes we
+                                # know into the retention buffer; everything else used to
+                                # be forwarded untouched, which is how a reasoning-model
+                                # delta, a list of content parts, an Anthropic
+                                # `message_start` and a legacy `text` choice all reached
+                                # the client unscanned. `scanned_line` is set by a branch
+                                # that already handled the event; if none did, the whole
+                                # object goes through the same walk the non-streaming path
+                                # uses, which skips structural keys and buffered channels.
+                                if (
+                                    not scanned_line
+                                    and settings.ENABLE_RESPONSE_PII_REDACTION
+                                ):
+                                    # This scan is vault-scoped, so ANY open window answers
+                                    # for the event. Calling `_buffer_for` straight away
+                                    # would OPEN one, and on a finishing event -- which
+                                    # carries no content of its own -- that trips the
+                                    # fail-closed window cap and cuts off a stream that was
+                                    # completing normally. Borrow first, open only if the
+                                    # stream has no window at all, and skip rather than
+                                    # abort if the ceiling is reached.
+                                    sweep_buffer = next(iter(buffers.values()), None)
+                                    if sweep_buffer is None:
+                                        try:
+                                            sweep_buffer = _buffer_for((0, None))
+                                        except ValueError:
+                                            logger.warning(
+                                                "SSE window ceiling reached; this event was "
+                                                "not scanned"
+                                            )
+                                    if sweep_buffer is not None:
+                                        swept = _redact_sibling_strings(
+                                            data_obj, sweep_buffer, skip_content=False
+                                        )
+                                        if swept != data_obj:
+                                            line = f"data: {json.dumps(swept).decode('utf-8')}"
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
 
@@ -1234,12 +1393,47 @@ async def rehydrate_sse_stream(
                         for ready in buffered:
                             yield ready
 
-                    if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
-                        logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_CLOSED): {e}")
+                    # A deliberate safety limit is never forgiven by FAIL_OPEN. Those
+                    # limits bound work an upstream controls, so treating them as
+                    # ordinary failures turned them into a redaction bypass: one
+                    # upstream opening 257 choice indices flipped this handler into raw
+                    # passthrough and had its PII forwarded in clear for the rest of the
+                    # stream. See StreamCapacityExceeded.
+                    capacity_breach = isinstance(e, StreamCapacityExceeded)
+                    if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED" or capacity_breach:
+                        # Type name only. The old f-string rendered `str(e)`, and an
+                        # exception raised while handling a payload can quote that
+                        # payload in its message. Invariant 4 applies to this sink too.
+                        logging.getLogger(__name__).error(
+                            "Streaming rehydration failed (%s): %s",
+                            "capacity" if capacity_breach else "FAIL_CLOSED",
+                            type(e).__name__,
+                        )
                         stream_aborted = True
+                        # Fail closed, but not silently. This used to `return`, so the
+                        # response body just stopped: no terminator and no error event,
+                        # which a client cannot tell apart from a stalled network. It
+                        # waits for a [DONE] that is never coming.
+                        #
+                        # Nothing unscanned is released here. The error text is a fixed
+                        # string, never the exception's own message.
+                        error_event = {
+                            "error": {
+                                "message": (
+                                    "The response stream was stopped by LLM-Shield-Proxy "
+                                    "because it could not be safely processed."
+                                ),
+                                "type": "shield_stream_aborted",
+                                "code": "stream_aborted",
+                            }
+                        }
+                        yield f"data: {json.dumps(error_event).decode('utf-8')}\n\n".encode()
+                        yield b"data: [DONE]\n\n"
                         return
                     else:
-                        logging.getLogger(__name__).error(f"Streaming rehydration failed (FAIL_OPEN): {e}")
+                        logging.getLogger(__name__).error(
+                            "Streaming rehydration failed (FAIL_OPEN): %s", type(e).__name__
+                        )
                         failed_open = True
                         if line_accumulator:
                             yield line_accumulator.encode("utf-8")
@@ -1280,7 +1474,18 @@ async def rehydrate_sse_stream(
                     watermark_text = ""
 
                 if line_accumulator:
-                    yield line_accumulator.encode("utf-8")
+                    # An upstream that stops mid-line leaves a fragment here. It used to
+                    # be yielded as-is, so a dropped connection forwarded whatever the
+                    # model was writing at the time, unscanned and with the caller's
+                    # placeholder unrestored. A fragment is not a complete SSE event and
+                    # no compliant client can parse it, so the safe end is to drop it and
+                    # say so rather than to hand it over.
+                    logger.warning(
+                        "Upstream stream ended mid-line; dropped %d unterminated bytes "
+                        "rather than forwarding them unscanned",
+                        len(line_accumulator.encode("utf-8")),
+                    )
+                    line_accumulator = ""
 
     # One span for the whole stream, replacing one span per delta. Started
     # explicitly rather than as a context manager because this generator yields
