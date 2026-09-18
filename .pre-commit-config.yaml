@@ -1,14 +1,47 @@
+# Every gate CI runs, run here first. A check that only exists in CI is a check you
+# find out about after pushing, which is how a bandit B112 finding reached a green PR
+# and cost a review round.
+#
+# VERSIONS ARE PINNED AND MUST MATCH `.github/workflows/ci.yml`. They drifted once:
+# this file pinned ruff 0.6.1 while CI installed it unpinned and got 0.16.x, ten minor
+# versions apart, so a rule added in between passed here and failed there. If you bump
+# one, bump the other in the same commit.
 repos:
--   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.1
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.5
     hooks:
-    -   id: ruff
-        args: [ --fix ]
--   repo: local
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.9.4
     hooks:
-    -   id: pytest
-        name: pytest
-        entry: pytest tests/
+      - id: bandit
+        # Same arguments as ci.yml. B101 is assert-in-tests, B104 is binding 0.0.0.0 in
+        # container config, B311 is non-crypto random in fixtures.
+        args: ["-s", "B101,B104,B311"]
+        files: ^(llm_shield_proxy|pii-leak-benchmark/pii_leak_benchmark)/
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.406
+    hooks:
+      - id: pyright
+        # Pyright is the engine Pylance runs, so what the editor shows and what this
+        # hook enforces are the same analysis. Pylance itself has no CLI and cannot be
+        # used here. Configuration lives in `pyproject.toml` under [tool.pyright] so the
+        # editor and this hook read one source of truth.
+        files: ^llm_shield_proxy/
+        pass_filenames: false
+        additional_dependencies: []
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (fast subset)
+        # `-m "not slow"` and no coverage: this runs on EVERY commit. The previous
+        # version ran the entire suite, about seven minutes a commit, which is long
+        # enough that people skip the hook entirely and the gate stops existing.
+        entry: python -m pytest tests/ -q -m "not slow" -x
         language: system
         types: [python]
         pass_filenames: false

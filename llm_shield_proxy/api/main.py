@@ -228,7 +228,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app_state.is_draining = False
     app_state.shutdown_event = asyncio.Event()
 
-    if settings.ENABLE_EXT_PROC:
+    # ONE read of the flag, shared by the conditional import and the startup below.
+    # `settings` is a hot-reloading proxy, so reading it twice can give two different
+    # answers: the import is skipped and the use site then finds the name unbound.
+    #
+    # Snapshotting is what makes them agree. Binding to None alone was not enough --
+    # it turned a NameError into a SILENT SKIP, leaving ext-proc configured as enabled
+    # and never started, which is worse because nothing says so.
+    enable_ext_proc = settings.ENABLE_EXT_PROC
+    serve_ext_proc = None
+    if enable_ext_proc:
         from llm_shield_proxy.api.grpc_service import serve_ext_proc
     from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
     from llm_shield_proxy.security.vault_client import vault_provider
@@ -333,7 +342,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     grpc_server = None
     sock_path = settings.EXT_PROC_SOCK_PATH
 
-    if settings.ENABLE_EXT_PROC:
+    if enable_ext_proc:
+        if serve_ext_proc is None:
+            # Unreachable while the snapshot above is the only reader of the flag.
+            # Loud rather than silent: ext-proc being enabled and absent is a
+            # configuration the operator must know about, not one to paper over.
+            raise RuntimeError(
+                "ENABLE_EXT_PROC is set but the ext-proc service could not be imported"
+            )
         if os.name != "nt":
             sock_dir = os.path.dirname(sock_path)
             # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
@@ -1003,6 +1019,11 @@ async def _proxy_catch_all_internal(
 
             is_v3 = False
             v3_cipher = None
+            # Pre-bound like the two above. It is assigned further down inside this try,
+            # and read again in the response path, which pyright showed can be reached
+            # without the assignment having run. None falls through to the default
+            # OpenAI-shaped branch, which is the safe answer when the provider is unknown.
+            target_provider = None
             try:
                 is_json_rpc = isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
                 if is_json_rpc:
