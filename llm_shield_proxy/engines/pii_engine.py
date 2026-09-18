@@ -9,6 +9,7 @@ Implements a high-throughput multi-tier detection cascade:
 from __future__ import annotations
 
 import base64
+import html
 import logging
 import math
 import os
@@ -23,6 +24,7 @@ import yaml
 
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.core.config_schema import CustomRegexConfig
+from llm_shield_proxy.engines.confusables import CONFUSABLE_TO_ASCII
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.observability.tracing import tracer
@@ -42,17 +44,62 @@ class CompiledProfile:
     tier3_ner_entities: Set[str] = field(default_factory=set)
 
 
-# Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
-INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
+# Characters that render as nothing and so hide a value from every pattern while the
+# client still displays the real thing. NFKC does not deal with them: U+3164 merely
+# folds to U+1160, which is equally invisible.
+#
+# This class is deleted from text that is FORWARDED upstream, not only from text that
+# is scanned -- `redact_text` returns `working_text`. So membership is limited to
+# characters that are invisible AND have no role in ordinary prose. Three known hiding
+# places are deliberately left out for that reason: variation selectors U+FE00-U+FE0F,
+# because U+FE0F is emoji presentation and stripping it rewrites every emoji in the
+# user's prompt; U+2800, a legitimate blank braille cell; and U+180B-U+180D, the
+# Mongolian Free Variation Selectors, which select glyph variants in ordinary Mongolian.
+# All three remain open gaps by decision, pinned by a test.
+INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
+    "["
+    "\u00AD"  # soft hyphen
+    "\u034F"  # combining grapheme joiner
+    "\u061C"  # Arabic letter mark
+    "\u115F\u1160"  # Hangul choseong/jungseong fillers
+    "\u17B4\u17B5"  # Khmer inherent vowels, invisible
+    "\u180E"  # Mongolian vowel separator, a format character with no glyph
+    # NOT U+180B-U+180D. Those are Mongolian Free Variation Selectors and they SELECT
+    # GLYPH VARIANTS in ordinary Mongolian text. This class is deleted from what gets
+    # FORWARDED, so including them silently rewrote real Mongolian input before it
+    # reached the provider. Same rule that keeps U+FE0F and U+2800 out: invisible is
+    # not sufficient, the character must also have no role in ordinary prose.
+    "\u200B-\u200F"  # zero-width space through RTL mark
+    "\u202A-\u202E"  # bidi embedding and override
+    "\u2060-\u206F"  # word joiner, invisible operators, deprecated format chars
+    "\u3164"  # Hangul filler
+    "\uFEFF"  # zero-width no-break space
+    "\uFFA0"  # halfwidth Hangul filler
+    "\U000e0000-\U000e007f"  # tag block, the classic ASCII smuggler
+    "]"
+)
 
 # Candidate base64 patterns for obfuscated PII smuggling. The lower bound of 8
 # data characters matches the >= 6 decoded-byte floor enforced below, and the
 # lookaround boundaries (instead of `\b`) keep trailing '=' padding inside the
 # match so padded base64 actually decodes -- the old trailing `\b` stripped the
 # padding, which made every padded value fail the validate=True decode.
-BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}(?![A-Za-z0-9+/=])")
+#
+# `-` and `_` are the URL-safe alphabet's substitutes for `+` and `/`. Without them
+# no candidate was formed at all for a URL-safe blob, padded or not:
+# `YWJvYkBleGFtcGxlLmNvbT8_` decodes to `abob@example.com??` and was invisible.
+# Including them means ordinary `snake_case` and `hyphen-joined` words now form
+# candidates too; they are filtered by the decode and the >= 6 / tier-1 gate below,
+# which is where prose was always separated from payload.
+BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{8,}={0,2}(?![A-Za-z0-9+/=_-])")
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
+# How many times a candidate is decoded before giving up. A twice-encoded value
+# decodes once into more base64, which no tier-1 pattern matches, so a single pass
+# stopped there and the PII underneath stayed hidden. Each extra pass is taken ONLY
+# when the previous one produced something that is itself base64-shaped, so the cost
+# is bounded to actual nesting rather than charged to every candidate.
+MAX_BASE64_DECODE_DEPTH = 3
 
 # Percent-encoding hides PII from every Tier 1 pattern. `bob%40example.com` matches no
 # email regex, and the client decodes it back to an address. The v2 profile measured a
@@ -66,6 +113,26 @@ PERCENT_BOUNDARY_SCAN_CHARS = 256
 # pattern that scans outward from each escape: that form backtracks, and one 120k run
 # with no delimiter took 4.4 seconds. This runs per SSE event.
 PERCENT_RUN_PATTERN: re.Pattern[str] = re.compile(r"[^\s\"'<>{}\[\],;()]+")
+
+# Cross-script look-alikes, from the UTS #39 confusables table vendored in
+# `confusables.py`. Built once as a `str.translate` table because this runs per scan.
+# Every row is one codepoint to one ASCII character, which is what lets a folded copy
+# share offsets with the original; `test_homoglyph_domains.py` pins that property.
+_CONFUSABLE_TRANSLATION = str.maketrans(CONFUSABLE_TO_ASCII)
+
+# HTML entities hide the same structured PII percent-encoding did: `bob&commat;example.com`
+# matches no email pattern, and every browser, chat client and markdown renderer shows
+# `bob@example.com`. Named, decimal and hexadecimal forms all appear in the wild.
+HTML_ENTITY_PATTERN: re.Pattern[str] = re.compile(
+    r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});"
+)
+MAX_ENTITY_INSPECTION_CHARS = 8_192
+# A run longer than the limit is not skipped, or the limit would just tell an attacker
+# how much padding to add. Its edges are still decoded, same as percent and base64 do.
+ENTITY_BOUNDARY_SCAN_CHARS = 256
+# Deliberately NOT `_PERCENT_RUN_DELIMITERS`: that set contains `;`, which terminates
+# every entity, so reusing it would cut each run at the first entity and decode nothing.
+_ENTITY_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[](),")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
@@ -286,7 +353,16 @@ NER_DISABLED_WARNING = (
 )
 
 # Candidate pattern for Shannon Entropy evaluation
-CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9_\-+=]{16,}\b")
+# Lookarounds rather than `\b`, for the same reason BASE64_CANDIDATE_PATTERN uses them.
+# A word boundary needs a word/non-word transition, and CJK ideographs are word
+# characters to Python's Unicode `re`. A secret sitting directly against Japanese or
+# Chinese text therefore had a boundary on neither side and Tier 2 never saw it, while
+# the identical secret with spaces around it was found at once. Excluding only the
+# secret alphabet itself makes the boundary "not more of the same token", which is what
+# was meant all along.
+CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
+    r"(?<![A-Za-z0-9_\-+=])[A-Za-z0-9_\-+=]{16,}(?![A-Za-z0-9_\-+=])"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +406,37 @@ def _extend_span_over_digit_run(text: str, end: int, limit: int) -> int:
         else:
             break
     return end
+
+
+def _decode_base64_candidate(token: str) -> Optional[bytes]:
+    """Decodes a base64 candidate in either alphabet, padded or not.
+
+    The decode used to be a bare `b64decode(token, validate=True)`, which rejected
+    two entirely ordinary spellings:
+
+    - **Unpadded.** Encoders drop `=` routinely (JWT segments, URL parameters, a
+      value that was `.rstrip("=")`-ed). `aaa@aaa.com` becomes `YWFhQGFhYS5jb20`,
+      length 15, and `validate=True` raises on the length rather than decoding it.
+    - **URL-safe**, which uses `-` and `_` where the standard alphabet uses `+`
+      and `/`.
+
+    Padding is restored arithmetically and the standard alphabet is tried first,
+    since it is far more common. `validate=True` stays on in both cases: it is what
+    stops ordinary prose from being decoded into noise and scanned.
+
+    Returns the decoded bytes, or None if this is not base64 in either alphabet.
+    """
+    padded = token + "=" * (-len(token) % 4)
+    for altchars in (None, b"-_"):
+        try:
+            return base64.b64decode(padded, altchars=altchars, validate=True)
+        # nosec B112 - the swallow IS the logic. "Not valid base64 in this alphabet"
+        # is the ordinary answer for most candidates, and the only way to ask is to
+        # try the decode. A candidate that decodes in neither alphabet returns None
+        # below and is dropped, so nothing is silently passed through.
+        except Exception:  # noqa: BLE001  # nosec B112 - see above
+            continue
+    return None
 
 
 def normalize_and_desmuggle(text: str) -> str:
@@ -614,6 +721,28 @@ class PIIEngine:
                 interior_end = end - BASE64_BOUNDARY_SCAN_CHARS
                 if interior_start < interior_end:
                     excluded_interiors.append((interior_start, interior_end))
+
+                # The boundary guards were kept in the plaintext scan segments but never
+                # decoded, and no text detector matches base64, so they guarded against
+                # nothing encoded. A 12,000-char attachment beginning `bob@example.com `
+                # produced no spans at all.
+                #
+                # Decode each guard on its own. The head is 4-aligned by construction;
+                # the tail is aligned back to the blob's own framing so it decodes to
+                # real bytes instead of a shifted smear. Each guard carries its OWN
+                # source span, so the span and its matched text agree and rehydration
+                # stays exact. The interior stays undecoded: that bound is the point.
+                blob = match.group(0)
+                tail_offset = len(blob) - BASE64_BOUNDARY_SCAN_CHARS
+                tail_offset -= tail_offset % 4
+                for guard_start, guard_text in (
+                    (start, blob[:BASE64_BOUNDARY_SCAN_CHARS]),
+                    (start + tail_offset, blob[tail_offset:]),
+                ):
+                    if len(guard_text) >= 8:
+                        base64_candidates.append(
+                            (guard_start, guard_start + len(guard_text), guard_text)
+                        )
                 continue
             base64_candidates.append((start, end, match.group(0)))
 
@@ -646,6 +775,32 @@ class PIIEngine:
                             (offset + match.start(), offset + match.end(), entity_type, matched_text)
                         )
 
+        # Tier 1b: the same patterns over a confusables-folded copy.
+        #
+        # `bob@ex<CYRILLIC A>mple.com` renders identically to the real address in every
+        # client and matches no pattern, so it was forwarded in clear. NFKC does not
+        # touch it and should not: Cyrillic `a` and Latin `a` are distinct characters,
+        # not compatibility variants.
+        #
+        # Folding happens on a COPY and the spans are reported against the original. The
+        # vendored UTS #39 table maps one codepoint to one ASCII character, so the fold
+        # cannot change a string's length and offsets carry over unchanged -- asserted
+        # below rather than assumed, because the whole approach rests on it. `matched_text`
+        # is taken from the original so the vault maps what was actually sent.
+        #
+        # The forwarded text is NOT folded. `redact_text` returns its working text, so
+        # folding there would rewrite genuine Russian prose into Latin gibberish.
+        if not text.isascii():
+            folded = text.translate(_CONFUSABLE_TRANSLATION)
+            if len(folded) == len(text) and folded != text:
+                for offset, segment in scan_segments:
+                    folded_segment = folded[offset:offset + len(segment)]
+                    for entity_type, pattern in active_profile.tier1_patterns:
+                        for match in pattern.finditer(folded_segment):
+                            start = offset + match.start()
+                            end = offset + match.end()
+                            raw_spans.append((start, end, entity_type, text[start:end]))
+
         # Tier 2: Shannon Entropy Analysis (Detects unformatted API keys, hashes, secret tokens)
         if self.enable_tier2 and settings.ENABLE_TIER2_ENTROPY:
             for offset, segment in scan_segments:
@@ -669,16 +824,31 @@ class PIIEngine:
 
         # Obfuscated Base64 Candidate Inspection
         for start, end, token in base64_candidates:
-            try:
-                decoded_bytes = base64.b64decode(token, validate=True)
+            probe = token
+            for _ in range(MAX_BASE64_DECODE_DEPTH):
+                decoded_bytes = _decode_base64_candidate(probe)
+                if decoded_bytes is None:
+                    break
                 decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
-                if decoded_text and len(decoded_text) >= 6:
-                    for entity_type, pattern in active_profile.tier1_patterns:
-                        if pattern.search(decoded_text):
-                            raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
-                            break
-            except Exception as exc:
-                logger.debug("Base64 candidate decode failed: %s", exc)
+                if len(decoded_text) < 6:
+                    break
+
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
+                    # The span stays the whole source run, as it was. Mapping a hit
+                    # inside the decoded text back to source offsets is fragile, and
+                    # more so once the value has been decoded more than once.
+                    raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
+                    break
+
+                # Nothing found. Go round again only if this decode produced another
+                # base64 blob, which is what a double-encoded value looks like.
+                nested = decoded_text.strip()
+                if not BASE64_CANDIDATE_PATTERN.fullmatch(nested):
+                    break
+                probe = nested
 
         # Obfuscated Percent-Encoded Candidate Inspection.
         #
@@ -716,6 +886,51 @@ class PIIEngine:
                     for _entity_type, pattern in active_profile.tier1_patterns
                 ):
                     raw_spans.append((start, end, "PERCENT_OBFUSCATED_PII", token))
+                    break
+
+        # Obfuscated HTML-Entity Candidate Inspection.
+        #
+        # Same shape and the same conservative whole-run span as the percent block above.
+        run_end = -1
+        for entity in HTML_ENTITY_PATTERN.finditer(text):
+            if entity.start() < run_end:
+                continue  # already inside a run this loop captured
+            start = entity.start()
+            while start > 0 and text[start - 1] not in _ENTITY_RUN_DELIMITERS:
+                start -= 1
+            end = entity.end()
+            while end < len(text) and text[end] not in _ENTITY_RUN_DELIMITERS:
+                end += 1
+            run_end = end
+            token = text[start:end]
+            if end - start > MAX_ENTITY_INSPECTION_CHARS:
+                # Decode the edges only, rather than skipping the run. Skipping made the
+                # cap a recipe: pad an entity-encoded address with enough non-delimiter
+                # characters and raw Tier 1 cannot see it either, so the whole run went
+                # to the provider unchanged. Percent runs and base64 blobs both already
+                # inspect their boundaries past their own caps; this matches them.
+                # A slice can cut an entity in half; `html.unescape` leaves the stub as
+                # literal text, which matches nothing and is safe.
+                probes = (
+                    token[:ENTITY_BOUNDARY_SCAN_CHARS],
+                    token[-ENTITY_BOUNDARY_SCAN_CHARS:],
+                )
+            else:
+                probes = (token,)
+            for probe in probes:
+                try:
+                    decoded_text = html.unescape(probe)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("HTML entity candidate decode failed: %s", exc)
+                    continue
+                # Nothing actually decoded, so Tier 1 already saw this text as-is.
+                if decoded_text == probe or len(decoded_text) < 6:
+                    continue
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
+                    raw_spans.append((start, end, "ENTITY_OBFUSCATED_PII", token))
                     break
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org).
