@@ -22,6 +22,25 @@ from llm_shield_proxy.streaming.json_lexer import StreamingJSONLexer
 
 logger = logging.getLogger(__name__)
 
+class StreamCapacityExceeded(ValueError):
+    """A deliberate safety limit was hit, as opposed to an unexpected processing error.
+
+    These limits -- the retention-window cap, the Anthropic tool-ordinal cap, the
+    output-size ceiling and the line-accumulator ceiling -- all bound work an UPSTREAM
+    controls. That makes them attacker-reachable on purpose, and it is why they must
+    never be forgiven by FAIL_OPEN.
+
+    Treating them as ordinary failures made the limits a redaction bypass: the fail-open
+    handler sets `failed_open` and forwards every later chunk raw, so an upstream that
+    deliberately opened 257 choice indices switched scanning off for the rest of the
+    stream and had its PII forwarded in clear. Measured, not theorised.
+
+    FAIL_OPEN exists to keep a stream alive through an unexpected bug in this proxy. It
+    does not exist to honour an upstream's request to stop inspecting it, so a breach of
+    one of these limits aborts the stream in either failure mode.
+    """
+
+
 # Event keys whose values are structural: rewriting them changes what the event MEANS
 # rather than what it discloses. An id, a model name or a finish_reason is not PII, and a
 # scanner that mangles them breaks clients for no privacy gain.
@@ -693,7 +712,7 @@ class SSERehydrationBuffer:
 
             # Enforce maximum safety length on the buffer
             if len(self.content_buffer) > 64 * 1024:
-                raise ValueError("SSE buffer exceeded maximum safety threshold (backpressure protection)")
+                raise StreamCapacityExceeded("SSE buffer exceeded maximum safety threshold (backpressure protection)")
 
             # In a fast-path, empty token_to_original can just skip rehydrate
             token_to_original = getattr(self.vault, "token_to_original", None)
@@ -830,7 +849,7 @@ async def rehydrate_sse_stream(
             if len(buffers) >= MAX_STREAM_WINDOWS:
                 # Fail closed. Reusing another channel's window here would reintroduce
                 # exactly the splicing this keying exists to prevent.
-                raise ValueError(
+                raise StreamCapacityExceeded(
                     f"SSE stream opened more than {MAX_STREAM_WINDOWS} retention windows"
                 )
             created = SSERehydrationBuffer(
@@ -932,7 +951,7 @@ async def rehydrate_sse_stream(
             if existing is not None:
                 return existing
             if len(anthropic_tool_ordinals) >= MAX_ANTHROPIC_TOOL_ORDINALS:
-                raise ValueError(
+                raise StreamCapacityExceeded(
                     f"Anthropic stream opened more than {MAX_ANTHROPIC_TOOL_ORDINALS} "
                     "tool-block indices"
                 )
@@ -965,7 +984,7 @@ async def rehydrate_sse_stream(
 
         def _bounded_output(piece: bytes) -> bytes:
             if len(piece) > max_output_piece_bytes:
-                raise ValueError("Rehydrated SSE output exceeded maximum safe length")
+                raise StreamCapacityExceeded("Rehydrated SSE output exceeded maximum safe length")
             return piece
 
         cached_id = "chatcmpl-watermark"
@@ -1031,7 +1050,7 @@ async def rehydrate_sse_stream(
                     line_accumulator += chunk_text
 
                     if len(line_accumulator) > max_line_length:
-                        raise ValueError("Line accumulator exceeded maximum safe length (Slowloris protection)")
+                        raise StreamCapacityExceeded("Line accumulator exceeded maximum safe length (Slowloris protection)")
 
                     while "\n" in line_accumulator:
                         line, line_accumulator = line_accumulator.split("\n", 1)
@@ -1374,12 +1393,21 @@ async def rehydrate_sse_stream(
                         for ready in buffered:
                             yield ready
 
-                    if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
+                    # A deliberate safety limit is never forgiven by FAIL_OPEN. Those
+                    # limits bound work an upstream controls, so treating them as
+                    # ordinary failures turned them into a redaction bypass: one
+                    # upstream opening 257 choice indices flipped this handler into raw
+                    # passthrough and had its PII forwarded in clear for the rest of the
+                    # stream. See StreamCapacityExceeded.
+                    capacity_breach = isinstance(e, StreamCapacityExceeded)
+                    if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED" or capacity_breach:
                         # Type name only. The old f-string rendered `str(e)`, and an
                         # exception raised while handling a payload can quote that
                         # payload in its message. Invariant 4 applies to this sink too.
                         logging.getLogger(__name__).error(
-                            "Streaming rehydration failed (FAIL_CLOSED): %s", type(e).__name__
+                            "Streaming rehydration failed (%s): %s",
+                            "capacity" if capacity_breach else "FAIL_CLOSED",
+                            type(e).__name__,
                         )
                         stream_aborted = True
                         # Fail closed, but not silently. This used to `return`, so the

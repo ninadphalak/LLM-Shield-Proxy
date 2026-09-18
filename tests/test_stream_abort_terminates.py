@@ -122,10 +122,13 @@ def test_the_log_records_the_type_not_the_message(fail_closed, caplog):
     with caplog.at_level(logging.ERROR):
         _drive(_exhaust_windows())
 
-    aborts = [r for r in caplog.records if "FAIL_CLOSED" in r.getMessage()]
+    # The window cap is a StreamCapacityExceeded, so this aborts under either failure
+    # mode and the log says "capacity" rather than naming the configured mode. The
+    # property under test is unchanged: the TYPE is recorded and the message is not.
+    aborts = [r for r in caplog.records if "Streaming rehydration failed" in r.getMessage()]
     assert aborts, "abort was not logged"
     message = aborts[-1].getMessage()
-    assert "ValueError" in message
+    assert "StreamCapacityExceeded" in message
     assert "retention windows" not in message
 
 
