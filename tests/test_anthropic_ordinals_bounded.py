@@ -77,21 +77,22 @@ def _tool_block_with_fragment(index: int, fragment: str) -> list[str]:
     return [f"data: {json.dumps(start)}\n\n", f"data: {json.dumps(delta)}\n\n"]
 
 
-def test_blocks_past_the_cap_do_not_merge_into_another_tool_call(monkeypatch):
-    """Greptile P1 on #42: reusing the last ordinal collided with a real block.
+def test_the_stream_fails_closed_past_the_cap(monkeypatch):
+    """Greptile on #42/#43: the two earlier answers each traded this bug for a worse one.
 
-    The cap returned `MAX_ANTHROPIC_TOOL_ORDINALS - 1` for every block past it. That
-    ordinal already belongs to the LAST block that was allocated one, so every
-    over-cap block shared its retention window and its client-visible tool-call index.
-    Two distinct tool calls silently merged into one, and because the over-cap block
-    was never put in the map, `content_block_stop` could not flush its tail either.
+    Recycling the last ordinal merged two distinct tool calls onto one client-visible
+    index. Leaving the block untranslated emitted a native Anthropic event into an
+    OpenAI-shaped stream and dropped it onto the chunk-local sweep, which has no
+    cross-event retention.
 
-    Bounding memory is not worth misrouting a tool call. An over-cap block gets no
-    ordinal at all now, so nothing is merged into a call that is not its own.
+    Refusing the stream is the only answer that keeps the output contract, the
+    cross-event guarantee and the memory bound at once, and it is what `_buffer_for`
+    already does past MAX_STREAM_WINDOWS. The client is told, per defect 22.
     """
     import llm_shield_proxy.streaming.streaming as streaming_module
 
     monkeypatch.setattr(streaming_module, "MAX_ANTHROPIC_TOOL_ORDINALS", 2)
+    monkeypatch.setattr(streaming_module.settings, "SHIELD_FAILURE_MODE", "FAIL_CLOSED")
 
     lines: list[str] = []
     for index in range(3):
@@ -100,23 +101,10 @@ def test_blocks_past_the_cap_do_not_merge_into_another_tool_call(monkeypatch):
 
     out = _run(lines)
 
-    # Group what the client actually sees by tool-call index. A second OPENER on an
-    # index that already has one means two distinct Anthropic blocks were presented as
-    # one call. Asserting on adjacent substrings would not catch this: the fragments
-    # arrive in separate SSE events, so they are never literally adjacent even when
-    # merged.
-    openers: dict = {}
-    for line in out.splitlines():
-        line = line.strip()
-        if not line.startswith("data: ") or line.endswith("[DONE]"):
-            continue
-        payload = json.loads(line[len("data: "):])
-        for call in payload.get("choices", [{}])[0].get("delta", {}).get("tool_calls") or []:
-            if (call.get("function") or {}).get("name"):
-                openers[call.get("index")] = openers.get(call.get("index"), 0) + 1
-
-    merged = {index: count for index, count in openers.items() if count > 1}
-    assert not merged, f"tool-call indices carrying more than one block: {merged}"
+    assert "shield_stream_aborted" in out, "the abort was not announced"
+    assert out.rstrip().endswith("data: [DONE]"), "the client was left without a terminator"
+    # Nothing from the over-cap block may be spliced onto an earlier tool call.
+    assert '{"block":2}' not in out
 
 
 def test_the_cap_still_bounds_the_map(monkeypatch):
