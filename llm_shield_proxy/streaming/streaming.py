@@ -44,6 +44,15 @@ _BUFFERED_CHANNEL_KEYS = frozenset({"content", "text", "arguments"})
 # fan-out and far below a memory concern at 64 KiB of buffer each.
 MAX_STREAM_WINDOWS = 256
 
+# How many distinct sibling JSON paths one stream may keep a cross-event tail for.
+# The map is keyed by the PATH an upstream chose, so an upstream that invents a new key
+# per event would otherwise grow it without limit -- invariant 1. Past the cap the
+# least-recently-seen path is evicted and the eviction is COUNTED
+# (`llm_shield_sse_sibling_paths_evicted_total`), because an evicted path silently stops
+# catching splits and a silently reduced scan is a silent leak. 64 is far above the
+# handful of sibling fields a real provider event carries.
+MAX_SIBLING_PATHS = 64
+
 # A retention window's identity: `(choice index, tool-call index or None)`. `None` is that
 # choice's ordered content channel; an int is one tool call's `arguments` fragments. They
 # are separate token streams and must never share a window -- see `_buffer_for`.
@@ -61,6 +70,25 @@ def _entry_index(entry: Any) -> int:
     if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
         return raw
     return 0
+
+
+def _list_entry_identity(item: Any, position: int) -> str:
+    """Identifies one list entry so its path stays the same across events.
+
+    Entries with an `index` are keyed by it. `choices` and `tool_calls` can arrive in a
+    different order, or one at a time, so their position in the list is not stable.
+
+    Entries without an `index` are keyed by position. Do not use `_entry_index` here: it
+    returns 0 when there is no index, so a list of index-less dicts would all get the
+    same path and share one tail.
+
+    The `i` and `p` prefixes keep index 0 and position 0 from colliding.
+    """
+    if isinstance(item, dict):
+        raw = item.get("index")
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+            return f"i{raw}"
+    return f"p{position}"
 
 
 def _tool_argument_fragments(delta: Any) -> Iterator[tuple]:
@@ -232,7 +260,142 @@ def redact_model_originated_tree(node: Any, vault: "Vault", skip_keys: frozenset
     return node
 
 
-def _redact_sibling_strings(node: Any, buffer: "SSERehydrationBuffer", skip_content: bool = True) -> Any:
+def _redact_across_join(tail: str, fragment: str, vault: Any) -> str:
+    """Redact the part of a value that this fragment COMPLETES across an event boundary.
+
+    `tail` is text already emitted on this JSON path, `fragment` is the text about to be
+    emitted on it. Neither matched a detector alone -- that is why the leak exists -- but
+    their concatenation does, and a client that appends the field reconstructs the value.
+
+    The probe is a scratch view and is never emitted. Only spans that STRADDLE the join
+    are acted on: a span lying wholly in `tail` was already emitted and cannot be recalled,
+    and a span lying wholly in `fragment` is the caller's per-event scan's job and has
+    already been handled by the time this runs. Redacting the completing half is enough,
+    because the prefix was emitted precisely because nothing matched it; what the client
+    keeps is a partial identifier, not a recoverable value. That residue is a documented
+    reduction in disclosure, not an elimination of it.
+
+    Both halves of the probe are clipped to the retention window, the same bound the
+    ordered content channel holds back at its own emit boundary. A straddling span longer
+    than that window is out of scope for the content channel too, and clipping is what
+    keeps this constant-cost per path per event instead of proportional to field length.
+    """
+    if not tail or not fragment:
+        return fragment
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+
+    window = settings.RESPONSE_PII_SCAN_WINDOW
+    head = tail[-window:] if len(tail) > window else tail
+    probe = head + (fragment[:window] if len(fragment) > window else fragment)
+    join = len(head)
+
+    try:
+        spans = pii_engine.detect_spans(probe)
+    except Exception:  # noqa: BLE001
+        # Same fail-open posture as `redact_model_originated_text`, and for the same
+        # reason: a scanner error must not blank the client's response. Logged, not silent.
+        logger.warning("Cross-event sibling scan failed; forwarding fragment unscanned", exc_info=True)
+        return fragment
+
+    known = getattr(vault, "token_to_original", None) or {}
+    # Every straddling span starts before the join, so they all cover the same prefix of
+    # `fragment`; the one reaching furthest subsumes the rest and one slice replaces them
+    # all. No per-character list is built on this path.
+    furthest_end = -1
+    entity = None
+    for start, end, entity_type, matched_text in spans:
+        if start >= join or end <= join or matched_text in known:
+            continue
+        if end > furthest_end:
+            furthest_end = end
+            entity = entity_type
+    if entity is None:
+        return fragment
+    return f"[{entity}_REDACTED]{fragment[furthest_end - join:]}"
+
+
+class _SiblingPathTails:
+    """Bounded, per-stream memory of what each sibling JSON path already emitted.
+
+    Keyed by JSON PATH rather than by key name, because that is the only join a client
+    actually performs: two events agreeing on `choices[0].delta.note` are the same field,
+    while `note` under two different parents are two different fields and joining them
+    would invent a value nobody ever sees.
+
+    Bounded because the keys are upstream-chosen. Insertion order IS recency order here --
+    `record` pops before it sets -- so the oldest key is the least recently seen and
+    eviction is `next(iter(...))`. Evictions are counted and surfaced, never silent.
+    """
+
+    __slots__ = ("_tails", "_max_paths", "evictions")
+
+    def __init__(self, max_paths: Optional[int] = None) -> None:
+        self._tails: Dict[str, str] = {}
+        self._max_paths = MAX_SIBLING_PATHS if max_paths is None else max_paths
+        self.evictions = 0
+
+    def __len__(self) -> int:
+        return len(self._tails)
+
+    @property
+    def tracked_paths(self) -> tuple:
+        """The paths currently held, oldest-seen first. For tests and diagnostics."""
+        return tuple(self._tails)
+
+    def scan(self, path: str, fragment: str, vault: Any) -> str:
+        """Redacts what `fragment` completes on `path`, then remembers what it emits.
+
+        One `pop` and one assignment per path per event, and one slice to build the tail.
+        An empty fragment is not an emission and must not erase the tail: a provider that
+        sends `""` on a field between two halves of a value would otherwise clear the very
+        memory this exists for.
+
+        The tail ACCUMULATES and is then clipped, rather than being replaced by the latest
+        fragment. A value split three ways puts nothing usable in any single fragment, so a
+        tail that remembered only the last one would never see the first, and the event
+        that completes the value would probe a join that does not exist.
+        """
+        if not fragment:
+            return fragment
+        tails = self._tails
+        # pop, not get: re-inserting below is what moves this path to the recency end.
+        previous = tails.pop(path, "")
+        emitted = _redact_across_join(previous, fragment, vault)
+        window = settings.RESPONSE_PII_SCAN_WINDOW
+        joined = previous + emitted
+        tails[path] = joined[-window:] if len(joined) > window else joined
+        if len(tails) > self._max_paths:
+            self._evict_oldest()
+        return emitted
+
+    def _evict_oldest(self) -> None:
+        tails = self._tails
+        while len(tails) > self._max_paths:
+            del tails[next(iter(tails))]
+            self.evictions += 1
+        logger.warning(
+            "SSE stream exceeded %d tracked sibling JSON paths; evicted least-recently-seen "
+            "(cross-event split detection is reduced on evicted paths)",
+            self._max_paths,
+        )
+        try:
+            from llm_shield_proxy.observability.metrics import (
+                llm_shield_sse_sibling_paths_evicted_total,
+            )
+
+            llm_shield_sse_sibling_paths_evicted_total.inc()
+        except Exception:  # noqa: BLE001
+            # Metrics must never be able to break a response stream.
+            logger.debug("Could not record a sibling-path eviction", exc_info=True)
+
+
+def _redact_sibling_strings(
+    node: Any,
+    buffer: "SSERehydrationBuffer",
+    skip_content: bool = True,
+    tails: Optional[_SiblingPathTails] = None,
+    path: str = "",
+) -> Any:
     """Redact model-originated PII in event fields OTHER than the delta content.
 
     The content field is the ordered stream and is handled by the retention buffer, which
@@ -244,26 +407,55 @@ def _redact_sibling_strings(node: Any, buffer: "SSERehydrationBuffer", skip_cont
     This is the response-path counterpart of the deep request walk added in 1.5.1: the
     request body is walked recursively, and until now the response was not.
 
-    KNOWN LIMIT, declared rather than hidden: sibling fields are scanned CHUNK-LOCALLY. A
-    value split across two events, half in each event's sibling field, is not reassembled
-    the way delta content is, because sibling fields are not an ordered stream and moving
-    text between events to buffer them would corrupt the event that carries them. The
-    conformance profile measures this as a non-zero DeltaFrag on the `sse-json-field`
-    carrier, and that number is the honest size of the gap.
+    `tails` closes the cross-event half of that gap. Sibling fields are still never
+    buffered or delayed -- an arbitrary JSON field has no defined concatenation semantics,
+    and withholding the tail of a field a client may treat as "last value wins" would
+    delay or corrupt a value rather than protect one. Instead each path remembers a bounded
+    tail of what it ALREADY emitted, and a fragment that completes a value across that
+    boundary is redacted on its way out. See `_redact_across_join`.
+
+    REMAINING LIMIT, still declared rather than hidden: the already-emitted prefix stays
+    with the client. It is a partial identifier and not a recoverable value, but it is
+    residue, and the fix is a reduction in disclosure rather than an elimination of it.
+    Passing no `tails` keeps the older chunk-local behaviour, which is what the
+    non-streaming callers want: they have no stream to join across.
     """
     if isinstance(node, dict):
         return {
             key: (
                 value
                 if key in _SSE_STRUCTURAL_KEYS or (skip_content and key in _BUFFERED_CHANNEL_KEYS)
-                else _redact_sibling_strings(value, buffer, skip_content=skip_content)
+                # Structural keys are skipped BEFORE the path is extended, so an `id` or a
+                # `model` never becomes a tracked path. They are stable across events, so
+                # probing them would join a value to itself and match on every event.
+                else _redact_sibling_strings(
+                    value, buffer, skip_content, tails, f"{path}.{key}"
+                )
             )
             for key, value in node.items()
         }
     if isinstance(node, list):
-        return [_redact_sibling_strings(v, buffer, skip_content=skip_content) for v in node]
+        # Keyed by the entry's own `index`, not its position. `choices[0]` can be index 0
+        # in one event and index 1 in the next, and keying by position would then join
+        # text from two different answers.
+        return [
+            _redact_sibling_strings(
+                item,
+                buffer,
+                skip_content,
+                tails,
+                f"{path}[{_list_entry_identity(item, position)}]",
+            )
+            for position, item in enumerate(node)
+        ]
     if isinstance(node, str):
-        return buffer._redact_model_originated(node)
+        # Chunk-local first: a value whole inside this fragment is redacted here, and the
+        # cross-boundary probe then runs over the text as it will actually be EMITTED,
+        # which is also what the path's tail must remember.
+        emitted = buffer._redact_model_originated(node)
+        if tails is not None:
+            emitted = tails.scan(path, emitted, buffer.vault)
+        return emitted
     return node
 
 
@@ -567,6 +759,10 @@ async def rehydrate_sse_stream(
         # (its value is destroyed, not merely delayed) and the other channel is handed a
         # fragment of a vault token that was never part of it.
         buffers: Dict[_WindowKey, SSERehydrationBuffer] = {}
+        # Per-path memory for the sibling scan, one map for the whole response and gone
+        # with it. Separate from `buffers` on purpose: a retention window HOLDS text back,
+        # and nothing here ever does -- it only remembers what already went out.
+        sibling_tails = _SiblingPathTails()
         # One escaping view for the whole stream, shared by every tool-call window, so
         # the escaped mapping is built at most once rather than once per tool call.
         json_vault: Optional[_JsonStringVaultView] = None
@@ -858,13 +1054,33 @@ async def rehydrate_sse_stream(
                                             # one: a finishing event needs no new channel.
                                             sibling_buffer = sibling_buffer or drained
                                         choice["delta"] = delta
+                                    if sibling_buffer is None:
+                                        # An event can carry only sibling fields, with no
+                                        # content and no tool arguments. Those events open
+                                        # no window, and used to skip this scan entirely,
+                                        # so splitting a value onto one of them bypassed it.
+                                        #
+                                        # The scan only needs the vault, so any open window
+                                        # will do. Open a new one only if the stream has
+                                        # none, and log rather than raise if it cannot.
+                                        sibling_buffer = next(iter(buffers.values()), None)
+                                        if sibling_buffer is None:
+                                            try:
+                                                sibling_buffer = _buffer_for((0, None))
+                                            except ValueError:
+                                                logger.warning(
+                                                    "SSE window ceiling reached; sibling "
+                                                    "fields in this event were not scanned"
+                                                )
                                     if sibling_buffer is not None:
                                         if settings.ENABLE_RESPONSE_PII_REDACTION:
                                             # Sibling fields of the event, which were
                                             # forwarded unscanned until 1.6.0. This scan is
                                             # vault-scoped rather than window-scoped, so any
                                             # of the event's windows answers for the event.
-                                            data_obj = _redact_sibling_strings(data_obj, sibling_buffer)
+                                            data_obj = _redact_sibling_strings(
+                                                data_obj, sibling_buffer, tails=sibling_tails
+                                            )
                                         line = f"data: {json.dumps(data_obj).decode('utf-8')}"
                                 # 2. Anthropic Content Block Delta
                                 elif "delta" in data_obj and isinstance(data_obj["delta"], dict):

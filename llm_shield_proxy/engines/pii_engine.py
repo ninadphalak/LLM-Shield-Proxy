@@ -54,19 +54,18 @@ BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=])[A-Z
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
 
-# Percent-encoding hides structured PII from every Tier 1 pattern: `bob%40example.com`
-# matches no email regex, and the client decodes it back to an address. The v2
-# conformance profile measured this as a 0.40 leak rate on percent-encoded cases against
-# 0.09 on plain ones, while the benchmark's own inspector decodes before matching. The
-# asymmetry, not the encoding, was the defect.
-#
-# This anchors on the escape and expands outward in Python rather than matching the run
-# with a regex. A pattern of the shape `[^\s]*%[0-9A-Fa-f]{2}[^\s]*` backtracks
-# quadratically over a long unbroken run that holds no valid escape, and this function
-# runs per SSE event on the streaming hot path.
+# Percent-encoding hides PII from every Tier 1 pattern. `bob%40example.com` matches no
+# email regex, and the client decodes it back to an address. The v2 profile measured a
+# 0.40 leak rate on percent-encoded cases against 0.09 on plain ones.
 PERCENT_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"%[0-9A-Fa-f]{2}")
 MAX_PERCENT_INSPECTION_CHARS = 8_192
-_PERCENT_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[],;()")
+# A run longer than the limit is not skipped, or the limit would just tell an attacker
+# how much padding to add. Its edges are still decoded, same as base64 does.
+PERCENT_BOUNDARY_SCAN_CHARS = 256
+# Finds runs of non-delimiter characters in one C-level pass. Do not replace this with a
+# pattern that scans outward from each escape: that form backtracks, and one 120k run
+# with no delimiter took 4.4 seconds. This runs per SSE event.
+PERCENT_RUN_PATTERN: re.Pattern[str] = re.compile(r"[^\s\"'<>{}\[\],;()]+")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
@@ -665,30 +664,35 @@ class PIIEngine:
         # source run is redacted rather than the decoded substring, because decoding
         # changes offsets and mapping them back is fragile. Redacting a few extra
         # percent-encoded characters around a hit is the safe direction to be wrong in.
-        run_end = -1
-        for escape in PERCENT_ESCAPE_PATTERN.finditer(text):
-            if escape.start() < run_end:
-                continue  # already inside a run this loop captured
-            start = escape.start()
-            while start > 0 and text[start - 1] not in _PERCENT_RUN_DELIMITERS:
-                start -= 1
-            end = escape.end()
-            while end < len(text) and text[end] not in _PERCENT_RUN_DELIMITERS:
-                end += 1
-            run_end = end
+        for run in PERCENT_RUN_PATTERN.finditer(text):
+            token = run.group(0)
+            # Two C-level rejections before any Python work. Text without a '%' is the
+            # overwhelmingly common case and must cost almost nothing here.
+            if "%" not in token or not PERCENT_ESCAPE_PATTERN.search(token):
+                continue
+            start, end = run.span()
             if end - start > MAX_PERCENT_INSPECTION_CHARS:
-                continue
-            token = text[start:end]
-            try:
-                decoded_text = unquote(token, errors="ignore")
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Percent candidate decode failed: %s", exc)
-                continue
-            # Nothing actually decoded, so Tier 1 already saw this text as-is.
-            if decoded_text == token or len(decoded_text) < 6:
-                continue
-            for entity_type, pattern in active_profile.tier1_patterns:
-                if pattern.search(decoded_text):
+                # Decode the edges only. A slice can cut an escape in half; `unquote`
+                # leaves the stub as literal text, which matches nothing and is safe.
+                probes = (
+                    token[:PERCENT_BOUNDARY_SCAN_CHARS],
+                    token[-PERCENT_BOUNDARY_SCAN_CHARS:],
+                )
+            else:
+                probes = (token,)
+            for probe in probes:
+                try:
+                    decoded_text = unquote(probe, errors="ignore")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Percent candidate decode failed: %s", exc)
+                    continue
+                # Nothing actually decoded, so Tier 1 already saw this text as-is.
+                if decoded_text == probe or len(decoded_text) < 6:
+                    continue
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
                     raw_spans.append((start, end, "PERCENT_OBFUSCATED_PII", token))
                     break
 

@@ -73,14 +73,43 @@ async def test_the_router_gates_every_supported_method() -> None:
     Reads the router source rather than driving HTTP, because the failure was a control
     flow one: the call existed, it was just unreachable for two of the three methods.
     """
+    import ast
     import inspect
+    import textwrap
 
     from llm_shield_proxy.api import mcp_router as module
 
-    source = inspect.getsource(module._process_single_call)
-    gate = source.index("await scan_arguments(params,")
-    branch = source.index('if method == "tools/call":')
-    assert gate < branch, (
-        "the egress gate must run before the tools/call branch, or methods other than "
-        "tools/call skip it entirely"
-    )
+    source = textwrap.dedent(inspect.getsource(module._process_single_call))
+    tree = ast.parse(source)
+
+    def _gate_calls_under(node) -> list:
+        """Every `scan_arguments(params, ...)` call anywhere beneath `node`."""
+        found = []
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            fn = child.func
+            name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
+            if name != "scan_arguments":
+                continue
+            first = child.args[0] if child.args else None
+            if isinstance(first, ast.Name) and first.id == "params":
+                found.append(child)
+        return found
+
+    assert _gate_calls_under(tree), "the egress gate call is gone entirely"
+
+    # The real invariant is NOT textual ordering, which was the original assertion here.
+    # It is that the gate is not NESTED inside a per-method branch, because that is what
+    # made it unreachable for `resources/read` and `tools/list`. Ordering was only ever a
+    # proxy for that, and it broke the moment a tool-authorization branch was correctly
+    # hoisted above the gate: authorization has to precede attacker-controlled DNS work.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        if "tools/call" not in ast.dump(node.test):
+            continue
+        assert not _gate_calls_under(node), (
+            "the egress gate is nested inside a tools/call branch, so methods other than "
+            "tools/call skip it entirely"
+        )
