@@ -27,6 +27,8 @@ from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.security.egress_guard import (
     EgressPolicyViolationError,
     PinnedTarget,
+    evaluate_url,
+    find_urls,
     resolve_pinned_target,
     scan_arguments,
 )
@@ -331,6 +333,55 @@ async def _process_single_call(
             forward_params = await _sanitize_async(params, inbound_vault, active_profile)
     except ValueError:
         return _jsonrpc_error(req_id, JSONRPC_INVALID_REQUEST, "Payload nesting depth exceeded") if has_id else None
+
+    # SSRF Gate, second half: re-check anything sanitization INTRODUCED.
+    #
+    # The gate above deliberately ran on the raw arguments, on the reasoning that those
+    # are what an upstream tool receives. They are not. What goes upstream is the
+    # sanitized copy, and inbound sanitization uses `Vault(synthetic=True)`, which
+    # substitutes realistic look-alike values rather than bracketed markers. When PII
+    # sits inside a URL's authority the substitution rewrites the host:
+    #
+    #     checked   https://bob@example.com.attacker.example/x
+    #     forwarded https://jacksondaniel@example.net/x
+    #
+    # A different registrable domain, never resolved, never evaluated, handed to the
+    # upstream tool to dial. Both halves are needed: the raw check still catches a
+    # forbidden host that sanitization leaves alone.
+    #
+    # Only the DIFFERENCE is evaluated, so a payload sanitization did not rewrite -- the
+    # overwhelming majority -- costs no additional DNS at all.
+    try:
+        for introduced in set(find_urls(forward_params)) - set(find_urls(params)):
+            await evaluate_url(introduced, egress_policy)
+    except EgressPolicyViolationError as exc:
+        AuditLogger.log_security_event(
+            event_type="mcp_egress_policy_violation",
+            severity="CRITICAL",
+            details={
+                "reason": exc.reason,
+                "method": method,
+                # Names the half that caught it: this URL was not in the client's
+                # request, it was produced by redaction, so an operator reading the
+                # chain is not left hunting for a host the caller never sent.
+                "detected_in": "sanitized_payload",
+                "blocked_url": _redact_url_for_audit(exc.url),
+                "blocked_host": exc.host,
+                "resolved_ip": exc.matched_ip,
+                "matched_rule": exc.matched_rule,
+                "applied_role_name": egress_policy.get("role_name", virtual_key),
+            },
+            virtual_key_id=virtual_key,
+        )
+        return (
+            _jsonrpc_error(
+                req_id,
+                JSONRPC_EGRESS_FORBIDDEN,
+                "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
+            )
+            if has_id
+            else None
+        )
 
     forward_payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": forward_params}
 
