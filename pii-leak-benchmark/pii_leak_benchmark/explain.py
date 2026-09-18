@@ -3,9 +3,9 @@
 WHY THIS EXISTS. A run reports ``leak_rate: 0.125``. That is correct, precise, and gives
 the person reading it no next action. It does not say WHAT left, WHICH side of the gateway
 saw it, or WHAT to change. The difference between "0.125" and "your gateway handed the
-caller's Social Security number to its model provider with redaction switched on" is the
-difference between a report and a bug ticket -- and it is the difference between persuading
-someone who already believes the problem is real and persuading someone who does not.
+caller's Social Security number to its model provider byte for byte" is the difference
+between a report and a bug ticket -- and it is the difference between persuading someone
+who already believes the problem is real and persuading someone who does not.
 
 Nothing here measures anything. Every value this module prints was decided by the scorers
 in ``http_profile`` and ``v2_emitter``; this is the layer that says it out loud. That
@@ -22,6 +22,17 @@ and an operator who confuses them fixes the wrong subsystem:
 
 The first two are leaks in opposite directions. The third is not a leak at all -- nothing
 escaped -- and reporting it as one sends someone to audit a redactor that is working.
+
+SAY ONLY WHAT THE RUN ESTABLISHED. Two facts the display must not assume, because both
+were assumed in the first draft and both read fine on the page:
+
+- A run may say "redaction was on and did not hold" only if it RECORDED
+  ``redaction_claim.configured_for_this_run``. The documented ``capture://self`` floor has
+  no gateway to accuse, and it is the first run an operator is told to do.
+- A leak found in ``unattributed_leak_evidence`` is traffic that reached a PUBLIC capture
+  without this run's marker. ``http_profile`` keeps it in its own field so a reader is not
+  told the target sent it; the display keeps the same separation, with its own headline,
+  label, arrow and sentence.
 
 WHY TWO LINES AND NOT ONE. In a leak the two values are IDENTICAL, and that identity is
 the finding: the gateway held the value, was asked to change it, and returned it byte for
@@ -546,7 +557,8 @@ def render(finding: Finding, *, reveal: bool) -> list[str]:
     )
     lines.append(
         f"      Case: {finding.carrier} / {finding.encoding} / "
-        f"split={'yes' if finding.fragmented else 'no'}   Seed: {finding.seed or _NO_SEED}"
+        f"split={'yes' if finding.fragmented else 'no'}   "
+        f"Seed: {_safe_seed(finding.seed) or _NO_SEED}"
     )
     return lines
 
@@ -554,6 +566,17 @@ def render(finding: Finding, *, reveal: bool) -> list[str]:
 # Not "Seed:" followed by nothing, which reads as a bug. Short, because it appears on
 # every block of an unseeded run; the footer says once what it means.
 _NO_SEED = "none"
+
+
+def _safe_seed(seed: str) -> str:
+    """The seed is the one part of a block that comes from the operator's command line.
+
+    `ci` renders these blocks inside a fenced code span in a Markdown job summary, so a
+    seed carrying a backtick run could close the fence early and let the rest of the
+    display be reinterpreted as Markdown in a pull request. A seed is an identifier;
+    backticks and line breaks in one carry nothing worth preserving.
+    """
+    return " ".join(seed.replace("`", "").split())
 
 
 def _value_line(label: str, value: str, note: str, width: int) -> str:

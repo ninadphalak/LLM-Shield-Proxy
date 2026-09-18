@@ -342,6 +342,20 @@ def test_the_block_carries_the_case_and_the_seed_so_the_run_repeats() -> None:
         assert "a1b2c3d4" in block
 
 
+def test_an_operator_supplied_seed_cannot_break_out_of_the_ci_code_fence() -> None:
+    """`ci` renders these blocks inside a ``` fence in a Markdown job summary.
+
+    The seed is the one part of a block that comes from the operator's command line, so it
+    is the one part that could close the fence early and let the rest of the display be
+    reinterpreted as Markdown in a pull request. A seed is an identifier; backticks and
+    newlines in it carry no meaning worth preserving.
+    """
+    hostile = "a\n" + "`" * 3 + "\n# heading"
+    block = "\n".join(explain.render(_finding(seed=hostile), reveal=False))
+    assert "```" not in block
+    assert len(block.splitlines()) == len(explain.render(_finding(), reveal=False))
+
+
 def test_an_unseeded_run_says_so_rather_than_printing_an_empty_seed() -> None:
     """`Seed:` with nothing after it reads as a bug. It is a real and reportable state."""
     block = "\n".join(explain.render(_finding(seed=""), reveal=True))
