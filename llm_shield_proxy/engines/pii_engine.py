@@ -430,7 +430,11 @@ def _decode_base64_candidate(token: str) -> Optional[bytes]:
     for altchars in (None, b"-_"):
         try:
             return base64.b64decode(padded, altchars=altchars, validate=True)
-        except Exception:  # noqa: BLE001 - not base64 in this alphabet; try the next
+        # nosec B112 - the swallow IS the logic. "Not valid base64 in this alphabet"
+        # is the ordinary answer for most candidates, and the only way to ask is to
+        # try the decode. A candidate that decodes in neither alphabet returns None
+        # below and is dropped, so nothing is silently passed through.
+        except Exception:  # noqa: BLE001  # nosec B112 - see above
             continue
     return None
 
