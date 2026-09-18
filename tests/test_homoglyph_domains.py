@@ -114,7 +114,12 @@ def test_the_two_vendored_tables_are_identical():
     proxy = root / "llm_shield_proxy" / "engines" / "confusables.py"
     benchmark = root / "pii-leak-benchmark" / "pii_leak_benchmark" / "confusables.py"
 
-    assert proxy.read_bytes() == benchmark.read_bytes()
+    # Text, not bytes. Both files are LF in the repository, but git rewrites line endings
+    # on checkout per platform and per file age, so on Windows the newly added copy came
+    # back CRLF and the older one LF. Comparing raw bytes therefore failed on a platform
+    # artefact while the tracked content was byte-identical, which is a test that cries
+    # wolf about the one thing it exists to detect.
+    assert proxy.read_text(encoding="utf-8") == benchmark.read_text(encoding="utf-8")
 
 
 def test_the_fold_never_changes_length():
