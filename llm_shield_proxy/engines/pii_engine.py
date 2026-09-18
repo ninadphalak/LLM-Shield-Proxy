@@ -43,7 +43,34 @@ class CompiledProfile:
 
 
 # Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
-INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
+# Characters that render as nothing and so hide a value from every pattern while the
+# client still displays the real thing. NFKC does not deal with them: U+3164 merely
+# folds to U+1160, which is equally invisible.
+#
+# This class is deleted from text that is FORWARDED upstream, not only from text that
+# is scanned -- `redact_text` returns `working_text`. So membership is limited to
+# characters that are invisible AND have no role in ordinary prose. Two known hiding
+# places are deliberately left out for that reason: variation selectors U+FE00-U+FE0F,
+# because U+FE0F is emoji presentation and stripping it rewrites every emoji in the
+# user's prompt, and U+2800, which is a legitimate blank braille cell. Both remain open
+# gaps by decision, pinned by a test.
+INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
+    "["
+    "\u00AD"  # soft hyphen
+    "\u034F"  # combining grapheme joiner
+    "\u061C"  # Arabic letter mark
+    "\u115F\u1160"  # Hangul choseong/jungseong fillers
+    "\u17B4\u17B5"  # Khmer inherent vowels, invisible
+    "\u180B-\u180E"  # Mongolian free variation selectors and vowel separator
+    "\u200B-\u200F"  # zero-width space through RTL mark
+    "\u202A-\u202E"  # bidi embedding and override
+    "\u2060-\u206F"  # word joiner, invisible operators, deprecated format chars
+    "\u3164"  # Hangul filler
+    "\uFEFF"  # zero-width no-break space
+    "\uFFA0"  # halfwidth Hangul filler
+    "\U000e0000-\U000e007f"  # tag block, the classic ASCII smuggler
+    "]"
+)
 
 # Candidate base64 patterns for obfuscated PII smuggling. The lower bound of 8
 # data characters matches the >= 6 decoded-byte floor enforced below, and the
@@ -300,7 +327,16 @@ NER_DISABLED_WARNING = (
 )
 
 # Candidate pattern for Shannon Entropy evaluation
-CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9_\-+=]{16,}\b")
+# Lookarounds rather than `\b`, for the same reason BASE64_CANDIDATE_PATTERN uses them.
+# A word boundary needs a word/non-word transition, and CJK ideographs are word
+# characters to Python's Unicode `re`. A secret sitting directly against Japanese or
+# Chinese text therefore had a boundary on neither side and Tier 2 never saw it, while
+# the identical secret with spaces around it was found at once. Excluding only the
+# secret alphabet itself makes the boundary "not more of the same token", which is what
+# was meant all along.
+CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
+    r"(?<![A-Za-z0-9_\-+=])[A-Za-z0-9_\-+=]{16,}(?![A-Za-z0-9_\-+=])"
+)
 
 
 # ---------------------------------------------------------------------------
