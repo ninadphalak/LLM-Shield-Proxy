@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from llm_shield_proxy.api import mcp_router as mcp_router_module
 from llm_shield_proxy.api.main import app
 from llm_shield_proxy.api.mcp_router import get_mcp_policy_resolver, warn_if_mcp_policy_is_empty_at_startup
 from llm_shield_proxy.core.config import settings
@@ -596,3 +597,91 @@ def test_redact_url_for_audit_survives_a_malformed_port():
 
     for bad in ("https://evil.test:abc/x", "https://evil.test:99999/x"):
         assert _redact_url_for_audit(bad) == "<unparseable-url>"
+
+
+def test_a_forbidden_tool_is_rejected_before_any_dns_resolution(monkeypatch):
+    """Greptile P1 on #38: authorization must precede attacker-controlled DNS work.
+
+    The egress gate added for `resources/read` was placed above the tool-authorization
+    block, so a caller whose role forbids the tool could still make the gateway resolve
+    any hostname it put in `params`. That is an unauthenticated outbound DNS probe, and
+    it is exactly the work authorization exists to gate.
+
+    The stale comment said as much: "tool authorization is checked BEFORE any upstream
+    routing or sanitization work" sat directly above the scan that had displaced it.
+    """
+    _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})
+
+    resolved: list = []
+
+    async def _recording_resolve(host: str):
+        resolved.append(host)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "not_allowed_tool",
+                "arguments": {"probe": "https://attacker-chosen.example/x"},
+            },
+        },
+    )
+
+    # Both denials share -32003, so the code alone cannot tell a tool rejection from an
+    # egress one. The audit event type is what distinguishes them, and `resolved` is the
+    # property actually under test.
+    assert response.json()["error"]["code"] == mcp_router_module.JSONRPC_TOOL_FORBIDDEN
+    assert resolved == [], f"resolved {resolved} for a caller not allowed to call the tool"
+
+
+def test_an_allowed_call_resolves_each_url_once(monkeypatch):
+    """Greptile P1 on #38: the argument scan duplicated the params scan.
+
+    `scan_arguments(params)` already covers `params["arguments"]`, so the second pass
+    resolved every argument URL a second time, doubling outbound DNS for every allowed
+    tool call.
+    """
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    resolved: list = []
+
+    async def _recording_resolve(host: str):
+        resolved.append(host)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    def response_callback(request):
+        import httpx
+
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 56, "result": {"ok": True}})
+
+    httpx_mock_url = UPSTREAM_URL
+
+    with patch("llm_shield_proxy.api.mcp_router.AuditLogger.log_security_event"):
+        response = client.post(
+            "/v1/mcp",
+            headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": httpx_mock_url},
+            json={
+                "jsonrpc": "2.0",
+                "id": 56,
+                "method": "tools/call",
+                "params": {"name": "fetch", "arguments": {"u": "https://docs.example.com/x"}},
+            },
+        )
+
+    assert response.status_code == 200
+    assert resolved.count("docs.example.com") == 1, (
+        f"resolved docs.example.com {resolved.count('docs.example.com')} times: {resolved}"
+    )

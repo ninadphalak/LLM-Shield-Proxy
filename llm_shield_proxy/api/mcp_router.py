@@ -256,13 +256,36 @@ async def _process_single_call(
     if method not in SUPPORTED_METHODS:
         return _jsonrpc_error(req_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}") if has_id else None
 
-    # Fail-Closed Gate: tool authorization is checked BEFORE any upstream routing or sanitization work.
+    # Fail-Closed Gate: tool authorization is checked BEFORE any upstream routing,
+    # sanitization, or attacker-controlled DNS resolution.
+    #
+    # The ordering is the point. When the egress scan below sat above this block, a
+    # caller whose role forbids the tool could still make the gateway resolve any
+    # hostname it put in `params`: an outbound DNS probe performed on behalf of someone
+    # not authorised to call anything. Resolution is attacker-directed work, so it
+    # happens only once the caller has been allowed to make the call at all.
+    tool_name = params.get("name") if method == "tools/call" else None
+    if method == "tools/call":
+        if not tool_name or _is_tool_forbidden(tool_name, allowed, blocked):
+            AuditLogger.log_security_event(
+                event_type="mcp_tool_forbidden",
+                severity="CRITICAL",
+                details={"reason": "Tool forbidden for active role", "tool_name": tool_name, "method": method},
+                virtual_key_id=virtual_key,
+            )
+            return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Tool forbidden for active role") if has_id else None
+
     # SSRF / DNS-rebinding gate, for EVERY supported method rather than only
     # `tools/call`. `resources/read` exists to fetch a URI, and it used to skip this
     # gate entirely: a `resources/read` naming the cloud metadata endpoint was forwarded
     # upstream unchecked. The scan also covers the whole of `params`, not just
     # `params["arguments"]`, because a URL in a sibling field such as `_meta` reaches an
     # upstream tool exactly as readily as one inside `arguments`.
+    #
+    # Scanning the whole of `params` subsumes `params["arguments"]`, so there is no
+    # second pass over the arguments. One used to follow this, purely so the audit
+    # record could name the tool; it resolved every argument URL a second time, which
+    # doubled outbound DNS on every allowed call. `tool_name` is in this record instead.
     try:
         await scan_arguments(params, egress_policy)
     except EgressPolicyViolationError as exc:
@@ -271,7 +294,7 @@ async def _process_single_call(
             severity="CRITICAL",
             details={
                 "reason": exc.reason,
-                "tool_name": params.get("name"),
+                "tool_name": tool_name,
                 "method": method,
                 "blocked_url": _redact_url_for_audit(exc.url),
                 "blocked_host": exc.host,
@@ -290,47 +313,6 @@ async def _process_single_call(
             if has_id
             else None
         )
-
-    if method == "tools/call":
-        tool_name = params.get("name")
-        if not tool_name or _is_tool_forbidden(tool_name, allowed, blocked):
-            AuditLogger.log_security_event(
-                event_type="mcp_tool_forbidden",
-                severity="CRITICAL",
-                details={"reason": "Tool forbidden for active role", "tool_name": tool_name, "method": method},
-                virtual_key_id=virtual_key,
-            )
-            return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Tool forbidden for active role") if has_id else None
-
-        # Arguments were already covered by the gate above, which scans the whole of
-        # `params`. This second pass stays because it names the tool in the audit record.
-        try:
-            await scan_arguments(params.get("arguments", {}), egress_policy)
-        except EgressPolicyViolationError as exc:
-            AuditLogger.log_security_event(
-                event_type="mcp_egress_policy_violation",
-                severity="CRITICAL",
-                details={
-                    "reason": exc.reason,
-                    "tool_name": tool_name,
-                    "method": method,
-                    "blocked_url": _redact_url_for_audit(exc.url),
-                    "blocked_host": exc.host,
-                    "resolved_ip": exc.matched_ip,
-                    "matched_rule": exc.matched_rule,
-                    "applied_role_name": egress_policy.get("role_name", virtual_key),
-                },
-                virtual_key_id=virtual_key,
-            )
-            return (
-                _jsonrpc_error(
-                    req_id,
-                    JSONRPC_EGRESS_FORBIDDEN,
-                    "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
-                )
-                if has_id
-                else None
-            )
 
     if upstream is None:
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "No upstream MCP server configured") if has_id else None
