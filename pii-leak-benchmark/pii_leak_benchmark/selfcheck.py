@@ -38,6 +38,9 @@ import os
 import sys
 from typing import Any, Optional, Sequence
 
+from pii_leak_benchmark import explain
+from pii_leak_benchmark.explain import OperatorSpecimens
+
 DESCRIPTION = (
     "Smoke-test your own gateway: does it send raw personal data to its upstream, and "
     "does it give the values back to the client? No vendor claim required."
@@ -266,7 +269,13 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
     print()
 
 
-def _print_report(report: dict[str, Any], verdict: str, reason: str, destination: Optional[str]) -> None:
+def _print_report(
+    report: dict[str, Any],
+    verdict: str,
+    reason: str,
+    destination: Optional[str],
+    specimens: Optional["OperatorSpecimens"] = None,
+) -> None:
     boundary = report["checks"][_BOUNDARY]
     capture = report["capture"]
 
@@ -287,6 +296,15 @@ def _print_report(report: dict[str, Any], verdict: str, reason: str, destination
     print()
 
     _print_per_entity(report, boundary)
+
+    # The values, before the matcher table. "EMAIL / literal / body" says how a finding
+    # was produced; it does not say what a reader should do, and it is the row a maintainer
+    # skips. Their own address coming back out of their own gateway is the row they read.
+    # `reveal=True` because these are this run's synthetic specimens, generated on this
+    # machine seconds ago, and they are deliberately absent from the JSON.
+    explain.print_findings(
+        explain.findings_from_report(report, specimens), reveal=specimens is not None
+    )
 
     evidence = boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]
     if evidence:
@@ -338,6 +356,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from pii_leak_benchmark.http_profile import run_http_conformance
 
     args = build_parser().parse_args(argv)
+    # Asked for explicitly. The report is written to disk; this is not, and keeping them
+    # as separate objects is what stops the values following the report into an artifact.
+    specimens = OperatorSpecimens()
 
     try:
         report = run_http_conformance(
@@ -363,6 +384,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # No claim, on purpose. See the module docstring: this declines to
             # participate in the publishable-row machinery rather than weakening it.
             redaction_claim=None,
+            specimens=specimens,
         )
     except (OSError, ValueError) as exc:
         print(f"\n  {VERDICT_NOT_MEASURED}\n", file=sys.stderr)
@@ -394,7 +416,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return EXIT_NOT_MEASURED
 
     verdict, reason = verdict_for(report, duty=args.duty)
-    _print_report(report, verdict, reason, destination)
+    _print_report(report, verdict, reason, destination, specimens=specimens)
 
     if verdict == VERDICT_CLEAN:
         return EXIT_CLEAN

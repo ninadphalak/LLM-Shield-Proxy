@@ -26,6 +26,7 @@ from urllib.parse import unquote_plus, urljoin
 import httpx
 
 from pii_leak_benchmark.confusables import CONFUSABLE_TO_ASCII, CONFUSABLE_TO_DIGIT
+from pii_leak_benchmark.explain import OperatorSpecimens
 from pii_leak_benchmark.provenance import build_attestation
 from pii_leak_benchmark.redaction_claim import (
     derive_outcome,
@@ -1673,6 +1674,12 @@ async def _exercise_target(
 
     completed = len(texts)
     return {
+        # NOT a published field, and nothing spreads this dict into the report -- every
+        # report key is taken by name. It exists so `run_http_conformance` can tell an
+        # operator what the client actually saw where their own value should have been,
+        # which is the difference between "restoration is broken" and "restoration
+        # returned a placeholder". See `explain.OperatorSpecimens`.
+        "client_text": texts[-1] if texts else "",
         "durations_ms": durations_ms,
         "iterations_requested": iterations,
         "iterations_completed": completed,
@@ -1708,6 +1715,7 @@ def run_http_conformance(
     redaction_claim: Optional[dict[str, Any]] = None,
     include_credentials: bool = False,
     fixture_seed: Optional[str] = None,
+    specimens: Optional["OperatorSpecimens"] = None,
 ) -> dict[str, Any]:
     """Evaluate an OpenAI-compatible endpoint against a controlled capture upstream.
 
@@ -1748,6 +1756,14 @@ def run_http_conformance(
     ``outcome: claim-unstated`` -- valid measurements, not publishable as a row. See
     ``conformance/redaction_claim.py``: a product that never offered redaction must
     never be printed as "Fail".
+
+    ``specimens`` is an OUT parameter and the only way this run's generated values leave
+    it. The report never carries them -- ``fixture.values_published`` is false and stays
+    false -- but the operator who generated them on their own machine seconds ago is
+    entitled to see them, and a leak display without the value explains nothing. An
+    explicit object the caller has to ask for keeps the two audiences apart by
+    construction: the report is written to disk and published, so anything reachable from
+    it is eventually serialized by someone who did not read the rule.
     """
     if iterations < 1:
         raise ValueError("iterations must be at least 1")
@@ -1783,6 +1799,7 @@ def run_http_conformance(
                 redaction_claim=redaction_claim,
                 include_credentials=include_credentials,
                 fixture_seed=fixture_seed,
+                specimens=specimens,
             )
     if (
         capture_host != _DEFAULT_CAPTURE_HOST
@@ -1814,6 +1831,10 @@ def run_http_conformance(
 
         fixture, nonce = seeded_fixture(fixture_seed, include_credentials)
     prompt = _build_prompt(nonce, fixture)
+    if specimens is not None:
+        specimens.fixture = dict(fixture)
+        specimens.prompt = prompt
+        specimens.seed = fixture_seed or ""
 
     effective_target = (
         session.advertised_base_url
@@ -1832,6 +1853,9 @@ def run_http_conformance(
             nonce,
         )
     )
+
+    if specimens is not None:
+        specimens.client_text = str(exercise["client_text"])
 
     # Everything the session has seen, which on a managed startup includes whatever
     # the target sent to its configured upstream before it began serving. That is
