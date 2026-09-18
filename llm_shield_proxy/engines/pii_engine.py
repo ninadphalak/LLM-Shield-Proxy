@@ -24,6 +24,7 @@ import yaml
 
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.core.config_schema import CustomRegexConfig
+from llm_shield_proxy.engines.confusables import CONFUSABLE_TO_ASCII
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.observability.tracing import tracer
@@ -107,6 +108,12 @@ MAX_BASE64_DECODE_DEPTH = 3
 PERCENT_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"%[0-9A-Fa-f]{2}")
 MAX_PERCENT_INSPECTION_CHARS = 8_192
 _PERCENT_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[],;()")
+
+# Cross-script look-alikes, from the UTS #39 confusables table vendored in
+# `confusables.py`. Built once as a `str.translate` table because this runs per scan.
+# Every row is one codepoint to one ASCII character, which is what lets a folded copy
+# share offsets with the original; `test_homoglyph_domains.py` pins that property.
+_CONFUSABLE_TRANSLATION = str.maketrans(CONFUSABLE_TO_ASCII)
 
 # HTML entities hide the same structured PII percent-encoding did: `bob&commat;example.com`
 # matches no email pattern, and every browser, chat client and markdown renderer shows
@@ -755,6 +762,32 @@ class PIIEngine:
                         raw_spans.append(
                             (offset + match.start(), offset + match.end(), entity_type, matched_text)
                         )
+
+        # Tier 1b: the same patterns over a confusables-folded copy.
+        #
+        # `bob@ex<CYRILLIC A>mple.com` renders identically to the real address in every
+        # client and matches no pattern, so it was forwarded in clear. NFKC does not
+        # touch it and should not: Cyrillic `a` and Latin `a` are distinct characters,
+        # not compatibility variants.
+        #
+        # Folding happens on a COPY and the spans are reported against the original. The
+        # vendored UTS #39 table maps one codepoint to one ASCII character, so the fold
+        # cannot change a string's length and offsets carry over unchanged -- asserted
+        # below rather than assumed, because the whole approach rests on it. `matched_text`
+        # is taken from the original so the vault maps what was actually sent.
+        #
+        # The forwarded text is NOT folded. `redact_text` returns its working text, so
+        # folding there would rewrite genuine Russian prose into Latin gibberish.
+        if not text.isascii():
+            folded = text.translate(_CONFUSABLE_TRANSLATION)
+            if len(folded) == len(text) and folded != text:
+                for offset, segment in scan_segments:
+                    folded_segment = folded[offset:offset + len(segment)]
+                    for entity_type, pattern in active_profile.tier1_patterns:
+                        for match in pattern.finditer(folded_segment):
+                            start = offset + match.start()
+                            end = offset + match.end()
+                            raw_spans.append((start, end, entity_type, text[start:end]))
 
         # Tier 2: Shannon Entropy Analysis (Detects unformatted API keys, hashes, secret tokens)
         if self.enable_tier2 and settings.ENABLE_TIER2_ENTROPY:
