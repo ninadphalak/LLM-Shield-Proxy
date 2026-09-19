@@ -76,28 +76,46 @@ jobs:
         uses: the-pr-agent/pr-agent@f3b385ea2927247ddcff2fe252472380b9c8f5fc # v0.45.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEEPSEEK.KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
-          CONFIG.MODEL: "gemini/gemini-3.8-flash"
-          # The SAME model, deliberately, and not a different one.
+          # PAID PRIMARY, FREE BACKUP -- that order, and the measurements are why.
+          # Four runs on the Gemini free tier on 2026-09-19 produced 58x 503 UNAVAILABLE
+          # ("experiencing high demand") and 12x 429 RESOURCE_EXHAUSTED ("You exceeded
+          # your current quota"). Both failure modes are real: free-tier quota AND
+          # capacity deprioritisation, and `/improve` failed on two of four runs. A
+          # primary that fails about half the time is not a primary; it is a backup.
           #
-          # `gemini/gemini-3.1-flash` was here and is not callable by this key: the API
-          # answers 404 "models/gemini-3.1-flash is not found for API version v1alpha".
-          # It came out of PR-Agent's own MAX_TOKENS table, which lists the models
-          # PR-Agent knows how to size -- not the models a given key may call. A fallback
-          # that 404s is worse than none: it only ever runs when the primary already
-          # failed, so it is silent until the moment it is needed.
+          # Every id below was read from the PROVIDER by `ai-provider-check.yml`, not
+          # from a table. That matters: PR-Agent's docs name `deepseek/deepseek-v4-flash`
+          # and its MAX_TOKENS table has `deepseek/deepseek-chat`, and this key can call
+          # NEITHER. DeepSeek's own docs confirm `deepseek-v4-flash` is a retired alias.
+          CONFIG.MODEL: "deepseek/deepseek-flash"
+          # Two steps, covering two different failures, and the ORDER is the argument.
+          # `deepseek-v4-pro` is another model on the same key, so it covers this model
+          # being individually overloaded but NOT an account-level quota or a provider
+          # outage -- both of which would take it down together with the primary. So the
+          # independent provider goes last rather than first: it is the only entry that
+          # survives DeepSeek as a whole, and it is free.
           #
-          # The failure it needs to cover is a 503 "experiencing high demand" from
-          # gemini-3.8-flash, which is transient, so retrying the same model is the
-          # correct response. Point this at a second family only after checking the key
-          # can actually call it: curl the ListModels endpoint, do not read a table.
-          CONFIG.FALLBACK_MODELS: '["gemini/gemini-3.8-flash"]'
+          # Both verified callable by this key via `ai-provider-check.yml`. The entry
+          # that used to be here, `gemini/gemini-3.1-flash`, was not: the API answered
+          # 404 for three runs and nobody noticed, because a fallback only ever runs once
+          # the primary has already failed. That is what makes a wrong fallback id worse
+          # than no fallback at all.
+          CONFIG.FALLBACK_MODELS: '["deepseek/deepseek-v4-pro", "gemini/gemini-3.8-flash"]'
           # PR-Agent caps every model at 32000 tokens by default, whatever the model can
           # actually take. This PR's diff measured 25059, so `/review` fit and `/improve`
           # -- which adds more scaffolding around the same diff -- did not, and posted
           # "Failed to generate code suggestions for PR" with no reason given.
-          # gemini-3.8-flash holds 1048576, so the cap was costing coverage and buying
-          # nothing. 200000 is well inside the model and still a real ceiling on spend.
+          # It is a CLAMP -- min(model limit, this) -- so it stays a real ceiling on
+          # spend and cannot overflow a smaller model added later.
+          #
+          # MEASURED, not read off a table. Run 35420726771 on this branch logged
+          # "Tokens: 4581, total tokens under limit: 200000", so the pinned build did
+          # resolve a limit for `deepseek/deepseek-flash` and it is at least 200000.
+          # That is the claim this comment is entitled to make. An earlier draft said
+          # "LiteLLM knows all three ids", checked against LiteLLM's main branch rather
+          # than the version bundled in the pinned action -- the wrong artifact.
           CONFIG.MAX_MODEL_TOKENS: "200000"
           # MUST match the `pull_request` types above. PR-Agent's own default is
           # ['opened', 'reopened', 'ready_for_review', 'review_requested'] -- WITHOUT
