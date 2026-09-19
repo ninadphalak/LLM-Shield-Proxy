@@ -252,6 +252,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         return selfcheck_main(arguments[1:])
 
+    # `cite` reads a finished report and writes nothing. It exists so a result posted
+    # in an issue names the instrument that produced it.
+    if arguments and arguments[0] == "cite":
+        from pii_leak_benchmark.cite import main as cite_main
+
+        return cite_main(arguments[1:])
+
+    # `badge` renders a finished report as a Shields.io endpoint file. It exists so a
+    # README badge carries the result rather than the workflow's exit status.
+    if arguments and arguments[0] == "badge":
+        from pii_leak_benchmark.badge import main as badge_main
+
+        return badge_main(arguments[1:])
+
     args = build_parser().parse_args(arguments)
     from pii_leak_benchmark.artifact import write_conformance_report
 

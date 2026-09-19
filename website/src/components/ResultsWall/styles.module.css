@@ -1,0 +1,119 @@
+.wrap {
+  margin-bottom: 1.5rem;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-bottom: 0.5rem;
+}
+
+.table {
+  display: table;
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.table th {
+  padding: 0;
+  vertical-align: bottom;
+}
+
+.head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--ifm-global-radius);
+}
+
+.head:hover {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.head:focus-visible {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: -2px;
+}
+
+.active {
+  color: var(--ifm-color-primary);
+}
+
+.arrow {
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
+.muted {
+  color: var(--ifm-color-emphasis-600);
+}
+
+/* The table carries eleven columns, so it scrolls at every width rather than only on
+   a phone. The scroller is its own element so the hint above it stays put. */
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table {
+  min-width: 62rem;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--ifm-color-primary-lightest);
+  color: var(--ifm-color-primary-darkest);
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.badge a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* The trend indicator. Colour alone never carries the meaning: the arrow glyph and the
+   title text both say which way it moved, so this reads the same to someone who cannot
+   separate red from green. */
+.trendBetter,
+.trendWorse {
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.trendBetter {
+  color: var(--ifm-color-success-dark);
+}
+
+.trendWorse {
+  color: var(--ifm-color-danger-dark);
+}
+
+/* Freshness, not ranking. An old row is not a worse gateway, it is an older
+   measurement, so this says what to do about it rather than scoring it. */
+.stale {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--ifm-color-warning-contrast-background);
+  color: var(--ifm-color-warning-contrast-foreground);
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+}

@@ -1,0 +1,255 @@
+"""``pii-leak-benchmark cite`` -- turn a report into a citable block.
+
+A maintainer who runs the harness and says "it passed" has produced a claim nobody can
+check. The same maintainer pasting this block has produced a reference: it names the
+harness revision, the inspector and corpus digests, and the exact configuration the
+numbers came from, so a reader can rerun the same instrument against the same corpus
+and compare.
+
+Standard library only. Nothing here may import ``llm_shield_proxy``: the benchmark is
+the neutral measurer and the proxy is one of the things it measures.
+
+WHAT THIS IS NOT. Every value is copied from a report the caller supplies, and reports
+are produced by whoever ran the harness. This block is therefore SELF-REPORTED and
+forgeable by its author, exactly as ``provenance.build_attestation`` says of its own
+fields. It makes a result *checkable* -- a reader can rerun the named instrument -- not
+*attested*. Do not add language here implying verification that no verifier performed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from typing import Any, Optional, Sequence
+
+from pii_leak_benchmark import report_fields as fields
+
+_MISSING = "unrecorded"
+
+# Runs of backticks inside a value, which decide how long its code fence must be.
+_BACKTICK_RUN = re.compile(r"`+")
+
+
+def _dig(report: dict[str, Any], *path: str, default: Any = None) -> Any:
+    node: Any = report
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return default
+        node = node[key]
+    return node
+
+
+def _rate(value: Any) -> str:
+    """Render a rate the way the reports and the spec do: 1.00, not 1.
+
+    A bare ``1`` next to ``0.125`` reads as a count rather than a rate, and these
+    blocks get pasted straight into issues where nobody has the schema to hand.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _MISSING
+    text = f"{value:.4f}".rstrip("0")
+    return text + "00" if text.endswith(".") else text
+
+
+def _flatten(value: str) -> str:
+    """Collapse line breaks to spaces. A multi-line value renders as two fields."""
+    return value.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+
+
+def _cell(value: str) -> str:
+    """Make a report-supplied value safe to sit in a GFM table cell.
+
+    Every value here is free-form text from a report the caller supplied, and the
+    rendered block is pasted straight into issues and READMEs, so a value that can break
+    out of its cell turns a block meant to be CHECKABLE into one that merely looks
+    complete.
+
+    Only the pipe is escaped, and only because GFM splits table rows on unescaped pipes
+    BEFORE any inline parsing, which is why `\\|` works even inside a code span and is
+    the documented way to carry a literal pipe. Backslashes are deliberately NOT escaped:
+    inside a code span a backslash is literal, so doubling it would display two where the
+    report held one, and this block is evidence.
+    """
+    return _flatten(value).replace("|", "\\|")
+
+
+def _code_cell(value: str) -> str:
+    """Render a value as a code span it cannot break out of.
+
+    ESCAPING A BACKTICK DOES NOT WORK HERE, which is the whole reason this exists.
+    CommonMark does not process backslash escapes inside code spans, so `` \\` `` still
+    closes the span: the first version of this escaped backticks, and a value of
+    ``gw`x`` rendered as the span ``gw\\`` followed by ``x`` as ordinary prose, taking
+    the rest of the row with it. The test passed, because it asserted the escaped text
+    appeared rather than that the span survived.
+
+    The rule that does work is the delimiter rule: a code span may be opened with any
+    run of backticks and is closed only by a run of exactly the same length, so a fence
+    one longer than the longest run inside the value can never be terminated early. A
+    value that starts or ends with a backtick is padded with a space, which CommonMark
+    strips when both sides have one.
+    """
+    flat = _cell(value)
+    longest = max((len(run) for run in _BACKTICK_RUN.findall(flat)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if flat.startswith("`") or flat.endswith("`") else ""
+    return f"{fence}{pad}{flat}{pad}{fence}"
+
+
+def _short(digest: Any, keep: int = 16) -> str:
+    if not isinstance(digest, str) or not digest:
+        return _MISSING
+    return digest if len(digest) <= keep else digest[:keep]
+
+
+def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
+    """Render a citation block for one conformance report."""
+    metrics = _dig(report, "metrics", default={})
+    # Guard the TYPE, not just falsiness. `or {}` still lets a truthy non-object
+    # through -- `"metrics": "unavailable"` in a hand-edited report reached `.get`
+    # and raised, which breaks the documented contract that missing fields degrade
+    # to `unrecorded` rather than traceback at a caller who named any JSON file.
+    if not isinstance(metrics, dict):
+        metrics = {}
+    leak = metrics.get("leak_rate") if isinstance(metrics.get("leak_rate"), dict) else {}
+
+    try:  # pragma: no cover - trivial, and absent only in a broken install
+        from pii_leak_benchmark import __version__ as package_version
+    except Exception:
+        package_version = _MISSING
+
+    rows: list[tuple[str, str]] = [
+        ("Benchmark package", str(package_version)),
+        # Both report shapes, via the shared resolver. Reading only the research
+        # spelling printed "unrecorded" for every operator run, which is the file the
+        # results-wall page tells submitters to cite.
+        ("Harness revision", fields.harness_revision(report)),
+        ("Schema", str(_dig(report, "schema", default=_MISSING))),
+    ]
+
+    # The research profiles (v2, FIDE) carry scorer and corpus digests. Operator runs
+    # do not, and padding their block with four "unrecorded" rows makes a usable
+    # result look like a broken one, so these appear only when the report has them.
+    instrument = fields.instrument_sha256(report)
+    if instrument:
+        rows.append(("Inspector digest", _short(instrument)))
+    corpus_digest = _dig(report, "corpus", "sha256")
+    if corpus_digest:
+        rows.append(("Corpus digest", _short(corpus_digest)))
+    for label, path in (
+        ("Corpus cases", ("corpus", "case_count")),
+        ("Seed", ("corpus", "seed")),
+    ):
+        value = _dig(report, *path)
+        if value is not None:
+            rows.append((label, str(value)))
+
+    rows.append(("Target", fields.target_name(report)))
+    rows.append(("Target version", fields.target_version(report)))
+    model = fields.model(report)
+    if model:
+        # Named as the model, never folded into "Target": an operator run records the
+        # alias it routed through, which is not the gateway under test.
+        rows.append(("Model", model))
+    # The operator shape files the verdict under `verdict`; the research shape uses
+    # `outcome`. This is the headline row, so a citation of a LEAK run must not
+    # print "unrecorded" merely because it was made by the other half of the tool.
+    rows.append(("Outcome", str(report.get("verdict") or report.get("outcome") or _MISSING)))
+    if isinstance(report.get("passed"), bool):
+        rows.append(("Checks passed", "yes" if report["passed"] else "no"))
+
+    if leak:
+        rows.append(("Leak (single-chunk)", _rate(leak.get("single_chunk"))))
+        rows.append(("Leak (adversarial)", _rate(leak.get("adversarial"))))
+    if "delta_frag" in metrics:
+        rows.append(("DeltaFrag", _rate(metrics.get("delta_frag"))))
+    if "fidelity_rate" in metrics:
+        rows.append(("Fidelity", _rate(metrics.get("fidelity_rate"))))
+    for label, key in (
+        ("Applicable cases", "cases_applicable"),
+        ("Inconclusive cases", "cases_inconclusive"),
+    ):
+        if key in metrics:
+            rows.append((label, str(metrics[key])))
+
+    for label, key in (("Platform", "platform"), ("Python", "python")):
+        value = _dig(report, "environment", key)
+        if value:
+            rows.append((label, str(value)))
+    rows.append(("Generated", str(report.get("generated_at", _MISSING))))
+
+    attestation = report.get("attestation") or report.get("provenance")
+    if isinstance(attestation, dict):
+        for label, key in (("Repository", "repository"), ("Run URL", "run_url")):
+            if attestation.get(key):
+                rows.append((label, str(attestation[key])))
+
+    caveat = (
+        "Self-reported: these values are copied from a report produced by whoever ran "
+        "the harness. They make the result rerunnable, not independently attested. "
+        "'Benchmark package' is the version that rendered this block, which is the "
+        "version that produced the report unless it was rendered later."
+    )
+
+    if style == "text":
+        # Markdown escaping would be noise here, but a newline still breaks the block:
+        # it silently turns one field into what looks like two, so it is flattened.
+        flat = [(_flatten(label), _flatten(value)) for label, value in rows]
+        width = max(len(label) for label, _ in flat)
+        body = "\n".join(f"{label.ljust(width)}  {value}" for label, value in flat)
+        return f"pii-leak-benchmark result\n{body}\n\n{caveat}\n"
+
+    lines = [
+        "<!-- pii-leak-benchmark citation -->",
+        "| Field | Value |",
+        "|---|---|",
+    ]
+    lines += [f"| {_cell(label)} | {_code_cell(value)} |" for label, value in rows]
+    lines += ["", f"_{caveat}_"]
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pii-leak-benchmark cite",
+        description=(
+            "Print a citable block for a conformance report, so a result posted in an "
+            "issue or README names the instrument that produced it."
+        ),
+    )
+    parser.add_argument(
+        "report",
+        nargs="?",
+        default="./PII_LEAK_BENCHMARK_LATEST.json",
+        help="Report JSON to cite (default: ./PII_LEAK_BENCHMARK_LATEST.json).",
+    )
+    parser.add_argument(
+        "--style",
+        choices=("markdown", "text"),
+        default="markdown",
+        help="markdown for issues and READMEs; text for terminals and logs.",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    try:
+        with open(args.report, encoding="utf-8") as handle:
+            report = json.load(handle)
+    except OSError as exc:
+        print(f"Cannot read report: {exc}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"Report is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+
+    if not isinstance(report, dict):
+        print("Report is not a JSON object.", file=sys.stderr)
+        return 2
+
+    sys.stdout.write(build_citation(report, style=args.style))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

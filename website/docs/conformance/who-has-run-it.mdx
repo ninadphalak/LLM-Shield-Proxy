@@ -1,0 +1,161 @@
+---
+title: Can your LLM gateway pass?
+sidebar_position: 9
+---
+
+import ResultsWall from '@site/src/components/ResultsWall';
+import CorpusCredits from '@site/src/components/CorpusCredits';
+import DefinedTerm from '@site/src/components/DefinedTerm';
+
+# Can your LLM gateway pass?
+
+An LLM gateway sits between your application and the model provider. This check asks whether
+yours does three things:
+
+1. **Keep the caller's data away from the provider.** If you configured it to redact an email
+   address, that address should not appear in the request it sends upstream.
+2. **Give the caller their own data back.** The response should still read correctly to the
+   person who sent it.
+3. **Keep out data the caller never sent.** If the model produces someone else's phone number, it
+   must not reach the client. Including when the stream splits it across two chunks.
+
+Do all three and you pass.
+
+## No gateway here has passed yet
+
+**Ours has not either, and we wrote the check.** With its response scan on, 1.6.0 leaked 2 of the
+16 values sent whole and 4 of the 16 sent split, and that row is below. We have since fixed those
+cases, and the passing row goes up when the evidence does, not before. Find a case that trips us
+and we will add it to the corpus and credit you.
+
+## Try it in one line
+
+No account, no API key, no paid model. Point it at a gateway you already have running:
+
+```bash
+pipx run pii-leak-benchmark --target-base-url http://localhost:4000/v1
+```
+
+It prints what it sent, what came back, and which of the three questions your gateway answered.
+About a minute. To put the result in CI and on your README, see [the CI setup](./ci).
+
+## Everything we have tested
+
+<ResultsWall />
+
+Read the middle columns together, because any one of them alone will mislead you. A gateway
+showing `0` leaked to the client may simply have returned nothing at all, and it may still have
+sent the caller's data straight to the provider. Every gateway here was configured to redact, so
+a value reaching the provider is a control that was switched on and did not hold.
+
+None of these are product defects in the abstract. Each row is one version in one configuration.
+
+### Why there is no speed column
+
+The obvious missing column is latency, and it is missing on purpose. Every result here would be
+timed on whatever machine the submitter happened to use, so a fast gateway on a slow runner would
+look worse than a slow one on fast hardware. That is hardware noise published as a product
+characteristic.
+
+What you actually want from a speed column is the **design tradeoff**, and that is in the table
+already, under "How it reads the stream". There are three ways to build this and each one costs
+something:
+
+- **Checks each chunk alone.** Fastest, and it cannot see a value split across two chunks.
+- **Waits for the whole response.** Sees everything, and the user waits for the entire answer
+  before any of it appears.
+- **Holds back a short tail.** Keeps the text streaming and still catches most splits. Leaks if
+  the tail is shorter than the value.
+
+There is no free option. That is why it is worth measuring, and why the column tells you more
+than a millisecond count would.
+
+## Two bugs that look identical in a leak count {#two-bugs}
+
+The same number in the leak column can mean two different defects, which need different fixes.
+This is the main reason the table is not a scoreboard.
+
+| | Sent whole<br/>`user@example.com` | Split across two chunks<br/>`user@exa` + `mple.com` |
+| :--- | :--- | :--- |
+| <DefinedTerm term="Detector gap" definition="The gateway never spots the value, so it leaks whether the stream splits it or not." /> | leaks | leaks |
+| <DefinedTerm term="Boundary bug" definition="The gateway spots the whole value but not its halves, so it only leaks when the stream splits it." /> | caught | leaks |
+
+### Detector gap {#detector-gap}
+
+The gateway never recognises the value at all. Splitting the stream changes nothing, because it
+was not going to catch it either way. Usually a missing pattern, an encoding it does not decode,
+or a look-alike character it does not fold.
+
+### Boundary bug {#boundary-bug}
+
+The gateway recognises the whole value but not its halves. It is clean until the stream splits
+the value across two chunks, and then it leaks. This is the defect the split column exists to
+find, and it is invisible to any test that sends values whole.
+
+## Add your gateway
+
+About ten minutes, and you do not need an account, an API key, or a paid model.
+
+**1. Run it.** Copy [the CI setup](./ci) into your repository and change three lines: where your
+gateway listens, the command that starts it, and the environment variable it reads for its
+provider URL.
+
+**2. Make the result checkable.** Run `pii-leak-benchmark cite` on the report. It prints a short
+block naming the version of the check and the test data it used, so someone else can repeat your
+exact run.
+
+**3. Post it.** [Open a prefilled issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?title=Result%3A%20%3Cyour%20gateway%20name%3E&body=Gateway%20and%20version%3A%0ALink%20to%20the%20project%3A%0AHow%20it%20inspects%20streaming%20responses%20%28one%20chunk%20at%20a%20time%2C%20buffered%2C%20other%29%3A%0A%0A%23%23%23%20Citation%20block%0A%0AOutput%20of%20%60pii-leak-benchmark%20cite%60%3A%0A%0A%60%60%60%0Apaste%20here%0A%60%60%60%0A%0A%23%23%23%20The%20result%0A%0A-%20Outcome%20%28CLEAN%20%2F%20LEAK%20%2F%20CHECK%20FAILED%20%2F%20NOT%20MEASURED%29%3A%0A-%20If%20something%20changed%20since%20a%20previous%20run%2C%20what%20and%20in%20which%20version%3A%0A-%20Anything%20that%20looked%20wrong%20or%20that%20you%20think%20the%20check%20got%20wrong%3A%0A&labels=conformance-result) and paste the block in. We add your row.
+
+### Forks and branches are welcome
+
+You do not need to be testing a released version. Checking a change before you ship it is one of
+the most useful things you can do with this, so a run from a branch or a fork gets a row like any
+other. The "Who ran it" column says which it was, and you can sort by it. Nothing is hidden and
+nothing is turned away.
+
+### What to send
+
+Send your result whatever it says.
+
+- **It passed.** You would be the first. That is worth saying loudly.
+- **It failed.** Post it, then post again when you fix it. A row going from `leak` to
+  `contained in 1.4.2` says your team fixed a real bug, and the table draws the arrow for you.
+- **You think the check is wrong.** Say so. That is our bug, we will fix it, and we will credit
+  you below.
+
+One thing to leave out: request or response bodies from a real deployment. The block from step 2
+carries no customer data, but a captured payload might.
+
+## Show the result on your README
+
+```markdown
+[![PII leak check](https://img.shields.io/endpoint?url=https://OWNER.github.io/REPO/pii-leak-badge.json)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
+```
+
+The run writes `pii-leak-badge.json` beside its other reports. Publish that file from your own
+repository and the badge reads `contained`, or `leaked 4 of 16`, rather than merely saying your
+workflow exited cleanly. Nothing is hosted here and there is nothing to register. Full setup is
+in [the CI guide](./ci).
+
+## Credit
+
+<CorpusCredits />
+
+## Why we do not rank these
+
+Click any heading to sort the table for yourself. We do not publish it in a ranked order:
+
+- **Rows are not comparable.** Each result is one version, one configuration, one set of test
+  values.
+- **A scoreboard starts arguments about fairness instead of getting gateways tested.**
+- **The same leak count can mean two different bugs**, as [the table above](#two-bugs) shows.
+
+The arrows are the one comparison we do draw, and they only ever compare a gateway with its own
+earlier version on this page. That is revision history rather than a ranking: it says a team
+fixed something, which is the entire behaviour this page exists to encourage.
+
+Full numbers for every run above, including the reference policies we use to calibrate the
+instrument, are on the [published results](./results) page, generated from the report files in
+the repository.
+
+Questions about any of this are welcome in the same issue tracker.
