@@ -7,6 +7,7 @@ import {
   ROWS,
   type ResultRow,
 } from '@site/src/data/results-wall';
+import {safeHref} from '@site/src/utils/safeHref';
 
 export type {ResultRow};
 
@@ -196,8 +197,8 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                     {architecture.label}
                   </td>
                   <td className={styles.muted}>
-                    {row.pricingUrl ? (
-                      <a href={row.pricingUrl} target="_blank" rel="noreferrer">
+                    {safeHref(row.pricingUrl) ? (
+                      <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
                         {row.license}
                       </a>
                     ) : (
@@ -206,8 +207,8 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                   </td>
                   <td>
                     <span className={styles.badge} title={provenance.hint}>
-                      {row.runUrl ? (
-                        <a href={row.runUrl} target="_blank" rel="noreferrer">
+                      {safeHref(row.runUrl) ? (
+                        <a href={safeHref(row.runUrl)} target="_blank" rel="noreferrer">
                           {provenance.label}
                         </a>
                       ) : (
@@ -217,7 +218,11 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                   </td>
                   <td>{row.note}</td>
                   <td className={styles.muted}>
-                    {row.reportUrl ? <a href={row.reportUrl}>{row.date}</a> : row.date}
+                    {safeHref(row.reportUrl) ? (
+                      <a href={safeHref(row.reportUrl)}>{row.date}</a>
+                    ) : (
+                      row.date
+                    )}
                     {stale && (
                       <span
                         className={styles.stale}

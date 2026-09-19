@@ -37,6 +37,8 @@ import json
 import sys
 from typing import Any, Optional, Sequence
 
+from pii_leak_benchmark import report_fields as fields
+
 DEFAULT_LABEL = "PII leak check"
 DEFAULT_OUTPUT = "./pii-leak-badge.json"
 
@@ -136,52 +138,26 @@ def _leak_detail(report: dict[str, Any]) -> Optional[str]:
 def _provenance(report: dict[str, Any], verdict: Any) -> dict[str, str]:
     """Say which run produced this badge, in whichever shape the report uses.
 
-    The two shapes file the same facts under different names, and reading only the
-    research one filled every CI badge's metadata with `unrecorded` while the report
-    was carrying the answers. Operator runs put the harness under
-    `contract.harness_version` and the target version at the top level as
-    `target_version`; research profiles use `harness_revision` and `implementation`.
-
-    Checked in that order because the action produces operator runs, which is the case
-    that has to be right without anyone looking.
+    The field lookups live in `report_fields` because `cite` needs the same ones, and
+    teaching only one of the two is how a CI report came to be cited with `unrecorded`
+    in every provenance row while the file beside it held the answers.
     """
-    harness = (
-        _dig(report, "contract", "harness_version")
-        or report.get("harness_revision")
-        or "unrecorded"
-    )
-    # NO `contract.model` fallback here, deliberately. An operator run records the model
-    # ROUTING ALIAS, not the name of the gateway under test, and filling `target` with it
-    # labelled `gpt-4o-mini` as the product that leaked. That is a worse failure than the
-    # `unrecorded` it replaced: a blank says the run did not record it, while a wrong name
-    # says something the run never measured. The alias is reported below as what it is.
-    target = _dig(report, "implementation", "name") or "unrecorded"
-    target_version = (
-        report.get("target_version")
-        or _dig(report, "implementation", "version")
-        or "unrecorded"
-    )
     block = {
-        "result": str(verdict or report.get("outcome") or "unrecorded"),
-        "harness_revision": str(harness),
-        "target": str(target),
-        "target_version": str(target_version),
-        "generated_at": str(report.get("generated_at", "unrecorded")),
+        "result": str(verdict or report.get("outcome") or fields.MISSING),
+        "harness_revision": fields.harness_revision(report),
+        "target": fields.target_name(report),
+        "target_version": fields.target_version(report),
+        "generated_at": str(report.get("generated_at", fields.MISSING)),
         # Never derived from the report: both this file and the page serving it are the
         # submitter's, so no report field could raise this above self-reported.
         "verification": "self-reported",
     }
-    # The operator contract pins the scorer. It is the one field that lets a reader tell
-    # whether a badge came from a stock instrument or a doctored one, so carry it.
-    instrument = _dig(report, "contract", "instrument_sha256")
+    instrument = fields.instrument_sha256(report)
     if instrument:
-        block["instrument_sha256"] = str(instrument)
-    # The model the run was routed through, under its own name so it cannot be mistaken
-    # for the gateway. Useful context, and on an operator run it is often the only thing
-    # naming what was exercised.
-    model = _dig(report, "contract", "model")
+        block["instrument_sha256"] = instrument
+    model = fields.model(report)
     if model:
-        block["model"] = str(model)
+        block["model"] = model
     return block
 
 

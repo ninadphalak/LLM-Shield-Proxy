@@ -246,3 +246,73 @@ def test_a_non_object_metrics_field_degrades_instead_of_raising():
 def test_a_metrics_list_degrades_instead_of_raising():
     out = build_citation(_report(metrics=[1, 2, 3]))
     assert "pii-leak-benchmark" in out
+
+
+# --- The operator report shape -----------------------------------------------------
+#
+# `test_operator_report_omits_research_only_rows` supplies `harness_revision` and an
+# `implementation` object, which a REAL operator run does not carry. That fixture hid a
+# bug: citing an actual `current.json` printed "unrecorded" for the harness, the target
+# and the version while the file held every one of them, and the results-wall page tells
+# submitters to cite exactly that file. These use the real shape.
+
+
+def _operator_run(**overrides):
+    """Exactly the keys `ci.py` writes to `current.json`. No research-shape fields."""
+    run = {
+        "schema": "pii-leak-benchmark/operator-run/v1",
+        "contract": {
+            "profile": "pii-v1",
+            "duty": "restore",
+            "seed": "a1b2",
+            "model": "gpt-4o-mini",
+            "iterations": 3,
+            "harness_version": "0.3.1",
+            "instrument_sha256": "deadbeefcafe0001",
+        },
+        "verdict": "LEAK",
+        "reason": "Synthetic values were observed upstream.",
+        "target_version": "1.2.3",
+        "generated_at": "2026-09-19T05:29:08Z",
+        "entities": {"EMAIL": "leak"},
+    }
+    run.update(overrides)
+    return run
+
+
+def test_citing_a_real_operator_run_names_the_harness_and_version():
+    out = build_citation(_operator_run())
+    assert "0.3.1" in out
+    assert "1.2.3" in out
+    assert "deadbeefcafe0001" in out
+
+
+def test_the_operator_verdict_is_the_outcome_row():
+    """The headline row. A citation of a LEAK run must not read `unrecorded` merely
+    because the operator shape files it under `verdict`."""
+    row = next(
+        line for line in build_citation(_operator_run()).splitlines() if "Outcome" in line
+    )
+    assert "LEAK" in row
+    assert "unrecorded" not in row
+
+
+def test_the_model_alias_is_its_own_row_not_the_target():
+    out = build_citation(_operator_run())
+    assert "| Model | `gpt-4o-mini` |" in out
+    target = next(line for line in out.splitlines() if line.startswith("| Target |"))
+    assert "unrecorded" in target, "the routing alias must not stand in for the gateway"
+
+
+def test_environment_rows_are_omitted_when_the_run_did_not_record_them():
+    """Operator runs carry no environment block. Three `unrecorded` rows is the
+    "usable result looks broken" case this module already avoids for the digests."""
+    out = build_citation(_operator_run())
+    assert "Platform" not in out
+    assert "Python" not in out
+
+
+def test_a_research_report_still_renders_its_environment():
+    out = build_citation(_report())
+    assert "Platform" in out
+    assert "Windows-11" in out

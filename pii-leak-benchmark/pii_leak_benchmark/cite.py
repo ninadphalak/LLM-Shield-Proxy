@@ -24,6 +24,8 @@ import re
 import sys
 from typing import Any, Optional, Sequence
 
+from pii_leak_benchmark import report_fields as fields
+
 _MISSING = "unrecorded"
 
 # Runs of backticks inside a value, which decide how long its code fence must be.
@@ -120,20 +122,22 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
 
     rows: list[tuple[str, str]] = [
         ("Benchmark package", str(package_version)),
-        ("Harness revision", str(_dig(report, "harness_revision", default=_MISSING))),
+        # Both report shapes, via the shared resolver. Reading only the research
+        # spelling printed "unrecorded" for every operator run, which is the file the
+        # results-wall page tells submitters to cite.
+        ("Harness revision", fields.harness_revision(report)),
         ("Schema", str(_dig(report, "schema", default=_MISSING))),
     ]
 
     # The research profiles (v2, FIDE) carry scorer and corpus digests. Operator runs
     # do not, and padding their block with four "unrecorded" rows makes a usable
     # result look like a broken one, so these appear only when the report has them.
-    for label, path in (
-        ("Inspector digest", ("instrument", "inspector_sha256")),
-        ("Corpus digest", ("corpus", "sha256")),
-    ):
-        value = _dig(report, *path)
-        if value:
-            rows.append((label, _short(value)))
+    instrument = fields.instrument_sha256(report)
+    if instrument:
+        rows.append(("Inspector digest", _short(instrument)))
+    corpus_digest = _dig(report, "corpus", "sha256")
+    if corpus_digest:
+        rows.append(("Corpus digest", _short(corpus_digest)))
     for label, path in (
         ("Corpus cases", ("corpus", "case_count")),
         ("Seed", ("corpus", "seed")),
@@ -142,9 +146,17 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
         if value is not None:
             rows.append((label, str(value)))
 
-    rows.append(("Target", str(_dig(report, "implementation", "name", default=_MISSING))))
-    rows.append(("Target version", str(_dig(report, "implementation", "version", default=_MISSING))))
-    rows.append(("Outcome", str(report.get("outcome", _MISSING))))
+    rows.append(("Target", fields.target_name(report)))
+    rows.append(("Target version", fields.target_version(report)))
+    model = fields.model(report)
+    if model:
+        # Named as the model, never folded into "Target": an operator run records the
+        # alias it routed through, which is not the gateway under test.
+        rows.append(("Model", model))
+    # The operator shape files the verdict under `verdict`; the research shape uses
+    # `outcome`. This is the headline row, so a citation of a LEAK run must not
+    # print "unrecorded" merely because it was made by the other half of the tool.
+    rows.append(("Outcome", str(report.get("verdict") or report.get("outcome") or _MISSING)))
     if isinstance(report.get("passed"), bool):
         rows.append(("Checks passed", "yes" if report["passed"] else "no"))
 
@@ -162,8 +174,10 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
         if key in metrics:
             rows.append((label, str(metrics[key])))
 
-    rows.append(("Platform", str(_dig(report, "environment", "platform", default=_MISSING))))
-    rows.append(("Python", str(_dig(report, "environment", "python", default=_MISSING))))
+    for label, key in (("Platform", "platform"), ("Python", "python")):
+        value = _dig(report, "environment", key)
+        if value:
+            rows.append((label, str(value)))
     rows.append(("Generated", str(report.get("generated_at", _MISSING))))
 
     attestation = report.get("attestation") or report.get("provenance")

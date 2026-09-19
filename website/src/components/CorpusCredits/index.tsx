@@ -1,5 +1,6 @@
 import type {ReactNode} from 'react';
 import styles from './styles.module.css';
+import {safeHref} from '@site/src/utils/safeHref';
 
 /**
  * Credit for people who contributed a case to the corpus.
@@ -40,9 +41,12 @@ type Props = {
 };
 
 function Name({credit}: {credit: Credit}): ReactNode {
-  if (!credit.href) return <>{credit.who}</>;
+  // Contributor-supplied, so it is validated rather than trusted. An unsafe target
+  // renders the name as plain text: the credit is the point, the link is a courtesy.
+  const href = safeHref(credit.href);
+  if (!href) return <>{credit.who}</>;
   return (
-    <a href={credit.href} target="_blank" rel="noreferrer">
+    <a href={href} target="_blank" rel="noreferrer">
       {credit.who}
     </a>
   );
