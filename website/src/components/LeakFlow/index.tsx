@@ -54,7 +54,7 @@ export default function LeakFlow(): ReactNode {
         arrived="ada@example.com"
         arrivedNote="unchanged"
         last="Model provider"
-        footnote="The address reaches the provider, and its logs, exactly as your user typed it. Nothing in a normal test suite fails, because the response still looks right."
+        footnote="The address arrives exactly as your user typed it, and lands in the provider's logs. Nothing on your side records that it happened."
       />
       <Lane
         state="contained"
