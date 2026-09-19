@@ -1,0 +1,147 @@
+.section {
+  padding: 5rem 0;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+}
+
+.header {
+  max-width: 760px;
+  margin: 0 auto 2.5rem;
+  text-align: center;
+}
+
+.eyebrow {
+  display: inline-block;
+  color: #00a8ff;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.title {
+  font-size: 2.25rem;
+  margin-bottom: 1rem;
+}
+
+.subtitle {
+  color: #8b949e;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.rows {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+}
+
+.leak {
+  border-left-color: #f85149;
+}
+
+.clean {
+  border-left-color: #3fb950;
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.project {
+  color: #e6edf3;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.version {
+  color: #8b949e;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.75rem;
+}
+
+.verdict {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.leak .dot {
+  background: #f85149;
+}
+
+.clean .dot {
+  background: #3fb950;
+}
+
+.verdictText {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.82rem;
+}
+
+.leak .verdictText {
+  color: #f85149;
+}
+
+.clean .verdictText {
+  color: #3fb950;
+}
+
+.caveat {
+  max-width: 820px;
+  margin: 1.5rem auto 0;
+  color: #8b949e;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+@media screen and (max-width: 640px) {
+  .title {
+    font-size: 1.7rem;
+  }
+
+  .row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  .verdict {
+    text-align: left;
+  }
+}

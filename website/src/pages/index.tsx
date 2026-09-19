@@ -17,6 +17,7 @@ import IntegrationStrip from '@site/src/components/Homepage/IntegrationStrip';
 import FinalCTA from '@site/src/components/Homepage/FinalCTA';
 import EvidenceShowcase from '@site/src/components/Homepage/EvidenceShowcase';
 import BenchmarkLead from '@site/src/components/Homepage/BenchmarkLead';
+import ResultsPreview from '@site/src/components/Homepage/ResultsPreview';
 import GlossaryTerm from '@site/src/components/GlossaryTerm';
 
 import styles from './index.module.css';
@@ -69,6 +70,7 @@ export default function Home(): ReactNode {
       <StatsBar />
       <main>
         <BenchmarkLead />
+        <ResultsPreview />
         <InteractiveShieldDemo />
         <TrustBar />
         <EvidenceShowcase />

@@ -5,53 +5,51 @@ title: Published results
 
 # Published results
 
-Every number on this page is generated from the JSON reports committed in this repository.
-Nothing here is typed by hand. CI regenerates the page and fails if it disagrees with the
-reports, so a figure on this page cannot outlive the artefact it came from.
+Every number here comes straight from the JSON reports committed in this repository. Nothing
+is typed by hand. CI rebuilds this page on every push and fails if it does not match the
+reports, so a number here cannot outlive the run it came from.
 
-Want to check one of these numbers yourself? [Reproduce the fragmentation
+Want to check one yourself? [Reproduce the fragmentation
 result](./reproduce-fragmentation) re-derives two of the rows below in about two minutes,
 offline.
 
 ## How to read the outcomes
 
-`fail` has one narrow meaning: a protected test value reached the capture server unmasked.
-It is not a quality judgement, and a non-`pass` is not automatically a leak - see the
-[outcome table](./reproducing#4-read-outcome) for what each value means.
+`fail` means one thing and nothing else: a value we asked the gateway to protect arrived at
+the capture server unmasked. It is not a score, and not every non-`pass` is a leak — the
+[outcome table](./reproducing#4-read-outcome) says what each value means.
 
-**Request path** is a separate finding from the four response rates, and a row can be
-clean on one and not the other. It reports whether unmasked test values reached the capture
-server on the way *out* to the model provider, always paired with whether the target was
-configured to prevent that:
+**Request path** is a separate result from the four response rates, and a row can be clean on
+one and not the other. It answers a single question: did unmasked test values go *out* to the
+model provider? It is always paired with whether the gateway was set up to stop that:
 
-- `configured, leaked: ...` is a control that was enabled and did not hold. This is a
+- `configured, leaked: ...` means protection was switched on and did not hold. That is a
   finding.
-- `not configured (N types seen)` is **not** a finding. Request redaction was never
-  enabled for that run, so the values were expected to pass through. Counting it against
-  the product would be accusing it of a defect it was not asked to prevent.
-- `not applicable` marks the reference policies, which are in-process models with no
-  request-path claim to make.
-- `claim not recorded` marks a measured product whose report did not record whether request
-  redaction was configured. That is a gap in the evidence, not a result, and the row cannot
-  be read either way until someone re-runs it with the claim supplied.
+- `not configured (N types seen)` is **not** a finding. Request redaction was never switched
+  on for that run, so the values were supposed to pass through. Counting it against the
+  product would be blaming it for something it was never asked to do.
+- `not applicable` marks the reference policies. They run in-process and make no claim about
+  the request path at all.
+- `claim not recorded` means the report never said whether request redaction was on. That is
+  a hole in the evidence, not a result, and the row cannot be read either way until someone
+  re-runs it and says.
 
-This is why `litellm-presidio` and `nemo-guardrails-0.24.0` both read `fail` while showing
-`0` in both response leak columns, and why they are not the same result: LiteLLM had
-request redaction configured and all four entity types left anyway; NeMo never enabled it.
+That is why `litellm-presidio` and `nemo-guardrails-0.24.0` both read `fail` with `0` in both
+response leak columns, and why they do not mean the same thing: LiteLLM had redaction switched
+on and all four data types left anyway. NeMo never switched it on.
 
-One of the measured products is this project's own. Read the request-path column with that
-in mind; the [benchmark readme](./benchmark_readme) states the conflict and the other limits
-in full.
+One of the products below is our own. Read the request-path column knowing that; the
+[benchmark readme](./benchmark_readme) sets out the conflict and the other limits in full.
 
-Two groups appear below and they are not comparable with each other:
+Two groups appear below, and you cannot compare one against the other:
 
-- **Reference policies** are inspectors written inside the benchmark to isolate one
-  variable. They are not products and were never shipped by anyone.
+- **Reference policies** are inspectors written inside the benchmark to isolate one variable.
+  They are not products and nobody ever shipped them.
 - **Measured gateways and libraries** are real software, at a pinned version, in a stated
-  configuration. A row measures *that configuration*, not the product's best possible
-  configuration, and certainly not the vendor's intent.
+  configuration. A row measures *that configuration* — not the product at its best, and not
+  what the vendor meant it to do.
 
-All results are **unreplicated** unless the table says otherwise. A result becomes
+Every result is **unreplicated** unless the table says otherwise. A result becomes
 `replicated` only after three unaffiliated people submit a run of the same target and
 configuration. See [submitting a result](./submitting).
 
@@ -151,20 +149,20 @@ Scope: in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and mod
 
 ## Limits that apply to every row above
 
-- The v2 profile observes network input and output only. Process RSS, audit integrity and
-  detector accuracy on real traffic are out of scope.
-- Fragmentation in the single-run rows is a two-part split at the value midpoint, not every
-  possible split point. Exhaustive and union oracles live in `exhaustive-splits/` and
+- The v2 profile watches network traffic in and out, nothing else. Process memory, audit
+  integrity and how well detectors do on real traffic are all out of scope.
+- Fragmentation in the single-run rows is one split, at the middle of the value — not every
+  place a split could land. Exhaustive and union oracles live in `exhaustive-splits/` and
   `worst-case-splits/` under the results tree.
-- Rates are over a fixed 32-case corpus in four entity types and two encodings. They do not
-  estimate how often a production stream would place a boundary badly.
-- The v1.0.0 timing figures are isolated in-process operations on one machine. They exclude
-  ASGI, HTTP, TLS, network and model time, and they are not end-to-end proxy latency.
+- Rates come from a fixed 32-case corpus in four data types and two encodings. They do not
+  tell you how often a real stream would break a value in a bad place.
+- The v1.0.0 timing figures are single in-process operations on one machine. They leave out
+  ASGI, HTTP, TLS, network and model time, so they are not end-to-end proxy latency.
 
 ## Independent reproductions
 
-None submitted yet. The six CI runners that reproduce the fragmentation rows on every push
-are not independent - they run the author's code from the author's repository. See
+None submitted yet. The six CI runners that reproduce the fragmentation rows on every push do
+not count as independent: they run the author's code from the author's repository. See
 [what a green Track 1 run proves, and what it does not](./reproduce-fragmentation#what-a-green-track-1-run-proves-and-what-it-does-not).
 
 To add yours, see [submitting a result](./submitting).
