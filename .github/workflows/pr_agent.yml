@@ -78,7 +78,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
           CONFIG.MODEL: "gemini/gemini-3.8-flash"
-          CONFIG.FALLBACK_MODELS: '["gemini/gemini-3.1-flash"]'
+          # The SAME model, deliberately, and not a different one.
+          #
+          # `gemini/gemini-3.1-flash` was here and is not callable by this key: the API
+          # answers 404 "models/gemini-3.1-flash is not found for API version v1alpha".
+          # It came out of PR-Agent's own MAX_TOKENS table, which lists the models
+          # PR-Agent knows how to size -- not the models a given key may call. A fallback
+          # that 404s is worse than none: it only ever runs when the primary already
+          # failed, so it is silent until the moment it is needed.
+          #
+          # The failure it needs to cover is a 503 "experiencing high demand" from
+          # gemini-3.8-flash, which is transient, so retrying the same model is the
+          # correct response. Point this at a second family only after checking the key
+          # can actually call it: curl the ListModels endpoint, do not read a table.
+          CONFIG.FALLBACK_MODELS: '["gemini/gemini-3.8-flash"]'
           # PR-Agent caps every model at 32000 tokens by default, whatever the model can
           # actually take. This PR's diff measured 25059, so `/review` fit and `/improve`
           # -- which adds more scaffolding around the same diff -- did not, and posted
