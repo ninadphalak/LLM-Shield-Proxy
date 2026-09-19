@@ -10,7 +10,7 @@ import GlossaryTerm from '@site/src/components/GlossaryTerm';
 
 # Catch PII leaks before they merge
 
-Your gateway sits between your app and the company that runs the model — OpenAI, Anthropic,
+Your gateway sits between your app and the company that runs the model: OpenAI, Anthropic,
 whoever you call. That company is the <GlossaryTerm definition="The company running the model your gateway calls: OpenAI, Anthropic, Azure, Bedrock. It is not your gateway. Your gateway is the thing in the middle that is supposed to clean the data before it gets here.">**provider**</GlossaryTerm>,
 and your gateway's job is to strip personal data out of the request before it goes there.
 
@@ -22,12 +22,12 @@ Setup is one file and three lines. No account, no API key, no paid model.
 **The hard part is that nothing tells you.** Redaction is a pattern-matching rule, and rules
 break quietly. Someone edits a prompt template. Someone narrows a regex to kill a false alarm.
 The provider adds a field. Your tests still pass, because the reply coming back still looks
-right — but real customer data is now leaving your network, and you will not know until
+right. But real customer data is now leaving your network, and you will not know until
 somebody finds it in OpenAI's logs.
 
 You only find out if you check. That is what this does: it checks on the pull request that
 broke it, names the data type, shows you the value as it left your network, and says what to
-do about it — while the fix is still one line.
+do about it, while the fix is still one line.
 
 ## See it work in 30 seconds, with no gateway at all
 
@@ -188,7 +188,7 @@ jobs:
 ## 3. Open a pull request
 
 It runs on every pull request from now on and takes about a minute. It shows up as a green or
-red check in the PR, and the full result is written to the **job summary** — the page you land
+red check in the PR, and the full result is written to the **job summary**, the page you land
 on from **Details**. You do not have to read the logs.
 
 The summary opens with the verdict, one of `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`,

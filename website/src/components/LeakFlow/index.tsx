@@ -103,7 +103,7 @@ export function CaptureFlow(): ReactNode {
         <p className={styles.footnote}>
           Because the capture stands where the provider normally does, it records the request
           byte for byte and can compare it against what was sent. The values are synthetic and
-          nothing leaves your machine — there is no provider on the other end to leak to.
+          nothing leaves your machine: there is no provider on the other end to leak to.
         </p>
       </div>
     </div>

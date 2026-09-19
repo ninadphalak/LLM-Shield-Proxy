@@ -10,7 +10,7 @@ import styles from './styles.module.css';
  *
  * WHY A SEPARATE COMPONENT. `ResultsWall` is the full instrument: every column, sortable,
  * with provenance and architecture. That belongs on its own page. What a first visitor
- * needs is the single most legible finding — what reached the provider — and a way through
+ * needs is the single most legible finding, which is what reached the provider, and a way through
  * to the real table. Anything more is a wall of numbers before they know what is being
  * counted.
  *

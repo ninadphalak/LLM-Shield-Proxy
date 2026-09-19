@@ -16,7 +16,7 @@ offline.
 ## How to read the outcomes
 
 `fail` means one thing and nothing else: a value we asked the gateway to protect arrived at
-the capture server unmasked. It is not a score, and not every non-`pass` is a leak — the
+the capture server unmasked. It is not a score, and not every non-`pass` is a leak. The
 [outcome table](./reproducing#4-read-outcome) says what each value means.
 
 **Request path** is a separate result from the four response rates, and a row can be clean on
@@ -46,7 +46,7 @@ Two groups appear below, and you cannot compare one against the other:
 - **Reference policies** are inspectors written inside the benchmark to isolate one variable.
   They are not products and nobody ever shipped them.
 - **Measured gateways and libraries** are real software, at a pinned version, in a stated
-  configuration. A row measures *that configuration* — not the product at its best, and not
+  configuration. A row measures *that configuration*, not the product at its best, and not
   what the vendor meant it to do.
 
 Every result is **unreplicated** unless the table says otherwise. A result becomes
@@ -151,7 +151,7 @@ Scope: in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and mod
 
 - The v2 profile watches network traffic in and out, nothing else. Process memory, audit
   integrity and how well detectors do on real traffic are all out of scope.
-- Fragmentation in the single-run rows is one split, at the middle of the value — not every
+- Fragmentation in the single-run rows is one split, at the middle of the value, not every
   place a split could land. Exhaustive and union oracles live in `exhaustive-splits/` and
   `worst-case-splits/` under the results tree.
 - Rates come from a fixed 32-case corpus in four data types and two encodings. They do not
