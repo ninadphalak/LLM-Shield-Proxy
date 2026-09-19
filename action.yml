@@ -99,6 +99,28 @@ runs:
                 argv.extend(['--' + flag, value])
         raise SystemExit(main(argv))
         PY
+    - name: Render the result badge
+      # After the measurement and on failure too: a leaking gateway is exactly the case
+      # whose badge must be produced, and a step that ran only on success would emit a
+      # badge for passes alone -- which is the plain Actions badge this replaces.
+      #
+      # Written into the reports directory, so it is uploaded with everything else and
+      # needs no second artifact. Never fails the job: a missing badge is cosmetic, and
+      # taking a measured run red over it would be a worse trade.
+      if: always() && steps.setup.outputs.out != ''
+      shell: bash
+      env:
+        BENCHMARK_PYTHON: ${{ steps.setup.outputs.python }}
+        BENCHMARK_OUT: ${{ steps.setup.outputs.out }}
+      run: |
+        report="$BENCHMARK_OUT/current.raw.json"
+        if [ ! -f "$report" ]; then
+          echo "No report at $report; skipping the badge."
+          exit 0
+        fi
+        "$BENCHMARK_PYTHON" -m pii_leak_benchmark.cli badge "$report" \
+          --out "$BENCHMARK_OUT/pii-leak-badge.json" || \
+          echo "Badge rendering failed; the reports are unaffected."
     - name: Keep benchmark reports
       if: always() && steps.setup.outputs.out != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

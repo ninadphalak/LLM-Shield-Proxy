@@ -82,6 +82,48 @@ It tracks the default branch and turns red the moment a leak lands there. On a p
 repository anyone can see it, which is the point: it is a claim a reader can click and check
 for themselves rather than take your word for.
 
+**That badge reports the job, not the measurement.** It is green whenever the workflow
+exited cleanly, so a gateway that contained everything and one that was never asked to
+look both show the same tick. To put the result itself on your README, the run writes a
+second file:
+
+```
+pii-leak-badge.json
+```
+
+It lands in the reports directory beside `summary.md`, so it is already in the artifact the
+workflow uploads. It is a [Shields.io endpoint](https://shields.io/badges/endpoint-badge)
+file. Publish it anywhere your repository serves raw files, then point Shields at it:
+
+```markdown
+[![PII leak check](https://img.shields.io/endpoint?url=https://OWNER.github.io/REPO/pii-leak-badge.json)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
+```
+
+The badge then reads `contained`, or `leaked 4 of 16`, or one of the grey outcomes below.
+Nothing is hosted by this project and there is nowhere to register: the file comes from your
+run and is served by you, which is also why it is not evidence to anyone else. A reader who
+wants to check it follows the badge to the run and reruns the instrument named in
+`pii-leak-benchmark cite`.
+
+To render one by hand from any finished report:
+
+```bash
+pii-leak-benchmark badge ./PII_LEAK_BENCHMARK_LATEST.json --out ./pii-leak-badge.json
+```
+
+| Badge reads | Colour | What it means |
+| :--- | :--- | :--- |
+| `contained` | green | Redaction was on, the run was attributable, nothing reached the upstream |
+| `leaked N of M` | red | Protected values were observed upstream |
+| `no leak, profile not met` | yellow | Nothing leaked, but some other required check did not hold |
+| `inconclusive` | grey | The run could not attribute what it saw |
+| `redaction not enabled` | grey | Redaction was off, so the run says nothing about the product |
+| `claim unstated` | grey | No redaction claim was recorded, so the run is not a verdict |
+| `no redaction offered` | blue | The product does not claim to redact |
+
+Only a real pass is green. A grey badge is not a soft pass: it means the run did not learn
+anything about the gateway, and it is worth fixing the configuration and rerunning.
+
 </details>
 
 <details>

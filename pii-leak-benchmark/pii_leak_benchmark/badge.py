@@ -1,0 +1,214 @@
+"""``pii-leak-benchmark badge`` -- render a report as a Shields.io endpoint badge.
+
+WHY THIS EXISTS. A plain GitHub Actions badge says only "the workflow exited 0". A
+gateway leaking every value shows the same green tick as one leaking none, provided
+the job did not crash, so the badge a maintainer puts in their README says nothing
+about the measurement. This renders the RESULT instead.
+
+HOW IT REACHES A README. Shields.io's endpoint mode draws a badge from any JSON URL::
+
+    https://img.shields.io/endpoint?url=https://OWNER.github.io/REPO/pii-leak-badge.json
+
+The adopter publishes this file from their own repository. Nothing is hosted here and
+there is no registry to register with, so it works identically from a fork and from a
+repository this project has never heard of. The badge is built from the adopter's own
+run, which is also why it is not evidence to anyone else: see below.
+
+THIS IS NOT ATTESTATION. The JSON is generated from a report produced by whoever ran
+the harness, and it is served from their web host. Both halves are under the
+submitter's control, exactly as ``cite.build_citation`` says of its block. A reader
+who wants to check the claim follows the badge to the run and reruns the named
+instrument. Do not add wording here implying a verifier checked anything.
+
+COLOUR IS A CLAIM, so it is derived from ``outcome`` and never from ``passed`` alone.
+There are seven outcomes and only one of them is green. A run that never enabled
+redaction, or that could not attribute what it saw, is not a pass with a caveat: it is
+not a verdict at all, and a green badge on one would be the single most misleading
+thing this package could emit.
+
+Standard library only. Nothing here may import ``llm_shield_proxy``: the benchmark is
+the neutral measurer and the proxy is one of the things it measures.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import Any, Optional, Sequence
+
+DEFAULT_LABEL = "PII leak check"
+DEFAULT_OUTPUT = "./pii-leak-badge.json"
+
+# Shields renders any string, so these are the vocabulary a reader actually sees.
+# Every one of them is a plain-language reading of an `outcome` value, and the three
+# greys exist because "we did not learn anything" must not look like "it held".
+#
+# `critical` (red) is reserved for a measured leak. `inactive` (grey) means the run was
+# not a verdict about the product. `blue` is a factual statement about the product
+# rather than a finding. Nothing here is `success` except a real pass.
+_OUTCOME_BADGE: dict[str, tuple[str, str]] = {
+    "pass": ("contained", "brightgreen"),
+    "fail": ("leaked", "critical"),
+    # Measured, attributable, and nothing reached the capture -- but some other part of
+    # the profile did not hold. Not a leak, and not a clean pass either.
+    "no-leak-profile-not-met": ("no leak, profile not met", "yellow"),
+    "inconclusive": ("inconclusive", "lightgrey"),
+    "redaction-not-enabled": ("redaction not enabled", "lightgrey"),
+    "claim-unstated": ("claim unstated", "lightgrey"),
+    "not-applicable": ("no redaction offered", "blue"),
+}
+
+_UNKNOWN_BADGE = ("unknown outcome", "lightgrey")
+
+
+def _dig(report: dict[str, Any], *path: str, default: Any = None) -> Any:
+    node: Any = report
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return default
+        node = node[key]
+    return node
+
+
+def _leak_detail(report: dict[str, Any]) -> Optional[str]:
+    """Say WHAT leaked, when the report is specific enough to support it.
+
+    Two report shapes reach this, and they know different things. The research
+    profiles count cases and can say "4 of 32". An operator run does not partition
+    into scored cases but does record which entity types crossed the boundary, and
+    "leaked: EMAIL, SSN" is more use to a maintainer than a bare rate.
+
+    Returns None when the report supports neither, so the caller falls back to the
+    bare verdict rather than inventing a denominator.
+    """
+    leaked_types = _dig(report, "checks", "configured_upstream_boundary", "leaked_entity_types")
+    if isinstance(leaked_types, list) and leaked_types:
+        names = sorted(str(entry) for entry in leaked_types)
+        return "leaked: " + ", ".join(names)
+
+    metrics = _dig(report, "metrics", default={})
+    if not isinstance(metrics, dict):
+        return None
+    applicable = metrics.get("cases_applicable")
+    leak = metrics.get("leak_rate")
+    overall = leak.get("overall") if isinstance(leak, dict) else None
+    if not isinstance(applicable, int) or applicable <= 0:
+        return None
+    if isinstance(overall, bool) or not isinstance(overall, (int, float)):
+        return None
+    # Back out the case count from the rate. The rate is the published number and the
+    # count is the readable one; rounding is safe because the rate is a quotient of
+    # integers over this same denominator.
+    leaked_cases = round(overall * applicable)
+    if leaked_cases <= 0:
+        return None
+    return f"leaked {leaked_cases} of {applicable}"
+
+
+def build_badge(
+    report: dict[str, Any],
+    *,
+    label: str = DEFAULT_LABEL,
+) -> dict[str, Any]:
+    """Render one conformance report as a Shields.io endpoint payload.
+
+    The returned dict is the whole file: Shields reads `schemaVersion`, `label`,
+    `message` and `color` and ignores the rest.
+    """
+    outcome = report.get("outcome")
+    message, color = _OUTCOME_BADGE.get(str(outcome), _UNKNOWN_BADGE)
+
+    # Only a measured leak gets the detail appended. A grey outcome that happens to
+    # carry a stale count must not be dressed up as a finding, and a pass must stay the
+    # single word a reader can take in at badge size.
+    if outcome == "fail":
+        detail = _leak_detail(report)
+        if detail:
+            message = detail
+
+    return {
+        "schemaVersion": 1,
+        "label": label,
+        "message": message,
+        "color": color,
+        # Not read by Shields. Present so the published file is self-describing: a
+        # reader who opens the JSON directly sees which instrument produced it and
+        # that nobody verified it, rather than four fields of decoration.
+        "pii_leak_benchmark": {
+            "outcome": str(outcome) if outcome is not None else "unrecorded",
+            "harness_revision": str(report.get("harness_revision", "unrecorded")),
+            "target": str(_dig(report, "implementation", "name", default="unrecorded")),
+            "target_version": str(
+                _dig(report, "implementation", "version", default="unrecorded")
+            ),
+            "generated_at": str(report.get("generated_at", "unrecorded")),
+            "verification": "self-reported",
+        },
+    }
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pii-leak-benchmark badge",
+        description=(
+            "Write a Shields.io endpoint JSON file for a conformance report, so a "
+            "README badge shows the result rather than whether the workflow exited 0."
+        ),
+        epilog=(
+            "Publish the file from your own repository, then point Shields at it: "
+            "https://img.shields.io/endpoint?url=<raw URL of the published file>"
+        ),
+    )
+    parser.add_argument(
+        "report",
+        nargs="?",
+        default="./PII_LEAK_BENCHMARK_LATEST.json",
+        help="Report JSON to render (default: ./PII_LEAK_BENCHMARK_LATEST.json).",
+    )
+    parser.add_argument(
+        "--out",
+        default=DEFAULT_OUTPUT,
+        help=f"Where to write the badge JSON (default: {DEFAULT_OUTPUT}). Use - for stdout.",
+    )
+    parser.add_argument(
+        "--label",
+        default=DEFAULT_LABEL,
+        help=f"Left-hand text on the badge (default: {DEFAULT_LABEL!r}).",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    try:
+        with open(args.report, encoding="utf-8") as handle:
+            report = json.load(handle)
+    except OSError as exc:
+        print(f"Cannot read report: {exc}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"Report is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+
+    if not isinstance(report, dict):
+        print("Report is not a JSON object.", file=sys.stderr)
+        return 2
+
+    badge = build_badge(report, label=args.label)
+    rendered = json.dumps(badge, indent=2, ensure_ascii=False) + "\n"
+
+    if args.out == "-":
+        sys.stdout.write(rendered)
+        return 0
+
+    try:
+        with open(args.out, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(rendered)
+    except OSError as exc:
+        print(f"Cannot write badge: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Wrote {args.out} ({badge['message']})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
