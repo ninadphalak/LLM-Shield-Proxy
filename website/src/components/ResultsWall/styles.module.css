@@ -57,14 +57,15 @@
   color: var(--ifm-color-emphasis-600);
 }
 
-@media (max-width: 768px) {
-  .wrap {
-    overflow-x: auto;
-  }
+/* The table carries eleven columns, so it scrolls at every width rather than only on
+   a phone. The scroller is its own element so the hint above it stays put. */
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
-  .table {
-    min-width: 40rem;
-  }
+.table {
+  min-width: 62rem;
 }
 
 .badge {
@@ -77,4 +78,42 @@
   font-size: 0.7rem;
   font-weight: 600;
   vertical-align: middle;
+}
+
+.badge a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* The trend indicator. Colour alone never carries the meaning: the arrow glyph and the
+   title text both say which way it moved, so this reads the same to someone who cannot
+   separate red from green. */
+.trendBetter,
+.trendWorse {
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.trendBetter {
+  color: var(--ifm-color-success-dark);
+}
+
+.trendWorse {
+  color: var(--ifm-color-danger-dark);
+}
+
+/* Freshness, not ranking. An old row is not a worse gateway, it is an older
+   measurement, so this says what to do about it rather than scoring it. */
+.stale {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--ifm-color-warning-contrast-background);
+  color: var(--ifm-color-warning-contrast-foreground);
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
