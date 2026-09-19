@@ -9,8 +9,11 @@ const config: Config = {
   tagline: 'Open, reproducible streaming privacy and audit evidence for enterprise LLM infrastructure',
   favicon: 'img/favicon.svg',
 
-  // Set the production url of your site here
-  url: 'https://project-0039f5fd-ac66-4a1c-9e0.web.app',
+  // The CUSTOM domain, not the Firebase project's default `.web.app` address. Docusaurus
+  // builds canonical links, the sitemap and Open Graph tags from this, so leaving it as
+  // the default told search engines the `.web.app` host was the real site and this one a
+  // duplicate, and every shared link previewed as the project-id URL.
+  url: 'https://llmshieldproxy.com',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/',
