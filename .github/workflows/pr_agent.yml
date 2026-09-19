@@ -25,10 +25,20 @@ on:
   issue_comment:
     types: [created]
 
-# One review per ref. Pushing three commits in a minute otherwise starts three reviews
-# that each pay for the whole diff, and the first two are obsolete before they finish.
+# One review per PR at a time, for PUSHES only.
+#
+# Each run sends the whole diff to the model, so pushing three commits in a minute
+# without this starts three runs that each pay for the whole diff -- and the first two
+# describe code the third has already replaced. Grouping them means run 3 cancels runs
+# 1 and 2, and you pay once, for the state that actually exists.
+#
+# The comment id is in the key on purpose. A `/review` or `/improve` comment is an
+# explicit request from a person, and if comment runs shared the push group, typing
+# `/improve` during an auto-review would kill one of the two: either the review the push
+# asked for, or the command the human asked for, silently and with no output either way.
+# Every comment gets its own group, so nothing cancels a typed command.
 concurrency:
-  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || 'push' }}
   cancel-in-progress: true
 
 permissions: {}
@@ -69,6 +79,13 @@ jobs:
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
           CONFIG.MODEL: "gemini/gemini-3.8-flash"
           CONFIG.FALLBACK_MODELS: '["gemini/gemini-3.1-flash"]'
+          # PR-Agent caps every model at 32000 tokens by default, whatever the model can
+          # actually take. This PR's diff measured 25059, so `/review` fit and `/improve`
+          # -- which adds more scaffolding around the same diff -- did not, and posted
+          # "Failed to generate code suggestions for PR" with no reason given.
+          # gemini-3.8-flash holds 1048576, so the cap was costing coverage and buying
+          # nothing. 200000 is well inside the model and still a real ceiling on spend.
+          CONFIG.MAX_MODEL_TOKENS: "200000"
           # MUST match the `pull_request` types above. PR-Agent's own default is
           # ['opened', 'reopened', 'ready_for_review', 'review_requested'] -- WITHOUT
           # `synchronize` -- so a workflow that triggers on a push to an open PR builds
