@@ -8,7 +8,7 @@ name: AI provider check
 # the primary has already failed, and it stays silent until the exact moment it is needed.
 # That is not hypothetical here. On 2026-09-19 the configured fallback answered
 #
-#   404  models/gemini-3.1-flash is not found for API version v1alpha
+#   404  models/<id> is not found for API version v1alpha
 #
 # through three runs, because the id had been taken from PR-Agent's own MAX_TOKENS table.
 # That table lists models PR-Agent knows how to SIZE, not models a key may CALL. The two

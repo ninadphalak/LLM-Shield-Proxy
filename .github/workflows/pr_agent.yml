@@ -2,20 +2,17 @@ name: PR Agent
 
 # AI review on every pull request, and on `/review`-style comments.
 #
-# WHY THE ENV BLOCK LOOKS LIKE THIS. PR-Agent maps env names onto its own
-# `configuration.toml` keys, so a misspelled key is not an error -- it is silently
-# ignored and the run falls back to the default OpenAI model with no credential, which
-# fails with an authentication error that names OpenAI and not the mistake. The three
-# Google AI Studio settings below are the exact names from
-# pr_agent/settings/configuration.toml and docs/usage-guide/changing_a_model.md:
+# The model ids are repository VARIABLES, not literals in this file, because this
+# repository is public and the choice of provider is not something it publishes. Set them
+# with `gh variable set PR_REVIEW_MODEL` / `PR_REVIEW_FALLBACKS`, and read the current
+# values with `gh variable list`.
 #
-#   GOOGLE_AI_STUDIO.GEMINI_API_KEY   the credential. NOT `OPENAI.KEY`, and there is no
-#                                     `OPENAI.API_TYPE = google_ai_studio`: that key only
-#                                     accepts openai/azure.
-#   CONFIG.MODEL                      needs the `gemini/` provider prefix or litellm
-#                                     cannot route it.
-#   CONFIG.FALLBACK_MODELS            PLURAL, and a JSON list. `FALLBACK_MODEL` is not a
-#                                     key and does nothing.
+# WHY THE ENV BLOCK LOOKS LIKE THIS. PR-Agent maps env names onto its own
+# `configuration.toml` keys, so a misspelled key is not an error -- it is silently ignored
+# and the run falls back to a default provider with no credential, then fails with an
+# authentication error that names that provider rather than the mistake. Every name below
+# is the exact key from `pr_agent/settings/configuration.toml`. A model id also needs its
+# provider prefix or litellm cannot route it, and FALLBACK_MODELS is plural and a list.
 #
 # GITHUB_TOKEN is required: without it PR-Agent cannot read the PR or post its review.
 
@@ -76,46 +73,30 @@ jobs:
         uses: the-pr-agent/pr-agent@f3b385ea2927247ddcff2fe252472380b9c8f5fc # v0.45.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Two credentials, so the chain can leave a provider that is having a bad
+          # day. Unset keys are harmless: a model whose key is missing simply fails and
+          # the chain moves on.
           DEEPSEEK.KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
-          # PAID PRIMARY, FREE BACKUP -- that order, and the measurements are why.
-          # Four runs on the Gemini free tier on 2026-09-19 produced 58x 503 UNAVAILABLE
-          # ("experiencing high demand") and 12x 429 RESOURCE_EXHAUSTED ("You exceeded
-          # your current quota"). Both failure modes are real: free-tier quota AND
-          # capacity deprioritisation, and `/improve` failed on two of four runs. A
-          # primary that fails about half the time is not a primary; it is a backup.
+          CONFIG.MODEL: ${{ vars.PR_REVIEW_MODEL }}
+          # Ordered, and the order is the argument. Earlier entries should be cheap and
+          # same-provider (they cover one model being overloaded); the LAST entry should
+          # be a different provider, because that is the only thing that survives an
+          # account-level quota or a provider outage, both of which take the primary and
+          # its same-provider siblings down together.
           #
-          # Every id below was read from the PROVIDER by `ai-provider-check.yml`, not
-          # from a table. That matters: PR-Agent's docs name `deepseek/deepseek-v4-flash`
-          # and its MAX_TOKENS table has `deepseek/deepseek-chat`, and this key can call
-          # NEITHER. DeepSeek's own docs confirm `deepseek-v4-flash` is a retired alias.
-          CONFIG.MODEL: "deepseek/deepseek-flash"
-          # Two steps, covering two different failures, and the ORDER is the argument.
-          # `deepseek-v4-pro` is another model on the same key, so it covers this model
-          # being individually overloaded but NOT an account-level quota or a provider
-          # outage -- both of which would take it down together with the primary. So the
-          # independent provider goes last rather than first: it is the only entry that
-          # survives DeepSeek as a whole, and it is free.
-          #
-          # Both verified callable by this key via `ai-provider-check.yml`. The entry
-          # that used to be here, `gemini/gemini-3.1-flash`, was not: the API answered
-          # 404 for three runs and nobody noticed, because a fallback only ever runs once
-          # the primary has already failed. That is what makes a wrong fallback id worse
-          # than no fallback at all.
-          CONFIG.FALLBACK_MODELS: '["deepseek/deepseek-v4-pro", "gemini/gemini-3.8-flash"]'
+          # Verify any id with `ai-provider-check.yml` before putting it here. A wrong
+          # FALLBACK id is the dangerous one: it only ever runs once the primary has
+          # already failed, so it stays silent until the moment it is needed. One sat
+          # here returning 404 for three runs and nobody noticed.
+          CONFIG.FALLBACK_MODELS: ${{ vars.PR_REVIEW_FALLBACKS }}
           # PR-Agent caps every model at 32000 tokens by default, whatever the model can
-          # actually take. This PR's diff measured 25059, so `/review` fit and `/improve`
-          # -- which adds more scaffolding around the same diff -- did not, and posted
-          # "Failed to generate code suggestions for PR" with no reason given.
-          # It is a CLAMP -- min(model limit, this) -- so it stays a real ceiling on
-          # spend and cannot overflow a smaller model added later.
-          #
-          # MEASURED, not read off a table. Run 35420726771 on this branch logged
-          # "Tokens: 4581, total tokens under limit: 200000", so the pinned build did
-          # resolve a limit for `deepseek/deepseek-flash` and it is at least 200000.
-          # That is the claim this comment is entitled to make. An earlier draft said
-          # "LiteLLM knows all three ids", checked against LiteLLM's main branch rather
-          # than the version bundled in the pinned action -- the wrong artifact.
+          # actually take. A 25059-token diff fit `/review` and not `/improve`, which
+          # wraps more scaffolding around the same diff, and the failure was reported
+          # with no reason given. This is a CLAMP -- min(model limit, this) -- so it
+          # stays a real ceiling on spend and cannot overflow a smaller model added
+          # later. Measured: a run logged "total tokens under limit: 200000", so the
+          # configured models resolve to at least that.
           CONFIG.MAX_MODEL_TOKENS: "200000"
           # MUST match the `pull_request` types above. PR-Agent's own default is
           # ['opened', 'reopened', 'ready_for_review', 'review_requested'] -- WITHOUT
@@ -134,13 +115,12 @@ jobs:
           # DEFAULT BRANCH, so it can only ever see committed files -- `.llm/CONTEXT.md`
           # is gitignored and unreachable from CI by design.
           #
-          # NOT `AGENTS.md`, which is PR-Agent's default and is the wrong file here: this
-          # repository already uses `/AGENTS.md`, `/GEMINI.md` and `/CLAUDE.md` as
-          # gitignored local pointer files for the agent running in the working directory.
-          # A separate, deliberately public file keeps the private pointer private and
-          # makes the published brief an explicit choice. It carries positive invariants
-          # only -- no known-gap list -- because this repo is public and publishing an
-          # unfixed weakness in a security product is a disclosure decision.
+          # NOT `AGENTS.md`, which is PR-Agent's default and the wrong file here: this
+          # repository already uses root-level agent pointer files, which are gitignored
+          # and local. A separate, deliberately public file keeps those private and makes
+          # the published brief an explicit choice. It carries positive invariants only --
+          # no known-gap list -- because this repo is public and publishing an unfixed
+          # weakness in a security product is a disclosure decision.
           CONFIG.REPO_CONTEXT_FILES: '[".github/REVIEW-CONTEXT.md"]'
           # This project's review value is in correctness and security, not style.
           PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
