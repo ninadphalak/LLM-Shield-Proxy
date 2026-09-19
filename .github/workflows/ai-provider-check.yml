@@ -62,9 +62,15 @@ jobs:
               echo "not configured; skipping."
               return 0
             fi
+            # The header goes in on STDIN, not as `-H "..."`. An argument is visible in
+            # curl's argv, which every other process on the runner can read -- which is
+            # exactly what the comment above this step says we are avoiding, and passing
+            # `-H` would have made that comment false. `echo` is a shell builtin, so it
+            # does not put the credential in an argv of its own either.
+            #
             # `-sS` stays quiet but still reports transport errors. Deliberately no `-f`:
             # an HTTP error BODY says what is actually wrong, and -f discards it.
-            curl -sS "${url}" -H "${hdr}: ${pre}${key}" || true
+            echo "${hdr}: ${pre}${key}" | curl -sS "${url}" --header @- || true
             echo ""
           }
 
@@ -74,5 +80,11 @@ jobs:
           ask B "${B_URL:-}" "${B_HDR:-}" "${B_PRE:-}" "${B_KEY:-}"
 
           echo ""
-          echo "Take an id from the output, with its provider prefix, into PR_REVIEW_MODEL"
-          echo "or PR_REVIEW_FALLBACKS via 'gh variable set'."
+          echo "Take an id that can SERVE A REVIEW into PR_REVIEW_MODEL or"
+          echo "PR_REVIEW_FALLBACKS via 'gh variable set', with its provider prefix."
+          echo ""
+          echo "Not every id in these responses can. The lists also carry embedding,"
+          echo "token-counting, speech and image models, and one of those configured as a"
+          echo "fallback fails exactly the way a wrong id does: only once the primary has"
+          echo "failed, silently, at the moment it is needed. Where a response marks"
+          echo "capability -- a generation-methods or modality field -- check it."
