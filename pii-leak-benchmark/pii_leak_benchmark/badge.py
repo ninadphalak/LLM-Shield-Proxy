@@ -133,6 +133,51 @@ def _leak_detail(report: dict[str, Any]) -> Optional[str]:
     return f"leaked {leaked_cases} of {applicable}"
 
 
+def _provenance(report: dict[str, Any], verdict: Any) -> dict[str, str]:
+    """Say which run produced this badge, in whichever shape the report uses.
+
+    The two shapes file the same facts under different names, and reading only the
+    research one filled every CI badge's metadata with `unrecorded` while the report
+    was carrying the answers. Operator runs put the harness under
+    `contract.harness_version` and the target version at the top level as
+    `target_version`; research profiles use `harness_revision` and `implementation`.
+
+    Checked in that order because the action produces operator runs, which is the case
+    that has to be right without anyone looking.
+    """
+    harness = (
+        _dig(report, "contract", "harness_version")
+        or report.get("harness_revision")
+        or "unrecorded"
+    )
+    target = (
+        _dig(report, "implementation", "name")
+        or _dig(report, "contract", "model")
+        or "unrecorded"
+    )
+    target_version = (
+        report.get("target_version")
+        or _dig(report, "implementation", "version")
+        or "unrecorded"
+    )
+    block = {
+        "result": str(verdict or report.get("outcome") or "unrecorded"),
+        "harness_revision": str(harness),
+        "target": str(target),
+        "target_version": str(target_version),
+        "generated_at": str(report.get("generated_at", "unrecorded")),
+        # Never derived from the report: both this file and the page serving it are the
+        # submitter's, so no report field could raise this above self-reported.
+        "verification": "self-reported",
+    }
+    # The operator contract pins the scorer. It is the one field that lets a reader tell
+    # whether a badge came from a stock instrument or a doctored one, so carry it.
+    instrument = _dig(report, "contract", "instrument_sha256")
+    if instrument:
+        block["instrument_sha256"] = str(instrument)
+    return block
+
+
 def build_badge(
     report: dict[str, Any],
     *,
@@ -170,16 +215,7 @@ def build_badge(
         # Not read by Shields. Present so the published file is self-describing: a
         # reader who opens the JSON directly sees which instrument produced it and
         # that nobody verified it, rather than four fields of decoration.
-        "pii_leak_benchmark": {
-            "result": str(verdict or report.get("outcome") or "unrecorded"),
-            "harness_revision": str(report.get("harness_revision", "unrecorded")),
-            "target": str(_dig(report, "implementation", "name", default="unrecorded")),
-            "target_version": str(
-                _dig(report, "implementation", "version", default="unrecorded")
-            ),
-            "generated_at": str(report.get("generated_at", "unrecorded")),
-            "verification": "self-reported",
-        },
+        "pii_leak_benchmark": _provenance(report, verdict),
     }
 
 

@@ -235,3 +235,38 @@ def test_an_unrecognised_verdict_is_never_green():
 def test_the_recorded_result_prefers_the_verdict():
     block = build_badge(_operator())["pii_leak_benchmark"]
     assert block["result"] == "LEAK"
+
+
+def test_an_operator_run_records_its_harness_and_target():
+    """The two report shapes file the same facts under different names. Reading only the
+    research one filled every CI badge's metadata with `unrecorded` while the report was
+    carrying the answers."""
+    block = build_badge(
+        _operator(
+            contract={
+                "harness_version": "0.3.1",
+                "instrument_sha256": "abc123",
+                "model": "gateway-under-test",
+            },
+            target_version="2.0.0",
+        )
+    )["pii_leak_benchmark"]
+
+    assert block["harness_revision"] == "0.3.1"
+    assert block["target"] == "gateway-under-test"
+    assert block["target_version"] == "2.0.0"
+    assert block["instrument_sha256"] == "abc123"
+
+
+def test_a_research_report_still_records_its_own_field_names():
+    block = build_badge(_report())["pii_leak_benchmark"]
+    assert block["harness_revision"] == "0.2.1"
+    assert block["target"] == "llm-shield-proxy"
+    assert block["target_version"] == "1.6.6"
+    # No operator contract, so no scorer digest is invented for it.
+    assert "instrument_sha256" not in block
+
+
+def test_provenance_is_always_marked_self_reported():
+    for report in (_report(), _operator()):
+        assert build_badge(report)["pii_leak_benchmark"]["verification"] == "self-reported"
