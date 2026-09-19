@@ -1,29 +1,43 @@
 ---
 title: Catch PII leaks before they merge
 sidebar_position: 1
+description: A GitHub Action that checks whether your LLM gateway sends real customer data to OpenAI, and fails the pull request when it does.
 ---
+
+import LeakFlow, {CaptureFlow} from '@site/src/components/LeakFlow';
+import GlossaryTerm from '@site/src/components/GlossaryTerm';
 
 # Catch PII leaks before they merge
 
-Your gateway is meant to strip personal data before it reaches the model provider. This job
-checks that it still does, on every pull request, and fails the build when it does not.
+Your gateway sits between your app and the company that runs the model — OpenAI, Anthropic,
+whoever you call. That company is the <GlossaryTerm definition="The company running the model your gateway calls: OpenAI, Anthropic, Azure, Bedrock. It is not your gateway. Your gateway is the thing in the middle that is supposed to clean the data before it gets here.">**provider**</GlossaryTerm>,
+and your gateway's job is to strip personal data out of the request before it goes there.
+
+This job checks that it still does, on every pull request, and fails the build when it does not.
 Setup is one file and three lines. No account, no API key, no paid model.
 
-**What you get for it:** the build turns red on the pull request that introduces a leak, naming
-the data type, showing you the value as it left your network, and saying what to do about it. A
-redaction rule that quietly stops matching is otherwise invisible until someone finds customer
-data in a provider log.
+<LeakFlow />
 
-## See what it looks like first, with no gateway at all
+**The hard part is that nothing tells you.** Redaction is a pattern-matching rule, and rules
+break quietly. Someone edits a prompt template. Someone narrows a regex to kill a false alarm.
+The provider adds a field. Your tests still pass, because the reply coming back still looks
+right — but real customer data is now leaving your network, and you will not know until
+somebody finds it in OpenAI's logs.
 
-You do not need to set anything up to see the output. This runs the same check against a direct
-connection with no gateway in the middle, which means every value leaks, on purpose:
+You only find out if you check. That is what this does: it checks on the pull request that
+broke it, names the data type, shows you the value as it left your network, and says what to
+do about it — while the fix is still one line.
+
+## See it work in 30 seconds, with no gateway at all
+
+You do not need to set anything up to see the output. This runs the same check against a
+direct connection with no gateway in the middle, so every value leaks, on purpose:
 
 ```bash
 pipx run pii-leak-benchmark selfcheck --target-base-url capture://self
 ```
 
-It starts a local capture, sends six kinds of synthetic data through, and reports what arrived:
+It starts a local capture, sends six kinds of fake data through, and reports what arrived:
 
 ```
   LEAK
@@ -36,14 +50,23 @@ LEAK  EMAIL reached the model provider
       the provider saw: xjtfstbe@example.com  <- nothing removed it on the way
 ```
 
-That is the failure the job catches. Nothing leaves your machine, the values are synthetic, and
-`capture://self` is the negative control: if it ever reports anything but `LEAK`, the instrument
-itself is broken. Point `--target-base-url` at a real gateway instead and you have the same check
-your CI will run.
+That is the failure the job catches. Nothing leaves your machine, the values are fake, and
+`capture://self` is the control: it has no gateway in it, so it *must* say `LEAK`. If it ever
+says anything else, the instrument itself is broken.
+
+Point `--target-base-url` at a real gateway instead and you have the same check your CI will run.
+
+## How it can tell
+
+<CaptureFlow />
+
+There is no trick to it. The check stands where the provider normally does, so it sees the
+request your gateway actually sent and compares it against what went in. Anything that comes
+out the far side unchanged is something OpenAI would have received.
 
 ### No gateway of your own? Point the check at someone else's
 
-`capture://self` has no gateway in it, so it measures nothing about any product. To get a real
+`capture://self` has no gateway in it, so it measures nothing about any product. For a real
 result you need something in the middle. Whichever gateway you pick, the shape is the same:
 
 1. **Tell the gateway its provider is the capture.** The check listens on `http://127.0.0.1:8765`.
@@ -51,15 +74,15 @@ result you need something in the middle. Whichever gateway you pick, the shape i
 2. **Start the gateway**, however its own documentation says to.
 3. **Point the check at the gateway** rather than at a provider.
 
-Only step 1 differs between products, and it is one setting: whatever your gateway already
-uses to reach OpenAI or another provider. It is usually called something like `api_base`,
-`base_url`, `custom_host` or an `OPENAI_BASE_URL` environment variable, and it lives wherever
-that gateway keeps its provider configuration.
+Only step 1 differs between products, and it is one setting: the one your gateway already uses
+to reach OpenAI. It is usually called something like `api_base`, `base_url`, `custom_host` or
+an `OPENAI_BASE_URL` environment variable, and it lives wherever that gateway keeps its
+provider configuration.
 
 **Their documentation is the authority on that, not this page.** Setting names change, and a
-copy here would go stale without anyone noticing, so what follows is a link to each project's
-own instructions rather than a reproduction of them. If a link below is dead or the setting has
-moved, theirs is right and ours is out of date: please
+copy here would go stale without anyone noticing, so what follows links to each project's own
+instructions instead of repeating them. If a link below is dead or the setting has moved,
+theirs is right and ours is out of date: please
 [tell us](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new) and we will fix it.
 
 <details>
@@ -117,8 +140,10 @@ numbers come out.
 
 </details>
 
-The [results wall](./who-has-run-it) records what each of these scored and how it was
-configured, which is the quickest way to pick one worth trying.
+**Eight gateways have already been measured this way.** The
+[results wall](./who-has-run-it) shows what each one scored and exactly how it was configured,
+including several that sent every data type straight through with redaction switched on. It is
+the quickest way to pick one worth trying.
 
 ## 1. Add the workflow
 
@@ -161,9 +186,9 @@ jobs:
 
 ## 3. Open a pull request
 
-It runs on every pull request from now on and takes about a minute. It appears as a green or red
-check in the PR's checks list, and the full result is written to the **job summary**, which is
-the page you land on from **Details**. You do not have to read the logs.
+It runs on every pull request from now on and takes about a minute. It shows up as a green or
+red check in the PR, and the full result is written to the **job summary** — the page you land
+on from **Details**. You do not have to read the logs.
 
 The summary opens with the verdict, one of `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`,
 then a row per data type:
@@ -173,26 +198,21 @@ then a row per data type:
 | EMAIL | not run | leak | Enable or repair request redaction for this format. |
 | SSN | not run | contained | No leak observed for this test shape. |
 
-`Baseline` reads `not run` until you configure a previous version to compare against, which is
+`Baseline` reads `not run` until you set up a previous version to compare against, which is
 optional and covered below.
 
-Under that, for anything that leaked, a section called **What leaked, and why it matters** shows
-the value as you sent it beside the value the provider received, and says why that particular
-data type is worth caring about. Values there are printed as shapes such as `<EMAIL>`: the
-summary is visible to everyone who can see the pull request, so the specimens go to the terminal
-of the machine that ran the check instead.
+Under that, for anything that leaked, a section called **What leaked, and why it matters** puts
+the value you sent beside the value the provider received, and says why that data type is worth
+caring about. Values there are printed as shapes such as `<EMAIL>`, because the summary is
+visible to everyone who can see the pull request. The real specimens go to the terminal of the
+machine that ran the check.
 
-Then the required behaviour checks, pass or fail, and a **What to do next** line written for the
-verdict you actually got rather than a generic one.
+Then the required behaviour checks, pass or fail, and a **What to do next** line written for
+the verdict you actually got rather than a generic one.
 
 Red means your gateway sent that value to the provider unmasked, and the job blocks the merge
-if you require the check. Nobody is emailed and nothing is sent anywhere: the result lives in
+if you require the check. Nobody is emailed and nothing is sent anywhere: the result stays in
 the pull request.
-
-**Why bother.** Request redaction is a rule that matches patterns, and rules stop matching. A
-provider adds a field, someone refactors a prompt template, a regex gets narrowed to fix a false
-positive. None of that fails a normal test suite, because the response still looks right. This
-is the check that notices, on the pull request that caused it, while it is still free to fix.
 
 That is the whole setup. Everything below is optional.
 
@@ -212,12 +232,11 @@ GitHub publishes a status badge for the workflow. Add it to your README, replaci
 
 It tracks the default branch and turns red the moment a leak lands there. On a public
 repository anyone can see it, which is the point: it is a claim a reader can click and check
-for themselves rather than take your word for.
+instead of taking your word for it.
 
-**That badge reports the job, not the measurement.** It is green whenever the workflow
-exited cleanly, so a gateway that contained everything and one that was never asked to
-look both show the same tick. To put the result itself on your README, the run writes a
-second file:
+**That badge reports the job, not the measurement.** It is green whenever the workflow exited
+cleanly, so a gateway that contained everything and one that was never asked to look both show
+the same tick. To put the result itself on your README, the run writes a second file:
 
 ```
 pii-leak-badge.json
@@ -264,11 +283,11 @@ anything about the gateway, and it is worth fixing the configuration and rerunni
 | Result | Meaning | Job status |
 | :--- | :--- | :--- |
 | CLEAN | Required checks completed for the selected duty | Pass |
-| LEAK | Synthetic values were observed upstream | Fail |
+| LEAK | Fake values were seen arriving upstream | Fail |
 | CHECK FAILED | Response or transport checks failed without an observed leak | Fail |
 | NOT MEASURED | Setup, attribution, inspection or comparison was incomplete | Fail |
 
-Existing leaks also fail the current job. A no-regression result does not excuse them.
+Leaks you already had also fail the current job. A no-regression result does not excuse them.
 
 Locally, exit 0 means clean, 1 means a measured failure, and 2 means incomplete measurement.
 
@@ -342,12 +361,12 @@ until your default branch has produced a fresh baseline.
 <summary><b>One-way masking, and which data types are tested</b></summary>
 
 `duty: restore` is the default and requires your gateway to give the caller back the original
-text. Set `duty: anonymize` if your product masks in one direction on purpose; that excludes
-the restoration checks but still requires upstream containment, valid SSE and completed
-requests. The benchmark cannot infer which you intended, so say which.
+text. Set `duty: anonymize` if your product masks in one direction on purpose; that drops the
+restoration checks but still requires upstream containment, valid SSE and completed requests.
+The benchmark cannot guess which you meant, so say which.
 
-`profile: pii-secrets-v1` is the default: email, a synthetic US SSN, a published test card,
-and fixed AWS, GitHub and Slack credential examples. `profile: pii-v1` tests only the three
+`profile: pii-secrets-v1` is the default: email, a fake US SSN, a published test card, and
+fixed AWS, GitHub and Slack credential examples. `profile: pii-v1` tests only the three
 personal-data formats.
 
 The default seed is `gateway-ci-v1`. Keep it stable for pull request comparisons and vary it
@@ -397,8 +416,8 @@ You do not need any of these to read the result. The table above is written stra
 workflow run page, so you read it in the browser and there is nothing to fetch.
 
 The job also uploads the underlying reports as an artifact called `pii-leak-benchmark`, on
-failures too, and they are worth opening in two cases: feeding `current.json` back as a
-baseline, and looking at exactly what arrived upstream when a result surprises you.
+failures too. They are worth opening in two cases: feeding `current.json` back as a baseline,
+and looking at exactly what arrived upstream when a result surprises you.
 
 | File | Purpose |
 | :--- | :--- |
@@ -412,20 +431,20 @@ baseline, and looking at exactly what arrived upstream when a result surprises y
 </details>
 
 <details>
-<summary><b>How it works, and what it does not cover</b></summary>
+<summary><b>What it does not cover</b></summary>
 
-The Action stands up a synthetic model provider, points your gateway at it through
-`upstream-env`, and records every request that arrives. It runs a negative control first, so
-a run that measures nothing fails instead of passing quietly. It starts your gateway, waits
-for its port, measures, writes the summary, and stops what it started. Startup logs are
-suppressed, so run your command locally if startup fails.
+The Action stands up a fake provider, points your gateway at it through `upstream-env`, and
+records every request that arrives. It runs a control first, so a run that measures nothing
+fails instead of passing quietly. It starts your gateway, waits for its port, measures, writes
+the summary, and stops what it started. Startup logs are suppressed, so run your command
+locally if startup fails.
 
-The provider is listening before your start command runs, so a gateway that contacts its
+The fake provider is listening before your start command runs, so a gateway that contacts its
 provider during startup finds it there. Requests sent during startup are part of the measured
 record, like any other request to the configured upstream.
 
-Configure the same redaction policy you intend to ship. The benchmark measures your gateway;
-it does not enable protection for you. Pin the Action to an immutable commit SHA if your
+Configure the same redaction policy you intend to ship. The benchmark measures your gateway; it
+does not turn protection on for you. Pin the Action to an immutable commit SHA if your
 organization requires it. For a gateway already running and already pointed at the capture,
 omit `start-command` and `upstream-env`. Authenticate to your gateway with
 `CONFORMANCE_TARGET_API_KEY` and `CONFORMANCE_TARGET_HEADERS`.
@@ -433,8 +452,8 @@ omit `start-command` and `upstream-env`. Authenticate to your gateway with
 **Limits.** The fixture uses a fixed set of formats. The values change every run, the formats
 do not, so a program written for those formats can pass without being a general detector.
 Credential examples are fixed shapes, not a representative sample. Only the capture and client
-boundaries are observed: logs, internal stores and other outbound destinations are outside
-this check. Run [response fragmentation tests](./reproduce-fragmentation) separately for
-injected response data.
+boundaries are watched: logs, internal stores and other outbound destinations are outside this
+check. Run [response fragmentation tests](./reproduce-fragmentation) separately for injected
+response data.
 
 </details>
