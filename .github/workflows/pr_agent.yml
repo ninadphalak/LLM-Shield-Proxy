@@ -76,6 +76,13 @@ jobs:
       # designs.
       - name: Configure review credentials
         env:
+          # The SECRET names stay descriptive on purpose, decided 2026-09-19. They are the
+          # only place left that names a provider, and renaming them to PR_PROVIDER_A_KEY
+          # would leave the owner unable to tell which credential is which when one needs
+          # rotating or its billing checked. That is a worse failure than the disclosure:
+          # a secret name says which providers are CONFIGURED, never which one served a
+          # given review, and the model chain itself is already in variables. Do not
+          # "finish the job" here.
           PROVIDER_A_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
           PROVIDER_B_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
           PROVIDER_A_KEY_ENV: ${{ vars.PR_PROVIDER_A_KEY_ENV }}

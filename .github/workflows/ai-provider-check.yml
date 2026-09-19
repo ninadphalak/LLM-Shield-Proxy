@@ -40,6 +40,7 @@ jobs:
           # `${{ secrets.X }}` inline would place the credential in the process's argv,
           # which is readable by any other process on the runner. Actions masks secret
           # values in log output; argv is not log output.
+          # Descriptive secret names are deliberate; see pr_agent.yml.
           A_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
           A_URL: ${{ vars.PR_PROVIDER_A_MODELS_URL }}
           A_HDR: ${{ vars.PR_PROVIDER_A_AUTH_HEADER }}
