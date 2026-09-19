@@ -41,6 +41,27 @@ That is the failure the job catches. Nothing leaves your machine, the values are
 itself is broken. Point `--target-base-url` at a real gateway instead and you have the same check
 your CI will run.
 
+### No gateway of your own? Test someone else's
+
+`capture://self` has no gateway in it, so it measures nothing about any product. To get a real
+result you need something in the middle, and standing one up takes about two minutes. Any
+OpenAI-compatible gateway works; this is one, installed from PyPI:
+
+```bash
+pip install llm-shield-proxy "uvicorn[standard]"
+
+UPSTREAM_BASE_URL=http://127.0.0.1:8765 VALID_VIRTUAL_KEYS=sk-demo   python -m uvicorn llm_shield_proxy.api.main:app --port 4000 &
+
+pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
+```
+
+`8765` is the port the check listens on, so the gateway is told to send its upstream traffic
+there and the check sees exactly what left. Swap in LiteLLM, LLM Guard, Portkey or your own
+build the same way: point the gateway's upstream at the capture, point the check at the gateway.
+
+The [results wall](./who-has-run-it) lists what other gateways scored and how each was
+configured, which is the quickest way to find one worth trying.
+
 ## 1. Add the workflow
 
 Save this as `.github/workflows/pii-leak-check.yml`:
