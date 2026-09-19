@@ -41,11 +41,24 @@ That is the failure the job catches. Nothing leaves your machine, the values are
 itself is broken. Point `--target-base-url` at a real gateway instead and you have the same check
 your CI will run.
 
-### No gateway of your own? Test someone else's
+### No gateway of your own? Point the check at someone else's
 
 `capture://self` has no gateway in it, so it measures nothing about any product. To get a real
-result you need something in the middle, and standing one up takes about two minutes. Any
-OpenAI-compatible gateway works; this is one, installed from PyPI:
+result you need something in the middle. Whichever gateway you pick, the shape is the same:
+
+1. **Tell the gateway its provider is the capture.** The check listens on `http://127.0.0.1:8765`.
+   Whatever setting normally holds your OpenAI base URL gets that address instead.
+2. **Start the gateway**, however its own documentation says to.
+3. **Point the check at the gateway** rather than at a provider.
+
+Only step 1 differs between products, and it is one setting. Their own install instructions are
+better than anything reproduced here and stay current when they change, so this lists the
+setting to change and links to the source for the rest.
+
+<details>
+<summary><b>LLM-Shield-Proxy</b> (the fastest way to see a real result)</summary>
+
+Setting: the `UPSTREAM_BASE_URL` environment variable.
 
 ```bash
 pip install llm-shield-proxy "uvicorn[standard]"
@@ -55,12 +68,61 @@ UPSTREAM_BASE_URL=http://127.0.0.1:8765 VALID_VIRTUAL_KEYS=sk-demo   python -m u
 pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
 ```
 
-`8765` is the port the check listens on, so the gateway is told to send its upstream traffic
-there and the check sees exactly what left. Swap in LiteLLM, LLM Guard, Portkey or your own
-build the same way: point the gateway's upstream at the capture, point the check at the gateway.
+Full options: [deployment guide](../deployment).
 
-The [results wall](./who-has-run-it) lists what other gateways scored and how each was
-configured, which is the quickest way to find one worth trying.
+</details>
+
+<details>
+<summary><b>LiteLLM</b></summary>
+
+Setting: `api_base` under the entry for your model in `model_list`, in LiteLLM's config file.
+
+```yaml
+model_list:
+  - model_name: capture
+    litellm_params:
+      model: openai/capture
+      api_base: http://127.0.0.1:8765/v1
+      api_key: sk-not-used-by-the-capture
+```
+
+Install and run it per [LiteLLM's proxy quick start](https://docs.litellm.ai/docs/proxy/quick_start),
+then point the check at the port it listens on. To measure its redaction rather than a bare
+relay, switch a guardrail on first: [LiteLLM guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start).
+Without one it forwards everything, which the check will correctly report as a leak.
+
+</details>
+
+<details>
+<summary><b>Portkey</b></summary>
+
+Setting: the `x-portkey-custom-host` request header, which overrides the provider per request.
+
+Set it to `http://127.0.0.1:8765/v1` and send it with `x-portkey-provider: openai`. Run the
+gateway per [Portkey's open-source gateway](https://github.com/Portkey-AI/gateway).
+
+Portkey applies no guardrail unless you send an `x-portkey-config` header naming one, and it
+answers `200` either way, so a run without it measures a plain relay.
+
+</details>
+
+<details>
+<summary><b>LLM Guard</b></summary>
+
+[LLM Guard](https://github.com/protectai/llm-guard) is a scanner library rather than a gateway, so there is no
+base URL to change: something has to call its scanners around an HTTP endpoint you provide.
+
+This repository contains a minimal one used for the published measurements, at
+`benchmarks/llm-guard-v2-profile/gateway.py`. It wires `Anonymize`, `Sensitive` and
+`Deanonymize` around a streaming endpoint and exposes the one genuine choice a streaming
+integrator has to make, through `LLMGUARD_MODE=chunk-local` or `buffered`. Read its docstring
+before drawing conclusions from a result: that choice, not LLM Guard, decides how the numbers
+come out.
+
+</details>
+
+The [results wall](./who-has-run-it) records what each of these scored and how it was
+configured, which is the quickest way to pick one worth trying.
 
 ## 1. Add the workflow
 
