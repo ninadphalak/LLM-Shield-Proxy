@@ -1,0 +1,106 @@
+name: AI provider check
+
+# Ask each configured provider which models THIS repository's key may actually call, and
+# print the ids.
+#
+# WHY THIS EXISTS. `pr_agent.yml` names a primary and a fallback model. A wrong id there is
+# not a loud failure: the primary is usually fine, so a bad FALLBACK id only ever runs once
+# the primary has already failed, and it stays silent until the exact moment it is needed.
+# That is not hypothetical here. On 2026-09-19 the configured fallback answered
+#
+#   404  models/gemini-3.1-flash is not found for API version v1alpha
+#
+# through three runs, because the id had been taken from PR-Agent's own MAX_TOKENS table.
+# That table lists models PR-Agent knows how to SIZE, not models a key may CALL. The two
+# are different sets and only the provider can settle it.
+#
+# Run this before changing a model id in `pr_agent.yml`, and paste the result into the
+# change. It costs nothing: listing models is not an inference call.
+#
+# Manual only. There is nothing to run on a push, and a scheduled job that touches
+# provider credentials for no reason is a standing risk with no payoff.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  list-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: List models each key can call
+        env:
+          # Read into the environment rather than interpolated into the command line:
+          # `${{ secrets.X }}` inline would place the key in the process's argv, which is
+          # readable from any other process on the runner. Actions masks secret values in
+          # log output, but argv is not log output.
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
+          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
+        run: |
+          set -euo pipefail
+
+          # No `set -x` anywhere in this file, deliberately: it would echo the expanded
+          # curl command, key included, straight into the log.
+
+          echo "## AI provider check" >> "$GITHUB_STEP_SUMMARY"
+
+          report() {
+            echo ""
+            echo "=============== $1 ==============="
+            echo ""
+            echo "### $1" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          report "DeepSeek"
+          if [ -z "${DEEPSEEK_KEY}" ]; then
+            echo "DEEPSEEK_API_KEY_PR is not set; skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            # `-sS` keeps curl quiet but still prints transport errors. No `-f`: an HTTP
+            # error BODY from these APIs says what is wrong, and -f discards it.
+            curl -sS https://api.deepseek.com/models \
+              -H "Authorization: Bearer ${DEEPSEEK_KEY}" -o /tmp/deepseek.json || true
+            python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          try:
+              data = json.load(open("/tmp/deepseek.json"))
+          except Exception as exc:
+              print(f"could not parse the response: {exc}")
+          else:
+              ids = [m.get("id") for m in data.get("data", [])]
+              # The error body, verbatim, when there is no model list. A bare "no models"
+              # cannot tell a bad key from a network failure from a changed endpoint.
+              print("\n".join(f"deepseek/{i}" for i in ids) if ids else json.dumps(data, indent=2))
+          PY
+          fi
+
+          report "Google AI Studio"
+          if [ -z "${GEMINI_KEY}" ]; then
+            echo "GEMINI_API_KEY_PR is not set; skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            # The key goes in a header, not the query string: a URL with a credential in it
+            # lands in proxy logs and in curl's own error messages.
+            curl -sS "https://generativelanguage.googleapis.com/v1beta/models" \
+              -H "x-goog-api-key: ${GEMINI_KEY}" -o /tmp/gemini.json || true
+            python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          try:
+              data = json.load(open("/tmp/gemini.json"))
+          except Exception as exc:
+              print(f"could not parse the response: {exc}")
+          else:
+              names = [
+                  m.get("name", "").removeprefix("models/")
+                  for m in data.get("models", [])
+                  # Only models that can actually serve a review. The list also carries
+                  # embedding and token-counting models, which cannot.
+                  if "generateContent" in m.get("supportedGenerationMethods", [])
+              ]
+              print("\n".join(f"gemini/{n}" for n in names) if names else json.dumps(data, indent=2))
+          PY
+          fi
+
+          echo ""
+          echo "Use these exact strings, with the provider prefix, in pr_agent.yml."
