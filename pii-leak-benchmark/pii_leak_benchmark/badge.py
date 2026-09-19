@@ -61,6 +61,24 @@ _OUTCOME_BADGE: dict[str, tuple[str, str]] = {
 
 _UNKNOWN_BADGE = ("unknown outcome", "lightgrey")
 
+# The OPERATOR run shape (`pii-leak-benchmark/operator-run/v1`) carries a `verdict`, not
+# an `outcome`, and the two are not interchangeable.
+#
+# This mattered more than it looks. `outcome` is derived from the redaction CLAIM first,
+# and the operator path deliberately records no claim -- `selfcheck` says as much when it
+# tells you to use the flat command to publish a row. So every operator report derives
+# `claim-unstated`, and a badge keyed on `outcome` came out grey on a run that had
+# measured a real leak. In CI, which is the only place the badge is produced
+# automatically, that meant the feature could never once show the thing it exists to
+# show. Read the verdict where there is one.
+_VERDICT_BADGE: dict[str, tuple[str, str]] = {
+    "CLEAN": ("contained", "brightgreen"),
+    "LEAK": ("leaked", "critical"),
+    # Measured, no leak observed, but a required check did not hold. Not a pass.
+    "CHECK FAILED": ("checks failed", "yellow"),
+    "NOT MEASURED": ("not measured", "lightgrey"),
+}
+
 
 def _dig(report: dict[str, Any], *path: str, default: Any = None) -> Any:
     node: Any = report
@@ -82,6 +100,15 @@ def _leak_detail(report: dict[str, Any]) -> Optional[str]:
     Returns None when the report supports neither, so the caller falls back to the
     bare verdict rather than inventing a denominator.
     """
+    # Operator runs record a per-type state rather than a case partition.
+    entities = report.get("entities")
+    if isinstance(entities, dict):
+        leaked = sorted(
+            str(name) for name, state in entities.items() if str(state).lower() == "leak"
+        )
+        if leaked:
+            return "leaked: " + ", ".join(leaked)
+
     leaked_types = _dig(report, "checks", "configured_upstream_boundary", "leaked_entity_types")
     if isinstance(leaked_types, list) and leaked_types:
         names = sorted(str(entry) for entry in leaked_types)
@@ -116,13 +143,21 @@ def build_badge(
     The returned dict is the whole file: Shields reads `schemaVersion`, `label`,
     `message` and `color` and ignores the rest.
     """
-    outcome = report.get("outcome")
-    message, color = _OUTCOME_BADGE.get(str(outcome), _UNKNOWN_BADGE)
+    # The operator verdict wins where there is one, because on that report shape
+    # `outcome` is not a verdict about the gateway at all. See `_VERDICT_BADGE`.
+    verdict = report.get("verdict")
+    if isinstance(verdict, str) and verdict:
+        message, color = _VERDICT_BADGE.get(verdict.upper(), _UNKNOWN_BADGE)
+        leaking = verdict.upper() == "LEAK"
+    else:
+        outcome = report.get("outcome")
+        message, color = _OUTCOME_BADGE.get(str(outcome), _UNKNOWN_BADGE)
+        leaking = outcome == "fail"
 
-    # Only a measured leak gets the detail appended. A grey outcome that happens to
+    # Only a measured leak gets the detail appended. A grey result that happens to
     # carry a stale count must not be dressed up as a finding, and a pass must stay the
     # single word a reader can take in at badge size.
-    if outcome == "fail":
+    if leaking:
         detail = _leak_detail(report)
         if detail:
             message = detail
@@ -136,7 +171,7 @@ def build_badge(
         # reader who opens the JSON directly sees which instrument produced it and
         # that nobody verified it, rather than four fields of decoration.
         "pii_leak_benchmark": {
-            "outcome": str(outcome) if outcome is not None else "unrecorded",
+            "result": str(verdict or report.get("outcome") or "unrecorded"),
             "harness_revision": str(report.get("harness_revision", "unrecorded")),
             "target": str(_dig(report, "implementation", "name", default="unrecorded")),
             "target_version": str(

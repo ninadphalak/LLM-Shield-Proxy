@@ -131,29 +131,6 @@ export type ResultRow = {
 
 export const ROWS: ResultRow[] = [
   {
-    date: '2026-09-19',
-    project: 'LLM-Shield-Proxy (ours)',
-    version: '1.6.6, response scan on',
-    sent: 'none',
-    sentN: 0,
-    restored: 'all',
-    restoredN: 1.0,
-    leakWhole: '0 of 16',
-    leakWholeN: 0.0,
-    leakSplit: '0 of 16',
-    leakSplitN: 0.0,
-    note: 'Nothing left for the provider and nothing leaked back, in either condition, over six seeds. Reproduce it with the recipe on the reproduction page; the committed report lands with the next evidence round.',
-    provenance: 'measured-here',
-    architecture: 'held-tail',
-    license: 'Apache-2.0',
-    // NOT `./results`. That page is generated from the committed reports, and this
-    // measurement is deliberately not among them: the evidence tree is frozen while the
-    // earlier round is cited, so these numbers live in a scratch run until the next
-    // round is cut. Pointing at `./results` would promise a report a reader cannot find.
-    reportUrl: './reproducing',
-    previous: {version: '1.6.0, response scan on', leakWholeN: 0.125, leakSplitN: 0.25},
-  },
-  {
     date: '2026-09-09',
     project: 'LLM-Shield-Proxy (ours)',
     version: '1.6.0, default settings',

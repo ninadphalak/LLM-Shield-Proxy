@@ -47,6 +47,29 @@ def _rate(value: Any) -> str:
     return text + "00" if text.endswith(".") else text
 
 
+def _flatten(value: str) -> str:
+    """Collapse line breaks to spaces. A multi-line value renders as two fields."""
+    return value.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+
+
+def _cell(value: str) -> str:
+    """Make a report-supplied value safe to sit inside a Markdown table cell.
+
+    Every value here is free-form text from a report the caller supplied, and the
+    rendered block is pasted straight into issues and READMEs. A `|` splits the row into
+    extra cells, a newline ends it early and starts a bogus one, and a backtick closes
+    the inline-code span so the rest of the value escapes into prose. Any of those turns
+    a block meant to be CHECKABLE into one that is merely misleading, which is the exact
+    property this command exists to provide.
+
+    Escaped rather than stripped: a value is evidence, and silently deleting characters
+    from it would make two different reports render identically.
+    """
+    escaped = value.replace("\\", "\\\\").replace("|", "\\|").replace("`", "\\`")
+    # Newlines cannot be escaped into a table cell at all; Markdown ends the row there.
+    return _flatten(escaped)
+
+
 def _short(digest: Any, keep: int = 16) -> str:
     if not isinstance(digest, str) or not digest:
         return _MISSING
@@ -55,7 +78,13 @@ def _short(digest: Any, keep: int = 16) -> str:
 
 def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
     """Render a citation block for one conformance report."""
-    metrics = _dig(report, "metrics", default={}) or {}
+    metrics = _dig(report, "metrics", default={})
+    # Guard the TYPE, not just falsiness. `or {}` still lets a truthy non-object
+    # through -- `"metrics": "unavailable"` in a hand-edited report reached `.get`
+    # and raised, which breaks the documented contract that missing fields degrade
+    # to `unrecorded` rather than traceback at a caller who named any JSON file.
+    if not isinstance(metrics, dict):
+        metrics = {}
     leak = metrics.get("leak_rate") if isinstance(metrics.get("leak_rate"), dict) else {}
 
     try:  # pragma: no cover - trivial, and absent only in a broken install
@@ -125,8 +154,11 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
     )
 
     if style == "text":
-        width = max(len(label) for label, _ in rows)
-        body = "\n".join(f"{label.ljust(width)}  {value}" for label, value in rows)
+        # Markdown escaping would be noise here, but a newline still breaks the block:
+        # it silently turns one field into what looks like two, so it is flattened.
+        flat = [(_flatten(label), _flatten(value)) for label, value in rows]
+        width = max(len(label) for label, _ in flat)
+        body = "\n".join(f"{label.ljust(width)}  {value}" for label, value in flat)
         return f"pii-leak-benchmark result\n{body}\n\n{caveat}\n"
 
     lines = [
@@ -134,7 +166,7 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
         "| Field | Value |",
         "|---|---|",
     ]
-    lines += [f"| {label} | `{value}` |" for label, value in rows]
+    lines += [f"| {_cell(label)} | `{_cell(value)}` |" for label, value in rows]
     lines += ["", f"_{caveat}_"]
     return "\n".join(lines) + "\n"
 

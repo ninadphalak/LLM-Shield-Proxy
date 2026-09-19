@@ -47,7 +47,15 @@
   border-top-color: var(--ifm-color-emphasis-900);
 }
 
+/* `:focus` as well as `:focus-visible`, and the order matters for touch.
+   A tap focuses the button but commonly does NOT match `:focus-visible`, which browsers
+   reserve for keyboard intent, and a touch device has no reliable hover either. With
+   only the two original selectors a tap therefore showed nothing at all, so the
+   definition this component exists to provide was unreachable on a phone. `:focus`
+   covers tap and keyboard both; `:focus-visible` stays so nothing regresses if a
+   browser treats them differently. */
 .wrap:hover .bubble,
+.term:focus + .bubble,
 .term:focus-visible + .bubble {
   opacity: 1;
   visibility: visible;

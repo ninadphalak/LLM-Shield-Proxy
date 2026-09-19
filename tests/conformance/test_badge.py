@@ -172,3 +172,66 @@ def test_main_rejects_a_report_that_is_not_an_object(tmp_path):
     listy = tmp_path / "list.json"
     listy.write_text("[]", encoding="utf-8")
     assert main([str(listy)]) == 2
+
+
+# --- The operator run shape ------------------------------------------------------
+#
+# `ci.py` writes `current.json` with a `verdict`, and records no redaction claim. That
+# makes `outcome` derive as `claim-unstated` on every CI run, so a badge keyed on
+# `outcome` was grey even when the run had measured a leak. CI is the only place the
+# badge is produced automatically, so the feature could never once show what it exists
+# to show. These pin the verdict path.
+
+
+def _operator(**overrides):
+    run = {
+        "schema": "pii-leak-benchmark/operator-run/v1",
+        "verdict": "LEAK",
+        "reason": "Synthetic values were observed upstream.",
+        "target_version": "1.2.3",
+        "generated_at": "2026-09-19T05:29:08Z",
+        "entities": {"EMAIL": "leak", "SSN": "clean", "CARDPAN": "leak"},
+    }
+    run.update(overrides)
+    return run
+
+
+def test_an_operator_leak_is_red_even_though_its_outcome_would_be_claim_unstated():
+    """The regression this exists for: an operator run carries no redaction claim, so
+    `outcome` derives as `claim-unstated`. Keying on it painted a measured leak grey."""
+    badge = build_badge(_operator(outcome="claim-unstated"))
+    assert badge["color"] == "critical"
+    assert badge["message"] == "leaked: CARDPAN, EMAIL"
+
+
+def test_a_clean_operator_run_is_green():
+    badge = build_badge(
+        _operator(verdict="CLEAN", entities={"EMAIL": "clean"}, outcome="claim-unstated")
+    )
+    assert badge["color"] == "brightgreen"
+    assert badge["message"] == "contained"
+
+
+@pytest.mark.parametrize(
+    "verdict,colour",
+    [("CHECK FAILED", "yellow"), ("NOT MEASURED", "lightgrey")],
+)
+def test_the_other_operator_verdicts_are_never_green(verdict, colour):
+    badge = build_badge(_operator(verdict=verdict, outcome="claim-unstated"))
+    assert badge["color"] == colour
+
+
+def test_the_verdict_wins_over_a_contradictory_outcome():
+    """Both fields present and disagreeing: the verdict is the one about the gateway."""
+    badge = build_badge(_operator(verdict="LEAK", outcome="pass"))
+    assert badge["color"] == "critical"
+
+
+def test_an_unrecognised_verdict_is_never_green():
+    badge = build_badge(_operator(verdict="SOMETHING ELSE"))
+    assert badge["color"] == "lightgrey"
+
+
+def test_the_recorded_result_prefers_the_verdict():
+    block = build_badge(_operator())["pii_leak_benchmark"]
+    assert block["result"] == "LEAK"

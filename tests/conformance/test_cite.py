@@ -159,3 +159,64 @@ def test_cite_does_not_import_the_proxy():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.append(node.module)
     assert not [name for name in imported if name.startswith("llm_shield_proxy")]
+
+
+# --- Report-supplied values are not trusted as Markdown ---------------------------
+#
+# Every value is free-form text out of a report the caller named, and the block is
+# pasted straight into issues and READMEs. A pipe, newline or backtick would break the
+# table and turn a block meant to be CHECKABLE into one that merely looks complete.
+
+
+def test_a_pipe_in_a_value_cannot_split_the_row():
+    out = build_citation(
+        _report(implementation={"name": "gw | injected | cells", "version": "1.0"})
+    )
+    row = next(line for line in out.splitlines() if "injected" in line)
+    # Two cells, so exactly three pipes: leading, separator, trailing.
+    assert row.count("|") - row.count(r"\|") == 3
+
+
+def test_a_backtick_in_a_value_cannot_end_the_code_span():
+    out = build_citation(
+        _report(implementation={"name": "gw` and `escaped", "version": "1.0"})
+    )
+    assert r"gw\` and \`escaped" in out
+
+
+def test_a_newline_in_a_value_cannot_forge_an_extra_row():
+    before = len(build_citation(_report()).splitlines())
+    out = build_citation(
+        _report(implementation={"name": "gw\nInspector digest | forged", "version": "1.0"})
+    )
+    assert len(out.splitlines()) == before
+    assert "forged" in out
+
+
+def test_the_text_style_also_flattens_newlines():
+    out = build_citation(
+        _report(implementation={"name": "gw\nforged", "version": "1.0"}), style="text"
+    )
+    assert "gw forged" in out
+
+
+def test_a_backslash_is_escaped_before_the_characters_it_could_escape():
+    """Order matters: escaping the pipe first and the backslash after would double back
+    over the escape just inserted."""
+    out = build_citation(
+        _report(implementation={"name": "back" + chr(92) + "slash", "version": "1.0"})
+    )
+    # One backslash in, two out. chr(92) rather than a literal, so the count is plain.
+    assert "back" + chr(92) * 2 + "slash" in out
+
+
+def test_a_non_object_metrics_field_degrades_instead_of_raising():
+    """`or {}` guarded only falsiness, so a truthy non-object reached `.get` and raised
+    a traceback at a caller who had merely named a hand-edited report."""
+    out = build_citation(_report(metrics="unavailable"))
+    assert "pii-leak-benchmark" in out
+
+
+def test_a_metrics_list_degrades_instead_of_raising():
+    out = build_citation(_report(metrics=[1, 2, 3]))
+    assert "pii-leak-benchmark" in out

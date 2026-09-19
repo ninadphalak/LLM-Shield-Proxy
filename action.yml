@@ -113,7 +113,12 @@ runs:
         BENCHMARK_PYTHON: ${{ steps.setup.outputs.python }}
         BENCHMARK_OUT: ${{ steps.setup.outputs.out }}
       run: |
-        report="$BENCHMARK_OUT/current.raw.json"
+        # `current.json`, not `current.raw.json`. The raw report is the conformance
+        # measurement and carries no redaction claim on this path, so its `outcome`
+        # derives as `claim-unstated` and the badge came out grey even on a measured
+        # leak. `current.json` is the operator run, and its `verdict` is the number this
+        # badge exists to publish.
+        report="$BENCHMARK_OUT/current.json"
         if [ ! -f "$report" ]; then
           echo "No report at $report; skipping the badge."
           exit 0
