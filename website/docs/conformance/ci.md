@@ -9,6 +9,38 @@ Your gateway is meant to strip personal data before it reaches the model provide
 checks that it still does, on every pull request, and fails the build when it does not.
 Setup is one file and three lines. No account, no API key, no paid model.
 
+**What you get for it:** the build turns red on the pull request that introduces a leak, naming
+the data type, showing you the value as it left your network, and saying what to do about it. A
+redaction rule that quietly stops matching is otherwise invisible until someone finds customer
+data in a provider log.
+
+## See what it looks like first, with no gateway at all
+
+You do not need to set anything up to see the output. This runs the same check against a direct
+connection with no gateway in the middle, which means every value leaks, on purpose:
+
+```bash
+pipx run pii-leak-benchmark selfcheck --target-base-url capture://self
+```
+
+It starts a local capture, sends six kinds of synthetic data through, and reports what arrived:
+
+```
+  LEAK
+
+  Raw fixture values reached the upstream: AWS_ACCESS_KEY_ID, CREDIT_CARD,
+  EMAIL, GITHUB_TOKEN, SLACK_TOKEN, SSN.
+
+LEAK  EMAIL reached the model provider
+      you sent:         xjtfstbe@example.com
+      the provider saw: xjtfstbe@example.com  <- nothing removed it on the way
+```
+
+That is the failure the job catches. Nothing leaves your machine, the values are synthetic, and
+`capture://self` is the negative control: if it ever reports anything but `LEAK`, the instrument
+itself is broken. Point `--target-base-url` at a real gateway instead and you have the same check
+your CI will run.
+
 ## 1. Add the workflow
 
 Save this as `.github/workflows/pii-leak-check.yml`:
@@ -33,7 +65,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
 
-      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1
         with:
           target-base-url: http://127.0.0.1:4000/v1
           start-command: ./scripts/start-test-gateway.sh
@@ -50,17 +82,38 @@ jobs:
 
 ## 3. Open a pull request
 
-It runs on every pull request from now on, takes about a minute, and shows up as a green or
-red check in the PR's checks list. Click **Details** on it to see what it found:
+It runs on every pull request from now on and takes about a minute. It appears as a green or red
+check in the PR's checks list, and the full result is written to the **job summary**, which is
+the page you land on from **Details**. You do not have to read the logs.
+
+The summary opens with the verdict, one of `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`,
+then a row per data type:
 
 | Data type | Baseline | Current | Next step |
 | :--- | :--- | :--- | :--- |
-| EMAIL | contained | leak | Enable or repair request redaction for this format. |
-| SSN | contained | contained | No leak observed for this test shape. |
+| EMAIL | not run | leak | Enable or repair request redaction for this format. |
+| SSN | not run | contained | No leak observed for this test shape. |
+
+`Baseline` reads `not run` until you configure a previous version to compare against, which is
+optional and covered below.
+
+Under that, for anything that leaked, a section called **What leaked, and why it matters** shows
+the value as you sent it beside the value the provider received, and says why that particular
+data type is worth caring about. Values there are printed as shapes such as `<EMAIL>`: the
+summary is visible to everyone who can see the pull request, so the specimens go to the terminal
+of the machine that ran the check instead.
+
+Then the required behaviour checks, pass or fail, and a **What to do next** line written for the
+verdict you actually got rather than a generic one.
 
 Red means your gateway sent that value to the provider unmasked, and the job blocks the merge
 if you require the check. Nobody is emailed and nothing is sent anywhere: the result lives in
 the pull request.
+
+**Why bother.** Request redaction is a rule that matches patterns, and rules stop matching. A
+provider adds a field, someone refactors a prompt template, a regex gets narrowed to fix a false
+positive. None of that fails a normal test suite, because the response still looks right. This
+is the check that notices, on the pull request that caused it, while it is still free to fix.
 
 That is the whole setup. Everything below is optional.
 
@@ -157,7 +210,7 @@ runner builds both versions; the old one needs no permanent deployment.
     ref: ${{ github.event.pull_request.base.sha }}
     path: baseline
 # Build both versions here in separate environments or container images.
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1
   with:
     target-base-url: http://127.0.0.1:4000/v1
     start-command: cd candidate && ./scripts/start-test-gateway.sh --port 4000
@@ -189,7 +242,7 @@ steps:
     run: |
       id=$(gh run list --workflow pii-leak-check.yml --branch main --status success              --limit 1 --json databaseId --jq '.[0].databaseId')
       gh run download "$id" --name pii-leak-benchmark --dir baseline || echo "no baseline yet"
-  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1
     with:
       target-base-url: http://127.0.0.1:4000/v1
       start-command: ./scripts/start-test-gateway.sh
@@ -253,7 +306,7 @@ fresh `--out` directory each time.
 To pin the Git source instead of the PyPI package:
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1#subdirectory=pii-leak-benchmark"
 ```
 
 </details>
