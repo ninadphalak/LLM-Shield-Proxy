@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         # then remembered not to print.
         findings = [
             explain.published_dict(f)
-            for f in explain.findings_from_report(report, seed=args.seed)
+            for f in explain.findings_from_report(report, seed=args.seed, duty=args.duty)
         ]
         ignored = {"response_fidelity", "fragmentation_safety"} if args.duty == "anonymize" else set()
         return {"schema": "pii-leak-benchmark/operator-run/v1", "contract": contract,

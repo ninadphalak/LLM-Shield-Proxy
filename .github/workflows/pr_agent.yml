@@ -112,6 +112,18 @@ jobs:
           GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
           GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "true"
           GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
+          # Where the standing project context comes from. PR-Agent reads these from the
+          # DEFAULT BRANCH, so it can only ever see committed files -- `.llm/CONTEXT.md`
+          # is gitignored and unreachable from CI by design.
+          #
+          # NOT `AGENTS.md`, which is PR-Agent's default and is the wrong file here: this
+          # repository already uses `/AGENTS.md`, `/GEMINI.md` and `/CLAUDE.md` as
+          # gitignored local pointer files for the agent running in the working directory.
+          # A separate, deliberately public file keeps the private pointer private and
+          # makes the published brief an explicit choice. It carries positive invariants
+          # only -- no known-gap list -- because this repo is public and publishing an
+          # unfixed weakness in a security product is a disclosure decision.
+          CONFIG.REPO_CONTEXT_FILES: '[".github/REVIEW-CONTEXT.md"]'
           # This project's review value is in correctness and security, not style.
           PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
             This is a streaming privacy gateway and a measurement harness for regulated

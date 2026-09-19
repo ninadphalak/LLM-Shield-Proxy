@@ -366,6 +366,7 @@ def findings_from_report(
     specimens: Optional[OperatorSpecimens] = None,
     *,
     seed: str = "",
+    duty: str = "restore",
 ) -> list[Finding]:
     """Read a v1 HTTP-profile report into findings. Measures nothing; decides nothing.
 
@@ -376,7 +377,15 @@ def findings_from_report(
     Without ``specimens`` the rows carry no values, which is exactly what the published
     path needs -- so the published renderer is never in the position of having a specimen
     available to leak.
+
+    ``duty`` is the same switch `selfcheck.verdict_for` and `ci` already take. Under
+    ``anonymize`` the gateway is not asked to restore anything, so a value that did not
+    come back is the configured behaviour and not a finding. Taking it here rather than
+    filtering at each call site means the terminal and the published summary cannot
+    disagree about what counts -- which is how this was wrong in both at once.
     """
+    if duty not in {"restore", "anonymize"}:
+        raise ValueError("duty must be restore or anonymize")
     boundary = report["checks"]["configured_upstream_boundary"]
     fixture = specimens.fixture if specimens else {}
     # The seed is what makes a finding repeatable, and the PUBLISHED path is the one that
@@ -426,7 +435,12 @@ def findings_from_report(
         )
 
     fidelity = report["checks"].get("response_fidelity", {})
-    if not fidelity.get("passed", True):
+    # A one-way anonymizer is SUPPOSED not to restore, and `response_fidelity` is already
+    # waived from the required checks for this duty. Reporting it anyway printed "was not
+    # restored" under a heading reading "What leaked, and why it matters", on a run whose
+    # verdict was CLEAN -- the exact confusion this module exists to prevent, aimed at an
+    # operator whose gateway is behaving exactly as configured.
+    if duty != "anonymize" and not fidelity.get("passed", True):
         findings.extend(_fidelity_findings(fixture, specimens, seed))
     return findings
 

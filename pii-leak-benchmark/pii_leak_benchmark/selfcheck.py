@@ -269,12 +269,28 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
     print()
 
 
+def findings_for(
+    report: dict[str, Any],
+    specimens: Optional["OperatorSpecimens"] = None,
+    *,
+    duty: str = "restore",
+) -> list[explain.Finding]:
+    """What this run should SAY, under the duty the operator declared.
+
+    A thin named wrapper rather than an inline call, because the duty reaching the display
+    is a behaviour worth a test of its own: without it an anonymizing gateway was told its
+    values did not come back, under a heading about leaks, on a CLEAN run.
+    """
+    return explain.findings_from_report(report, specimens, duty=duty)
+
+
 def _print_report(
     report: dict[str, Any],
     verdict: str,
     reason: str,
     destination: Optional[str],
     specimens: Optional["OperatorSpecimens"] = None,
+    duty: str = "restore",
 ) -> None:
     boundary = report["checks"][_BOUNDARY]
     capture = report["capture"]
@@ -303,7 +319,7 @@ def _print_report(
     # `reveal=True` because these are this run's synthetic specimens, generated on this
     # machine seconds ago, and they are deliberately absent from the JSON.
     explain.print_findings(
-        explain.findings_from_report(report, specimens), reveal=specimens is not None
+        findings_for(report, specimens, duty=duty), reveal=specimens is not None
     )
 
     evidence = boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]
@@ -416,7 +432,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return EXIT_NOT_MEASURED
 
     verdict, reason = verdict_for(report, duty=args.duty)
-    _print_report(report, verdict, reason, destination, specimens=specimens)
+    _print_report(report, verdict, reason, destination, specimens=specimens, duty=args.duty)
 
     if verdict == VERDICT_CLEAN:
         return EXIT_CLEAN

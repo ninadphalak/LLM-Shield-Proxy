@@ -459,6 +459,63 @@ def test_a_failed_restoration_becomes_a_fidelity_finding_not_a_leak() -> None:
     assert findings and all(f.kind == explain.KIND_FIDELITY for f in findings)
 
 
+def test_an_anonymizing_gateway_is_not_told_its_values_did_not_come_back() -> None:
+    """A one-way anonymizer is SUPPOSED not to restore. Saying so is not a finding.
+
+    `--duty anonymize` already waives `response_fidelity` from the required checks, and
+    both `selfcheck.verdict_for` and `ci` honour that when deciding the verdict. The
+    display did not: it built fidelity findings regardless, so a run whose verdict is
+    CLEAN printed "was not restored" under a heading that reads "What leaked, and why it
+    matters". That is the precise confusion this whole module exists to prevent, aimed at
+    the operator of a gateway that is behaving exactly as configured.
+    """
+    report = _boundary_report(fidelity_passed=False)
+
+    assert explain.findings_from_report(report, duty="anonymize") == []
+    assert explain.findings_from_report(report, duty="restore")
+
+
+def test_an_anonymize_duty_still_reports_a_real_leak() -> None:
+    """Waiving restoration must not waive egress. The two are unrelated failures."""
+    report = _boundary_report(
+        leaked=[{"entity_type": "EMAIL", "channel": "body", "scope": "per-request",
+                 "match": "literal"}],
+        fidelity_passed=False,
+    )
+    kinds = {f.kind for f in explain.findings_from_report(report, duty="anonymize")}
+    assert kinds == {explain.KIND_LEAK_TO_PROVIDER}
+
+
+def test_a_clean_anonymize_run_has_no_what_leaked_section_at_all() -> None:
+    """End to end through the published summary, because that is where it was seen."""
+    from pii_leak_benchmark import ci
+
+    report = _boundary_report(fidelity_passed=False)
+    run = {
+        "schema": "pii-leak-benchmark/operator-run/v1", "verdict": "CLEAN",
+        "reason": "No fixture value reached the upstream.",
+        "contract": {"profile": "pii-v1", "duty": "anonymize", "seed": "s"},
+        "entities": {"EMAIL": "contained"}, "required_checks": {"sse_validity": True},
+        "coverage": [],
+        "findings": [
+            explain.published_dict(f)
+            for f in explain.findings_from_report(report, seed="s", duty="anonymize")
+        ],
+    }
+    summary = ci.render_summary(run)
+    assert "What leaked" not in summary
+    assert "was not restored" not in summary
+
+
+def test_the_selfcheck_terminal_honours_the_duty_too() -> None:
+    """Same defect, second surface. The operator sees this one first."""
+    from pii_leak_benchmark import selfcheck
+
+    report = _boundary_report(fidelity_passed=False)
+    assert selfcheck.findings_for(report, duty="anonymize") == []
+    assert selfcheck.findings_for(report, duty="restore")
+
+
 def test_a_clean_run_produces_no_findings_and_therefore_prints_nothing() -> None:
     assert explain.findings_from_report(_boundary_report()) == []
 
