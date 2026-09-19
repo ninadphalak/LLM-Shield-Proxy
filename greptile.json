@@ -1,0 +1,22 @@
+{
+  "_comment_gate": "Greptile reviews ONLY pull requests carrying the 'deep-review' label. The free tier is 50 credits per month, and the standing rule reserves them for changes to security/, streaming/, engines/, or anything that alters a published claim or measurement. Before this file, that rule was a convention nobody enforced: Greptile reviewed every PR and spent a credit on each, so the month's budget was gone on config and docs churn. 'labels' makes the rule mechanical. Add the label with: gh pr edit <n> --add-label deep-review",
+  "labels": ["deep-review"],
+
+  "_comment_autoReview": "On a labelled PR, review when it opens and on later pushes, but not on a rebase: a force-push that only rewrites history is usually a rebase onto main or a reworded commit, and paying a second credit for the same content is how a 50-credit budget disappears. A rebase that genuinely changes the diff can be reviewed by hand with @greptileai.",
+  "autoReview": ["open", "push"],
+
+  "_comment_strictness": "3 of 3. These credits are deliberately spent on the highest-risk changes in the repository, so the review should be the strict one. Nitpicks are filtered by commentTypes below rather than by lowering severity.",
+  "strictness": 3,
+
+  "_comment_commentTypes": "No style comments. ruff, bandit and pyright already gate formatting, naming and imports in CI, and a credit spent on a style opinion is a credit not spent on a fail-open gate or a leaked value.",
+  "commentTypes": ["logic", "syntax"],
+
+  "_comment_triggerOnDrafts": "A draft is work in progress. Reviewing one spends a credit on code that is about to change.",
+  "triggerOnDrafts": false,
+
+  "_comment_excludeAuthors": "Bots do not write the logic this budget exists to check.",
+  "excludeAuthors": ["*-bot", "*[bot]", "dependabot[bot]"],
+
+  "_comment_ignorePatterns": "Generated and vendored trees. confusables.py is written by scripts/build_confusables.py and the two copies are asserted byte-identical by a test, so a review comment on it is a comment on the generator's output. Lockfiles and site build output are not reviewable either.",
+  "ignorePatterns": "**/*.generated.*\nllm_shield_proxy/engines/confusables.py\npii-leak-benchmark/pii_leak_benchmark/confusables.py\nwebsite/build/**\nwebsite/.docusaurus/**\n**/package-lock.json\n**/*.lock\nvenv*/**\nbenchmarks/results/**"
+}
