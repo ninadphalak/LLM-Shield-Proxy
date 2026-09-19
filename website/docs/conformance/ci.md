@@ -51,14 +51,21 @@ result you need something in the middle. Whichever gateway you pick, the shape i
 2. **Start the gateway**, however its own documentation says to.
 3. **Point the check at the gateway** rather than at a provider.
 
-Only step 1 differs between products, and it is one setting. Their own install instructions are
-better than anything reproduced here and stay current when they change, so this lists the
-setting to change and links to the source for the rest.
+Only step 1 differs between products, and it is one setting: whatever your gateway already
+uses to reach OpenAI or another provider. It is usually called something like `api_base`,
+`base_url`, `custom_host` or an `OPENAI_BASE_URL` environment variable, and it lives wherever
+that gateway keeps its provider configuration.
+
+**Their documentation is the authority on that, not this page.** Setting names change, and a
+copy here would go stale without anyone noticing, so what follows is a link to each project's
+own instructions rather than a reproduction of them. If a link below is dead or the setting has
+moved, theirs is right and ours is out of date: please
+[tell us](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new) and we will fix it.
 
 <details>
 <summary><b>LLM-Shield-Proxy</b> (the fastest way to see a real result)</summary>
 
-Setting: the `UPSTREAM_BASE_URL` environment variable.
+Ours, so this one is exact and kept working:
 
 ```bash
 pip install llm-shield-proxy "uvicorn[standard]"
@@ -75,49 +82,38 @@ Full options: [deployment guide](../deployment).
 <details>
 <summary><b>LiteLLM</b></summary>
 
-Setting: `api_base` under the entry for your model in `model_list`, in LiteLLM's config file.
+Install and run the proxy: [LiteLLM proxy quick start](https://docs.litellm.ai/docs/proxy/quick_start).
+Point the provider base URL for your model at `http://127.0.0.1:8765/v1`.
 
-```yaml
-model_list:
-  - model_name: capture
-    litellm_params:
-      model: openai/capture
-      api_base: http://127.0.0.1:8765/v1
-      api_key: sk-not-used-by-the-capture
-```
-
-Install and run it per [LiteLLM's proxy quick start](https://docs.litellm.ai/docs/proxy/quick_start),
-then point the check at the port it listens on. To measure its redaction rather than a bare
-relay, switch a guardrail on first: [LiteLLM guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start).
-Without one it forwards everything, which the check will correctly report as a leak.
+To measure redaction rather than a bare relay, switch a guardrail on first:
+[LiteLLM guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start). Without one it
+forwards everything, which the check will correctly report as a leak.
 
 </details>
 
 <details>
 <summary><b>Portkey</b></summary>
 
-Setting: the `x-portkey-custom-host` request header, which overrides the provider per request.
+Run the gateway: [Portkey open-source gateway](https://github.com/Portkey-AI/gateway). It takes
+the provider host per request as a header, so set that to `http://127.0.0.1:8765/v1`.
 
-Set it to `http://127.0.0.1:8765/v1` and send it with `x-portkey-provider: openai`. Run the
-gateway per [Portkey's open-source gateway](https://github.com/Portkey-AI/gateway).
-
-Portkey applies no guardrail unless you send an `x-portkey-config` header naming one, and it
-answers `200` either way, so a run without it measures a plain relay.
+Portkey applies no guardrail unless the request names one, and it answers `200` either way, so a
+run without one measures a plain relay rather than its redaction.
 
 </details>
 
 <details>
 <summary><b>LLM Guard</b></summary>
 
-[LLM Guard](https://github.com/protectai/llm-guard) is a scanner library rather than a gateway, so there is no
-base URL to change: something has to call its scanners around an HTTP endpoint you provide.
+[LLM Guard](https://github.com/protectai/llm-guard) is a scanner library rather than a gateway,
+so there is no base URL to change: something has to call its scanners around an HTTP endpoint
+you provide.
 
 This repository contains a minimal one used for the published measurements, at
-`benchmarks/llm-guard-v2-profile/gateway.py`. It wires `Anonymize`, `Sensitive` and
-`Deanonymize` around a streaming endpoint and exposes the one genuine choice a streaming
-integrator has to make, through `LLMGUARD_MODE=chunk-local` or `buffered`. Read its docstring
-before drawing conclusions from a result: that choice, not LLM Guard, decides how the numbers
-come out.
+`benchmarks/llm-guard-v2-profile/gateway.py`. Read its docstring before drawing conclusions from
+a result: it exposes the one genuine choice a streaming integrator has to make, through
+`LLMGUARD_MODE=chunk-local` or `buffered`, and that choice rather than LLM Guard decides how the
+numbers come out.
 
 </details>
 
