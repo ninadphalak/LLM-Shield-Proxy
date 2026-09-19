@@ -1,24 +1,27 @@
 name: AI provider check
 
-# Ask each configured provider which models THIS repository's key may actually call, and
-# print the ids.
+# Ask each configured provider which models THIS repository's key may actually call.
 #
 # WHY THIS EXISTS. `pr_agent.yml` names a primary and a fallback model. A wrong id there is
 # not a loud failure: the primary is usually fine, so a bad FALLBACK id only ever runs once
 # the primary has already failed, and it stays silent until the exact moment it is needed.
-# That is not hypothetical here. On 2026-09-19 the configured fallback answered
+# That is not hypothetical here -- a configured fallback answered
 #
 #   404  models/<id> is not found for API version v1alpha
 #
-# through three runs, because the id had been taken from PR-Agent's own MAX_TOKENS table.
-# That table lists models PR-Agent knows how to SIZE, not models a key may CALL. The two
-# are different sets and only the provider can settle it.
+# through three runs, because the id had been taken from the review tool's own MAX_TOKENS
+# table. That table lists models the tool knows how to SIZE, not models a key may CALL. The
+# two are different sets, and only the provider can settle it.
 #
-# Run this before changing a model id in `pr_agent.yml`, and paste the result into the
-# change. It costs nothing: listing models is not an inference call.
+# Run this before changing a model id, and take the value from the output.
 #
-# Manual only. There is nothing to run on a push, and a scheduled job that touches
-# provider credentials for no reason is a standing risk with no payoff.
+# Endpoints, auth header shapes and credentials all come from repository variables and
+# secrets, so this public file names no provider. It prints each response verbatim rather
+# than parsing per-provider JSON shapes: one less thing to keep in step with an API, and an
+# error body then reaches you intact instead of being swallowed as "no models found".
+#
+# Manual only. There is nothing to run on a push, and a scheduled job that touches provider
+# credentials for no reason is a standing risk with no payoff.
 
 on:
   workflow_dispatch:
@@ -31,76 +34,44 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: List models each key can call
+      - name: List callable models
         env:
           # Read into the environment rather than interpolated into the command line:
-          # `${{ secrets.X }}` inline would place the key in the process's argv, which is
-          # readable from any other process on the runner. Actions masks secret values in
-          # log output, but argv is not log output.
-          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
-          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
+          # `${{ secrets.X }}` inline would place the credential in the process's argv,
+          # which is readable by any other process on the runner. Actions masks secret
+          # values in log output; argv is not log output.
+          A_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
+          A_URL: ${{ vars.PR_PROVIDER_A_MODELS_URL }}
+          A_HDR: ${{ vars.PR_PROVIDER_A_AUTH_HEADER }}
+          A_PRE: ${{ vars.PR_PROVIDER_A_AUTH_PREFIX }}
+          B_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
+          B_URL: ${{ vars.PR_PROVIDER_B_MODELS_URL }}
+          B_HDR: ${{ vars.PR_PROVIDER_B_AUTH_HEADER }}
+          B_PRE: ${{ vars.PR_PROVIDER_B_AUTH_PREFIX }}
         run: |
           set -euo pipefail
+          # No `set -x` anywhere in this file: it would echo the expanded curl command,
+          # credential included, straight into the log.
 
-          # No `set -x` anywhere in this file, deliberately: it would echo the expanded
-          # curl command, key included, straight into the log.
-
-          echo "## AI provider check" >> "$GITHUB_STEP_SUMMARY"
-
-          report() {
+          ask() {
+            label="$1"; url="$2"; hdr="$3"; pre="$4"; key="$5"
             echo ""
-            echo "=============== $1 ==============="
+            echo "=============== provider ${label} ==============="
+            if [ -z "${url}" ] || [ -z "${key}" ] || [ -z "${hdr}" ]; then
+              echo "not configured; skipping."
+              return 0
+            fi
+            # `-sS` stays quiet but still reports transport errors. Deliberately no `-f`:
+            # an HTTP error BODY says what is actually wrong, and -f discards it.
+            curl -sS "${url}" -H "${hdr}: ${pre}${key}" || true
             echo ""
-            echo "### $1" >> "$GITHUB_STEP_SUMMARY"
           }
 
-          report "DeepSeek"
-          if [ -z "${DEEPSEEK_KEY}" ]; then
-            echo "DEEPSEEK_API_KEY_PR is not set; skipping." | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            # `-sS` keeps curl quiet but still prints transport errors. No `-f`: an HTTP
-            # error BODY from these APIs says what is wrong, and -f discards it.
-            curl -sS https://api.deepseek.com/models \
-              -H "Authorization: Bearer ${DEEPSEEK_KEY}" -o /tmp/deepseek.json || true
-            python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
-          import json
-          try:
-              data = json.load(open("/tmp/deepseek.json"))
-          except Exception as exc:
-              print(f"could not parse the response: {exc}")
-          else:
-              ids = [m.get("id") for m in data.get("data", [])]
-              # The error body, verbatim, when there is no model list. A bare "no models"
-              # cannot tell a bad key from a network failure from a changed endpoint.
-              print("\n".join(f"deepseek/{i}" for i in ids) if ids else json.dumps(data, indent=2))
-          PY
-          fi
-
-          report "Google AI Studio"
-          if [ -z "${GEMINI_KEY}" ]; then
-            echo "GEMINI_API_KEY_PR is not set; skipping." | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            # The key goes in a header, not the query string: a URL with a credential in it
-            # lands in proxy logs and in curl's own error messages.
-            curl -sS "https://generativelanguage.googleapis.com/v1beta/models" \
-              -H "x-goog-api-key: ${GEMINI_KEY}" -o /tmp/gemini.json || true
-            python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
-          import json
-          try:
-              data = json.load(open("/tmp/gemini.json"))
-          except Exception as exc:
-              print(f"could not parse the response: {exc}")
-          else:
-              names = [
-                  m.get("name", "").removeprefix("models/")
-                  for m in data.get("models", [])
-                  # Only models that can actually serve a review. The list also carries
-                  # embedding and token-counting models, which cannot.
-                  if "generateContent" in m.get("supportedGenerationMethods", [])
-              ]
-              print("\n".join(f"gemini/{n}" for n in names) if names else json.dumps(data, indent=2))
-          PY
-          fi
+          # An absent auth prefix is normal: one scheme wants "Bearer ", another wants the
+          # bare key in its own header. An absent URL or key just skips that provider.
+          ask A "${A_URL:-}" "${A_HDR:-}" "${A_PRE:-}" "${A_KEY:-}"
+          ask B "${B_URL:-}" "${B_HDR:-}" "${B_PRE:-}" "${B_KEY:-}"
 
           echo ""
-          echo "Use these exact strings, with the provider prefix, in pr_agent.yml."
+          echo "Take an id from the output, with its provider prefix, into PR_REVIEW_MODEL"
+          echo "or PR_REVIEW_FALLBACKS via 'gh variable set'."

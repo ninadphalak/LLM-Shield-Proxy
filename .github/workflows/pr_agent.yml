@@ -64,6 +64,34 @@ jobs:
     timeout-minutes: 20
     name: Review the pull request
     steps:
+      # The review tool locates a credential by reading an env var whose NAME it chooses,
+      # e.g. `<PROVIDER>.KEY`. That name is the left-hand side of the mapping, and GitHub
+      # Actions does not allow an expression there -- `${{ vars.X }}: value` is not a valid
+      # env key -- so moving the model IDS to variables did nothing for these. Exporting
+      # the pair at runtime does: the name comes from a variable too, and this file names
+      # no provider.
+      #
+      # The credential ends up in the job environment either way; what changes is that the
+      # public file no longer says whose it is. Actions masks secret values in logs in both
+      # designs.
+      - name: Configure review credentials
+        env:
+          PROVIDER_A_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
+          PROVIDER_B_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
+          PROVIDER_A_KEY_ENV: ${{ vars.PR_PROVIDER_A_KEY_ENV }}
+          PROVIDER_B_KEY_ENV: ${{ vars.PR_PROVIDER_B_KEY_ENV }}
+        run: |
+          set -euo pipefail
+          # No `set -x` here, ever: it would echo the expanded credential.
+          # An unset credential is not an error -- the chain skips that provider, which is
+          # what lets a partly configured repository still get a review.
+          if [ -n "${PROVIDER_A_KEY_ENV:-}" ] && [ -n "${PROVIDER_A_KEY:-}" ]; then
+            echo "${PROVIDER_A_KEY_ENV}=${PROVIDER_A_KEY}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${PROVIDER_B_KEY_ENV:-}" ] && [ -n "${PROVIDER_B_KEY:-}" ]; then
+            echo "${PROVIDER_B_KEY_ENV}=${PROVIDER_B_KEY}" >> "$GITHUB_ENV"
+          fi
+
       - name: PR Agent action step
         id: pragent
         # Pinned to a commit SHA with the tag in a comment, matching every other action in
@@ -73,11 +101,6 @@ jobs:
         uses: the-pr-agent/pr-agent@f3b385ea2927247ddcff2fe252472380b9c8f5fc # v0.45.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Two credentials, so the chain can leave a provider that is having a bad
-          # day. Unset keys are harmless: a model whose key is missing simply fails and
-          # the chain moves on.
-          DEEPSEEK.KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
-          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
           CONFIG.MODEL: ${{ vars.PR_REVIEW_MODEL }}
           # Ordered, and the order is the argument. Earlier entries should be cheap and
           # same-provider (they cover one model being overloaded); the LAST entry should
