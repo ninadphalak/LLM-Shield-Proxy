@@ -116,6 +116,7 @@ _ATTACK_SEEDS = {
     "hexish": "abcdef0123",
     "digits": "1234567890",
     "b64ish": "QUJDREVG",
+    "slack_hyphens": "xoxb-" + "a-" * 5,
 }
 
 

@@ -303,6 +303,14 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
         ),
     ),
     (
+        "SLACK_TOKEN",
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"x(?:ox[baprse]|app)-(?:[0-9a-zA-Z]+-)+[0-9a-zA-Z]+"
+            + _ASCII_RIGHT_BOUNDARY
+        ),
+    ),
+    (
         "SSH_PRIVATE_KEY",
         re.compile(r"-----BEGIN.*?PRIVATE KEY-----", re.DOTALL),
     ),
