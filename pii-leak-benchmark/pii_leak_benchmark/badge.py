@@ -150,11 +150,12 @@ def _provenance(report: dict[str, Any], verdict: Any) -> dict[str, str]:
         or report.get("harness_revision")
         or "unrecorded"
     )
-    target = (
-        _dig(report, "implementation", "name")
-        or _dig(report, "contract", "model")
-        or "unrecorded"
-    )
+    # NO `contract.model` fallback here, deliberately. An operator run records the model
+    # ROUTING ALIAS, not the name of the gateway under test, and filling `target` with it
+    # labelled `gpt-4o-mini` as the product that leaked. That is a worse failure than the
+    # `unrecorded` it replaced: a blank says the run did not record it, while a wrong name
+    # says something the run never measured. The alias is reported below as what it is.
+    target = _dig(report, "implementation", "name") or "unrecorded"
     target_version = (
         report.get("target_version")
         or _dig(report, "implementation", "version")
@@ -175,6 +176,12 @@ def _provenance(report: dict[str, Any], verdict: Any) -> dict[str, str]:
     instrument = _dig(report, "contract", "instrument_sha256")
     if instrument:
         block["instrument_sha256"] = str(instrument)
+    # The model the run was routed through, under its own name so it cannot be mistaken
+    # for the gateway. Useful context, and on an operator run it is often the only thing
+    # naming what was exercised.
+    model = _dig(report, "contract", "model")
+    if model:
+        block["model"] = str(model)
     return block
 
 

@@ -253,9 +253,20 @@ def test_an_operator_run_records_its_harness_and_target():
     )["pii_leak_benchmark"]
 
     assert block["harness_revision"] == "0.3.1"
-    assert block["target"] == "gateway-under-test"
     assert block["target_version"] == "2.0.0"
     assert block["instrument_sha256"] == "abc123"
+    # The routing alias is reported as the model, never as the target.
+    assert block["model"] == "gateway-under-test"
+    assert block["target"] == "unrecorded"
+
+
+def test_the_model_alias_is_never_passed_off_as_the_gateway():
+    """An operator run records the model it routed through, not the name of the gateway
+    under test. Filling `target` from it labelled a model as the product that leaked,
+    which is worse than the blank it replaced: a blank says the run did not record it."""
+    block = build_badge(_operator(contract={"model": "gpt-4o-mini"}))["pii_leak_benchmark"]
+    assert block["target"] == "unrecorded"
+    assert block["model"] == "gpt-4o-mini"
 
 
 def test_a_research_report_still_records_its_own_field_names():
