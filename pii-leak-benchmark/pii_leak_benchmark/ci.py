@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlsplit
 
-from . import __version__
+from . import __version__, explain
 from .artifact import write_json_artifact
 from .operator_profile import PROFILE_VERSION, coverage, seeded_fixture
 from .selfcheck import (
@@ -92,6 +92,24 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) 
                      "Check upstream routing, credentials and capture reachability." if state == "not measured" else
                      "No leak observed for this test shape.")
         lines.append(f"| {_cell(entity)} | {_cell(before)} | {_cell(state)} | {next_step} |")
+    findings = run.get("findings") or []
+    if findings:
+        # In a fenced block, not a table. The two lines have to sit under each other with
+        # the arrow on the wrong one; a Markdown table would reflow them and the display
+        # would stop saying which side was supposed to differ.
+        #
+        # SHAPES, NOT VALUES. This summary is appended to GITHUB_STEP_SUMMARY and read by
+        # everyone who can see the pull request. `<EMAIL>` keeps the row actionable without
+        # handing a specimen to that audience; the operator running the check locally sees
+        # the values in their own terminal instead.
+        lines.extend(["", "## What leaked, and why it matters", "", "```"])
+        for item in findings:
+            lines.extend(str(line) for line in item.get("display", []))
+            lines.append("")
+        lines.extend(["```", "",
+                      "Values are shown as shapes. The specimens this run generated are "
+                      "printed to the terminal of the machine that ran it and are "
+                      "deliberately absent from every artifact here."])
     lines.extend(["", "## Required behavior", ""])
     for check, passed in run["required_checks"].items():
         lines.append(f"- `{check}`: {'pass' if passed else 'FAIL'}")
@@ -280,11 +298,19 @@ def main(argv: list[str] | None = None) -> int:
                 )
         write_json_artifact(out / f"{label}.raw.json", report, indent=2)
         verdict, reason = verdict_for(report, duty=args.duty)
+        # Deliberately built WITHOUT specimens. Everything this command writes is an
+        # artifact, so the values are never fetched here at all rather than fetched and
+        # then remembered not to print.
+        findings = [
+            explain.published_dict(f)
+            for f in explain.findings_from_report(report, seed=args.seed, duty=args.duty)
+        ]
         ignored = {"response_fidelity", "fragmentation_safety"} if args.duty == "anonymize" else set()
         return {"schema": "pii-leak-benchmark/operator-run/v1", "contract": contract,
                 "verdict": verdict, "reason": reason, "target_version": version,
                 "generated_at": report["generated_at"], "entities": measured_entities(report),
                 "required_checks": {name: check["passed"] for name, check in report["checks"].items() if name not in ignored},
+                "findings": findings,
                 "coverage": coverage(report["fixture"]["formats"])}
 
     try:

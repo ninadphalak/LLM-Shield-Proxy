@@ -24,6 +24,10 @@ Public API:
 - ``write_conformance_report`` - write a report as LF-terminated JSON.
 - ``build_attestation`` - self-reported CI provenance for a run, or ``None``.
 - ``derive_outcome`` / ``rationale_for`` - what a published row is ALLOWED to say.
+- ``OperatorSpecimens`` / ``findings_from_report`` / ``render`` - the explanation layer.
+  Pass ``OperatorSpecimens()`` to ``run_http_conformance`` to receive the run's generated
+  values; they are never written to the report. ``render(..., reveal=False)`` publishes
+  shapes instead. See ``explain`` for the rule.
 
 Reports validate against the Streaming Privacy Gateway (SPG) report schema in
 ``spec/v1.0.0`` of the LLM-Shield-Proxy repository. The specification keeps the SPG
@@ -31,6 +35,13 @@ name; only this tool carries the searchable one.
 """
 
 from pii_leak_benchmark.artifact import write_conformance_report
+from pii_leak_benchmark.explain import (
+    Finding,
+    OperatorSpecimens,
+    findings_from_report,
+    published_dict,
+    render,
+)
 from pii_leak_benchmark.http_profile import (
     CaptureSession,
     CaptureUnreachableError,
@@ -43,10 +54,15 @@ from pii_leak_benchmark.redaction_claim import derive_outcome, rationale_for
 __all__ = [
     "CaptureSession",
     "CaptureUnreachableError",
+    "Finding",
+    "OperatorSpecimens",
     "build_attestation",
     "capture_session",
     "derive_outcome",
+    "findings_from_report",
+    "published_dict",
     "rationale_for",
+    "render",
     "run_http_conformance",
     "source_revision",
     "write_conformance_report",
