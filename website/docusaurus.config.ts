@@ -195,7 +195,27 @@ const config: Config = {
   markdown: {
     mermaid: true,
   },
-  themes: ['@docusaurus/theme-mermaid'],
+  themes: [
+    '@docusaurus/theme-mermaid',
+    // LOCAL search, deliberately, rather than hosted DocSearch.
+    //
+    // Docusaurus ships no search at all by default, and the usual answer is Algolia.
+    // That would mean every visitor's browser calling a third party on each keystroke,
+    // on the documentation site for a gateway whose selling point is that it makes no
+    // outbound calls. This builds the index at build time and serves it as static
+    // assets from this origin: no account, no crawler, nothing to phone home, and it
+    // works behind an air gap like the rest of the product it documents.
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true, // cache-bust the index when content changes
+        indexBlog: true,
+        docsRouteBasePath: '/docs',
+        highlightSearchTermsOnTargetPage: true,
+        explicitSearchResultPath: true,
+      },
+    ],
+  ],
 };
 
 export default config;
