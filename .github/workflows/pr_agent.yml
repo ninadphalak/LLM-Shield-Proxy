@@ -69,6 +69,13 @@ jobs:
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
           CONFIG.MODEL: "gemini/gemini-3.8-flash"
           CONFIG.FALLBACK_MODELS: '["gemini/gemini-3.1-flash"]'
+          # MUST match the `pull_request` types above. PR-Agent's own default is
+          # ['opened', 'reopened', 'ready_for_review', 'review_requested'] -- WITHOUT
+          # `synchronize` -- so a workflow that triggers on a push to an open PR builds
+          # the Docker image, starts the agent, logs "Skipping action: synchronize" and
+          # exits green having reviewed nothing. A listened-for event that is then
+          # discarded is worse than not listening: it bills a runner and reports success.
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review", "synchronize"]'
           # Review and suggestions, yes. `auto_describe` rewrites the PR body, and the
           # bodies in this repository carry the measurements and the reasoning behind a
           # change; a generated summary would overwrite the evidence.
