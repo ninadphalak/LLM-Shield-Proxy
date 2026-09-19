@@ -25,6 +25,31 @@ const config: Config = {
 
   onBrokenLinks: 'warn',
 
+  /**
+   * Traffic measurement, on the same terms this project asks of everyone else.
+   *
+   * WHY NOT GOOGLE ANALYTICS. This site argues that you should not send personal data to a
+   * third party without checking what leaves. Shipping GA on it would hand every reader's
+   * browsing to an advertising company, which is the behaviour the benchmark exists to
+   * catch. Cloudflare Web Analytics sets no cookie, stores no per-visitor identifier and
+   * needs no consent banner, and this domain already resolves through Cloudflare, so it
+   * adds no vendor that was not already in the path.
+   *
+   * The token is not a credential: it ships in the HTML of every page and only says which
+   * site a beacon belongs to. It comes from the environment so a fork builds clean and a
+   * local `npm run build` does not report traffic. Unset, this is an empty array and no
+   * beacon is emitted at all.
+   */
+  scripts: process.env.CF_ANALYTICS_TOKEN
+    ? [
+        {
+          src: 'https://static.cloudflareinsights.com/beacon.min.js',
+          defer: true,
+          'data-cf-beacon': JSON.stringify({token: process.env.CF_ANALYTICS_TOKEN}),
+        },
+      ]
+    : [],
+
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
   // may want to replace "en" with "zh-Hans".

@@ -31,6 +31,10 @@ jobs:
           npm ci
 
       - name: Build Docusaurus
+        env:
+          # Absent on forks and in pull requests, where the build simply emits no
+          # analytics beacon. See the `scripts` block in docusaurus.config.ts.
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
         run: |
           cd website
           npm run build

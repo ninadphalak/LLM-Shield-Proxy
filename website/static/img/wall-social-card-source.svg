@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00ff9d"/>
+      <stop offset="1" stop-color="#00a8ff"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="85%" cy="12%" r="75%">
+      <stop offset="0" stop-color="#161b22"/>
+      <stop offset="1" stop-color="#0a0e14"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bgGlow)"/>
+
+  <text x="70" y="82" fill="#00ff9d" font-size="23" font-weight="700" letter-spacing="3.5">PII-LEAK-BENCHMARK &#183; RESULTS WALL</text>
+
+  <text x="70" y="168" fill="#ffffff" font-size="66" font-weight="800">No gateway has passed yet</text>
+  <text x="70" y="220" fill="#8b949e" font-size="28">Ours has not either, and we wrote the check.</text>
+
+  <!-- Stat chips -->
+  <g>
+    <rect x="70" y="268" width="330" height="150" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+    <text x="100" y="342" fill="#e6edf3" font-size="62" font-weight="800">8</text>
+    <text x="100" y="382" fill="#8b949e" font-size="22">configurations measured</text>
+
+    <rect x="435" y="268" width="330" height="150" rx="12" fill="#0d1117" stroke="rgba(248,81,73,0.45)" stroke-width="2"/>
+    <rect x="435" y="268" width="4" height="150" rx="2" fill="#f85149"/>
+    <text x="465" y="342" fill="#f85149" font-size="62" font-weight="800">0</text>
+    <text x="465" y="382" fill="#8b949e" font-size="22">passed every check</text>
+
+    <rect x="800" y="268" width="330" height="150" rx="12" fill="#0d1117" stroke="rgba(248,81,73,0.45)" stroke-width="2"/>
+    <rect x="800" y="268" width="4" height="150" rx="2" fill="#f85149"/>
+    <text x="830" y="342" fill="#f85149" font-size="62" font-weight="800">6</text>
+    <text x="830" y="382" fill="#8b949e" font-size="22">sent data to the provider</text>
+  </g>
+
+  <text x="70" y="470" fill="#8b949e" font-size="23">Each row is one version in one stated configuration, not a verdict on the product.</text>
+  <text x="70" y="506" fill="#8b949e" font-size="23">Nothing is ranked. Every result is reproducible from the published reports.</text>
+
+  <text x="70" y="576" fill="url(#grad)" font-size="24" font-weight="700">llmshieldproxy.com</text>
+
+  <g transform="translate(1012,498) scale(0.36)">
+    <path d="M110 0 L210 34 V110 C210 175 165 220 110 245 C55 220 10 175 10 110 V34 Z"
+          fill="none" stroke="url(#grad)" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M110 0 L210 34 V110 C210 175 165 220 110 245 Z" fill="url(#grad)" fill-opacity="0.12"/>
+    <path d="M68 122 L98 152 L155 90" stroke="url(#grad)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>
