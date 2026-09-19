@@ -71,8 +71,14 @@ def test_the_guard_rejects_the_schemes_that_execute() -> None:
     schemes = {value.strip().strip("'\"") for value in allowed.group(1).split(",") if value.strip()}
     assert schemes == {"http", "https", "mailto"}, schemes
 
-    # Control characters must be stripped BEFORE the scheme is read, or `java\nscript:`
-    # is parsed as a scheme of `java` and waved through while the browser executes it.
-    strip_index = guard.index("replace(/[\\u0000-\\u0020]/g")
+    # Tab, newline and carriage return must be removed BEFORE the scheme is read. A
+    # browser ignores them anywhere in a URL, so `java<TAB>script:` reads as a scheme of
+    # `java` to a checker that looks first and executes as `javascript:` in the browser.
+    strip_index = guard.index("\\u0009")
     scheme_index = guard.index("SCHEME.exec(")
     assert strip_index < scheme_index
+
+    # Interior spaces must NOT be stripped, only trimmed at the ends. Removing one
+    # rewrites a legitimate link to a different destination. The trim is anchored; the
+    # unanchored removal covers only the three characters above.
+    assert "^[\\u0000-\\u0020]+|[\\u0000-\\u0020]+$" in guard

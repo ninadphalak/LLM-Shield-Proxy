@@ -24,11 +24,19 @@ const SAFE_SCHEMES = new Set(['http', 'https', 'mailto']);
 export function safeHref(raw?: string): string | undefined {
   if (!raw) return undefined;
 
-  // Strip control characters and whitespace BEFORE looking for the scheme. Browsers
-  // ignore tabs and newlines inside a URL, so `java\nscript:alert(1)` is parsed as
+  // Normalise exactly as a browser does, BEFORE looking for the scheme, and no more.
+  //
+  // Tab, newline and carriage return are ignored anywhere inside a URL, so
+  // `java\nscript:alert(1)` is parsed as
   // `javascript:` while a naive check sees a scheme of `java\nscript` and no match at
-  // all. Stripping first means the check sees what the browser will see.
-  const value = raw.replace(/[\u0000-\u0020]/g, '');
+  // all. Those three are removed everywhere, and leading or trailing controls and
+  // spaces are trimmed, which browsers also do. INTERIOR spaces are left alone: a
+  // browser percent-encodes them rather than dropping them, so removing one here would
+  // silently point a legitimate link at a different destination, which is the one thing
+  // this helper promises not to do.
+  const value = raw
+    .replace(/[\u0009\u000A\u000D]/g, '')
+    .replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '');
   if (!value) return undefined;
 
   const scheme = SCHEME.exec(value);
