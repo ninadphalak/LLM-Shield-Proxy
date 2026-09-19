@@ -9,6 +9,7 @@ third-party attestation.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from pii_leak_benchmark.cite import build_citation, main
@@ -177,11 +178,36 @@ def test_a_pipe_in_a_value_cannot_split_the_row():
     assert row.count("|") - row.count(r"\|") == 3
 
 
-def test_a_backtick_in_a_value_cannot_end_the_code_span():
-    out = build_citation(
-        _report(implementation={"name": "gw` and `escaped", "version": "1.0"})
-    )
-    assert r"gw\` and \`escaped" in out
+def _code_span(out: str, needle: str) -> tuple[str, str]:
+    """Return (fence, content) of the code span on the row containing `needle`.
+
+    The earlier version of this test asserted that escaped backticks APPEARED in the
+    output, which passed while the span still closed early: CommonMark ignores backslash
+    escapes inside a code span. Reading the fence back is what actually checks the
+    property, so a regression here fails instead of passing quietly.
+    """
+    row = next(line for line in out.splitlines() if needle in line)
+    cell = row.split(" | ", 1)[1].rstrip(" |")
+    fence = re.match(r"`+", cell).group()
+    assert cell.endswith(fence), "the span does not close with the fence it opened"
+    return fence, cell[len(fence) : -len(fence)]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["gw`x", "a``b", "```triple```", "`lead", "trail`"],
+)
+def test_a_backtick_in_a_value_cannot_end_the_code_span(name):
+    """A fence must be longer than the longest run inside it, or the value escapes into
+    prose and takes the rest of the row with it."""
+    out = build_citation(_report(implementation={"name": name, "version": "1.0"}))
+    fence, content = _code_span(out, name.strip("`") or "lead")
+
+    longest = max(len(run) for run in re.findall("`+", name))
+    assert len(fence) > longest
+    # The value survives verbatim, with no escape characters inserted into it.
+    assert content.strip(" ") == name
+    assert "\\`" not in content
 
 
 def test_a_newline_in_a_value_cannot_forge_an_extra_row():
@@ -200,14 +226,14 @@ def test_the_text_style_also_flattens_newlines():
     assert "gw forged" in out
 
 
-def test_a_backslash_is_escaped_before_the_characters_it_could_escape():
-    """Order matters: escaping the pipe first and the backslash after would double back
-    over the escape just inserted."""
-    out = build_citation(
-        _report(implementation={"name": "back" + chr(92) + "slash", "version": "1.0"})
-    )
-    # One backslash in, two out. chr(92) rather than a literal, so the count is plain.
-    assert "back" + chr(92) * 2 + "slash" in out
+def test_a_backslash_survives_verbatim():
+    """Backslashes are NOT escaped, deliberately. Inside a code span a backslash is
+    literal, so doubling it would display two where the report held one, and this block
+    is evidence about what was measured."""
+    name = "back" + chr(92) + "slash"
+    out = build_citation(_report(implementation={"name": name, "version": "1.0"}))
+    _fence, content = _code_span(out, "slash")
+    assert content == name
 
 
 def test_a_non_object_metrics_field_degrades_instead_of_raising():

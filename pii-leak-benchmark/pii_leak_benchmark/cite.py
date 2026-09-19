@@ -20,10 +20,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from typing import Any, Optional, Sequence
 
 _MISSING = "unrecorded"
+
+# Runs of backticks inside a value, which decide how long its code fence must be.
+_BACKTICK_RUN = re.compile(r"`+")
 
 
 def _dig(report: dict[str, Any], *path: str, default: Any = None) -> Any:
@@ -53,21 +57,43 @@ def _flatten(value: str) -> str:
 
 
 def _cell(value: str) -> str:
-    """Make a report-supplied value safe to sit inside a Markdown table cell.
+    """Make a report-supplied value safe to sit in a GFM table cell.
 
     Every value here is free-form text from a report the caller supplied, and the
-    rendered block is pasted straight into issues and READMEs. A `|` splits the row into
-    extra cells, a newline ends it early and starts a bogus one, and a backtick closes
-    the inline-code span so the rest of the value escapes into prose. Any of those turns
-    a block meant to be CHECKABLE into one that is merely misleading, which is the exact
-    property this command exists to provide.
+    rendered block is pasted straight into issues and READMEs, so a value that can break
+    out of its cell turns a block meant to be CHECKABLE into one that merely looks
+    complete.
 
-    Escaped rather than stripped: a value is evidence, and silently deleting characters
-    from it would make two different reports render identically.
+    Only the pipe is escaped, and only because GFM splits table rows on unescaped pipes
+    BEFORE any inline parsing, which is why `\\|` works even inside a code span and is
+    the documented way to carry a literal pipe. Backslashes are deliberately NOT escaped:
+    inside a code span a backslash is literal, so doubling it would display two where the
+    report held one, and this block is evidence.
     """
-    escaped = value.replace("\\", "\\\\").replace("|", "\\|").replace("`", "\\`")
-    # Newlines cannot be escaped into a table cell at all; Markdown ends the row there.
-    return _flatten(escaped)
+    return _flatten(value).replace("|", "\\|")
+
+
+def _code_cell(value: str) -> str:
+    """Render a value as a code span it cannot break out of.
+
+    ESCAPING A BACKTICK DOES NOT WORK HERE, which is the whole reason this exists.
+    CommonMark does not process backslash escapes inside code spans, so `` \\` `` still
+    closes the span: the first version of this escaped backticks, and a value of
+    ``gw`x`` rendered as the span ``gw\\`` followed by ``x`` as ordinary prose, taking
+    the rest of the row with it. The test passed, because it asserted the escaped text
+    appeared rather than that the span survived.
+
+    The rule that does work is the delimiter rule: a code span may be opened with any
+    run of backticks and is closed only by a run of exactly the same length, so a fence
+    one longer than the longest run inside the value can never be terminated early. A
+    value that starts or ends with a backtick is padded with a space, which CommonMark
+    strips when both sides have one.
+    """
+    flat = _cell(value)
+    longest = max((len(run) for run in _BACKTICK_RUN.findall(flat)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if flat.startswith("`") or flat.endswith("`") else ""
+    return f"{fence}{pad}{flat}{pad}{fence}"
 
 
 def _short(digest: Any, keep: int = 16) -> str:
@@ -166,7 +192,7 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
         "| Field | Value |",
         "|---|---|",
     ]
-    lines += [f"| {_cell(label)} | `{_cell(value)}` |" for label, value in rows]
+    lines += [f"| {_cell(label)} | {_code_cell(value)} |" for label, value in rows]
     lines += ["", f"_{caveat}_"]
     return "\n".join(lines) + "\n"
 
