@@ -2874,7 +2874,9 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
         {t for t in types if not t.split(";")[0].strip().lower() == "text/event-stream"}
     )
     missing_done = [r.case for r in scored if not r.done_marker]
-    # Unanswered cases fail the validation.
+    # Unanswered cases fail the validation. A case dying in transport appends no status 
+    # code and is excluded from missing_done. Previously, runs failing in transport 
+    # wrongly reported `passed: true`. We must fail closed: "could not look" != "looked and fine".
     unanswered = [r for r in results if r.transport_error is not None]
     errors: list[str] = []
     if bad_types:
@@ -2901,7 +2903,13 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
 
 
 def _fidelity_check(observable: list[RunResult], attempted: list[RunResult]) -> dict[str, Any]:
-    """Echo fidelity over cases where echo was measurable."""
+    """Echo fidelity over cases where echo was measurable.
+    
+    A rate without its denominator is not a measurement. Removing unmeasurable cases 
+    from the denominator of a boolean check previously caused empty results (e.g. 
+    when a relay forwards nothing) to incorrectly pass as `expected_value_reconstructed: true`.
+    Requested counts assertions; completed counts measurable ones. Zero measurements is a failure.
+    """
     matching = sum(1 for r in observable for v in r.echo_recovered.values() if v)
     completed = sum(len(r.echo_recovered) for r in observable)
     requested = sum(len(r.echo_recovered) for r in attempted)
@@ -2943,7 +2951,12 @@ def _injection_evidence(
 
 
 def _fragmentation_strategy_label(results: list[RunResult]) -> str:
-    """Fragmentation strategy recorded during the run."""
+    """Fragmentation strategy recorded during the run.
+    
+    This is what was ACTUALLY DONE, read off the adversarial cases, rather than a hardcoded 
+    label. Previously, the report could contradict itself by claiming "exhaustive-2-part" 
+    while limiting cuts to midpoints.
+    """
     # EVERY result, not just the adversarial ones. `run_case` records the oracle on both
     # arms, and a run whose adversarial cases all died in transport would otherwise be
     # published under the midpoint label whatever oracle was actually requested.

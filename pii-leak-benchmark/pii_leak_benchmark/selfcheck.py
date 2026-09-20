@@ -1,34 +1,14 @@
 """``pii-leak-benchmark selfcheck`` -- the operator smoke test.
 
-WHY THIS EXISTS. The flat command is built for PUBLISHING a comparative row, so it
-requires the vendor's claim, a citation for it, and the exact setting that enabled
-redaction. Those flags are what stop a published table from saying "Fail" about a product
-that never offered redaction, and they are not negotiable there.
+Answers "does my deployment leak?" without the friction of the publishable `flat` command 
+(which requires vendor claims and citations). 
 
-They are pure friction for the other audience: an operator pointing the harness at their
-own gateway to answer one question -- *does my deployment leak?* There is no vendor to
-cite. It is their own proxy.
+*   `outcome` (Publishable Row): Remains `claim-unstated` (fail-closed, not publishable).
+*   `verdict` (Operator Action): Defined here to provide actionable feedback.
 
-WHAT IT DOES NOT DO. It does not weaken the claim machinery; it declines to participate in
-it. The run records no claim, so `outcome` derives to `claim-unstated` exactly as it would
-from the flat command with no claim flags -- the fail-closed default, not publishable as a
-verdict about anyone. What this module adds is a second, separate reading of the same
-measurement, addressed to the person who owns the deployment:
-
-    outcome   -- what a PUBLISHED ROW may say about a product. Unchanged, still derived.
-    verdict   -- what the OPERATOR should do about their own gateway. Defined here.
-
-Those answer different questions and are deliberately not the same field. A selfcheck can
-say LEAK while `outcome` says `claim-unstated`, and both are correct: raw values reached
-the upstream, and you have not written down enough for that to be a publishable finding
-about a product.
-
-THE TRAP THIS IS BUILT AROUND. The dangerous result is not a leak, which is loud. It is a
-run whose traffic never reached the capture at all: every needle check trivially passes
-because nothing was ever inspected, and an operator reads "no leak" and ships. The harness
-already refuses to call that a pass -- `attributable` gates the outcome -- and this command
-refuses harder, reporting NOT MEASURED and exit 2. Never let a quiet misconfiguration read
-as a clean bill of health.
+Crucially, this command refuses to return CLEAN if traffic never reached the capture (e.g., 
+a misconfigured proxy), returning NOT MEASURED (exit 2) instead. Every needle check passing 
+because nothing was inspected is not a clean bill of health.
 """
 
 from __future__ import annotations
@@ -69,10 +49,8 @@ claim, so its outcome is claim-unstated by design. To publish a comparative resu
 the flat command and record the claim.
 """
 
-# Re-derived from the report rather than re-measured: `attributable` is
-# `bool(correlated)` and `leaked` is `bool(leaked_types or unattributed_leaked_types)`
-# in http_profile. Keeping these as accessors means the selfcheck verdict cannot drift
-# from the outcome derivation without a test noticing.
+# Re-derive attributable/leaked from the report to prevent the selfcheck verdict from 
+# drifting from the outcome derivation without tests noticing.
 _BOUNDARY = "configured_upstream_boundary"
 
 # Named here rather than imported at module scope: `cli` imports this module, and
@@ -117,12 +95,10 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
     parser.add_argument(
         "--target-header",
         action="append",
-        # The SAME default the flat command uses, so `append` adds to the environment
-        # rather than replacing it. With `default=None` and a post-hoc fallback, supplying
-        # one CLI header silently discarded every header in CONFORMANCE_TARGET_HEADERS --
-        # which is where credentials and routing headers are supposed to live. The check
-        # then runs unauthenticated, or against a different route, and reports NOT
-        # MEASURED for a reason that has nothing to do with the gateway.
+        # Uses the same default as `flat` so `append` adds to the environment rather than 
+        # replacing it. A `None` default would silently discard CONFORMANCE_TARGET_HEADERS 
+        # (credentials/routing) when a single CLI header is provided, causing unauthenticated
+        # requests and false NOT MEASURED reports.
         default=_target_headers_from_env(),
         metavar="NAME=VALUE",
         help="Additional request header; repeat as needed. Values are not written to the "
@@ -170,9 +146,8 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).
 
-    Deliberately ordered attributability first. A run that never reached the capture
-    inspected nothing, so every needle check passed vacuously; reporting that as CLEAN
-    would be the one failure mode that actively misleads someone into shipping.
+    Attributability is checked first. If a run never reached the capture, it inspected 
+    nothing and passed vacuously; returning CLEAN here would actively mislead the operator.
     """
     boundary = report["checks"][_BOUNDARY]
 
@@ -219,15 +194,10 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
 
 
 def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
-    """One row per entity TESTED, not just the ones that leaked.
+    """Prints one row per entity TESTED.
 
-    Printing only the leaks makes a clean run unreadable: nothing distinguishes "SSN was
-    tested and your gateway contained it" from "SSN was never tested". Those support
-    opposite decisions, and the second one is the reading that gets someone hurt.
-
-    Both halves come from the report as it already stands -- `fixture.formats` is the set
-    that was sent, `leaked_entity_types` the subset that escaped -- so this is a reporting
-    change and not a second measurement.
+    Printing only leaks makes a clean run unreadable, as it fails to distinguish between
+    "SSN was tested and contained" and "SSN was never tested". 
     """
     tested = sorted(report.get("fixture", {}).get("formats", {}))
     if not tested:
@@ -277,9 +247,8 @@ def findings_for(
 ) -> list[explain.Finding]:
     """What this run should SAY, under the duty the operator declared.
 
-    A thin named wrapper rather than an inline call, because the duty reaching the display
-    is a behaviour worth a test of its own: without it an anonymizing gateway was told its
-    values did not come back, under a heading about leaks, on a CLEAN run.
+    Maintained as a named wrapper so the duty logic (e.g. preventing anonymizing gateways 
+    from being told their values didn't return on a CLEAN run) can be tested directly.
     """
     return explain.findings_from_report(report, specimens, duty=duty)
 
@@ -313,11 +282,9 @@ def _print_report(
 
     _print_per_entity(report, boundary)
 
-    # The values, before the matcher table. "EMAIL / literal / body" says how a finding
-    # was produced; it does not say what a reader should do, and it is the row a maintainer
-    # skips. Their own address coming back out of their own gateway is the row they read.
-    # `reveal=True` because these are this run's synthetic specimens, generated on this
-    # machine seconds ago, and they are deliberately absent from the JSON.
+    # Print the synthetic specimens (`reveal=True`) above the matcher table. Showing the 
+    # actual generated values makes the failure actionable, whereas the matcher table 
+    # ("EMAIL / literal / body") only explains how the finding was produced.
     explain.print_findings(
         findings_for(report, specimens, duty=duty), reveal=specimens is not None
     )
@@ -372,8 +339,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from pii_leak_benchmark.http_profile import run_http_conformance
 
     args = build_parser().parse_args(argv)
-    # Asked for explicitly. The report is written to disk; this is not, and keeping them
-    # as separate objects is what stops the values following the report into an artifact.
+    # Passed separately from the report to prevent the generated synthetic specimens 
+    # from leaking into the on-disk JSON artifact.
     specimens = OperatorSpecimens()
 
     try:
@@ -390,15 +357,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             capture_token=os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token,
             capture_public_url=args.capture_public_url,
             extra_headers=headers_from_args(args),
-            # Credentials ON by default here, OFF in the flat command. An operator asking
-            # "does my deployment leak?" means secrets as much as personal data -- a
-            # developer pasting an API key into a prompt is the likelier incident. The flat
-            # command keeps the published three-type fixture so old rows stay comparable;
-            # a selfcheck report is `claim-unstated` and not publishable as a row, so
-            # widening it cannot corrupt a table.
+            # Credentials are ON by default here (unlike the `flat` command) because 
+            # operator self-checks typically care about secrets as much as personal data.
+            # This doesn't corrupt historical comparisons because selfchecks are not 
+            # publishable rows.
             include_credentials=args.profile == "pii-secrets-v1" and not args.no_credentials,
-            # No claim, on purpose. See the module docstring: this declines to
-            # participate in the publishable-row machinery rather than weakening it.
+            # Force `claim-unstated`. This explicitly declines participation in the 
+            # publishable-row machinery.
             redaction_claim=None,
             specimens=specimens,
         )
@@ -413,10 +378,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     destination = None
     if args.json_out:
-        # Inside the untrusted-run handling, not outside it. An unwritable path raises
-        # OSError, and an uncaught exception exits 1 -- the status this command documents
-        # as LEAK. An operator would read "raw values reached your upstream" when what
-        # actually happened is that a directory was missing.
+        # Caught here to prevent an unwritable path (OSError) from uncaught-exiting with 1,
+        # which this command documents as LEAK. A missing directory should not read as a leak.
         try:
             destination = write_conformance_report(report, args.json_out)
         except (OSError, ValueError) as exc:

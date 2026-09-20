@@ -1074,7 +1074,16 @@ class PIIEngine:
         json_path: str,
         active_profile: Optional[CompiledProfile] = None,
     ) -> str:
-        """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims."""
+        """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
+
+        The blob's edges are inspected first to avoid skipping limits, which tells an 
+        attacker how much padding to add. Measured: a 12 KB base64 blob carrying an 
+        email at its head was caught before hitting the base64 character limit.
+        The interior is not decoded; this bound avoids the cost of full inspection.
+        
+        A `data:` URI is skipped. Rewriting declared media breaks vision models, 
+        which is a worse failure than the risk it removes.
+        """
         policy = settings.UNMAPPED_BLOB_POLICY
         if policy == "block":
             raise UnmappedBlobError(json_path or "<root>", len(blob))
@@ -1083,7 +1092,8 @@ class PIIEngine:
         if policy == "skip" or blob.startswith("data:"):
             return blob
 
-        # The tail offset is aligned back to the blob's OWN 4-character framing.
+        # Align tail offset to the blob's 4-character framing (like oversized base64).
+        # An unaligned slice decodes to a shifted smear, causing tail PII to be missed.
         tail_offset = len(blob) - BLOB_BOUNDARY_SCAN_CHARS
         tail_offset -= tail_offset % 4
         # Joined with a newline so a match cannot straddle the seam.
@@ -1104,7 +1114,8 @@ class PIIEngine:
         )
 
         if edge_scan == "pii_found":
-            # A FIXED marker, not a vault token.
+            # Return a FIXED marker. Minting a vault token would hash and retain the 
+            # entire blob in plaintext in Redis, making the payload size bound pointless.
             return "[UNMAPPED_BLOB_PII_REDACTED]"
 
         return blob

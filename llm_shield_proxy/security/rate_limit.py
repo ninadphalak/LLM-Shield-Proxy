@@ -98,8 +98,7 @@ class DistributedRateLimiter:
                     result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
                 except Exception as e:
                     if "NOSCRIPT" in str(e):
-                        # Script was flushed (Redis restart/failover/SCRIPT FLUSH -- routine ops
-                        # events). Reload once and retry before giving up on this call.
+                        # Reload flushed script (e.g. after Redis restart/failover) and retry.
                         async with self._lock:
                             self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
                         result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, 1)  # type: ignore
@@ -107,9 +106,8 @@ class DistributedRateLimiter:
                         raise
                 return bool(result)
             except Exception as e:
-                # Security Note: invalidate the cached SHA so a future call re-attempts
-                # distributed limiting once Redis recovers, instead of permanently
-                # degrading to per-process limiting for the rest of the process lifetime.
+                # Invalidate SHA so distributed limiting is retried once Redis recovers, 
+                # rather than permanently degrading to per-process limiting.
                 self._lua_sha = None
                 logging.getLogger(__name__).warning(
                     "Redis error during rate limit evaluation; degrading to in-memory bucket for this call: %s", e
@@ -127,11 +125,7 @@ class DistributedRateLimiter:
 rate_limiter = DistributedRateLimiter()
 
 class DistributedBlastRadiusLimiter:
-    """Entity-Weighted Blast Radius Circuit Breaker (Phase 2).
-
-    Evaluates the volume of sensitive PII entities swapped per minute.
-    Acts as a fail-safe that halts compromised agents attempting bulk data exfiltration.
-    """
+    """Circuit breaker that halts bulk data exfiltration by limiting PII swaps per minute."""
     def __init__(self):
         maxsize = settings.RATE_LIMIT_LOCAL_CACHE_MAXSIZE
         ttl = settings.RATE_LIMIT_LOCAL_CACHE_TTL_SECONDS
@@ -165,8 +159,7 @@ class DistributedBlastRadiusLimiter:
                     result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, requested)  # type: ignore
                 except Exception as e:
                     if "NOSCRIPT" in str(e):
-                        # Script was flushed (Redis restart/failover/SCRIPT FLUSH -- routine ops
-                        # events). Reload once and retry before falling back.
+                        # Reload flushed script and retry before falling back.
                         async with self._lock:
                             self._lua_sha = await vs.async_client.script_load(RATE_LIMIT_LUA)  # type: ignore
                         result = await vs.async_client.evalsha(self._lua_sha, 1, key, rate_per_ms, burst, now_ms, requested)  # type: ignore
@@ -174,10 +167,8 @@ class DistributedBlastRadiusLimiter:
                         raise
                 return bool(result)
             except Exception as e:
-                # Security Note: this limiter guards against bulk PII exfiltration, so it must
-                # never fail OPEN on a Redis error. Invalidate the cached SHA so a future call
-                # re-attempts distributed enforcement once Redis recovers, then fall through to
-                # the in-memory bucket below for a strict, fail-closed per-process limit.
+                # To prevent failing open on Redis errors, invalidate the SHA for future 
+                # recovery and fall back to the strict per-process in-memory limit.
                 self._lua_sha = None
                 logging.getLogger(__name__).warning(
                     "Redis error during blast radius evaluation; degrading to in-memory limiter (fail-closed): %s", e
@@ -189,9 +180,8 @@ class DistributedBlastRadiusLimiter:
                 if virtual_key_id not in self._in_memory_buckets:
                     self._in_memory_buckets[virtual_key_id] = InMemoryBucket(rate_per_sec, burst)
 
-        # InMemoryBucket currently only supports acquire(1), we need to acquire(requested)
-        # We will dynamically adapt the InMemoryBucket for multiple tokens if needed,
-        # but for simplicity in fallback, we'll implement a quick inline check for requested.
+        # Inline logic to acquire `requested` tokens, since `InMemoryBucket.acquire()` 
+        # is hardcoded to 1 token.
         bucket = self._in_memory_buckets[virtual_key_id]
         now = time.monotonic()
         async with bucket.lock:
