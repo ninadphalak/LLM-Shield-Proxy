@@ -1,8 +1,4 @@
-"""``pii-leak-benchmark submit`` -- post a finished result to the results wall.
-
-Sends the citation block, never the full report, to prevent leaking sensitive URLs or secrets.
-Gateway names are explicitly required, not guessed from model aliases.
-"""
+"""``pii-leak-benchmark submit`` -- post a finished result to the results wall."""
 
 from __future__ import annotations
 
@@ -23,8 +19,7 @@ from pii_leak_benchmark import report_fields as fields
 SUBMISSION_REPO = "ninadphalak/LLM-Shield-Proxy"
 SUBMISSION_LABEL = "conformance-result"
 
-# The sections of a submission, in order.
-# The headings are a contract between this command, the issue form, and the intake script.
+# Ordered submission sections.
 SUBMISSION_SECTIONS = (
     "Gateway",
     "Version and configuration",
@@ -87,7 +82,7 @@ def build_title(report: dict[str, Any]) -> str:
 
 
 def submission_url(report: dict[str, Any], *, repo: str = SUBMISSION_REPO) -> str:
-    """Generate a prefilled issue URL, excluding the citation to avoid silent URL truncation by GitHub."""
+    """Generate a prefilled issue URL."""
     query = urlencode(
         {
             "title": build_title(report),
@@ -132,7 +127,7 @@ def _gh_available() -> bool:
 
 
 def _create_via_gh(title: str, body: str, repo: str) -> str:
-    """Create an issue via `gh` using `--body-file` to bypass command-line length limits."""
+    """Create an issue via `gh`."""
     handle = tempfile.NamedTemporaryFile(
         "w", suffix=".md", delete=False, encoding="utf-8", newline="\n"
     )

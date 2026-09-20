@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Turn a benchmark result posted as an issue into a published row.
-
-Measured values come from the linked CI run's artifact, never from the issue text. 
-The issue supplies only metadata like gateway name, licence, and architecture.
-"""
+"""Turn a benchmark result posted as an issue into a published row."""
 
 from __future__ import annotations
 
@@ -61,8 +57,6 @@ ENTITY_WORDS = {
     "PHONE": "phone numbers",
     "CREDIT_CARD": "card numbers",
     "AWS_ACCESS_KEY_ID": "AWS keys",
-    # nosec B105 on both: these are display labels for entity IDs, keyed by the name the
-    # corpus uses. There is no credential here, only the English for one.
     "GITHUB_TOKEN": "GitHub tokens",  # nosec B105
     "SLACK_TOKEN": "Slack tokens",  # nosec B105
 }
@@ -147,8 +141,6 @@ def _api(url: str) -> Any:
             ),
         },
     )
-    # The URL is always rebuilt from a matched owner/repo/id against api.github.com, so
-    # there is no caller-controlled scheme or host here.
     with urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS) as response:  # nosec B310
         return json.loads(response.read().decode("utf-8"))
 
@@ -269,7 +261,7 @@ def classify_provenance(
     branch = str(run.get("head_branch") or "")
     where = (owner, repo, run_id)
 
-    # Fetch repository details via a second call because the run payload omits default_branch.
+    # Handle missing default_branch in payload.
     default_branch = str(home_repo.get("default_branch") or "")
     if not default_branch:
         try:
@@ -362,7 +354,7 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
         derived["restored"] = "all" if fidelity else "none"
         derived["restoredN"] = 1.0 if fidelity else 0.0
     elif split:
-        # Check rate numerically because a rate of 0.75 is truthy in Python.
+        # Enforce exact boolean conditions.
         rate = (split.get("metrics") or {}).get("fidelity_rate")
         if isinstance(rate, (int, float)) and not isinstance(rate, bool) and 0.0 <= rate <= 1.0:
             derived["restored"] = "all" if rate == 1.0 else "none" if rate == 0.0 else "some"
@@ -583,7 +575,7 @@ def check_row_content() -> None:
 
 
 def build_site() -> None:
-    """Run the site build locally before commit because GITHUB_TOKEN PRs don't trigger workflows."""
+    """Run local site build before commit."""
     _run("npm", "ci", "--no-audit", "--no-fund", cwd=WEBSITE)
     _run("npm", "run", "build", cwd=WEBSITE)
 
@@ -629,7 +621,7 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
         # Auto-merge and squash.
         _run("gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch")
     except (OSError, subprocess.SubprocessError):
-        # Delete branch on failure to prevent stale branches on retry.
+        # Prevent stale branches.
         _try("git", "push", "origin", "--delete", branch)
         raise
 
@@ -738,7 +730,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         publish(row, issue_number)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
-        # Comment on the issue if publishing fails so the submitter is notified.
+        # Notify submitter on failure.
         comment(
             issue_number,
             "This result was read and verified, and then could not be published "

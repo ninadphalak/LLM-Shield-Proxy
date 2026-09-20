@@ -663,9 +663,7 @@ def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(mon
     assert any("HEAD:intake/issue-7" in line for line in flat), "the branch is pushed"
     assert any(line.startswith("gh pr create") for line in flat)
     assert not any("HEAD:main" in line for line in flat), "never straight at the protected branch"
-    # `--auto`, not an immediate merge. PR-Agent's check is required on main, so a merge
-    # attempted before it reports is simply refused; auto-merge hands the timing to GitHub
-    # and this job does not sit waiting for a reviewer.
+    # Ensure --auto is used to defer to GitHub's check timing.
     merge = next(line for line in flat if line.startswith("gh pr merge"))
     assert "--auto" in merge and "--squash" in merge and "--delete-branch" in merge
 
@@ -742,8 +740,7 @@ def test_a_failed_pull_request_takes_its_branch_back_down(monkeypatch):
 
     def run(command, *args, **kwargs):
         calls.append(list(command))
-        # `_run(*command)` hands subprocess a TUPLE, so slice-compare as a list or this
-        # never matches and the test passes for the wrong reason.
+        # Check command tuple to ensure precise matching.
         if list(command[:3]) == ["gh", "pr", "create"]:
             raise intake.subprocess.CalledProcessError(1, "gh pr create")
         return Result()
