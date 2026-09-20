@@ -1,10 +1,4 @@
-"""The intake path from a posted result to a published row, with nobody in the middle.
-
-The load-bearing claim of this path is that the numbers come from the linked run's own
-artifact rather than from the issue text. Most of what is checked here is that claim and
-the ways it is allowed to fail: an artifact that cannot be read must produce a row that
-says less, never a row that guesses.
-"""
+"""Tests for the intake script: verifying numbers come from CI artifacts, not issue text."""
 
 from __future__ import annotations
 
@@ -34,7 +28,7 @@ flags = _load("result_flags", "scripts/count_result_flags.py")
 
 
 def _template_labels() -> list[str]:
-    """The field labels in the issue form, read without a YAML dependency."""
+    """Extract field labels from the issue form YAML."""
     text = TEMPLATE.read_text(encoding="utf-8")
     return re.findall(r"^\s+label:\s*(.+?)\s*$", text, flags=re.MULTILINE)
 
@@ -71,7 +65,7 @@ def test_both_submission_paths_parse_to_the_same_fields():
 
 
 def test_the_summary_link_and_the_command_agree():
-    """`ci` must not grow its own copy of the submission format."""
+    """Ensure `ci` and `submit` generate the same submission URL format."""
     from pii_leak_benchmark import ci
     from pii_leak_benchmark.submit import submission_url
 
@@ -129,12 +123,7 @@ def test_every_dropdown_option_in_the_form_maps_to_a_union_value():
 
 
 def _run_payload(*, branch="feature", fork=False, head="o/r", home="o/r", default="main"):
-    """A run payload shaped like the real one.
-
-    `default_branch` is deliberately NOT in `repository`: the live API does not put it
-    there, which is the bug this shape exists to keep caught. `_fetch` below answers the
-    repository endpoint separately, as the script now has to.
-    """
+    """Mock a run payload, deliberately omitting `default_branch` to match the real API."""
     return {
         "head_branch": branch,
         "head_repository": {"full_name": head, "fork": fork},
@@ -343,7 +332,7 @@ def test_a_type_that_was_not_measured_is_not_counted_as_contained():
 
 
 def test_the_raw_report_settles_fidelity_when_the_operator_run_dropped_it():
-    """The anonymize duty removes that check from the operator run; the raw report keeps it."""
+    """Read fidelity from the raw report when the anonymize duty removes it from the operator run."""
     operator = _operator_run()
     del operator["required_checks"]["response_fidelity"]
     derived = intake.derive_measurements(
@@ -592,7 +581,7 @@ def test_an_unchanged_count_is_not_a_change():
 
 
 def test_an_archive_with_too_many_members_is_not_walked_to_the_end(monkeypatch):
-    """A benchmark artifact holds four files. This refuses to iterate a stranger's zip."""
+    """Refuse to iterate a zip with too many members to prevent zip bombs."""
     monkeypatch.setattr(intake, "MAX_MEMBERS", 5)
     crowd = {f"f{n}.json": {"n": n} for n in range(50)}
     crowd["current.json"] = _operator_run()
@@ -605,7 +594,7 @@ def test_no_more_reports_are_parsed_than_a_run_could_have(monkeypatch):
 
 
 def test_a_courtesy_that_fails_does_not_fail_the_job(monkeypatch, capsys):
-    """Commenting and labelling happen after the row is live; they cannot cost it."""
+    """Failing to comment or label should not fail the job after a successful commit."""
     class Failed:
         returncode = 1
         stderr = "label 'needs-info' not found"
@@ -619,12 +608,7 @@ def test_a_courtesy_that_fails_does_not_fail_the_job(monkeypatch, capsys):
 
 
 def test_a_default_branch_run_is_not_downgraded_when_the_run_payload_omits_it():
-    """The live API leaves `default_branch` out of a run's embedded repository object.
-
-    Reading it only from there made every run on a project's own trunk look like a feature
-    branch, which understates the strongest provenance the page can award. Measured
-    against a real run: 46 keys in that object and `default_branch` is not one of them.
-    """
+    """Ensure a main-branch run isn't downgraded due to GitHub API omitting `default_branch`."""
     value, reason, _ = intake.classify_provenance(
         "https://github.com/o/r/actions/runs/42", fetch=_fetch(_run_payload(branch="main"))
     )
@@ -643,7 +627,7 @@ def test_an_unreadable_repository_lookup_does_not_invent_a_default_branch():
 
 
 def _fake_git(staged, calls):
-    """Stand in for git: record every call, answer the staged-files query."""
+    """Mock git to record calls and answer staged-files queries."""
     class Result:
         returncode = 0
         stdout = "\n".join(staged)
@@ -657,12 +641,7 @@ def _fake_git(staged, calls):
 
 
 def test_publishing_refuses_to_push_anything_but_the_rows_file(monkeypatch):
-    """The one control here that is a check rather than an argument.
-
-    This workflow is triggered by issues, which anyone can open, so a run of it holds a
-    token that can write to the default branch. Everything else is reasoning about why the
-    run cannot be steered. This reads back what is actually staged.
-    """
+    """Fail publishing if any file besides the rows file is staged."""
     calls = []
     monkeypatch.setattr(
         intake.subprocess, "run",
@@ -674,13 +653,7 @@ def test_publishing_refuses_to_push_anything_but_the_rows_file(monkeypatch):
 
 
 def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(monkeypatch):
-    """`main` requires a PR, so the job opens one instead of being exempted from the rule.
-
-    A bypass list cannot express "the bot but not me" on a user-owned repository: the only
-    bypass actors offered there are roles, and roles are hierarchical, so exempting Write
-    exempts Admin with it. A pull request needs no bypass at all, because the rule asks for
-    a pull request and does not ask anyone to approve one.
-    """
+    """Publish via PR instead of bypassing branch protection rules."""
     calls = []
     monkeypatch.setattr(
         intake.subprocess, "run", _fake_git(["website/src/data/submitted-rows.json"], calls)
@@ -701,11 +674,7 @@ def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(mon
 
 
 def test_the_same_run_posted_from_many_issues_is_one_row(tmp_path):
-    """Issue numbers are free. A run is a measurement however many times it is posted.
-
-    Keyed on the issue number until the flood case was thought through, which let one
-    verified run be posted from any number of issues, each passing every check.
-    """
+    """Deduplicate runs posted across multiple issues by updating the existing row."""
     path = tmp_path / "rows.json"
     path.write_text('{"entries": []}', encoding="utf-8")
     for number in range(1, 26):
@@ -757,13 +726,13 @@ def test_rows_are_counted_per_submitter():
 
 
 def test_the_repository_a_run_happened_in_is_recorded_beside_the_claimed_name():
-    """Nothing stops somebody labelling another project's genuine run as their own."""
+    """Record the actual repository to defend against misattribution."""
     row = _row()
     assert row["_submission"]["ranIn"] == "o/r"
 
 
 def test_a_failed_pull_request_takes_its_branch_back_down(monkeypatch):
-    """A branch left behind makes the retry collide with it."""
+    """Delete the PR branch if PR creation or auto-merge fails."""
     calls = []
 
     class Result:
@@ -791,12 +760,7 @@ def test_a_failed_pull_request_takes_its_branch_back_down(monkeypatch):
     [(1.0, "all", 1.0), (0.0, "none", 0.0), (0.75, "some", 0.75), (0.5, "some", 0.5)],
 )
 def test_a_partial_fidelity_rate_is_reported_as_partial(rate, restored, number):
-    """A rate is not a boolean, and this once read `bool(rate)`.
-
-    0.75 is truthy, so a run that restored three cases in four was published as "all" with
-    `restoredN: 1.0` and a note saying every value came back. That is the strongest claim
-    this column makes, asserted from a measurement that says otherwise.
-    """
+    """A partial fidelity rate (e.g., 0.75) must report as 'some', not 'all'."""
     split = _split_report()
     split["metrics"]["fidelity_rate"] = rate
     derived = intake.derive_measurements({"v2.json": split})
@@ -813,7 +777,7 @@ def test_a_fidelity_rate_that_is_not_a_rate_asserts_nothing(rate):
 
 
 def test_a_boolean_check_still_wins_over_the_rate():
-    """The two per-run checks are genuinely boolean; only the profile reports a rate."""
+    """A boolean fidelity check overrides an absent or malformed rate."""
     derived = intake.derive_measurements(
         {"current.raw.json": _raw_report(fidelity=True), "v2.json": _split_report()}
     )
@@ -821,11 +785,7 @@ def test_a_boolean_check_still_wins_over_the_rate():
 
 
 def test_an_artifact_larger_than_the_cap_is_never_fetched():
-    """The listing's size is refused before anything is downloaded.
-
-    The download checks the real bytes too, because a listing is the submitter's claim
-    about their own artifact. This check means an oversized one costs no transfer at all.
-    """
+    """Refuse oversized artifacts based on the API listing before downloading."""
     fetched = []
 
     def download(owner, repo, artifact_id):
@@ -846,11 +806,7 @@ def test_an_artifact_larger_than_the_cap_is_never_fetched():
 
 
 def test_the_row_content_is_checked_before_anything_is_committed(monkeypatch):
-    """The style scan moved out of CI and into the intake, so it must actually run here.
-
-    `ci.yml` now skips a row-only change on the strength of this call. If it is removed,
-    that filter has to go with it or stranger-supplied text reaches the site unchecked.
-    """
+    """Ensure the style scan runs before commit, as CI no longer checks row-only PRs."""
     calls = []
     monkeypatch.setattr(
         intake.subprocess, "run",
@@ -862,7 +818,7 @@ def test_the_row_content_is_checked_before_anything_is_committed(monkeypatch):
 
 
 def test_the_ci_filter_and_the_content_check_agree():
-    """A filter justified by a call that no longer exists is how content goes unchecked."""
+    """Verify that `ci.yml` skipping row-only PRs is paired with local content checking."""
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     script = (REPO_ROOT / "scripts" / "process_conformance_submission.py").read_text(encoding="utf-8")
     if "submitted-rows.json" in workflow and "paths-ignore" in workflow:
@@ -872,7 +828,7 @@ def test_the_ci_filter_and_the_content_check_agree():
 
 
 def test_the_harness_version_is_recorded_on_the_row():
-    """The instrument moves, so a row has to say which one measured it."""
+    """Record the harness version used for the measurement."""
     derived = intake.derive_measurements({"current.json": _operator_run()})
     assert derived["harness"] == "0.3.1"
 

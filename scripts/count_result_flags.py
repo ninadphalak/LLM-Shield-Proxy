@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Count open disputes against each published row.
-
-A count, never a verdict: a disputed row is never hidden or downranked, which is the same
-rule that keeps two disagreeing runs both on the page. An open issue labelled
-`result-dispute` whose body names a row's submission issue counts against it, so the count
-comes from the tracker each run and clears itself when the issue closes.
-
-Standard library plus `gh`.
-"""
+"""Count open disputes against each published row. Disputed rows remain visible."""
 
 from __future__ import annotations
 
@@ -37,19 +29,13 @@ def open_disputes(repo: str) -> list[dict[str, Any]]:
 
 
 def count_by_issue(disputes: list[dict[str, Any]]) -> dict[int, int]:
-    """How many open disputes name each submission issue.
-
-    A dispute that names several rows counts against each of them, which is right: one
-    issue saying "these three rows all used the wrong config" is a question about three
-    rows. The reference has to be a `#123` token, so a bare number in prose ("16 of 16")
-    cannot be mistaken for one.
-    """
+    """Count open disputes for each submission issue. One dispute can name multiple rows."""
     counts: dict[int, int] = {}
     for dispute in disputes:
         text = f"{dispute.get('title', '')}\n{dispute.get('body', '') or ''}"
         for referenced in {int(n) for n in re.findall(r"#(\d{1,7})\b", text)}:
             if referenced == dispute.get("number"):
-                continue  # an issue referring to itself is not a dispute of a row
+                continue  # Skip self-references
             counts[referenced] = counts.get(referenced, 0) + 1
     return counts
 
@@ -85,18 +71,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         counts = count_by_issue(open_disputes(args.repo))
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
-        # A failure here must never take the site down or empty the counts. Leaving
-        # yesterday's numbers up is strictly better than publishing zeroes we did not
-        # measure.
+        # Fail gracefully to keep yesterday's numbers instead of erasing them.
         print(f"Could not read the dispute list: {exc}", file=sys.stderr)
         return 1
 
     document = json.loads(ROWS_FILE.read_text(encoding="utf-8"))
     changed = apply_counts(document, counts)
     print(f"{len(counts)} referenced issues, {changed} rows changed")
-    # The calling workflow rebuilds and redeploys only when something moved, because a
-    # push made with GITHUB_TOKEN does not start deploy-docs.yml. Telling it whether to
-    # bother is cheaper than deploying an unchanged site every night.
+    # Signal changes to the calling workflow to avoid unchanged redeploys.
     if os.getenv("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
             handle.write(f"changed={'true' if changed and not args.dry_run else 'false'}\n")

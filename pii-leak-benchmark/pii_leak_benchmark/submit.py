@@ -1,14 +1,7 @@
 """``pii-leak-benchmark submit`` -- post a finished result to the results wall.
 
-SENDS THE CITATION, NEVER THE REPORT. `submitting.md` warns that `target.base_url`,
-`capture.target_must_be_preconfigured_for` and `capture.self_probe.advertised_url` can
-carry account identifiers, tunnel hostnames and probe secrets; this posts to a public
-tracker. The citation block is built from named fields only.
-
-The gateway name is not guessed: an operator run records the model alias it routed through,
-which is a different fact, and `report_fields` refuses to substitute one for the other.
-
-Standard library only. Nothing here may import ``llm_shield_proxy``.
+Sends the citation block, never the full report, to prevent leaking sensitive URLs or secrets.
+Gateway names are explicitly required, not guessed from model aliases.
 """
 
 from __future__ import annotations
@@ -31,12 +24,7 @@ SUBMISSION_REPO = "ninadphalak/LLM-Shield-Proxy"
 SUBMISSION_LABEL = "conformance-result"
 
 # The sections of a submission, in order.
-#
-# THE HEADINGS ARE A CONTRACT between three things that never see each other: this
-# command, the job summary rendered by `ci.render_submission`, and the issue form at
-# `.github/ISSUE_TEMPLATE/conformance-result.yml`, which the intake script parses by
-# heading. Rename one here and a field silently vanishes on the other end, so
-# `tests/test_conformance_intake.py` pins them together.
+# The headings are a contract between this command, the issue form, and the intake script.
 SUBMISSION_SECTIONS = (
     "Gateway",
     "Version and configuration",
@@ -49,8 +37,7 @@ SUBMISSION_SECTIONS = (
     "Notes",
 )
 
-# Where a report is likely to be, in the order a person would look. `ci` writes the first,
-# the flat command writes the last.
+# Standard fallback paths for finding a report.
 DEFAULT_REPORTS = (
     Path("pii-check") / "current.json",
     Path("current.json"),
@@ -59,7 +46,7 @@ DEFAULT_REPORTS = (
 
 
 def _verdict(report: dict[str, Any]) -> str:
-    """The headline, under either shape's spelling for it."""
+    """Extract the verdict headline from the report."""
     return str(report.get("verdict") or report.get("outcome") or "")
 
 
@@ -83,7 +70,7 @@ def _sections(report: dict[str, Any], *, citation: Optional[str]) -> dict[str, s
 
 
 def build_body(report: dict[str, Any], *, citation: Optional[str] = None) -> str:
-    """The issue body, with the citation in it when there is room for it."""
+    """Build the issue body, embedding the citation if provided."""
     filled = _sections(report, citation=citation)
     return (
         "\n\n".join(
@@ -100,14 +87,7 @@ def build_title(report: dict[str, Any]) -> str:
 
 
 def submission_url(report: dict[str, Any], *, repo: str = SUBMISSION_REPO) -> str:
-    """A prefilled issue URL.
-
-    THE CITATION IS DELIBERATELY NOT IN IT. It is the longest part of a submission and
-    GitHub truncates a long prefill URL silently, so an over-budget link fails as a
-    half-filled form rather than as an error. The block is shown next to the link, in the
-    job summary or on the terminal, to be pasted. `gh` has no such limit, so the
-    `gh issue create` path does carry it.
-    """
+    """Generate a prefilled issue URL, excluding the citation to avoid silent URL truncation by GitHub."""
     query = urlencode(
         {
             "title": build_title(report),
@@ -152,12 +132,7 @@ def _gh_available() -> bool:
 
 
 def _create_via_gh(title: str, body: str, repo: str) -> str:
-    """Hand the submission to `gh`, through a file rather than an argument.
-
-    `--body-file`, never `--body`. A citation block is a couple of thousand characters of
-    table with newlines in it; on Windows that is past the command-line limit, and the
-    newlines do not survive the trip in any case.
-    """
+    """Create an issue via `gh` using `--body-file` to bypass command-line length limits."""
     handle = tempfile.NamedTemporaryFile(
         "w", suffix=".md", delete=False, encoding="utf-8", newline="\n"
     )
@@ -186,10 +161,8 @@ Examples:
   pii-leak-benchmark submit --dry-run           print the submission, send nothing
   pii-leak-benchmark submit --print-url         print the prefilled link, open nothing
 
-With `gh` installed and authenticated the issue is created directly, citation included.
-Without it, the prefilled issue opens in a browser and the citation is printed here to
-paste. Either way the report itself is never uploaded: it can hold your gateway's base
-URL and capture hostname, and this goes to a public tracker.
+With `gh` installed, the issue is created directly. Otherwise, it opens a prefilled browser URL.
+The full report is never uploaded to protect sensitive gateway URLs.
 """
 
 
@@ -239,8 +212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(_create_via_gh(title, body, args.repo))
             return 0
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
-            # Fall through to the browser. A failed handoff is not a reason to lose the
-            # result, and the operator can see what went wrong.
+            # Fall back to the browser if `gh` fails.
             print(f"`gh` could not open the issue ({exc}); opening a browser instead.", file=sys.stderr)
 
     url = submission_url(report, repo=args.repo)
