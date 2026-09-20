@@ -329,8 +329,21 @@ def classify_provenance(
     head_name = str(head_repo.get("full_name") or "")
     home_name = str(home_repo.get("full_name") or f"{owner}/{repo}")
     branch = str(run.get("head_branch") or "")
-    default_branch = str(home_repo.get("default_branch") or "")
     where = (owner, repo, run_id)
+
+    # SECOND CALL, and it is not avoidable. The `repository` object embedded in a workflow
+    # run is the minimal form and carries no `default_branch`: measured against a real run,
+    # it has 46 keys and that is not one of them. Reading it from there returned empty, so
+    # a run on `main` failed the default-branch comparison and was published as
+    # `submitted-branch`, quietly understating every submission from a project's own
+    # trunk. The repository endpoint does have the field.
+    default_branch = str(home_repo.get("default_branch") or "")
+    if not default_branch:
+        try:
+            details = fetch(f"https://api.github.com/repos/{owner}/{repo}")
+            default_branch = str((details or {}).get("default_branch") or "")
+        except (urllib.error.URLError, OSError, ValueError):
+            default_branch = ""
 
     if head_repo.get("fork") or (head_name and head_name != home_name):
         return (

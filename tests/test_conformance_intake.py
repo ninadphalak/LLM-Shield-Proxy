@@ -129,11 +129,26 @@ def test_every_dropdown_option_in_the_form_maps_to_a_union_value():
 
 
 def _run_payload(*, branch="feature", fork=False, head="o/r", home="o/r", default="main"):
+    """A run payload shaped like the real one.
+
+    `default_branch` is deliberately NOT in `repository`: the live API does not put it
+    there, which is the bug this shape exists to keep caught. `_fetch` below answers the
+    repository endpoint separately, as the script now has to.
+    """
     return {
         "head_branch": branch,
         "head_repository": {"full_name": head, "fork": fork},
-        "repository": {"full_name": home, "default_branch": default},
+        "repository": {"full_name": home},
     }
+
+
+def _fetch(payload, default="main"):
+    def fetch(url):
+        if url.endswith("/actions/runs/42"):
+            return payload
+        return {"default_branch": default}
+
+    return fetch
 
 
 @pytest.mark.parametrize(
@@ -148,7 +163,7 @@ def _run_payload(*, branch="feature", fork=False, head="o/r", home="o/r", defaul
 )
 def test_provenance_follows_the_run_not_the_submitter(payload, expected):
     value, reason, where = intake.classify_provenance(
-        "https://github.com/o/r/actions/runs/42", fetch=lambda url: payload
+        "https://github.com/o/r/actions/runs/42", fetch=_fetch(payload)
     )
     assert value == expected
     assert reason
@@ -610,3 +625,27 @@ def test_a_courtesy_that_fails_does_not_fail_the_job(monkeypatch, capsys):
     assert intake.comment(7, "hello") is False
     assert intake.close_issue(7) is False
     assert "Could not" in capsys.readouterr().err
+
+
+def test_a_default_branch_run_is_not_downgraded_when_the_run_payload_omits_it():
+    """The live API leaves `default_branch` out of a run's embedded repository object.
+
+    Reading it only from there made every run on a project's own trunk look like a feature
+    branch, which understates the strongest provenance the page can award. Measured
+    against a real run: 46 keys in that object and `default_branch` is not one of them.
+    """
+    value, reason, _ = intake.classify_provenance(
+        "https://github.com/o/r/actions/runs/42", fetch=_fetch(_run_payload(branch="main"))
+    )
+    assert value == "submitted-main"
+    assert "main" in reason
+
+
+def test_an_unreadable_repository_lookup_does_not_invent_a_default_branch():
+    def fetch(url):
+        if url.endswith("/actions/runs/42"):
+            return _run_payload(branch="main")
+        raise urllib.error.URLError("no")
+
+    value, _, _ = intake.classify_provenance("https://github.com/o/r/actions/runs/42", fetch=fetch)
+    assert value == "submitted-branch"
