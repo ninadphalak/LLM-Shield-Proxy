@@ -102,7 +102,7 @@ export default function LeakFlow(): ReactNode {
         back="<EMAIL>"
         backNote="never came back"
         last="Model provider"
-        footnote="Nothing leaked, and your app is broken anyway: the caller gets a placeholder where its own data should be. The job calls this CHECK FAILED rather than a leak, because the fix is a different one. If your product masks in one direction on purpose, duty: anonymize drops the two restore checks, and a run with nothing else wrong comes back CLEAN."
+        footnote="Nothing leaked, and your app is broken anyway: the caller gets a placeholder where its own data should be. The job calls this CHECK FAILED rather than a leak, because the fix is a different one. If your product masks in one direction on purpose, duty: anonymize drops the two restore checks and an otherwise sound run comes back CLEAN. The summary prints the duty beside the result, so that CLEAN is never mistaken for a scored return leg."
       />
     </div>
   );
