@@ -704,8 +704,12 @@ def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(mon
     flat = [" ".join(call) for call in calls]
     assert any("HEAD:intake/issue-7" in line for line in flat), "the branch is pushed"
     assert any(line.startswith("gh pr create") for line in flat)
-    assert any(line.startswith("gh pr merge") and "--squash" in line for line in flat)
     assert not any("HEAD:main" in line for line in flat), "never straight at the protected branch"
+    # `--auto`, not an immediate merge. PR-Agent's check is required on main, so a merge
+    # attempted before it reports is simply refused; auto-merge hands the timing to GitHub
+    # and this job does not sit waiting for a reviewer.
+    merge = next(line for line in flat if line.startswith("gh pr merge"))
+    assert "--auto" in merge and "--squash" in merge and "--delete-branch" in merge
 
 
 # ------------------------------------------------------------------- flood resistance

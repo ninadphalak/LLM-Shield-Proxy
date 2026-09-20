@@ -64,7 +64,18 @@ jobs:
       - name: Read the submission, verify the run, publish the row
         id: publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # RESULTS_WALL_TOKEN, falling back to GITHUB_TOKEN, and the fallback only keeps
+          # the job running rather than working properly. `main` requires PR-Agent's
+          # check, and a pull request opened by GITHUB_TOKEN has its workflow runs created
+          # and then held at `action_required` with zero jobs: PR-Agent never reports, the
+          # required check never goes green, and auto-merge waits forever. A PR opened
+          # under a real token triggers the reviewers like any other.
+          #
+          # The token is fine-grained and scoped to this repository, Contents and Pull
+          # requests, write. It is not here to get a review on a one-line JSON row, which
+          # is worth nothing. It is here so the rule that every CODE pull request passes
+          # PR-Agent can be enforced by GitHub rather than by an agent remembering it.
+          GH_TOKEN: ${{ secrets.RESULTS_WALL_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
         # The issue body is read from the event payload file on disk. It is never

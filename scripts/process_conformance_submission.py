@@ -790,9 +790,19 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
     )
     try:
         _run("gh", "pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", body)
-        # Squash, so one row is one commit on main whatever the branch looks like, and
-        # delete the branch behind it: these accumulate one per submission otherwise.
-        _run("gh", "pr", "merge", branch, "--squash", "--delete-branch")
+        # AUTO-MERGE, NOT AN IMMEDIATE ONE. `main` requires PR-Agent's check, so a merge
+        # attempted now is refused for a check that has not reported yet. `--auto` hands
+        # the merge to GitHub, which performs it the moment the required checks pass, and
+        # this job does not sit waiting for them.
+        #
+        # This is also why the workflow runs with a token that is not GITHUB_TOKEN. A pull
+        # request opened by GITHUB_TOKEN gets its workflow runs created and then held at
+        # `action_required` with zero jobs, so PR-Agent never reports, the required check
+        # never goes green, and auto-merge would wait forever.
+        #
+        # Squash so one row is one commit on main, and delete the branch behind it: these
+        # accumulate one per submission otherwise.
+        _run("gh", "pr", "merge", branch, "--auto", "--squash", "--delete-branch")
     except (OSError, subprocess.SubprocessError):
         # Take the branch back down before giving up. A failure between pushing it and
         # merging it used to leave `intake/issue-N` behind on the remote, so a retry hit a
