@@ -519,14 +519,20 @@ def test_a_resubmission_replaces_its_own_row_rather_than_adding_a_second(tmp_pat
     assert entries[0]["version"] == "1.2.4"
 
 
-def test_two_different_issues_both_get_a_row(tmp_path):
+def test_two_issues_pointing_at_one_run_do_not_both_get_a_row(tmp_path):
+    """This asserted the opposite until the flood case was thought through.
+
+    Keying on the issue number let the same verified run be posted from any number of
+    issues, each one passing every check because each one genuinely was that run. The
+    identity is the run.
+    """
     path = tmp_path / "submitted-rows.json"
     path.write_text('{"entries": []}', encoding="utf-8")
     for number in (7, 8):
         row = _row()
         row["_submission"]["issue"] = number
         intake.append_row(row, path=path)
-    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 2
+    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 1
 
 
 def test_the_rows_file_in_the_tree_is_valid():
@@ -689,3 +695,64 @@ def test_publishing_proceeds_when_only_the_rows_file_is_staged(monkeypatch):
     )
     intake.publish(_row(), 7)
     assert any("push" in call for call in calls), "the normal path still pushes"
+
+
+# ------------------------------------------------------------------- flood resistance
+
+
+def test_the_same_run_posted_from_many_issues_is_one_row(tmp_path):
+    """Issue numbers are free. A run is a measurement however many times it is posted."""
+    path = tmp_path / "rows.json"
+    path.write_text('{"entries": []}', encoding="utf-8")
+    for number in range(1, 26):
+        row = _row()
+        row["_submission"]["issue"] = number
+        intake.append_row(row, path=path)
+    entries = json.loads(path.read_text(encoding="utf-8"))["entries"]
+    assert len(entries) == 1
+    assert entries[0]["_submission"]["issue"] == 25, "the latest posting wins"
+
+
+def test_two_genuinely_different_runs_both_get_a_row(tmp_path):
+    path = tmp_path / "rows.json"
+    path.write_text('{"entries": []}', encoding="utf-8")
+    for run in ("42", "43"):
+        row = _row()
+        row["runUrl"] = f"https://github.com/o/r/actions/runs/{run}"
+        intake.append_row(row, path=path)
+    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 2
+
+
+def test_a_row_without_a_run_is_identified_by_target_instead():
+    without = dict(_row())
+    without.pop("runUrl", None)
+    assert intake.row_identity(without)[0] == "target"
+    assert intake.row_identity(_row())[0] == "run"
+
+
+def test_a_resubmission_of_the_same_target_replaces_it(tmp_path):
+    path = tmp_path / "rows.json"
+    path.write_text('{"entries": []}', encoding="utf-8")
+    for version in ("1.0", "1.0"):
+        row = _row()
+        row.pop("runUrl", None)
+        row["version"] = version
+        intake.append_row(row, path=path)
+    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 1
+
+
+def test_rows_are_counted_per_submitter():
+    entries = [
+        {"_submission": {"submitter": "a"}},
+        {"_submission": {"submitter": "a"}},
+        {"_submission": {"submitter": "b"}},
+        "not a dict",
+    ]
+    assert intake.submissions_by(entries, "a") == 2
+    assert intake.submissions_by(entries, "nobody") == 0
+
+
+def test_the_repository_a_run_happened_in_is_recorded_beside_the_claimed_name():
+    """Nothing stops somebody labelling another project's genuine run as their own."""
+    row = _row()
+    assert row["_submission"]["ranIn"] == "o/r"

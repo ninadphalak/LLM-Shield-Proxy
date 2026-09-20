@@ -106,6 +106,13 @@ MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_MEMBERS = 500
 MAX_REPORTS = 25
 
+# How many rows one account may hold at once. Not a judgement about anybody: a gateway
+# maintainer has one row per version they care about, and a number well past that is the
+# signature of a flood rather than of a prolific contributor. Past it, submissions are
+# answered rather than published, which costs an honest heavy user a sentence and costs
+# somebody opening issues in a loop everything.
+MAX_ROWS_PER_SUBMITTER = 12
+
 
 # --------------------------------------------------------------------------- parsing
 
@@ -541,9 +548,18 @@ def build_row(
     project_url = clean(fields.get("project_url", ""), limit=300)
     if project_url.startswith(("https://", "http://")):
         row["pricingUrl"] = project_url
+    # The repository the run actually happened in, recorded separately from the name the
+    # submitter gave the gateway. Nothing stops somebody pointing at another project's
+    # genuine run and labelling it as their own product; the run URL is on the row, so
+    # that has always been checkable, but only by clicking. Recording the repository makes
+    # a mismatch between "who ran it" and "what it is called" visible without leaving the
+    # page, which is the cheapest defence against misattribution and costs an honest
+    # submitter nothing.
+    run_match = RUN_URL.match(run_url)
     row["_submission"] = {
         "issue": issue_number,
         "submitter": submitter,
+        "ranIn": f"{run_match.group(1)}/{run_match.group(2)}" if run_match else "",
         "evidence": evidence,
         "notes": clean(fields.get("notes", ""), limit=600),
     }
@@ -604,26 +620,47 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
 # --------------------------------------------------------------------------- writing
 
 
+def row_identity(row: dict[str, Any]) -> tuple[str, ...]:
+    """What makes two rows the same row, for replacement rather than accumulation.
+
+    THE RUN IS THE IDENTITY when there is one. Keying on the issue number alone was the
+    obvious choice and it was wrong: issue numbers are free, so the same run URL submitted
+    from a hundred issues produced a hundred identical rows, each one passing every check
+    because each one WAS a genuine verified result. One run is one measurement however
+    many times it is posted.
+
+    Without a run, a project and version is the next best thing, so a project correcting
+    its own row replaces it rather than appearing twice.
+    """
+    run_url = str(row.get("runUrl") or "")
+    if run_url:
+        return ("run", run_url)
+    return ("target", str(row.get("project", "")).casefold(), str(row.get("version", "")).casefold())
+
+
+def submissions_by(entries: list[Any], submitter: str) -> int:
+    return sum(
+        1
+        for entry in entries
+        if isinstance(entry, dict) and (entry.get("_submission") or {}).get("submitter") == submitter
+    )
+
+
 def append_row(row: dict[str, Any], path: Path = ROWS_FILE) -> None:
     """Append to the rows file, keeping it valid JSON at every step.
 
-    Read, parse, append, dump. A malformed result fails here, in a workflow log, rather
-    than at the next site build. A resubmission replaces its own earlier row instead of
-    adding a second: a project posting a new version opens a new issue, and a project
-    correcting a mistake should not leave the mistake up.
+    Read, parse, replace-or-append, dump. A malformed result fails here, in a workflow
+    log, rather than at the next site build.
     """
     document = json.loads(path.read_text(encoding="utf-8"))
     entries = document.setdefault("entries", [])
     if not isinstance(entries, list):
         raise ValueError("submitted-rows.json: 'entries' is not a list")
-    issue = row.get("_submission", {}).get("issue")
+    identity = row_identity(row)
     document["entries"] = [
         existing
         for existing in entries
-        if not (
-            isinstance(existing, dict)
-            and existing.get("_submission", {}).get("issue") == issue
-        )
+        if not (isinstance(existing, dict) and row_identity(existing) == identity)
     ]
     document["entries"].append(row)
     # LF and a trailing newline, matching `write_json_artifact` in the benchmark: a CRLF
@@ -771,6 +808,25 @@ def main(argv: Optional[list[str]] = None) -> int:
     # the row nowhere; the comment tells the submitter exactly what to link instead.
     if row.get("status") != "published":
         comment(issue_number, text)
+        label(issue_number, "needs-info")
+        return 1
+
+    # The cap is checked against the rows that already exist, and a REPLACEMENT is always
+    # allowed: somebody correcting or reposting a row they already hold is not adding one.
+    existing = json.loads(ROWS_FILE.read_text(encoding="utf-8")).get("entries", [])
+    submitter = (row.get("_submission") or {}).get("submitter", "")
+    replacing = any(
+        isinstance(entry, dict) and row_identity(entry) == row_identity(row) for entry in existing
+    )
+    if not replacing and submissions_by(existing, submitter) >= MAX_ROWS_PER_SUBMITTER:
+        comment(
+            issue_number,
+            f"This account already holds {MAX_ROWS_PER_SUBMITTER} rows on the wall, which "
+            "is the cap, so this one was not published. That is a flood guard rather than "
+            "a judgement: if you have a real reason to need more, say so here and it will "
+            "be raised. Resubmitting a run that already has a row still works and replaces "
+            "it.",
+        )
         label(issue_number, "needs-info")
         return 1
 
