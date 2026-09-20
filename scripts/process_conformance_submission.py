@@ -750,14 +750,10 @@ an argument: this job is issue-triggered, so anyone can cause a run of it.
     _run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
     _run("git", "add", str(ROWS_FILE.relative_to(REPO_ROOT)))
 
-    # THE ONLY FILE THIS JOB MAY EVER CHANGE, checked rather than intended.
-    #
-    # This workflow is triggered by issues, which anyone can open, so an outsider can
-    # cause a run of it that holds a token able to write to the default branch. Every
-    # other control here is an argument that the run cannot be steered: the body never
-    # reaches a shell, no submitted code executes, only JSON is parsed. This one is not an
-    # argument. It reads back what is actually staged and refuses to push anything but the
-    # rows file, so a bug anywhere upstream of it cannot become a commit to main.
+    # A REGRESSION GUARD, not a live check. `git add` above names one fixed path, so
+    # nothing else can be staged today and this cannot fire. It is here because the job is
+    # issue-triggered and holds write access to the default branch, so a later edit that
+    # broadens what is staged should fail loudly rather than commit it.
     staged = subprocess.run(  # nosec B603 B607 - fixed argument list
         ["git", "diff", "--cached", "--name-only"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,

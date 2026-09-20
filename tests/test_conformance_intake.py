@@ -520,22 +520,6 @@ def test_a_resubmission_replaces_its_own_row_rather_than_adding_a_second(tmp_pat
     assert entries[0]["version"] == "1.2.4"
 
 
-def test_two_issues_pointing_at_one_run_do_not_both_get_a_row(tmp_path):
-    """This asserted the opposite until the flood case was thought through.
-
-    Keying on the issue number let the same verified run be posted from any number of
-    issues, each one passing every check because each one genuinely was that run. The
-    identity is the run.
-    """
-    path = tmp_path / "submitted-rows.json"
-    path.write_text('{"entries": []}', encoding="utf-8")
-    for number in (7, 8):
-        row = _row()
-        row["_submission"]["issue"] = number
-        intake.append_row(row, path=path)
-    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 1
-
-
 def test_the_rows_file_in_the_tree_is_valid():
     document = json.loads(
         (REPO_ROOT / "website" / "src" / "data" / "submitted-rows.json").read_text(encoding="utf-8")
@@ -717,7 +701,11 @@ def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(mon
 
 
 def test_the_same_run_posted_from_many_issues_is_one_row(tmp_path):
-    """Issue numbers are free. A run is a measurement however many times it is posted."""
+    """Issue numbers are free. A run is a measurement however many times it is posted.
+
+    Keyed on the issue number until the flood case was thought through, which let one
+    verified run be posted from any number of issues, each passing every check.
+    """
     path = tmp_path / "rows.json"
     path.write_text('{"entries": []}', encoding="utf-8")
     for number in range(1, 26):
