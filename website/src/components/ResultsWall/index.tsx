@@ -5,6 +5,7 @@ import {
   ARCHITECTURE,
   PROVENANCE,
   ROWS,
+  firstIndependentPass,
   type ResultRow,
 } from '@site/src/data/results-wall';
 import {safeHref} from '@site/src/utils/safeHref';
@@ -25,8 +26,10 @@ type Col = {
 // or every gateway that buffers, can have that; the site still ships none of those
 // orders as the default. See the page for why that distinction is load-bearing.
 const COLUMNS: Col[] = [
-  {key: 'project', label: 'Gateway', sortOn: (r) => r.project},
-  {key: 'version', label: 'Version', sortOn: (r) => r.version},
+  // Gateway, version and licence share one cell. They are three facts about WHICH row
+  // this is rather than three measurements, they are always read together, and as separate
+  // columns they pushed the four numbers that matter off the side of a narrow screen.
+  {key: 'project', label: 'Gateway', sortOn: (r) => `${r.project} ${r.version}`},
   {key: 'sent', label: "Sent the caller's data to the provider", sortOn: (r) => r.sentN, numeric: true},
   {key: 'restored', label: "Gave back the caller's own data", sortOn: (r) => r.restoredN, numeric: true},
   // `?? -1` sorts an unmeasured row below every measured one, in both directions, rather
@@ -40,7 +43,6 @@ const COLUMNS: Col[] = [
     sortOn: (r) => ARCHITECTURE[r.architecture].rank,
     numeric: true,
   },
-  {key: 'license', label: 'Licence', sortOn: (r) => r.license},
   {
     key: 'provenance',
     label: 'Who ran it',
@@ -131,20 +133,10 @@ function Flags({flags}: {flags?: {count: number; issue: number}}): ReactNode {
 }
 
 /**
- * WHY ONLY TWO COLUMNS ARE LIT, and never a whole row.
- *
- * Highlighting rather than filtering, because a filter answers "which should I pick" by
- * removing the evidence for the other answer. Nothing here disappears.
- *
- * Only `sent` and `restored` are lit, and only at their unambiguous value. Nothing
- * reaching the provider is good however the rest of the row reads, and every value coming
- * back is good on its own terms. The leak columns are deliberately NOT lit: a low count
- * there can mean the gateway caught everything, or that it returned almost nothing to the
- * client, and the page says so in as many words. Colouring `0 of 16` green would assert
- * the flattering reading of a number that has two.
- *
- * No row is lit as a whole, because a row that scored well on every column would be the
- * ranking this page does not publish.
+ * Only `sent` and `restored` are lit, at their unambiguous value. The leak columns are
+ * not: a low count there can mean the gateway caught everything OR returned almost
+ * nothing, so colouring `0 of 16` green asserts the flattering reading of a number with
+ * two. No whole row is lit; that would be the ranking this page does not publish.
  */
 
 /**
@@ -182,6 +174,9 @@ function Leak({
 }
 
 export default function ResultsWall({rows = ROWS}: Props): ReactNode {
+  // Computed, so the mark is earned by the row rather than granted in a data file. It is
+  // undefined until a gateway this project did not write answers all three questions.
+  const milestone = useMemo(() => firstIndependentPass(rows), [rows]);
   const [key, setKey] = useState<string>('date');
   const [ascending, setAscending] = useState(false);
 
@@ -256,9 +251,25 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                 <tr key={`${row.project}-${row.version}`}>
                   <td>
                     {row.project}
+                    {row === milestone && (
+                      <span
+                        className={styles.milestone}
+                        title="The first gateway not written by this project to answer all three questions. Computed from the rows, not awarded.">
+                        first independent pass
+                      </span>
+                    )}
                     <Flags flags={row.flags} />
+                    <span className={styles.sub}>{row.version}</span>
+                    <span className={styles.sub}>
+                      {safeHref(row.pricingUrl) ? (
+                        <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
+                          {row.license}
+                        </a>
+                      ) : (
+                        row.license
+                      )}
+                    </span>
                   </td>
-                  <td className={styles.muted}>{row.version}</td>
                   <td className={row.sentN === 0 ? styles.good : undefined}>{row.sent}</td>
                   <td className={row.restoredN === 1 ? styles.good : undefined}>
                     {row.restored}
@@ -279,15 +290,6 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                   </td>
                   <td className={styles.muted} title={architecture.hint}>
                     {architecture.label}
-                  </td>
-                  <td className={styles.muted}>
-                    {safeHref(row.pricingUrl) ? (
-                      <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
-                        {row.license}
-                      </a>
-                    ) : (
-                      row.license
-                    )}
                   </td>
                   <td>
                     <span className={styles.badge} title={provenance.hint}>
@@ -312,6 +314,13 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                         className={styles.stale}
                         title="Measured a while ago. The project has probably shipped since.">
                         worth rerunning
+                      </span>
+                    )}
+                    {row.harness && (
+                      <span
+                        className={styles.harness}
+                        title={`Measured with pii-leak-benchmark ${row.harness}. Two rows measured with different harness versions were produced by different code.`}>
+                        harness {row.harness}
                       </span>
                     )}
                   </td>

@@ -89,10 +89,12 @@ Corpus `30efa2eb65888844...` at seed `a1b2c3d4e5f60001`, inspector `94262e29a492
 | `llm-guard-chunk-local` | 1 | 0.25 | 0.75 | 0.5 | configured, leaked: USPHONE | 0/32 | `fail` |
 | `llm-shield-proxy-1.6.0-response-off` | 1 | 1 | 1 | 0 | configured, clean | 0/32 | `fail` |
 | `llm-shield-proxy-1.6.0-response-on` | 1 | 0.125 | 0.25 | 0.125 | configured, clean | 0/32 | `fail` |
+| `llm-shield-proxy-1.6.6-response-off` | 1 | 1 | 1 | 0 | configured, clean | 0/32 | `fail` |
+| `llm-shield-proxy-1.6.6-response-on` | 1 | 0 | 0 | 0 | configured, clean | 0/32 | `pass` |
 | `nemo-guardrails-0.24.0` | 0 | 0 | 0 | 0 | not configured (4 types seen) | 8/32 | `fail` |
 | `portkey-gateway-oss` | 1 | 1 | 1 | 0 | not configured (4 types seen) | 0/32 | `fail` |
 
-**0 of 8 measured gateway and library configurations pass.** The only passing rows are reference policies: `retention-plus-decoding`.
+**1 of 10 measured gateway and library configurations pass.** 
 
 ### Seed sweeps
 
@@ -118,7 +120,7 @@ Mean across seeds, with minimum--maximum where the value varies.
 
 ### Evidence inventory
 
-- v2 response-split reports: **95**
+- v2 response-split reports: **97**
 - FIDE v2.1 reports (separate 64-case corpus): **73**
 - Seed-sweep aggregates: **9**
 

@@ -141,6 +141,18 @@ export type ResultRow = {
   /** Link to the CI run behind a submitted row, so the provenance claim is clickable. */
   runUrl?: string;
   /**
+   * The harness version that produced the row.
+   *
+   * WHY IT IS ON THE ROW. The instrument moves. A result measured with 0.2.1 and one
+   * measured with 0.3.2 were produced by different code, and a reader comparing two rows
+   * is entitled to know whether they were measured the same way. Without this the table
+   * silently mixes instruments, and the longer it runs the more it mixes them.
+   *
+   * It is shown beside the date rather than as a column of its own, because it says HOW a
+   * row was measured rather than WHAT was measured, which is what the date says too.
+   */
+  harness?: string;
+  /**
    * The same configuration's previous measurement, for the trend indicator. Set this
    * only when the earlier row is on this page too: the arrow is a comparison a reader
    * can verify by looking up, never a number we assert on its own.
@@ -169,6 +181,46 @@ export type ResultRow = {
  */
 export const MEASURED_ROWS: ResultRow[] = [
   {
+    date: '2026-09-20',
+    project: 'LLM-Shield-Proxy (ours)',
+    version: '1.6.6, response scan on',
+    sent: 'none',
+    sentN: 0,
+    restored: 'all',
+    restoredN: 1.0,
+    leakWhole: '0 of 16',
+    leakWholeN: 0.0,
+    leakSplit: '0 of 16',
+    leakSplitN: 0.0,
+    note: 'Kept everything out of the provider request, handed every value back to the client, and caught every injected value whole and split across two chunks.',
+    provenance: 'measured-here',
+    harness: '0.2.1',
+    architecture: 'held-tail',
+    license: 'Apache-2.0',
+    reportUrl: './results',
+    previous: {version: '1.6.0, response scan on', leakWholeN: 0.125, leakSplitN: 0.25},
+  },
+  {
+    date: '2026-09-20',
+    project: 'LLM-Shield-Proxy (ours)',
+    version: '1.6.6, default settings',
+    sent: 'none',
+    sentN: 0,
+    restored: 'all',
+    restoredN: 1.0,
+    leakWhole: '16 of 16',
+    leakWholeN: 1.0,
+    leakSplit: '16 of 16',
+    leakSplitN: 1.0,
+    note: 'Kept everything out of the provider request and handed every value back. Response scanning is off by default, so values the model produced were not caught.',
+    provenance: 'measured-here',
+    harness: '0.2.1',
+    architecture: 'none',
+    license: 'Apache-2.0',
+    reportUrl: './results',
+    previous: {version: '1.6.0, default settings', leakWholeN: 1.0, leakSplitN: 1.0},
+  },
+  {
     date: '2026-09-09',
     project: 'LLM-Shield-Proxy (ours)',
     version: '1.6.0, default settings',
@@ -181,6 +233,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '16 of 16',
     leakSplitN: 1.0,
     note: 'Kept everything out of the provider request, then handed every value back to the client.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'none',
     license: 'Apache-2.0',
@@ -199,6 +252,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '4 of 16',
     leakSplitN: 0.25,
     note: 'Kept everything out of the provider request. Still leaks some back to the client, and twice as much once a value is split.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'held-tail',
     license: 'Apache-2.0',
@@ -217,6 +271,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '12 of 16',
     leakSplitN: 0.75,
     note: 'Phone numbers reached the provider. Gave the caller their data back. Splitting a value tripled what leaked to the client.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'per-chunk',
     license: 'MIT',
@@ -235,6 +290,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '5 of 16',
     leakSplitN: 0.3125,
     note: 'Phone numbers reached the provider. Splitting changed nothing, because it waits for the whole response before sending any of it.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'buffered',
     license: 'MIT',
@@ -253,6 +309,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '2 of 16',
     leakSplitN: 0.125,
     note: 'All four data types reached the provider, and none of the caller’s own data came back.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'held-tail',
     license: 'Apache-2.0',
@@ -271,6 +328,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '0 of 16',
     leakSplitN: 0.0,
     note: 'All four data types reached the provider even though redaction was switched on, and none of the caller’s data came back.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'not-stated',
     license: 'MIT',
@@ -289,6 +347,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '0 of 12',
     leakSplitN: 0.0,
     note: 'All four data types reached the provider. Nothing was restored, and 8 of 32 cases produced no stream at all.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'not-stated',
     license: 'Apache-2.0',
@@ -307,6 +366,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '16 of 16',
     leakSplitN: 1.0,
     note: 'All four data types reached the provider, and everything it should have withheld went through to the client.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'none',
     license: 'Apache-2.0',
@@ -315,32 +375,11 @@ export const MEASURED_ROWS: ResultRow[] = [
 ];
 
 /**
- * Rows submitted from outside, read from `submitted-rows.json`.
+ * Rows submitted from outside, read from `submitted-rows.json` and validated here.
  *
- * WHY THE VALIDATOR. A submitted entry is written into that file by a workflow, from the
- * body of an issue anyone can open. Docusaurus will bundle whatever is in there, so the
- * check that it is a well-formed row has to happen somewhere, and the build is the right
- * place: a bad entry stops the deploy instead of reaching the page.
- *
- * WHAT `status` MEANS. The workflow writes `published` when it could read the measured
- * columns out of the linked run's build artifact, which is the normal case, and the row
- * goes up without anyone approving it. It writes nothing at all when it could not: a
- * submission whose artifact was unreadable is answered on the issue rather than parked
- * here, because a row nobody can see helps nobody. `draft` therefore exists for a row a
- * person is still working on by hand, and such a row renders nowhere.
- *
- * An earlier version of this comment described a manual flow where every submission
- * landed as a draft for a maintainer to complete. That was the design before the intake
- * read artifacts; it is not what the code does, and the two public data files saying so
- * were caught in review rather than by anything executable. If this paragraph and
- * `scripts/process_conformance_submission.py` ever disagree again, the script is right.
- *
- * The validator below is what keeps either path safe: a `published` entry that is missing
- * a field, or that carries a value outside one of the two unions, throws here rather than
- * shipping. Note what it does NOT require, and why. The four leak columns are optional
- * because only the response-split profile measures them, and there is no honest default
- * for a missing one: `0 of 16` is the strongest claim on this page and an absent count
- * would sort as though it were the weakest.
+ * JSON rather than TypeScript because a workflow writes it from an issue anyone can open:
+ * there it is data, here it would be bundled source. A bad entry stops the build rather
+ * than reaching the page, and a submitted row claiming `measured-here` is refused.
  */
 type SubmittedEntry = {status?: unknown} & Partial<Record<keyof ResultRow, unknown>>;
 
@@ -417,3 +456,53 @@ export const SUBMITTED_ROWS: ResultRow[] = publishedRows(
  * sorts client side and defaults to date, and nothing on this page is ranked.
  */
 export const ROWS: ResultRow[] = [...MEASURED_ROWS, ...SUBMITTED_ROWS];
+
+
+/**
+ * Does this row answer all three questions the page asks?
+ *
+ * Nothing to the provider, everything back to the caller, and nothing the caller never
+ * sent reaching the client, whole or split. That is the page's own stated criterion, so
+ * restating it in code is not a judgement: a row either met it or it did not.
+ */
+/**
+ * A prefix test, not a regular expression: the first version shipped a literal backspace
+ * where a word boundary belonged, matched nothing, and our own row took the milestone.
+ */
+function isOurs(project: string): boolean {
+  return project.toLowerCase().startsWith('llm-shield-proxy');
+}
+
+export function passes(row: ResultRow): boolean {
+  return (
+    row.sentN === 0 &&
+    row.restoredN === 1 &&
+    row.leakWholeN === 0 &&
+    row.leakSplitN === 0
+  );
+}
+
+/**
+ * The first pass by a gateway this project did not write, or undefined while there is none.
+ *
+ * Eligibility is about the GATEWAY, not who measured it. Filtering on `measured-here` was
+ * backwards twice: it excluded third-party gateways measured in this repository, which are
+ * exactly the ones we did not write, and that provenance is the easiest for a reader to
+ * check. `submitted-unverified` is excluded because no run stands behind the numbers.
+ *
+ * Not unforgeable: a submitted row's numbers come from the submitter's own CI artifact, so
+ * the page must not claim the mark cannot be claimed. Ties go to neither.
+ */
+export function firstIndependentPass(rows: ResultRow[]): ResultRow | undefined {
+  const winners = rows
+    .filter(
+      (row) =>
+        !isOurs(row.project) &&
+        row.provenance !== 'submitted-unverified' &&
+        passes(row),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (winners.length === 0) return undefined;
+  if (winners.length > 1 && winners[0].date === winners[1].date) return undefined;
+  return winners[0];
+}

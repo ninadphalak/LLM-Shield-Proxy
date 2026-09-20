@@ -24,17 +24,32 @@ yours does three things:
 
 Do all three and you pass.
 
-## No gateway here has passed yet
+## Ours did not pass either, at first
 
-> **First to pass, unclaimed.** Nobody has answered all three questions yet. The first
-> gateway that does gets named here with the date and the exact version it passed on, and
-> that entry stays whatever happens afterwards. It is a milestone rather than a placing:
-> there is no second and no ranking, only the date something first worked.
+With its response scan on, 1.6.0 leaked 2 of the 16 values sent whole and 4 of the 16 sent
+split. We wrote the check and it caught us.
 
-**Ours has not either, and we wrote the check.** With its response scan on, 1.6.0 leaked 2 of the
-16 values sent whole and 4 of the 16 sent split, and that row is below. We have since fixed those
-cases, and the passing row goes up when the evidence does, not before. Find a case that trips us
-and we will add it to the corpus and credit you.
+**1.6.6 passes.** Nothing reaches the provider, every value comes back to the caller, and
+every injected value is caught both whole and split across two chunks. Both rows are below,
+so the change is something you can see rather than take on trust, and the report behind it
+is on the [results page](./results).
+
+**On the default settings it still does not pass.** Response scanning is off unless you turn
+it on, because it changes what callers receive, so the out-of-the-box row leaks 16 of 16
+both ways. That row is below too.
+
+A result from the people who built the instrument is the most conflicted row here, which is
+why the "Who ran it" column sorts our own runs alongside the self-reported ones rather than
+above them. That does not change because the number improved.
+
+**No gateway other than ours has passed yet.** The first one that does gets a mark on its
+row in the table below, and keeps it. It goes to any gateway we did not write, whether we
+measured it or its own maintainers did, as long as there is a run behind the numbers to
+open. It is computed from the published rows rather than handed out, which is not the same
+as saying it cannot be gamed: a project that fabricated a report could take it, and would
+be doing so in public under its own name.
+
+Find a case that trips either configuration and we will add it to the corpus and credit you.
 
 ## Try it in one line
 
@@ -162,6 +177,19 @@ reports and you publish that file from your own repository. Nothing is hosted he
 nothing to register, and no permission is asked for or given. Deleting the line from your
 README removes it, and deleting the file stops it updating. We never add a badge to anybody's
 project and cannot.
+
+**If you would rather not publish what it found**, there is a quieter one:
+
+```bash
+pii-leak-benchmark badge current.json --style neutral
+```
+
+That badge reads `benchmarked` and nothing else. It is blue rather than green, deliberately,
+because a neutral badge wearing the pass colour would be worse than no badge at all. It says
+the true and much smaller thing: this project runs the check. What the check found stays in
+the run.
+
+Three options, then: publish the result, publish that a check ran, or publish neither.
 
 **Anywhere else**, link this page. It carries a preview card, and any row is fair to point
 at, including one that is not yours. A gateway quietly forwarding data its users assume is

@@ -1,20 +1,12 @@
 """``pii-leak-benchmark submit`` -- post a finished result to the results wall.
 
-A result that stays on the machine that produced it is not a result anybody can read. The
-steps between the two used to be: find the report, run ``cite``, copy the block, find the
-page, find the link, paste, fill in the fields you happen to remember. Each one is small
-and each one is somewhere a person stops.
+SENDS THE CITATION, NEVER THE REPORT. `submitting.md` warns that `target.base_url`,
+`capture.target_must_be_preconfigured_for` and `capture.self_probe.advertised_url` can
+carry account identifiers, tunnel hostnames and probe secrets; this posts to a public
+tracker. The citation block is built from named fields only.
 
-WHAT IT SENDS. The citation block and the handful of facts a report actually records. Not
-the report. ``submitting.md`` warns that ``target.base_url``,
-``capture.target_must_be_preconfigured_for`` and ``capture.self_probe.advertised_url`` can
-carry account identifiers, tunnel hostnames and probe secrets, and this command is aimed
-at a public issue tracker. The citation block is built field by field from known keys, so
-it is safe by construction in a way a whole report is not.
-
-THE GATEWAY NAME IS NOT GUESSED. An operator run records the model alias it routed
-through, not which gateway was measured. ``report_fields`` refuses to substitute one for
-the other and so does this: the field is left for the submitter.
+The gateway name is not guessed: an operator run records the model alias it routed through,
+which is a different fact, and `report_fields` refuses to substitute one for the other.
 
 Standard library only. Nothing here may import ``llm_shield_proxy``.
 """

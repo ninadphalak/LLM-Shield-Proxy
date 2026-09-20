@@ -228,6 +228,7 @@ def _operator_run(entities=None, fidelity=False):
         "verdict": "LEAK",
         "entities": entities or {"EMAIL": "leak", "SSN": "contained", "CREDIT_CARD": "contained"},
         "required_checks": {"response_fidelity": fidelity},
+        "contract": {"harness_version": "0.3.1"},
     }
 
 
@@ -519,22 +520,6 @@ def test_a_resubmission_replaces_its_own_row_rather_than_adding_a_second(tmp_pat
     assert entries[0]["version"] == "1.2.4"
 
 
-def test_two_issues_pointing_at_one_run_do_not_both_get_a_row(tmp_path):
-    """This asserted the opposite until the flood case was thought through.
-
-    Keying on the issue number let the same verified run be posted from any number of
-    issues, each one passing every check because each one genuinely was that run. The
-    identity is the run.
-    """
-    path = tmp_path / "submitted-rows.json"
-    path.write_text('{"entries": []}', encoding="utf-8")
-    for number in (7, 8):
-        row = _row()
-        row["_submission"]["issue"] = number
-        intake.append_row(row, path=path)
-    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 1
-
-
 def test_the_rows_file_in_the_tree_is_valid():
     document = json.loads(
         (REPO_ROOT / "website" / "src" / "data" / "submitted-rows.json").read_text(encoding="utf-8")
@@ -716,7 +701,11 @@ def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(mon
 
 
 def test_the_same_run_posted_from_many_issues_is_one_row(tmp_path):
-    """Issue numbers are free. A run is a measurement however many times it is posted."""
+    """Issue numbers are free. A run is a measurement however many times it is posted.
+
+    Keyed on the issue number until the flood case was thought through, which let one
+    verified run be posted from any number of issues, each passing every check.
+    """
     path = tmp_path / "rows.json"
     path.write_text('{"entries": []}', encoding="utf-8")
     for number in range(1, 26):
@@ -880,3 +869,19 @@ def test_the_ci_filter_and_the_content_check_agree():
         assert "test_public_docs_style.py" in script, (
             "ci.yml skips row-only changes, so the intake must run the content scan itself"
         )
+
+
+def test_the_harness_version_is_recorded_on_the_row():
+    """The instrument moves, so a row has to say which one measured it."""
+    derived = intake.derive_measurements({"current.json": _operator_run()})
+    assert derived["harness"] == "0.3.1"
+
+
+def test_the_research_spelling_of_the_harness_version_is_read_too():
+    split = _split_report()
+    split["harness_revision"] = "0.4.0"
+    assert intake.derive_measurements({"v2.json": split})["harness"] == "0.4.0"
+
+
+def test_a_report_with_no_harness_version_records_none():
+    assert "harness" not in intake.derive_measurements({"v2.json": _split_report()})
