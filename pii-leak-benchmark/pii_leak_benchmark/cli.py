@@ -1,11 +1,6 @@
 """``pii-leak-benchmark`` -- the console entry point.
 
-This ran as ``llm-shield-proxy benchmark --target-base-url ...`` and then as
-``llm-shield-conformance``. The command, distribution, and import package are now
-named after what is measured rather than after one implementation.
-
-The module imports standard library plus ``httpx`` and nothing else, so measuring a
-gateway never requires installing another one.
+Requires only stdlib and ``httpx`` to ensure independent installation.
 """
 
 from __future__ import annotations
@@ -22,7 +17,7 @@ DESCRIPTION = (
 
 
 def _target_headers_from_env() -> list[str]:
-    """Read one NAME=VALUE target header per non-empty environment line."""
+    """Parse one NAME=VALUE target header per non-empty environment line."""
     return [
         line
         for line in os.getenv("CONFORMANCE_TARGET_HEADERS", "").splitlines()
@@ -30,40 +25,14 @@ def _target_headers_from_env() -> list[str]:
     ]
 
 EPILOG = """\
-This command PUBLISHES a comparative row, so it requires the vendor's claim and a
-citation for it. Two subcommands measure the same thing without publishing one:
+This command publishes a comparative row requiring vendor claims and citations.
+Other subcommands:
+  selfcheck : Run without publishing (no claim flags needed).
+  ci        : Run as a pipeline step (starts gateway, runs control, writes summary).
+  cite      : Generate a citation block for a finished report.
+  submit    : Open a public submission with the citation block.
 
-  pii-leak-benchmark selfcheck --target-base-url http://your-gateway/v1
-      One run against a gateway you are already running. Operator-facing verdict,
-      no claim flags.
-
-  pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 \\
-      --start-command 'your-gateway --port 4000'
-      The same check for a pipeline: it starts the gateway, runs a negative control,
-      compares an optional previous version and writes a Markdown summary and
-      artifacts. See `pii-leak-benchmark ci --help`.
-
-Two more read a finished report and measure nothing:
-
-  pii-leak-benchmark cite REPORT
-      The citation block: the harness revision, the corpus and the configuration the
-      numbers came from, so a reader can rerun your exact run.
-
-  pii-leak-benchmark submit [REPORT]
-      Open that result as a submission to the public results wall. Sends the citation
-      block, never the report itself.
-
-The gateway under test must already be configured to send its upstream traffic to the
-capture this command starts (default http://127.0.0.1:8765/v1). Nothing is measured
-about a gateway that never reaches the capture: that run reports
-outcome=inconclusive, which is not a verdict and must not be published as one.
-
-Example:
-
-  pii-leak-benchmark --target-base-url http://127.0.0.1:8899/v1 \\
-      --target-name some-gateway --target-version 1.2.3 \\
-      --redaction-claimed claimed --redaction-claim-citation https://vendor.example/docs \\
-      --redaction-enabled --redaction-config-reference "guardrail: pii, redact: true"
+The gateway under test MUST route upstream traffic to the capture server.
 """
 
 
@@ -71,11 +40,7 @@ def build_parser(
     prog: str = "pii-leak-benchmark",
     require_target: bool = True,
 ) -> argparse.ArgumentParser:
-    """The HTTP-profile parser.
-
-    ``require_target`` is False for callers that also offer another profile on the
-    same command line and decide the branch themselves.
-    """
+    """Build the argument parser. ``require_target`` is False for multi-profile callers."""
     parser = argparse.ArgumentParser(
         prog=prog,
         description=DESCRIPTION,
@@ -195,7 +160,7 @@ def headers_from_args(args: argparse.Namespace) -> dict[str, str]:
 
 
 def redaction_claim_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    """The claim block. The harness DERIVES ``outcome`` from it; it is never a free string."""
+    """Construct the claim block, which drives the derived ``outcome``."""
     claim: dict[str, Any] = {
         "vendor_claims_pii_redaction": args.redaction_claimed,
         "configured_for_this_run": bool(args.redaction_enabled),
@@ -210,11 +175,10 @@ def redaction_claim_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    """Run the HTTP profile described by parsed arguments and return the report."""
+    """Execute the HTTP profile from arguments and return the report."""
     from pii_leak_benchmark.http_profile import run_http_conformance
 
-    # Environment first. A token in argv is readable from any process listing on the
-    # host; the flag stays for scripted use but the env var wins.
+    # Environment token wins over argv to prevent process listing exposure.
     capture_token = os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token
 
     return run_http_conformance(
@@ -239,8 +203,7 @@ def print_summary(report: dict[str, Any], destination: str) -> None:
     print(f"  Passed:       {report['passed']}")
     print(f"  Outcome:      {report['outcome']}")
     if report["outcome"] not in ("pass", "fail"):
-        # Say it on stdout too. A reader who never opens the JSON must not write a
-        # "Fail" row from a run that was never a verdict.
+        # Ensure rationale is printed to prevent misinterpreting non-verdicts as failures.
         print(f"                {report['outcome_rationale']}")
     print(f"  Checks:       {len(report['checks'])}")
     print(f"  Iterations:   {report['checks']['client_observed_latency']['iterations']}")
@@ -254,31 +217,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         return ci_main(arguments[1:])
 
-    # One subcommand, dispatched before the flat parser sees anything, so the
-    # publishing command line is byte-for-byte what it was. `selfcheck` is the
-    # operator smoke test and deliberately takes no claim flags.
+    # Dispatch subcommands early to bypass the main publisher parsing.
     if arguments and arguments[0] == "selfcheck":
         from pii_leak_benchmark.selfcheck import main as selfcheck_main
 
         return selfcheck_main(arguments[1:])
 
-    # `cite` reads a finished report and writes nothing. It exists so a result posted
-    # in an issue names the instrument that produced it.
+    # `cite` generates a citation block from a report.
     if arguments and arguments[0] == "cite":
         from pii_leak_benchmark.cite import main as cite_main
 
         return cite_main(arguments[1:])
 
-    # `submit` posts a finished report's citation to the results wall. It sends the
-    # citation block and never the report: a report can hold the gateway's base URL and
-    # the capture hostname, and this goes to a public tracker.
+    # `submit` opens a public submission using the citation block (never the full report).
     if arguments and arguments[0] == "submit":
         from pii_leak_benchmark.submit import main as submit_main
 
         return submit_main(arguments[1:])
 
-    # `badge` renders a finished report as a Shields.io endpoint file. It exists so a
-    # README badge carries the result rather than the workflow's exit status.
+    # `badge` generates a Shields.io JSON endpoint from a report.
     if arguments and arguments[0] == "badge":
         from pii_leak_benchmark.badge import main as badge_main
 
@@ -293,8 +250,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             report, args.json_out or "./PII_LEAK_BENCHMARK_LATEST.json"
         )
     except (OSError, ValueError) as exc:
-        # CaptureUnreachableError subclasses OSError deliberately, so a hijacked or
-        # unreachable capture lands here rather than as a traceback.
+        # Catch connection/file errors to prevent stack traces on unreachable captures.
         print(f"Benchmark failed: {exc}", file=sys.stderr)
         return 2
 
