@@ -45,17 +45,7 @@ class CompiledProfile:
 
 
 # Characters that render as nothing and so hide a value from every pattern while the
-# client still displays the real thing. NFKC does not deal with them: U+3164 merely
-# folds to U+1160, which is equally invisible.
-#
-# This class is deleted from text that is FORWARDED upstream, not only from text that
-# is scanned -- `redact_text` returns `working_text`. So membership is limited to
-# characters that are invisible AND have no role in ordinary prose. Three known hiding
-# places are deliberately left out for that reason: variation selectors U+FE00-U+FE0F,
-# because U+FE0F is emoji presentation and stripping it rewrites every emoji in the
-# user's prompt; U+2800, a legitimate blank braille cell; and U+180B-U+180D, the
-# Mongolian Free Variation Selectors, which select glyph variants in ordinary Mongolian.
-# All three remain open gaps by decision, pinned by a test.
+# client still displays the real thing.
 INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
     "["
     "\u00AD"  # soft hyphen
@@ -79,62 +69,34 @@ INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
     "]"
 )
 
-# Candidate base64 patterns for obfuscated PII smuggling. The lower bound of 8
-# data characters matches the >= 6 decoded-byte floor enforced below, and the
-# lookaround boundaries (instead of `\b`) keep trailing '=' padding inside the
-# match so padded base64 actually decodes -- the old trailing `\b` stripped the
-# padding, which made every padded value fail the validate=True decode.
-#
-# `-` and `_` are the URL-safe alphabet's substitutes for `+` and `/`. Without them
-# no candidate was formed at all for a URL-safe blob, padded or not:
-# `YWJvYkBleGFtcGxlLmNvbT8_` decodes to `abob@example.com??` and was invisible.
-# Including them means ordinary `snake_case` and `hyphen-joined` words now form
-# candidates too; they are filtered by the decode and the >= 6 / tier-1 gate below,
-# which is where prose was always separated from payload.
+# Candidate base64 patterns for obfuscated PII smuggling.
 BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{8,}={0,2}(?![A-Za-z0-9+/=_-])")
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
-# How many times a candidate is decoded before giving up. A twice-encoded value
-# decodes once into more base64, which no tier-1 pattern matches, so a single pass
-# stopped there and the PII underneath stayed hidden. Each extra pass is taken ONLY
-# when the previous one produced something that is itself base64-shaped, so the cost
-# is bounded to actual nesting rather than charged to every candidate.
+# How many times a candidate is decoded before giving up.
 MAX_BASE64_DECODE_DEPTH = 3
 
-# Percent-encoding hides PII from every Tier 1 pattern. `bob%40example.com` matches no
-# email regex, and the client decodes it back to an address. The v2 profile measured a
-# 0.40 leak rate on percent-encoded cases against 0.09 on plain ones.
+# Percent-encoding hides PII from every Tier 1 pattern.
 PERCENT_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"%[0-9A-Fa-f]{2}")
 MAX_PERCENT_INSPECTION_CHARS = 8_192
-# A run longer than the limit is not skipped, or the limit would just tell an attacker
-# how much padding to add. Its edges are still decoded, same as base64 does.
+# A run longer than the limit is not skipped. Its edges are still decoded.
 PERCENT_BOUNDARY_SCAN_CHARS = 256
-# Finds runs of non-delimiter characters in one C-level pass. Do not replace this with a
-# pattern that scans outward from each escape: that form backtracks, and one 120k run
-# with no delimiter took 4.4 seconds. This runs per SSE event.
+# Finds runs of non-delimiter characters in one C-level pass.
 PERCENT_RUN_PATTERN: re.Pattern[str] = re.compile(r"[^\s\"'<>{}\[\],;()]+")
 
-# Cross-script look-alikes, from the UTS #39 confusables table vendored in
-# `confusables.py`. Built once as a `str.translate` table because this runs per scan.
-# Every row is one codepoint to one ASCII character, which is what lets a folded copy
-# share offsets with the original; `test_homoglyph_domains.py` pins that property.
+# Cross-script look-alikes, from the UTS #39 confusables table.
 _CONFUSABLE_TRANSLATION = str.maketrans(CONFUSABLE_TO_ASCII)
 
-# HTML entities hide the same structured PII percent-encoding did: `bob&commat;example.com`
-# matches no email pattern, and every browser, chat client and markdown renderer shows
-# `bob@example.com`. Named, decimal and hexadecimal forms all appear in the wild.
+# HTML entities hide structured PII.
 HTML_ENTITY_PATTERN: re.Pattern[str] = re.compile(
     r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});"
 )
 MAX_ENTITY_INSPECTION_CHARS = 8_192
-# A run longer than the limit is not skipped, or the limit would just tell an attacker
-# how much padding to add. Its edges are still decoded, same as percent and base64 do.
+# A run longer than the limit is not skipped. Its edges are still decoded.
 ENTITY_BOUNDARY_SCAN_CHARS = 256
-# The same 256-char edge probe, for a blob in a field no policy claims. See
-# `_handle_unmapped_blob`: this path was the only oversized input that skipped it.
+# The same 256-char edge probe, for a blob in a field no policy claims.
 BLOB_BOUNDARY_SCAN_CHARS = 256
-# Deliberately NOT `_PERCENT_RUN_DELIMITERS`: that set contains `;`, which terminates
-# every entity, so reusing it would cut each run at the first entity and decode nothing.
+# Deliberately NOT `_PERCENT_RUN_DELIMITERS`.
 _ENTITY_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[](),")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
@@ -142,17 +104,7 @@ INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
     r"(?i)\b(?:system\s+override|ignore\s+all\s+previous\s+instructions|<\|im_start\|>system|<\|im_end\|>)\b"
 )
 
-# ASCII-only boundary assertions. Python's `\b` treats any Unicode word character
-# (including CJK ideographs, Hiragana, Katakana, Hangul) as part of `\w`, so PII
-# glued directly to non-Latin script text with no whitespace (e.g. "邮箱是john@x.com没有")
-# silently fails to match with `\b`. These assertions only block adjacency to ASCII
-# alphanumerics/underscore, permitting adjacency to non-Latin scripts.
-# Separators that appear between the groups of a structured identifier. A plain hyphen
-# is not the only one people actually send: Word and Outlook autocorrect a typed hyphen
-# into an en dash, and PDF extraction produces non-breaking hyphens. An SSN pasted from
-# an ordinary document was not recognised at all, which needs no attacker to happen.
-# U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash,
-# U+2014 em dash, U+2212 minus sign.
+# ASCII-only boundary assertions.
 _DASH = r"[-\u2010-\u2014\u2212]"
 
 _ASCII_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
@@ -160,16 +112,9 @@ _ASCII_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
 
 # ---------------------------------------------------------------------------
 # Structural validation of Tier 1 matches.
-#
-# Issuer and checksum checks are confidence SIGNALS, never card-redaction gates.
-# A finite IIN table cannot prove that a number is not a private-label, gift, or newly
-# assigned card, and a typo can make a genuine card fail Luhn. Therefore every value
-# matching the native CREDIT_CARD shape is kept. See docs/features
-# .../supported-pii-types.
 # ---------------------------------------------------------------------------
 
-# Selected public payment-network identifiers. This table is deliberately incomplete
-# and must never be used to reject a match.
+# Selected public payment-network identifiers.
 _CARD_IIN_PREFIXES = (
     "4",                                     # Visa
     "34", "37",                              # American Express
@@ -179,10 +124,7 @@ _CARD_IIN_PREFIXES = (
     "6011", "62", "64", "65",                # Discover / UnionPay / Maestro
 )
 _CARD_MASTERCARD_2_SERIES = (222100, 272099)
-# ISO/IEC 7812-1 permits a PAN of up to 19 digits. The previous ceiling of 16 meant a
-# Luhn-valid 19-digit Visa (`4111111111111111110`) matched NOTHING: the ASCII boundary
-# assertions stop a 16-digit prefix from matching when a digit follows, so the value was
-# not partially redacted, it passed through untouched. That is a direct PCI DSS leak.
+# ISO/IEC 7812-1 permits a PAN of up to 19 digits.
 _CARD_MIN_DIGITS = 13
 _CARD_MAX_DIGITS = 19
 
@@ -210,15 +152,7 @@ def _is_payment_iin(digits: str) -> bool:
 
 
 def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
-    """Return (keep_the_span, confidence).
-
-    ``keep_the_span`` is the only value the detection path consumes. Confidence is
-    computed and returned so it can be asserted and, later, surfaced -- it is NOT
-    currently attached to the span tuple or to an audit record, and the documentation
-    says so rather than implying a feature that does not exist.
-
-    Anything not covered by an explicit rule is kept with unchanged behaviour.
-    """
+    """Return (keep_the_span, confidence)."""
     if entity_type == "CREDIT_CARD":
         digits = "".join(character for character in matched if character.isdigit())
         if not _CARD_MIN_DIGITS <= len(digits) <= _CARD_MAX_DIGITS:
@@ -227,9 +161,7 @@ def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
         checksum = _luhn_ok(digits)
         if issuer and checksum:
             return True, "high"
-        # Every regex-shaped card is redacted. An unrecognised IIN may be private-label,
-        # gift-card, or newly assigned; a bad checksum may be a one-digit error or
-        # transposition. Neither observation can safely prove the value is non-PII.
+        # Every regex-shaped card is redacted.
         return True, "medium"
 
     return True, "medium"
@@ -238,17 +170,7 @@ def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     (
-        # The repetition limits stop a denial of service. With `+`, a long run of
-        # characters the local part accepts but with no `@` in it -- a base64 blob, a hex
-        # digest, `%41%41%41...` -- makes the engine retry from every start position and
-        # rescan to the end each time. That is quadratic: 30k characters took 0.27s, 60k
-        # 1.11s, 120k 4.36s. With the limits, 120k takes 0.008s.
-        #
-        # A possessive quantifier does not fix this. It was measured: 120k still took
-        # 2.9s, because it only stops backtracking within one attempt, not the retries.
-        #
-        # The limits are the RFC 5321 maxima, 64 for the local part and 255 for the
-        # domain, so no address anyone can actually receive mail at stops matching.
+        # The repetition limits stop a denial of service.
         "EMAIL",
         re.compile(
             _ASCII_LEFT_BOUNDARY
@@ -271,12 +193,7 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
         _ASCII_LEFT_BOUNDARY + r"(?:\d[ ]?" + _DASH + r"?){13,19}" + _ASCII_RIGHT_BOUNDARY
     )),
     (
-        # A digit run longer than any card. The pattern above accepts 13 to 19
-        # digits and then requires a non-alphanumeric to follow, so a 20-digit run
-        # -- a PAN with an expiry typed after it -- failed at every candidate length
-        # and was not redacted at all. Missing it entirely is the worst outcome, so
-        # the whole run is redacted. The same reasoning as the comment above: an
-        # observation cannot safely prove a number is not PII.
+        # A digit run longer than any card.
         "LONG_DIGIT_RUN",
         re.compile(_ASCII_LEFT_BOUNDARY + r"\d{20,}" + _ASCII_RIGHT_BOUNDARY),
     ),
@@ -327,35 +244,12 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
 
 # ---------------------------------------------------------------------------
 # Tier 3: Contextual Named Entity Recognition.
-#
-# There is no regex fallback here, deliberately. Until 2026-09-02 this module shipped a
-# TIER3_NER_PATTERNS heuristic that matched any run of capitalized words as a PERSON. It
-# was measured over a 60-string prose corpus: it fired on 25 of 25 ordinary business
-# sentences containing a capitalized bigram, producing 26 fabricated names, and it could
-# not match a CJK, Hangul, Cyrillic or Arabic name at all.
-#
-# The failure mode is what removed it. A Tier 1 false positive over-redacts, which is
-# safe. A PERSON false positive REPLACES real text: under synthetic swapping "My Aadhaar
-# is on the enrolment slip." became "Elizabeth is on the enrolment slip." -- grammatical
-# English that no downstream consumer can tell was altered. The heuristic corrupted more
-# text than it protected, and it made name redaction look enabled when it was not.
-#
-# Name redaction therefore requires a loaded ONNX NER model. With no model the engine
-# emits NO PERSON spans and says so loudly rather than quietly approximating:
-# describe_ner_coverage() reports it, the constructor logs a warning naming every profile
-# that expects PERSON, /readyz and /health surface it, and the compliance report records
-# it. A stated gap is safer than a silent approximation.
 # ---------------------------------------------------------------------------
 
-# Entity types the Tier 3 model path can emit. Used to populate the built-in
-# ``global_strict`` profile; a profile may still list a subset via CUSTOM_REGEX_PATH.
+# Entity types the Tier 3 model path can emit.
 TIER3_NER_ENTITIES: Set[str] = {"PERSON"}
 
-# The single wording for "names are not being redacted", used by the startup warning and
-# echoed in the startup banner. Written for an operator reading a log at 3am, not for a
-# developer: it says what is off, what is still on, and the exact two settings that turn
-# it on. Structured detail (which profiles declare PERSON) lives in
-# describe_ner_coverage() and on /readyz, where it is data rather than prose.
+# The single wording for "names are not being redacted".
 NER_DISABLED_WARNING = (
     "Name redaction is off. The Tier 3 NER model is not loaded, so people's names will "
     "not be redacted. Email addresses, card numbers, SSNs and other structured "
@@ -364,13 +258,7 @@ NER_DISABLED_WARNING = (
 )
 
 # Candidate pattern for Shannon Entropy evaluation
-# Lookarounds rather than `\b`, for the same reason BASE64_CANDIDATE_PATTERN uses them.
-# A word boundary needs a word/non-word transition, and CJK ideographs are word
-# characters to Python's Unicode `re`. A secret sitting directly against Japanese or
-# Chinese text therefore had a boundary on neither side and Tier 2 never saw it, while
-# the identical secret with spaces around it was found at once. Excluding only the
-# secret alphabet itself makes the boundary "not more of the same token", which is what
-# was meant all along.
+# Candidate pattern for Shannon Entropy evaluation.
 CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
     r"(?<![A-Za-z0-9_\-+=])[A-Za-z0-9_\-+=]{16,}(?![A-Za-z0-9_\-+=])"
 )
@@ -378,20 +266,6 @@ CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
 
 # ---------------------------------------------------------------------------
 # No span may stop in the middle of a digit run.
-#
-# Measured on 2026-09-02: `Aadhaar 3333 3333 3333` redacted to
-# `Aadhaar [PHONE_1] 3333`. The PHONE expression consumed `3333 3333`, stopped at its
-# own grouping limit, and the final four digits went upstream verbatim. A partial match
-# is strictly worse than a miss, because the output looks redacted.
-#
-# The fix is applied to resolved spans rather than to any one expression, because the
-# defect is a class: every numeric pattern has some grouping limit, and the next one
-# added will have a different one. Growing the span cannot change which detector won or
-# what it was typed as; it can only make the redaction cover the whole identifier. Where
-# it over-reaches it over-redacts, which is the safe direction.
-#
-# Verified not to move the documented 22-string false-positive corpus in
-# tests/test_tier1_validation_signal.py (17 strings / 18 spans before and after).
 # ---------------------------------------------------------------------------
 
 # Separators that may appear inside a single printed identifier.
@@ -505,11 +379,7 @@ class UnmappedBlobError(ValueError):
 
 
 def _policy_skip_keys() -> frozenset[str]:
-    """Keys the active virtual key's policy claims, so deep redaction leaves them alone.
-
-    JSON is schemaless, so a deployment's proprietary fields cannot be known here.
-    A policy naming them is how an operator says "this one is mine, do not walk it".
-    """
+    """Keys the active virtual key's policy claims, so deep redaction leaves them alone."""
     policy = request_policy_ctx.get() or {}
     declared = policy.get("payload_skip_keys")
     if isinstance(declared, str):
@@ -524,9 +394,7 @@ class PIIEngine:
 
     - Tier 1: Microsecond regex for structured identifiers.
     - Tier 2: Shannon Entropy filter for high-entropy secrets and keys.
-    - Tier 3: Contextual Named Entity Recognition via a loaded ONNX model. There is no
-      heuristic fallback: with no model, no PERSON span is produced. See
-      describe_ner_coverage().
+    - Tier 3: Contextual Named Entity Recognition via a loaded ONNX model.
     """
 
     def __init__(
@@ -626,30 +494,16 @@ class PIIEngine:
             name="global_strict", tier1_patterns=all_tier1, tier3_ner_entities=all_tier3
         )
 
-        # Fires at construction and on every policy hot-reload, so a profile edit that
-        # newly declares PERSON is reported even on a long-running process.
+        # Fires at construction and on every policy hot-reload.
         self._warn_if_ner_is_declared_but_unbacked()
 
     @property
     def name_redaction_active(self) -> bool:
-        """True only when a Tier 3 NER model is actually loaded and usable.
-
-        There is no heuristic fallback, so this is the whole answer to "are names being
-        redacted": if it is False, no PERSON span can be produced by any profile.
-        """
+        """True only when a Tier 3 NER model is actually loaded and usable."""
         return bool(self.enable_tier3 and self._onnx_session and self._tokenizer)
 
     def describe_ner_coverage(self) -> Dict[str, Any]:
-        """Report whether name (PERSON) redaction is actually in force, and for whom.
-
-        This exists so an operator cannot believe name redaction is on when it is not.
-        The same structure is surfaced by ``/readyz``, ``/health`` and the compliance
-        report, and the constructor logs a warning built from it at startup.
-
-        ``profiles_expecting_ner`` names every compiled profile that declares a Tier 3
-        entity. When ``model_loaded`` is False, every one of those declarations is
-        inert: the profile asks for name redaction and does not get it.
-        """
+        """Report whether name (PERSON) redaction is actually in force, and for whom."""
         expecting = sorted(
             profile.name
             for profile in (
@@ -675,15 +529,7 @@ class PIIEngine:
         }
 
     def _warn_if_ner_is_declared_but_unbacked(self) -> None:
-        """Log once per (re)compile if a profile expects PERSON and no model can supply it.
-
-        Deliberately at WARNING. The previous behaviour -- a regex heuristic standing in
-        silently -- is what made this gap invisible in the first place.
-
-        This is the ONLY place the fact is stated in prose. The startup banner in
-        ``api/main.py`` shows the status word from the same coverage snapshot and does not
-        restate it, so an operator sees one message, not two competing ones.
-        """
+        """Log once per (re)compile if a profile expects PERSON and no model can supply it."""
         coverage = self.describe_ner_coverage()
         if coverage["name_redaction_active"] or not coverage["unbacked_profiles"]:
             return
@@ -719,10 +565,7 @@ class PIIEngine:
         if active_profile is None:
             active_profile = self._global_strict_profile
 
-        # Locate encoded bodies once. Small candidates are decoded below. For an
-        # attachment-sized candidate, retain small edge guards so detectors can still
-        # catch plaintext that touches the body, but do not run every detector across
-        # the encoded interior. Segment offsets preserve positions in the source text.
+        # Locate encoded bodies once.
         base64_candidates: List[Tuple[int, int, str]] = []
         excluded_interiors: List[Tuple[int, int]] = []
         for match in BASE64_CANDIDATE_PATTERN.finditer(text):
@@ -733,16 +576,7 @@ class PIIEngine:
                 if interior_start < interior_end:
                     excluded_interiors.append((interior_start, interior_end))
 
-                # The boundary guards were kept in the plaintext scan segments but never
-                # decoded, and no text detector matches base64, so they guarded against
-                # nothing encoded. A 12,000-char attachment beginning `bob@example.com `
-                # produced no spans at all.
-                #
-                # Decode each guard on its own. The head is 4-aligned by construction;
-                # the tail is aligned back to the blob's own framing so it decodes to
-                # real bytes instead of a shifted smear. Each guard carries its OWN
-                # source span, so the span and its matched text agree and rehydration
-                # stays exact. The interior stays undecoded: that bound is the point.
+                # Decode each guard on its own.
                 blob = match.group(0)
                 tail_offset = len(blob) - BASE64_BOUNDARY_SCAN_CHARS
                 tail_offset -= tail_offset % 4
@@ -775,32 +609,12 @@ class PIIEngine:
                 for offset, segment in scan_segments:
                     for match in pattern.finditer(segment):
                         matched_text = match.group(0)
-                        # classify_tier1_match is deliberately NOT called here. It is a pure
-                        # function whose every branch returns keep=True, so the old
-                        # `if not keep: continue` was unreachable and the call was work with
-                        # no effect -- a Luhn checksum and an IIN lookup per card-shaped
-                        # match, thrown away. Detection does not consult it, and must not:
-                        # a validator that rejects is a validator that can leak. It stays as
-                        # a standalone, tested signal for callers that want confidence.
+                        # classify_tier1_match is deliberately NOT called here.
                         raw_spans.append(
                             (offset + match.start(), offset + match.end(), entity_type, matched_text)
                         )
 
         # Tier 1b: the same patterns over a confusables-folded copy.
-        #
-        # `bob@ex<CYRILLIC A>mple.com` renders identically to the real address in every
-        # client and matches no pattern, so it was forwarded in clear. NFKC does not
-        # touch it and should not: Cyrillic `a` and Latin `a` are distinct characters,
-        # not compatibility variants.
-        #
-        # Folding happens on a COPY and the spans are reported against the original. The
-        # vendored UTS #39 table maps one codepoint to one ASCII character, so the fold
-        # cannot change a string's length and offsets carry over unchanged -- asserted
-        # below rather than assumed, because the whole approach rests on it. `matched_text`
-        # is taken from the original so the vault maps what was actually sent.
-        #
-        # The forwarded text is NOT folded. `redact_text` returns its working text, so
-        # folding there would rewrite genuine Russian prose into Latin gibberish.
         if not text.isascii():
             folded = text.translate(_CONFUSABLE_TRANSLATION)
             if len(folded) == len(text) and folded != text:
@@ -848,35 +662,25 @@ class PIIEngine:
                     pattern.search(decoded_text)
                     for _entity_type, pattern in active_profile.tier1_patterns
                 ):
-                    # The span stays the whole source run, as it was. Mapping a hit
-                    # inside the decoded text back to source offsets is fragile, and
-                    # more so once the value has been decoded more than once.
+                    # The span stays the whole source run, as it was.
                     raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
                     break
 
-                # Nothing found. Go round again only if this decode produced another
-                # base64 blob, which is what a double-encoded value looks like.
+                # Nothing found.
                 nested = decoded_text.strip()
                 if not BASE64_CANDIDATE_PATTERN.fullmatch(nested):
                     break
                 probe = nested
 
         # Obfuscated Percent-Encoded Candidate Inspection.
-        #
-        # Same shape as the base64 block above, and the same conservative span: the whole
-        # source run is redacted rather than the decoded substring, because decoding
-        # changes offsets and mapping them back is fragile. Redacting a few extra
-        # percent-encoded characters around a hit is the safe direction to be wrong in.
         for run in PERCENT_RUN_PATTERN.finditer(text):
             token = run.group(0)
-            # Two C-level rejections before any Python work. Text without a '%' is the
-            # overwhelmingly common case and must cost almost nothing here.
+            # Two C-level rejections before any Python work.
             if "%" not in token or not PERCENT_ESCAPE_PATTERN.search(token):
                 continue
             start, end = run.span()
             if end - start > MAX_PERCENT_INSPECTION_CHARS:
-                # Decode the edges only. A slice can cut an escape in half; `unquote`
-                # leaves the stub as literal text, which matches nothing and is safe.
+                # Decode the edges only.
                 probes = (
                     token[:PERCENT_BOUNDARY_SCAN_CHARS],
                     token[-PERCENT_BOUNDARY_SCAN_CHARS:],
@@ -900,8 +704,6 @@ class PIIEngine:
                     break
 
         # Obfuscated HTML-Entity Candidate Inspection.
-        #
-        # Same shape and the same conservative whole-run span as the percent block above.
         run_end = -1
         for entity in HTML_ENTITY_PATTERN.finditer(text):
             if entity.start() < run_end:
@@ -915,13 +717,7 @@ class PIIEngine:
             run_end = end
             token = text[start:end]
             if end - start > MAX_ENTITY_INSPECTION_CHARS:
-                # Decode the edges only, rather than skipping the run. Skipping made the
-                # cap a recipe: pad an entity-encoded address with enough non-delimiter
-                # characters and raw Tier 1 cannot see it either, so the whole run went
-                # to the provider unchanged. Percent runs and base64 blobs both already
-                # inspect their boundaries past their own caps; this matches them.
-                # A slice can cut an entity in half; `html.unescape` leaves the stub as
-                # literal text, which matches nothing and is safe.
+                # Decode the edges only, rather than skipping the run.
                 probes = (
                     token[:ENTITY_BOUNDARY_SCAN_CHARS],
                     token[-ENTITY_BOUNDARY_SCAN_CHARS:],
@@ -1008,9 +804,7 @@ class PIIEngine:
                 non_overlapping.append(span)
                 last_end = end
 
-        # A span that ends on a digit while the run continues is a partial match, and a
-        # partial match on a structured identifier leaks its tail. Grow it to cover the
-        # whole run, clamped by the next accepted span. See _extend_span_over_digit_run.
+        # A span that ends on a digit while the run continues is a partial match.
         completed: List[Tuple[int, int, str, str]] = []
         for index, (start, end, entity_type, matched_text) in enumerate(non_overlapping):
             if end > start and text[end - 1].isdigit():
@@ -1024,9 +818,6 @@ class PIIEngine:
 
     def redact_text(self, text: str, vault: Vault, active_profile: Optional[CompiledProfile] = None) -> str:
         """Redacts PII spans in text and registers deterministic mappings in the Vault.
-
-        Applies Unicode de-smuggling (stripping zero-width and invisible format characters)
-        and obfuscated Base64 detection to prevent adversarial filter evasion.
 
         Time Complexity: O(N + K) where N is text length and K is number of matches.
         Space Complexity: O(N) for reconstructed redacted text.
@@ -1066,9 +857,6 @@ class PIIEngine:
         max_depth: int = 20,
     ) -> Dict[str, Any]:
         """Recursively traverses LLM payload dictionary and redacts string content.
-
-        Supports standard OpenAI/Anthropic/Gemini payload structures (messages array, prompt, system, input, tool_calls).
-        Protects against indirect prompt injection in tool responses and JSON recursion bombs.
 
         Args:
             payload: Request JSON dictionary.
@@ -1184,9 +972,7 @@ class PIIEngine:
                     for p in new_payload["prompt"]
                 ]
 
-        # Redact system prompt if separated at top level. Anthropic sends this as a
-        # bare string or as a list of content blocks; a block list reaching the wire
-        # unredacted is the same leak as an unredacted message.
+        # Redact system prompt if separated at top level.
         if "system" in new_payload:
             if isinstance(new_payload["system"], str):
                 new_payload["system"] = self.redact_text(new_payload["system"], vault, active_profile)
@@ -1195,8 +981,7 @@ class PIIEngine:
                     new_payload["system"], vault, active_profile
                 )
 
-        # Redact the Responses API instructions field, which carries caller text
-        # outside both `messages` and `input`.
+        # Redact the Responses API instructions field.
         if "instructions" in new_payload and isinstance(new_payload["instructions"], str):
             new_payload["instructions"] = self.redact_text(
                 new_payload["instructions"], vault, active_profile
@@ -1214,9 +999,7 @@ class PIIEngine:
                     for item in new_payload["input"]
                 ]
 
-        # Everything the shapes above do not cover still reaches the provider
-        # verbatim: metadata, user, tools, response_format, and any field this
-        # gateway has never heard of. Walk those too.
+        # Everything else still reaches the provider verbatim. Walk those too.
         if settings.ENABLE_DEEP_PAYLOAD_REDACTION:
             protected = settings.payload_protected_keys_set | _policy_skip_keys()
             ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
@@ -1240,14 +1023,7 @@ class PIIEngine:
         max_depth: int,
         json_path: str = "",
     ) -> Any:
-        """Redacts every string beneath `node`, skipping structure and opaque blobs.
-
-        Two things are deliberately left alone. Values under a protected key carry
-        structure rather than prose, and rewriting one breaks the request instead of
-        protecting anybody. Strings past `max_string_length`, and any data: URI, are
-        blobs: scanning one base64 image costs more than the whole rest of a payload,
-        and no image is going to be matched by a text detector anyway.
-        """
+        """Redacts every string beneath `node`, skipping structure and opaque blobs."""
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
 
@@ -1298,72 +1074,37 @@ class PIIEngine:
         json_path: str,
         active_profile: Optional[CompiledProfile] = None,
     ) -> str:
-        """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
-
-        The blob's EDGES are inspected first. This used to be the only oversized input in
-        the engine that was not edge-scanned: percent runs, base64 candidates and HTML
-        entity runs all decode their two 256-char edges past their own caps, each for the
-        reason written beside it -- a limit that skips is a recipe for how much padding to
-        add. Measured: a 12 KB base64 blob carrying `bob@example.com` at its head was
-        caught as BASE64_OBFUSCATED_PII when it reached `detect_spans` and forwarded
-        VERBATIM from an unclaimed field, because `PAYLOAD_MAX_REDACT_STRING_LENGTH` stops
-        it before `MAX_BASE64_INSPECTION_CHARS` ever gets to look.
-
-        The interior is still not decoded. That bound is the cost this ceiling exists to
-        avoid and a control test pins it.
-
-        A `data:` URI is skipped as before: declared media with a known shape, not an
-        unknown field. Rewriting one breaks vision models, which is a worse failure than
-        the risk it removes.
-        """
+        """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims."""
         policy = settings.UNMAPPED_BLOB_POLICY
         if policy == "block":
             raise UnmappedBlobError(json_path or "<root>", len(blob))
 
-        # `skip` is an explicit opt-out. Do not spend the probe on it.
+        # `skip` is an explicit opt-out.
         if policy == "skip" or blob.startswith("data:"):
             return blob
 
-        # The tail offset is aligned back to the blob's OWN 4-character framing, exactly
-        # as the oversized-base64 path does. An unpadded blob whose length is not a
-        # multiple of four otherwise starts its tail slice mid-group, and the slice
-        # decodes to a shifted smear that matches nothing -- so tail PII would have been
-        # forwarded while the code looked like it had checked.
+        # The tail offset is aligned back to the blob's OWN 4-character framing.
         tail_offset = len(blob) - BLOB_BOUNDARY_SCAN_CHARS
         tail_offset -= tail_offset % 4
-        # Joined with a newline so a match cannot straddle the seam and manufacture a hit
-        # out of two unrelated fragments.
+        # Joined with a newline so a match cannot straddle the seam.
         probe = blob[:BLOB_BOUNDARY_SCAN_CHARS] + "\n" + blob[tail_offset:]
 
         try:
             edge_scan = "pii_found" if self.detect_spans(probe, active_profile) else "clean"
-        except Exception:  # noqa: BLE001  # nosec B110 - a probe failure must not take
-            # down the request. Recorded as its own outcome: `clean` means the probe ran
-            # and found nothing, and an operator who cannot tell that apart from "the
-            # probe blew up" may suppress a path that was never inspected at all.
+        except Exception:  # noqa: BLE001  # nosec B110
+            # A probe failure must not take down the request.
             logger.warning("Unmapped-blob edge scan failed at %s", json_path or "<root>")
             edge_scan = "failed"
 
         AuditLogger.log_unmapped_blob(
             json_path=json_path or "<root>",
             size_bytes=len(blob),
-            # "could not inspect this" and "inspected the edges and found PII" are
-            # different events. An operator tuning payload_skip_keys has to tell them
-            # apart, and one record type conflated them.
+            # Different events for telemetry.
             edge_scan=edge_scan,
         )
 
         if edge_scan == "pii_found":
-            # `warn` means "forward what I could not inspect, but tell me". Once the edges
-            # ARE inspected and PII is found, forwarding is no longer that -- it is
-            # "found PII and shipped it anyway", which no DLP product should do.
-            #
-            # A FIXED marker, not a vault token. Minting one would hash and retain the
-            # whole blob in both token maps and push it to Redis, so a field near the
-            # request-size limit would cost work and PLAINTEXT RETENTION proportional to
-            # the entire value -- including the interior this function never looked at.
-            # That is the opposite of what a bounded probe is for. Nothing round-trips an
-            # unclaimed vendor field, so there is no restoration to preserve.
+            # A FIXED marker, not a vault token.
             return "[UNMAPPED_BLOB_PII_REDACTED]"
 
         return blob
@@ -1375,11 +1116,7 @@ class PIIEngine:
         active_profile: Optional[CompiledProfile] = None,
         max_depth: int = 8,
     ) -> Any:
-        """Redacts a tool_result's own content, a string or further blocks.
-
-        Walked with an explicit queue and a depth bound rather than by recursion.
-        The nesting is caller controlled, so an unbounded descent is a JSON bomb.
-        """
+        """Redacts a tool_result's own content, a string or further blocks."""
         if isinstance(content, str):
             return self.redact_text(content, vault, active_profile)
         if not isinstance(content, list):
@@ -1429,12 +1166,7 @@ class PIIEngine:
         vault: Vault,
         active_profile: Optional[CompiledProfile] = None,
     ) -> Any:
-        """Redacts one Responses API input item.
-
-        An item carries its text in `content` (a string or a block list), and tool
-        items carry it outside `content` entirely: a function_call in `arguments`,
-        a function_call_output in `output`.
-        """
+        """Redacts one Responses API input item."""
         if not isinstance(item, dict):
             return item
 
