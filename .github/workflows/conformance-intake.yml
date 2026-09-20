@@ -94,7 +94,7 @@ jobs:
       # uploads what was built. The build is the gate; this is the delivery.
       - name: Deploy the built site
         if: steps.publish.outcome == 'success'
-        uses: w9jds/firebase-action@f527de56a76155c20044753433bc6b5b379f4641 # master, pinned 2026-09-12
+        uses: w9jds/firebase-action@d462443a9654f6ed6d84972a0215e273c21107ce # master, pinned 2026-09-12
         with:
           args: deploy --only hosting
         env:
