@@ -1,57 +1,6 @@
 """Minimal v2.0.0 profile emitter — demonstrates the echo/injection response split.
-
-WHAT THIS IS. The smallest thing that produces a `spec/v2.0.0` http-profile report from a
-real measurement, so the response split is a demonstrated design rather than a specified
-one. It runs two loopback HTTP servers -- an upstream (the capture) and a gateway under
-test -- and drives them with a real streaming client.
-
-WHAT IT IS NOT. Not the full v2 harness. It carries a real pairwise covering array over the
-five axes the v2 corpus block requires -- entity, encoding, fragmentation, carrier,
-request_site -- but each axis has only two to four values, fragmentation is a single midpoint
-split rather than every split point, and there is no generative corpus behind the case
-definitions. Every such narrowing is declared in `limitations.method_limits` in the emitted
-report. Nothing in the report claims coverage this module does not measure.
-
-`request_site` was added late, and how it was missed is worth keeping. Every case used to put
-its protected values in `messages[0].content`. Nothing in the report said so, and every
-gateway measured looked like it had been asked about its whole request path when it had only
-been asked about one field of it. The axis exists because a profile that varies four things
-and silently fixes a fifth reports a narrower result than it appears to.
-
-THE POINT. On the response path a correct gateway must do two OPPOSITE things at once:
-
-    ECHO segment      -- the upstream replays the MASKED prompt. The gateway must
-                         REHYDRATE its own placeholders back to the originals.
-                         Measured as FidelityRate.
-    INJECTION segment -- the upstream emits values that were never in the prompt. The
-                         gateway must REDACT them. Measured as LeakRate.
-
-No single global policy satisfies both. The shipped controls make the trade-off concrete:
-`passthrough` scores Fidelity 0.0 and Leak 1.0/1.0 because it does not restore the masked
-echo; `redact-all` scores Fidelity 0.0 and Leak 0.125/1.0; `chunk-local` scores Fidelity
-1.0 and Leak 0.125/1.0; bounded retention scores Fidelity 1.0 and Leak 0.125/0.125; and
-retention plus decoding scores Fidelity 1.0 and Leak 0.0/0.0. Leak pairs are
-single-chunk/adversarial. These are measured controls, not idealized quadrants.
-
-DeltaFrag = LeakRate(adversarial) - LeakRate(single_chunk) is then the number that
-separates a chunk-local scanner from a retaining one. Both score identically when every
-value arrives inside one chunk; only the adversarial condition tells them apart.
-
-The reference policies are deliberate models, not products, and nothing in this module
-names or ranks a vendor.
-
-EXTERNAL GATEWAYS. `--gateway-url` skips the in-process policies entirely and drives a real
-proxy that is already running and already configured to use this harness's capture as its
-upstream. `policy_name` is then only a label. Two things make that mode honest and both are
-easy to get wrong:
-
-  - The capture must answer each case with ITS OWN fixture. It is rebound to the same fixed
-    port every case, so it sends `Connection: close`; without that a pooling gateway gets
-    the previous case's response and the case scores as a non-leak. See `_stop`.
-  - The report's `capture.upstream_bodies` is not optional colour. FidelityRate and
-    LeakRate are response-path measurements, and a gateway that masks nothing scores
-    FidelityRate 1.0 for the trivial reason that there was nothing to restore. Only the
-    prompt the upstream received separates that from real rehydration.
+Drives two loopback HTTP servers (upstream and gateway) with a streaming client to measure
+FidelityRate (rehydration of echoed placeholders) and LeakRate (redaction of new injected values).
 """
 
 from __future__ import annotations
@@ -88,28 +37,15 @@ from .http_profile import (
 )
 
 SCHEMA_ID = "llm-shield.streaming-privacy-http-profile/v2.0.0"
-# BUMP THIS WHEN BEHAVIOUR THAT DECIDES A NUMBER CHANGES. It read "0.1.0-minimal" through
-# two rounds of repair that gave the module a conformant SSE parser, path-keyed joins, five
-# checks that can now fail, a real capture self-probe and an exhaustive split oracle -- so
-# every report claimed a harness_revision that had stopped being true. "Minimal" in
-# particular was no longer a description of anything.
-#
-# It is a LABEL, not a selected-source staleness fingerprint:
-# `instrument.inspector_sha256` is derived from an explicit, non-transitive list and so
-# catches edits to that list without a manual version bump. The full evidence tag and
-# eligibility checks cover provenance and completeness beyond that fingerprint. This
-# label lets a reader distinguish report generations at a glance without hashing source.
+# Label for report generations. Bump when measurement-affecting behavior changes.
 EMITTER_VERSION = "0.2.1"
 
-# Detector for the injection segment. Deliberately simple and deliberately NOT given the
-# fixture values: a gateway that was handed the needles would be measuring nothing.
+# Simple injection detector; deliberately blind to specific fixture values.
 _DETECTORS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("EMAIL", re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)),
     ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
     ("CARDPAN", re.compile(r"\b(?:\d[ -]?){13,19}\b")),
-    # Ordered after SSN on purpose: an SSN is 3-2-4 digits and a US phone is 3-3-4, so
-    # the two patterns cannot both match the same run, but keeping the more specific
-    # shape first documents the intent.
+    # Ordered after SSN (3-2-4 vs 3-3-4) to prefer the more specific shape.
     ("USPHONE", re.compile(r"\b\d{3}-\d{3}-\d{4}\b")),
 )
 
@@ -123,14 +59,13 @@ _PLACEHOLDER = re.compile(r"\[(?:EMAIL|SSN|CARDPAN)_\d+\]")
 
 @dataclass(frozen=True)
 class Segments:
-    """Two disjoint value sets: one echoed back, one injected by the upstream."""
+    """Disjoint value sets: one echoed, one injected."""
 
     echo: dict[str, str]
     injection: dict[str, str]
 
 
-# v2 caps entity ids at 10 characters, because vault retention L = N-1 makes the longest
-# id a hot-path cost. make_fixture() still uses v1's names, so map them once here.
+# Map v1 entity IDs to v2's 10-char cap to bound vault retention costs.
 _V2_ENTITY_ID = {"email": "EMAIL", "ssn": "SSN", "card": "CARDPAN", "credit_card": "CARDPAN",
                  "CREDIT_CARD": "CARDPAN", "EMAIL": "EMAIL", "SSN": "SSN",
                  "phone": "USPHONE", "USPHONE": "USPHONE"}
@@ -150,15 +85,7 @@ def _remap(fixture: dict[str, str]) -> dict[str, str]:
 def make_seeded_fixture(rng: "random.Random") -> dict[str, str]:
     """One run's protected values, drawn reproducibly from `rng`.
 
-    v1's `make_fixture` draws from `secrets` on purpose -- a target must not be able to
-    predict the next run's values. v2 needs the opposite property for the corpus block:
-    the seed must reproduce the drawn values, or the `seed` field is decoration.
-
-    Both properties are wanted, so this is a separate generator rather than a change to
-    v1. It imports v1's value spaces and rejection rules instead of restating them, so
-    the two cannot drift: the SSN area/group/serial ranges, the invalidating-prefix list,
-    the IPv4-collision rejection, the email alphabet and length, and the published test
-    card list all come from `http_profile`.
+    Unlike v1, v2 needs seeded reproducibility for the corpus block. Imports v1's spaces/rules.
     """
     while True:
         area = rng.randint(*_FIXTURE_SSN_AREA)
@@ -180,32 +107,7 @@ def make_seeded_fixture(rng: "random.Random") -> dict[str, str]:
     )
     card = rng.choice(_FIXTURE_TEST_CARDS)
 
-    # USPHONE is drawn from 555-0100 through 555-0199, in any valid area code. That block
-    # is WIDELY CITED as reserved by the NANP for fictitious use, and `entity-list.md`
-    # records the citation as UNVERIFIED: ATIS/INC and NANPA sources were unreachable. So
-    # the safety claim here rests on that citation, not on a retrieved primary source, and
-    # it is labelled the same way in the registry. What IS verified in this repository is
-    # the detectability half: Google Cloud DLP flags 212-555-0143.
-    #
-    # This entity is in the corpus for a specific methodological reason.
-    #
-    # A fixture value must be BOTH safe to publish and detectable by the detectors under
-    # test, and those two requirements conflict for identifiers validated against real
-    # assignment. The SSN above resolves the conflict in favour of safety -- area 900-999
-    # is never assigned, so no living person's SSN can appear in this corpus -- and pays
-    # for it by being invisible to any detector that validates the area, Google Cloud DLP
-    # among them. That is reported per run as `detector_blind_entities`.
-    #
-    # USPHONE shows the conflict is NOT inherent. Where the governing body publishes a
-    # reserved range for fiction AND detectors honour it, a fixture can be both. Verified:
-    # DLP flags 212-555-0143. The same holds for EMAIL via RFC 2606 `example.com` and for
-    # CARDPAN via the published test PANs, both already used above. SSN is the exception
-    # because the SSA's reserved advertising block (987-65-4320..4329) sits inside the
-    # 900-999 area that validating detectors reject, so its reserved range and its
-    # detectable range are disjoint.
-    #
-    # Corpus design rule, and the reason this entity is here: prefer entities with a
-    # reserved-and-honoured test range; for the rest, declare the blindness.
+    # USPHONE uses fictitious ranges to balance publish safety and detector visibility.
     area = rng.randint(2, 9) * 100 + rng.randint(0, 99)
     line = rng.randint(0, 99)
     return {
@@ -219,9 +121,7 @@ def make_seeded_fixture(rng: "random.Random") -> dict[str, str]:
 def build_segments(seed: str) -> Segments:
     """Draw two disjoint fixtures reproducibly from `seed`.
 
-    Same seed, same values -- which is what makes the report's `corpus.seed` field mean
-    something. Disjointness is asserted on NORMALIZED forms in `check_segment_separation`;
-    this only has to produce a candidate pair.
+    Same seed produces same values. Disjointness is enforced via _normalized_disjoint.
     """
     rng = random.Random(seed)
     echo = make_seeded_fixture(rng)
@@ -265,9 +165,7 @@ def _longest_shared_substring(a: Iterable[str], b: Iterable[str]) -> int:
 def check_segment_separation(segments: Segments, request_body: str) -> dict[str, Any]:
     """The check that makes the two opposite measurements safe to run on one response.
 
-    If a value appeared in both segments, correct rehydration of the echo would be
-    indistinguishable from a leak of the injection, and the profile would fail a gateway
-    that did the right thing.
+    Prevents overlapping values where echo rehydration mimics an injection leak.
     """
     echo_values = list(segments.echo.values())
     injection_values = list(segments.injection.values())
@@ -337,12 +235,7 @@ class Policy:
 
 
 def _redact_then_rehydrate(text: str, vault: dict[str, str]) -> str:
-    """Order is load-bearing.
-
-    Redact raw values FIRST, then restore your own placeholders. The other order
-    rehydrates a placeholder into the original and the detector immediately redacts it
-    again, so the gateway destroys its own restore and scores FidelityRate 0.
-    """
+    """Redact raw values first, then rehydrate placeholders to avoid double-redaction."""
     out = text
     for _entity, pattern in _DETECTORS:
         out = pattern.sub("[REDACTED]", out)
@@ -352,7 +245,7 @@ def _redact_then_rehydrate(text: str, vault: dict[str, str]) -> str:
 
 
 class Passthrough(Policy):
-    """Forwards bytes untouched. Never rehydrates, never redacts."""
+    """Forwards bytes untouched."""
 
     name = "passthrough"
 
@@ -361,10 +254,7 @@ class Passthrough(Policy):
 
 
 class RedactAll(Policy):
-    """Redacts every detected value and never rehydrates.
-
-    The one-way anonymizer. Scores a perfect LeakRate and destroys the response.
-    """
+    """One-way anonymizer: redacts detected values, never rehydrates."""
 
     name = "redact-all"
     redacts = True
@@ -377,11 +267,7 @@ class RedactAll(Policy):
 
 
 class ChunkLocal(Policy):
-    """Rehydrates and redacts, but reasons about one delta at a time with no state.
-
-    This is the modelled defect. It is correct whenever a value or placeholder happens to
-    arrive inside a single delta, and wrong the moment one straddles a boundary.
-    """
+    """Rehydrates and redacts chunk-by-chunk statelessly. Vulnerable to fragmentation."""
 
     name = "chunk-local"
     rehydrates = True
@@ -392,12 +278,7 @@ class ChunkLocal(Policy):
 
 
 class Retaining(Policy):
-    """Rehydrates and redacts with a bounded suffix carry.
-
-    Holds back the longest tail that could still become a placeholder or a detectable
-    value, so boundaries stop mattering. Retention is bounded by the longest needle, which
-    is what keeps memory flat.
-    """
+    """Rehydrates and redacts with a bounded suffix carry to handle fragmentation safely."""
 
     name = "bounded-retention"
     rehydrates = True
@@ -412,13 +293,7 @@ class Retaining(Policy):
         )
 
     def _cut(self) -> int:
-        """Longest prefix that cannot contain the start of an unfinished needle.
-
-        Holding a fixed tail of `_bound` characters is NOT sufficient: a value whose
-        prefix sits before the cut is emitted unredacted. Cutting at the last whitespace
-        before the tail is, because every needle here is a whitespace-free run. This is
-        the same reasoning as the shipped word-boundary case in the proxy's retention.
-        """
+        """Cut prefix at the last whitespace before the tail to prevent partial emission."""
         limit = len(self._buffer) - self._bound
         if limit <= 0:
             return 0
@@ -439,14 +314,7 @@ class Retaining(Policy):
 
 
 class RetainingDecoding(Retaining):
-    """Bounded retention PLUS decoding before detection.
-
-    Retention alone fixes fragmentation and nothing else. A percent-encoded value has no
-    `@` and no digit-group separators, so the detector never fires on it however much
-    buffer you hold. The encoding and fragmentation axes are independent defects and each
-    needs its own mitigation; this policy exists to show that, and it is the only
-    reference policy here that passes the whole covering array.
-    """
+    """Bounded retention combined with decoding to handle percent-encoded injection."""
 
     name = "retention-plus-decoding"
 
@@ -460,10 +328,7 @@ class RetainingDecoding(Retaining):
         for _entity, pattern in _DETECTORS:
             for match in pattern.finditer(decoded):
                 original = match.group(0)
-                # Redact the value in whatever surface form it appears in.
-                # The two quote calls are identical for the current fixtures (none
-                # contains '/'). The duplicate is harmless historical evidence-code
-                # debt; removing it awaits the next frozen-instrument evidence round.
+                # Redact the value across surface encodings.
                 for surface in (original, quote(original, safe=""), quote(original)):
                     out = out.replace(surface, "[REDACTED]")
         return out
@@ -479,12 +344,7 @@ PRESIDIO_ANALYZER_URL = "http://127.0.0.1:5002/analyze"
 
 
 def _presidio_redact(text: str, url: str = PRESIDIO_ANALYZER_URL) -> str:
-    """Redact using a real Presidio analyzer over HTTP.
-
-    Presidio returns spans; this replaces them right-to-left so earlier offsets stay
-    valid. Any transport failure raises -- a detector that silently returns the input
-    unchanged would score as a leak and be indistinguishable from a real one.
-    """
+    """Redact via Presidio HTTP analyzer, applying spans right-to-left."""
     if not text.strip():
         return text
     payload = json.dumps({"text": text, "language": "en"}).encode()
@@ -499,13 +359,7 @@ def _presidio_redact(text: str, url: str = PRESIDIO_ANALYZER_URL) -> str:
 
 
 class PresidioChunkLocal(Policy):
-    """A REAL Presidio analyzer applied per delta, with no state between deltas.
-
-    This is the integration pattern, not a Presidio defect: Presidio makes no streaming
-    claim, and applying it per chunk is the integrator's decision. Rehydration is the
-    gateway's own (Presidio does not rehydrate), so fidelity here measures the gateway
-    wrapper, not Presidio.
-    """
+    """Stateless Presidio integration applied per delta. Exposes fragmentation leaks."""
 
     name = "presidio-chunk-local"
     rehydrates = True
@@ -519,11 +373,7 @@ class PresidioChunkLocal(Policy):
 
 
 class PresidioRetaining(Retaining):
-    """The same real Presidio analyzer behind a bounded suffix carry.
-
-    Same detector, same deployment, same fixture. The only difference from
-    `presidio-chunk-local` is that the boundary is not allowed to fall inside a value.
-    """
+    """Presidio integration behind a bounded suffix carry to fix fragmentation."""
 
     name = "presidio-retention"
 
@@ -549,59 +399,23 @@ class PresidioRetaining(Retaining):
 
 # --------------------------------------------------------------------------------------
 # Credentialed cloud detectors.
-#
-# The Presidio rows above run a container on loopback. These two run a commercial SaaS
-# under a real billing account, which is a different claim: it is what a practitioner
-# gets by buying the vendor's answer rather than self-hosting one. Same caveat as the
-# Presidio rows and it is not a small one -- the DETECTOR is the vendor's, the streaming
-# integration and the rehydration half are this wrapper's. Neither vendor is being
-# ranked, and neither claims to be a streaming scanner.
-#
-# Credentials come from `gcloud auth application-default login`. Both APIs need
-# `x-goog-user-project` when the caller is a user account rather than a service account;
-# without it they answer 403 SERVICE_DISABLED, which reads as an outage rather than as a
-# missing header.
+# Evaluates commercial SaaS detectors (DLP/Model Armor) under real billing accounts.
+# Credentials via `gcloud auth application-default login` requiring `x-goog-user-project`.
+# Network timeouts are distinct from local sockets to accommodate cold starts.
 # --------------------------------------------------------------------------------------
-
-# THE CLOUD DEADLINE AND RETRY BUDGET, and it is not the client one.
-#
-# `CLIENT_CONNECT_TIMEOUT` / `CLIENT_READ_TIMEOUT` bound the sockets this harness opens to
-# a gateway on loopback or in a container next door, where five and ten seconds are
-# generous. These two are a commercial SaaS across the public internet under a real
-# billing account, and the deadline here was the literal `timeout=60` -- so the ONE pair
-# of sockets in this harness that crosses a network was the one pair `--connect-timeout`
-# and `--read-timeout` could not reach. Both now route here.
-#
-# They are SEPARATE globals with their own defaults rather than an alias for the client
-# pair, because the client read default is 10s and a DLP call on a cold project exceeds
-# it: aliasing them would have turned "route the flags" into a silent 60s -> 10s
-# regression on the only calls that are billed. Unset, these reproduce the old 60s read.
 GCP_CONNECT_TIMEOUT = float(os.environ.get("V2_GCP_CONNECT_TIMEOUT", "5"))
 GCP_READ_TIMEOUT = float(os.environ.get("V2_GCP_READ_TIMEOUT", "60"))
 
-# THE RETRY BUDGET. DLP and Model Armor are quota'd per project per minute, and this
-# profile calls them once per DELTA -- 32 cases x several deltas x every split point under
-# `--exhaustive-splits` -- which is precisely the shape that meets a quota wall. An
-# unretried 429 propagates out of `feed()`, through the gateway handler, and ends a billed
-# multi-hour run at whichever case happened to be in flight. 503 is the same story from
-# the backend's side. Neither says anything about the DETECTOR, so neither may become a
-# measurement: the run either completes or it stops, but a transport refusal from the
-# vendor must never be scored as a redaction result.
+# Retry bounds for cloud endpoints to gracefully handle rate limiting (429) or 503s.
 GCP_MAX_ATTEMPTS = int(os.environ.get("V2_GCP_MAX_ATTEMPTS", "6"))
 GCP_BACKOFF_BASE = float(os.environ.get("V2_GCP_BACKOFF_BASE", "1.0"))
 GCP_BACKOFF_CAP = float(os.environ.get("V2_GCP_BACKOFF_CAP", "60"))
 GCP_RETRY_STATUS = frozenset({429, 503})
 
-# Access tokens from `gcloud auth print-access-token` are one-hour bearer tokens. The
-# cache had no clock, so a run longer than an hour -- which the four GCP rows are, and
-# which `--exhaustive-splits` guarantees -- carried an expired token from the moment it
-# expired and answered 401 for every remaining case. Refresh well inside the hour.
+# Refresh `gcloud` access tokens before their 1-hour expiration.
 GCP_TOKEN_TTL_SECONDS = float(os.environ.get("V2_GCP_TOKEN_TTL_SECONDS", "3000"))
 
-# Backoff jitter, from a dedicated generator rather than the `random` module. The corpus
-# is drawn from `random.Random(seed)` instances and a seeded run must reproduce; touching
-# global `random` state from a retry path would make reproducibility depend on how many
-# times Google rate-limited us.
+# Jitter generator isolated from the corpus PRNG to preserve reproducibility.
 _GCP_JITTER = random.Random()
 
 _GCP_TOKEN_CACHE: dict[str, Any] = {}
@@ -609,18 +423,7 @@ _GCP_TOKEN_LOCK = threading.Lock()
 
 
 def _gcloud(argv: list[str], what: str) -> str:
-    # `shell=True` WITH A LIST IS NOT A LINT NIT, IT IS A PORTABILITY BUG. On POSIX,
-    # `subprocess.run(["gcloud", "auth", "print-access-token"], shell=True)` execs
-    # `/bin/sh -c gcloud` and binds the remaining elements to $0, $1 ... so the
-    # subcommand is silently DROPPED and the call cannot do what it says. It only ever
-    # appeared to work because these rows are run from Windows, where the shell joins
-    # the list back into a command line.
-    #
-    # `shell=True` was presumably reached for because bare `gcloud` is not executable on
-    # Windows without the shell resolving `gcloud.cmd` through PATHEXT. `shutil.which`
-    # does that resolution honestly: it honours PATHEXT on Windows and returns an
-    # absolute path on both platforms, so the argument vector reaches the process
-    # unchanged and no shell is involved.
+    # Use `shutil.which` instead of `shell=True` to resolve `gcloud` safely on Windows/POSIX.
     import shutil
     import subprocess  # nosec B404 - a fixed argv to the operator's own gcloud, no shell
 
@@ -641,18 +444,7 @@ def _gcloud(argv: list[str], what: str) -> str:
 
 
 def _gcp_context() -> tuple[str, str]:
-    """(access token, project id) from the local gcloud install, token refreshed on age.
-
-    The predecessor was `if not _GCP_TOKEN_CACHE:` -- fetch once, hold forever. Google's
-    access tokens live one hour. The GCP rows take longer than that, so the failure was
-    not hypothetical: every case after the 60-minute mark gets a 401, which no retry rule
-    here treats as retryable, and the run dies with most of the corpus measured and
-    nothing written.
-
-    The project id does NOT expire and is cached unconditionally; only the token carries a
-    clock. `time.monotonic` and not `time.time`, because a wall-clock step must not either
-    expire a live token or extend a dead one.
-    """
+    """Get access token and project ID, refreshing the token before expiration."""
     with _GCP_TOKEN_LOCK:
         if "project" not in _GCP_TOKEN_CACHE:
             _GCP_TOKEN_CACHE["project"] = _gcloud(
@@ -671,20 +463,7 @@ _GCP_OPENERS: dict[tuple[float, float], Any] = {}
 
 
 def _gcp_opener(connect_timeout: float, read_timeout: float) -> Any:
-    """An opener whose connect and read deadlines are two numbers, not one.
-
-    `urlopen(request, timeout=T)` hands T to the socket as a per-operation timeout, so it
-    cannot express "connecting may take five seconds but a silent response may not stall
-    for sixty" -- the same limitation the client path already solves with `httpx.Timeout`
-    and documents at length above `CLIENT_CONNECT_TIMEOUT`. urllib has no `httpx.Timeout`,
-    so the phases are separated where urllib actually applies them: the connection is made
-    under the connect deadline and the socket is re-armed with the read deadline the
-    moment it is up.
-
-    Cached per (connect, read) pair rather than rebuilt per call, because the sweep may
-    rewrite the globals between policies and a per-call rebuild would define two classes
-    for every delta of every case.
-    """
+    """An opener that separates connect and read timeouts. Cached per timeout pair."""
     key = (connect_timeout, read_timeout)
     cached = _GCP_OPENERS.get(key)
     if cached is not None:
@@ -701,8 +480,7 @@ def _gcp_opener(connect_timeout: float, read_timeout: float) -> Any:
 
         def connect(self) -> None:
             super().connect()
-            # AFTER the TLS handshake, so this re-arms the wrapped SSL socket and every
-            # subsequent read is bounded by the read deadline rather than the connect one.
+            # Re-arm the socket with the read deadline after connection.
             if self.sock is not None:
                 self.sock.settimeout(read_timeout)
 
@@ -716,13 +494,7 @@ def _gcp_opener(connect_timeout: float, read_timeout: float) -> Any:
 
 
 def _gcp_retry_delay(error: HTTPError, attempt: int) -> float:
-    """How long to wait before retrying, preferring what the service asked for.
-
-    `Retry-After` is seconds or an HTTP-date (RFC 9110 10.2.3). Google sends the seconds
-    form; the date form is parsed rather than ignored, because ignoring it falls back to a
-    backoff shorter than the one the service asked for, which is how a retry loop turns a
-    rate limit into a longer rate limit.
-    """
+    """Determine retry delay, respecting `Retry-After` headers or falling back to jittered exponential."""
     import datetime
 
     header = ((error.headers.get("Retry-After") if error.headers else None) or "").strip()
@@ -741,19 +513,12 @@ def _gcp_retry_delay(error: HTTPError, attempt: int) -> float:
                     when = when.replace(tzinfo=datetime.timezone.utc)
                 now = datetime.datetime.now(datetime.timezone.utc)
                 return max(0.0, (when - now).total_seconds())
-    # Exponential, with full jitter. Without jitter the per-delta call pattern
-    # re-synchronises on the quota window and every retry collides with the last.
+    # Exponential backoff with jitter to prevent thunder-herd quota collisions.
     return _GCP_JITTER.uniform(0.0, GCP_BACKOFF_BASE * (2 ** (attempt - 1)))
 
 
 def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """POST to a Google API under a phased deadline and a bounded retry budget.
-
-    The token is re-read from `_gcp_context()` on EVERY attempt rather than captured once
-    before the loop: a retry that sleeps a minute may cross the refresh boundary, and a
-    loop that re-sent the token it captured before sleeping would defeat the refresh it
-    had just waited through.
-    """
+    """POST to Google API with bounded retries and fresh tokens per attempt."""
     data = json.dumps(payload).encode()
     for attempt in range(1, GCP_MAX_ATTEMPTS + 1):
         token, project = _gcp_context()
@@ -772,9 +537,7 @@ def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             if error.code not in GCP_RETRY_STATUS or attempt == GCP_MAX_ATTEMPTS:
-                # Out of budget, or a status that says something about the REQUEST rather
-                # than the service's load. Raise: a case that could not be measured has to
-                # surface as a transport error, never be scored as a redaction result.
+                # Raise non-retryable errors immediately.
                 raise
             wait = min(GCP_BACKOFF_CAP, _gcp_retry_delay(error, attempt))
             print(
@@ -788,11 +551,7 @@ def _gcp_post(url: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _dlp_redact(text: str) -> str:
-    """Google Cloud DLP de-identification. The vendor rewrites the text itself.
-
-    Unlike Presidio (which returns spans this module then splices), DLP returns the
-    de-identified string, so the replacement policy is Google's and not ours.
-    """
+    """Google Cloud DLP de-identification. DLP rewrites the string itself."""
     if not text.strip():
         return text
     _token, project = _gcp_context()
@@ -1041,15 +800,7 @@ def _all_pairs(
     axes: dict[str, tuple[str, ...]] | None = None,
     feasible: "Callable[[dict[str, str]], bool] | None" = None,
 ) -> set[tuple[str, str, str, str]]:
-    """Every pair of axis values that SOME feasible case can carry.
-
-    `feasible` exists for a constrained axis set. The FIDE profile carries both a needle
-    id and its `needle_class`, and a needle belongs to exactly one class -- so
-    `(entity, AKIAKEYID, needle_class, pii)` is not an uncovered pair, it is an
-    impossible one. Requiring it would make `proof_complete` unsatisfiable and the
-    schema's coverage gate meaningless. Pairs are filtered by asking whether any complete
-    case in the product satisfies both, not by hand-listing exclusions.
-    """
+    """Pairs of axis values that SOME feasible case can carry, constrained by `feasible`."""
     import itertools
 
     axes = AXES if axes is None else axes
@@ -1074,11 +825,7 @@ def covering_array(
     axes: dict[str, tuple[str, ...]] | None = None,
     feasible: "Callable[[dict[str, str]], bool] | None" = None,
 ) -> list[dict[str, str]]:
-    """Greedy pairwise covering array over the profile's axes, plus fragmentation twins.
-
-    Exhaustive here is a few hundred cases, so the array is generated greedily and then
-    the pairwise proof is recomputed against it rather than asserted.
-    """
+    """Greedy pairwise covering array over profile axes, plus fragmentation twins."""
     import itertools
 
     axes = AXES if axes is None else axes
@@ -1100,15 +847,7 @@ def covering_array(
         remaining -= _pairs_of(best, axes)
         candidates.remove(best)
 
-    # DeltaFrag is a DIFFERENCE of two leak rates, so it is only meaningful if the two
-    # fragmentation conditions are otherwise identical populations. A greedy pairwise
-    # array does not give that: the five-axis array came out 8 single_chunk against 4
-    # adversarial, and DeltaFrag was then comparing two differently-composed sets and
-    # attributing the difference to fragmentation. Adding each chosen case's
-    # fragmentation twin makes fragmentation a WITHIN-case factor, so every adversarial
-    # case has exactly one single_chunk counterpart differing in nothing else.
-    #
-    # This is why `gcp-dlp-retention` could report a NEGATIVE DeltaFrag before the fix.
+    # Add fragmentation twins so DeltaFrag compares identical case conditions.
     seen = {tuple(sorted(c.items())) for c in chosen}
     for case in list(chosen):
         for value in axes["fragmentation"]:
@@ -1147,17 +886,7 @@ def _encode(value: str, encoding: str) -> str:
 
 
 def _sse_frames(events: Iterable[dict[str, Any]]) -> list[bytes]:
-    """The same body as `_sse`, but as ONE FRAME PER EVENT rather than one blob.
-
-    Split out so the capture can write the frames individually and COUNT THE WRITES. The
-    number of data events the capture put on the socket used to be computed from the case
-    definition -- "one preamble plus `_injection_events`, so 3 or 4, fixed by
-    construction" -- which is a statement about what the code should do, published in the
-    slot reserved for what it did. Every published `upstream_data_events_emitted` was
-    therefore correct by assumption and could not have caught the capture emitting
-    something else: a serialisation change, a truncated write, a handler that raised
-    between two events. `data: [DONE]` is the last frame and is not a data event.
-    """
+    """Split into one frame per event to allow writing and counting individually."""
     frames: list[bytes] = []
     for event in events:
         delta: dict[str, Any] = {"content": event.get("content", "")}
@@ -1174,46 +903,15 @@ SSE_DONE_FRAME = b"data: [DONE]\n\n"
 
 
 def _sse(events: Iterable[dict[str, Any]]) -> bytes:
-    """Serialise events. `content` is the delta text; any other key is a sibling field.
-
-    The sibling field is the `sse-json-field` carrier: a value that never appears in the
-    reassembled delta text and is found only by walking the event JSON.
-    """
+    """Serialise events. `content` is delta text; others are sibling fields."""
     return b"".join(_sse_frames(events)) + SSE_DONE_FRAME
 
 
-# WHETHER THE CAPTURE AUTHENTICATES, stated once next to the handler that decides it.
-#
-# `capture.authentication_required` was reported as `bool(V2_GATEWAY_TOKEN)` -- the bearer
-# token the harness sends TO THE GATEWAY. That is a fact about the target, published as a
-# fact about the capture, and it read `true` in four gateway rows. `_make_upstream` reads
-# no headers and rejects nothing, so the honest value is False, and
-# `test_the_capture_answers_without_credentials` demonstrates it rather than asserting it.
-# It matters because an unauthenticated capture is exactly the condition `_self_probe`
-# exists to guard: anything that can reach the port can answer for it.
+# Stated explicitly: `_make_upstream` reads no headers and rejects nothing.
 CAPTURE_REQUIRES_AUTHENTICATION = False
 
 
-# A STRICT, PHASED CLIENT DEADLINE, because a stalled socket must fail the case rather
-# than the run.
-#
-# The client harness used `urlopen(..., timeout=120)`. `urllib` takes ONE number and hands
-# it to the socket as a per-operation timeout, so it cannot say "connecting may take 5
-# seconds but a silent stream may not stall for more than 10" -- and 120 seconds per
-# attempt, three attempts per split point, 32 cases, is an hour and a half of wall clock
-# before a stalled seed gives up. A multi-seed sweep that meets one stalled socket looks
-# indistinguishable from a hang, which is how the sweep came to be described as hanging on
-# a particular seed.
-#
-# `httpx.Timeout` separates the phases, so the deadline that matters -- no bytes arriving
-# on an accepted connection -- is short and the ones that do not are not made short with
-# it. A case that trips it records a `transport_error` and is scored INCONCLUSIVE, which
-# is the honest outcome and already the schema's: a refused or dead case must never be
-# counted as "did not leak".
-#
-# Overridable because a real gateway can legitimately be slow: LLM Guard and NeMo load
-# transformer models, and a first request through a cold container can exceed ten seconds
-# without anything being wrong. The in-process reference policies never approach it.
+# Strict, phased client deadlines to fail a stalled socket rather than hang a run.
 CLIENT_CONNECT_TIMEOUT = float(os.environ.get("V2_CLIENT_CONNECT_TIMEOUT", "5"))
 CLIENT_READ_TIMEOUT = float(os.environ.get("V2_CLIENT_READ_TIMEOUT", "10"))
 
@@ -1230,12 +928,7 @@ def _client_timeout() -> httpx.Timeout:
 
 @dataclass
 class UpstreamResponseRecord:
-    """Empirical socket-write facts for one capture response.
-
-    The record is installed before the first data frame is written and updated after
-    every successful ``wfile.write``.  It therefore survives a reset or another
-    mid-response exception instead of losing all frames that preceded the failure.
-    """
+    """Empirical socket-write facts for one capture response."""
 
     data_events_written: int = 0
     completed: bool = False
@@ -1246,60 +939,28 @@ class UpstreamState:
     segments: Segments
     case: dict[str, str]
     received_bodies: list[str] = field(default_factory=list)
-    # Every request-target the capture was actually asked for. `upstream_paths_observed`
-    # was the literal `["/v1/chat/completions"]` and the handler recorded no path, so a
-    # gateway calling any other route was reported as calling that one.
     received_paths: list[str] = field(default_factory=list)
-    # ONE RECORD PER RESPONSE the capture started. The record is appended before any
-    # frame write and incremented after each successful write, so a response reset after
-    # frame N still records N rather than disappearing. `run_case` snapshots this list
-    # around each gateway request; zero or multiple upstream responses are not guessed
-    # into a one-response coalescing comparison.
     response_records: list[UpstreamResponseRecord] = field(default_factory=list)
     response_records_lock: threading.Lock = field(default_factory=threading.Lock)
-    # Where to cut the injected value for the attempt currently in flight. The empty
-    # tuple means "do not cut"; one offset is a two-part partition, two offsets a
-    # three-part one. Set by `run_case` before each request.
+    # Where to cut the injected value for the attempt currently in flight.
     cuts: tuple[int, ...] = ()
 
 
-# The partition families this oracle knows how to enumerate, and what each one means.
-#
-#   midpoint            one two-part partition, cut at len // 2. The published default.
-#   exhaustive-2-part   every internal two-part partition: N - 1 of them.
-#   exhaustive-3-part   every internal three-part partition: choose(N - 1, 2) of them.
-#   union-worst-case    both exhaustive families together. The case fails if ANY
-#                       enumerated partition in either family leaks.
-#
-# `union-worst-case` is bounded by construction: it is the worst case over THE ENUMERATED
-# CORPUS VALUES AND THESE TWO FAMILIES, never over arbitrary streams, arbitrary values,
-# arbitrary interleavings, or more than three pieces. Every place the label is printed
-# says so.
+# Partition families for fragmentation analysis.
 PARTITION_FAMILIES: tuple[str, ...] = ("exhaustive-2-part", "exhaustive-3-part")
 ORACLES: tuple[str, ...] = ("midpoint",) + PARTITION_FAMILIES + ("union-worst-case",)
 
-# Per case, per family. `choose(N - 1, 2)` is quadratic in the rendered length, so a
-# 74-character PEM block is 2,628 requests for ONE case and a 300-character one is 44,551.
-# A run that silently truncates its own enumeration and then reports containment is the
-# worst failure this harness has, so the cap is explicit, published, and turns the family
-# INCONCLUSIVE for that case rather than shortening it.
+# Cap on partition pieces to bound combinatorial explosion of 3-part splits.
 DEFAULT_PARTITION_CAP = int(os.environ.get("V2_PARTITION_CAP", "6000"))
 
 
 def _family_partitions(rendered: str, family: str) -> list[tuple[int, ...]]:
-    """Every partition of `rendered` in one family, as tuples of internal cut offsets.
-
-    Both families produce ORDERED, NONEMPTY, CONTIGUOUS pieces that concatenate back to
-    `rendered` byte for byte, and no piece is the whole value: the offsets are drawn from
-    `1 .. N-1`, so the first piece loses at least the last character and the last piece
-    loses at least the first.
-    """
+    """Every partition of `rendered` in one family, as tuples of internal cut offsets."""
     n = len(rendered)
     if family == "exhaustive-2-part":
         return [(i,) for i in range(1, n)]
     if family == "exhaustive-3-part":
-        # Every PAIR of distinct internal cuts, i < j, both in 1..N-1. That is exactly
-        # choose(N - 1, 2) partitions, each with three nonempty pieces, no duplicates.
+        # Every pair of distinct internal cuts, i < j, both in 1..N-1.
         return [(i, j) for i in range(1, n - 1) for j in range(i + 1, n)]
     raise ValueError(f"unknown partition family {family!r}")
 
@@ -1310,32 +971,7 @@ def injection_partitions(
     oracle: str = "midpoint",
     cap: int = DEFAULT_PARTITION_CAP,
 ) -> tuple[list[tuple[int, ...]], list[str], dict[str, int], dict[str, bool]]:
-    """The partitions to try for one case, plus per-family attempted counts and cap hits.
-
-    Returns `(partitions, families, attempted_by_family, capped_by_family)`, where
-    `families[i]` names the family `partitions[i]` came from -- the union statistic has
-    to be decomposable into its components, and recomputing the membership afterwards is
-    how two enumerators drift apart. A single-chunk case
-    returns exactly one uncut attempt and no family is enumerated for it: the uncut arm
-    is the baseline the difference subtracts, not a partition.
-
-    THE MIDPOINT IS A WEAK ORACLE, and this is the axis where that matters most. Whether
-    a split defeats a detector depends on what the pieces LOOK LIKE, not on where the
-    middle is: `950-36-9596` cut at 6 leaves `950-36` and `9596`, and a detector may well
-    fire on neither, on one, or -- the case that produced a NEGATIVE DeltaFrag on seed
-    0000000000000001 -- on a fragment for an unrelated reason, which suppresses the leak
-    and scores the fragmented condition as safe. One sample per case cannot tell those
-    apart.
-
-    Enumeration is not expensive for two parts and sampling is the wrong instinct: a value
-    of N characters has exactly N-1 internal two-part partitions, about 20 for an email
-    and 11 for an SSN. Three parts is quadratic and IS expensive, which is what `cap` is
-    for. A family whose enumeration would exceed the cap is not shortened; the case is
-    marked capped, excluded from that family's denominator, and reported. An aborted
-    combinatorial run must never score as containment.
-
-    Default stays the midpoint so the published corpus does not move.
-    """
+    """The partitions to try for one case, plus per-family counts and cap hits."""
     if oracle not in ORACLES:
         raise ValueError(f"unknown oracle {oracle!r}; known: {ORACLES}")
     if case["fragmentation"] == "single_chunk":
@@ -1368,18 +1004,7 @@ def injection_partitions(
 
 
 def _partition_pieces(rendered: str, cuts: tuple[int, ...]) -> list[str]:
-    """Cut `rendered` at the given internal offsets. Asserted, not assumed.
-
-    Two properties are what make a partition oracle a fragmentation measurement rather
-    than a mutation fuzzer, and both are checked here rather than in a test that runs
-    somewhere else:
-
-      * the pieces concatenate back to `rendered` BYTE FOR BYTE, so the client
-        reconstructs exactly the value the capture meant to send. A partition that
-        changed the value would measure detector recall on a different string.
-      * no piece contains the complete value, so any detection is a detection of a
-        FRAGMENT. Without this an oracle can score a leak it manufactured.
-    """
+    """Cut `rendered` at internal offsets, ensuring concatenation recovers the original."""
     if not cuts:
         return [rendered]
     bounds = (0,) + cuts + (len(rendered),)
@@ -1421,12 +1046,7 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             try:
                 self._respond()
             except Exception as exc:  # noqa: BLE001
-                # An exception here used to escape into BaseHTTPRequestHandler, which
-                # closes the socket without writing anything. The client then reports
-                # "Server disconnected without sending a response" -- a transport error,
-                # for what is really a harness bug, and it sends you looking at the
-                # gateway. A case dict missing an axis key produced exactly that, and it
-                # cost an hour. Answer 500 with the reason instead.
+                # Answer 500 on harness bugs instead of silently disconnecting.
                 message = json.dumps({"harness_error": f"{type(exc).__name__}: {exc}"}).encode()
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")
@@ -1437,10 +1057,7 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
                 self.close_connection = True
 
         def _respond(self) -> None:
-            # Record the response attempt before parsing the request or constructing a
-            # frame. A malformed second upstream request still matters for correlation:
-            # without this record `run_case` would silently pair the gateway's response
-            # with the preceding successful request.
+            # Record the response attempt before parsing the request.
             record = UpstreamResponseRecord()
             with state.response_records_lock:
                 state.response_records.append(record)
@@ -1448,9 +1065,7 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             raw = self.rfile.read(length).decode("utf-8", "replace")
             state.received_bodies.append(raw)
             state.received_paths.append(self.path)
-            # Echo back whatever arrived AT THE CASE'S SITE, not a fixed field. Echoing
-            # messages[0].content regardless of site would report "not restored" for every
-            # case that put its values somewhere else, which says nothing about the gateway.
+            # Echo back whatever arrived at the case's specific request site.
             echoed = extract_site(json.loads(raw), state.case["request_site"])
             prompt = "" if echoed is None else echoed
 
@@ -1461,28 +1076,16 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
-            # Each case gets a fresh capture bound to the same port, so a pooled
-            # keep-alive connection outlives the fixture it was opened against: the
-            # gateway reuses the socket, the OLD handler thread answers, and the case is
-            # scored against the PREVIOUS case's injected values. Measured, not theorised
-            # -- an SSN case came back carrying the EMAIL case's needle, which reads as
-            # "the gateway redacted the SSN" and is entirely false. Refusing reuse costs a
-            # TCP handshake per case and buys per-case independence.
+            # Refuse keep-alive so pooled gateway connections don't cross case fixtures.
             self.send_header("Connection", "close")
             self.end_headers()
-            # Install the record BEFORE the first write, then update it after every
-            # successful frame. The old local counter was appended only after the whole
-            # response flushed, so a reset after three frames recorded zero.
+            # Track frames written cleanly even if the connection resets mid-stream.
             for frame in frames:
                 self.wfile.write(frame)
                 with state.response_records_lock:
                     record.data_events_written += 1
             self.wfile.write(SSE_DONE_FRAME)
-            # A CLEAN EOF, explicitly. `wfile` is a buffered writer and `close_connection`
-            # alone does not promise the buffer reached the socket before the handler
-            # returns; on a shutdown racing the last case that leaves the client blocked
-            # on a read for a body the server considers sent. Flush, then let
-            # `close_connection` do the FIN.
+            # Flush buffered writes before FIN.
             self.wfile.flush()
             with state.response_records_lock:
                 record.completed = True
@@ -1502,11 +1105,7 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8", "replace")
             payload = json.loads(raw)
-            # Walk the WHOLE body, not the chat shapes this code happens to know. A
-            # reference gateway that only masked messages[0].content would score a perfect
-            # FidelityRate on the chat-content site and silently egress every other one,
-            # which is the defect the request_site axis exists to expose. Structural keys
-            # are left alone.
+            # Walk the whole body to expose site-specific fidelity defects.
             vault: dict[str, str] = {}
 
             def _walk(node: Any, key: str | None = None) -> Any:
@@ -1526,9 +1125,7 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                 data=json.dumps(payload).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            # `upstream_url` is this process's own loopback capture, whose http:// address
-            # `_serve` just returned. It is not operator input and cannot carry a file:/
-            # or custom scheme.
+            # `upstream_url` is the loopback capture.
             with urlopen(request, timeout=CLIENT_READ_TIMEOUT) as response:  # nosec B310 # noqa: S310
                 upstream_sse = response.read().decode("utf-8", "replace")
 
@@ -1542,10 +1139,7 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                     continue
                 delta = json.loads(data)["choices"][0]["delta"]
                 event: dict[str, Any] = {"content": policy.feed(delta.get("content", ""))}
-                # Sibling fields pass through the SAME policy. A gateway that only
-                # inspects `content` is a real and common shape, but modelling it here
-                # would conflate "did not retain" with "did not look", and those are
-                # different defects.
+                # Sibling fields pass through the same policy.
                 for key, value in delta.items():
                     if key != "content" and isinstance(value, str):
                         event[key] = policy.feed(value)
@@ -1558,12 +1152,7 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
-            # THE SAME CLEAN EOF THE CAPTURE GIVES. This handler kept the connection alive
-            # and never flushed. `urlopen` sends `Connection: close` so the server closed
-            # anyway and it never showed; a pooling client does not, and then the fixture
-            # for case N+1 is talking to a socket held open by case N's handler thread
-            # while `_stop` is trying to close the listener underneath it. Answer, flush,
-            # close -- one exchange per connection, the same rule as the capture.
+            # Flush and close -- one exchange per connection.
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
@@ -1579,67 +1168,39 @@ class RunResult:
     case: dict[str, str]
     client_text: str
     echo_recovered: dict[str, bool]
-    # False when the gateway never forwarded the case's request site at all. The echo
-    # half is then unmeasurable, not failed, and it is excluded from FidelityRate rather
-    # than counted as a miss. Dropping an unrecognised key is a legitimate thing for a
-    # gateway to do, and scoring it as a fidelity failure would punish it for that.
+    # False if gateway dropped request site. Excludes case from FidelityRate.
     echo_observable: bool
-    # Set when the gateway refused the case outright -- an HTTP error, a rejected schema,
-    # a transport failure. The case is then INCONCLUSIVE: nothing was measured, and it
-    # must not be counted as "did not leak". NeMo Guardrails 0.24.0 answers 422 to a
-    # request carrying an unrecognised top-level key, which is how this arose.
+    # Reason for transport/HTTP failure. Inconclusive, never counts as a non-leak.
     transport_error: str | None
     injection_leaked: bool
     events_observed: int
     upstream_bodies: list[str]
     latency_ms: list[float]
-    # Recorded, not assumed. `_sse_check` used to return a literal in which every one of
-    # these was a constant: status 200, content type valid, zero invalid events, no
-    # errors -- emitted verbatim by a run whose gateway answered `application/json` with
-    # no events at all. A check that cannot fail is not a check.
+    # Empirical facts.
     status_codes: list[int] = field(default_factory=list)
     content_types: list[str] = field(default_factory=list)
     invalid_events: int = 0
     done_marker: bool = False
-    # HOW the injected value was recovered, or None if it was not. See `_leak_tier`.
-    # `injection_leaked` alone is an accusation with no way to check it, which is the
-    # objection the boundary check answered and this one had not.
+    # Tier of leak detection if present.
     leak_tier: str | None = None
-    # Largest event count over the case's split points. `events_observed` is the FIRST
-    # split point, so it agrees with `client_text` and `echo_recovered`, which are also
-    # read from the first attempt.
+    # Largest event count across splits.
     events_observed_max: int = 0
-    # Events carrying data, i.e. excluding the `[DONE]` sentinel. `events_observed`
-    # counts `[DONE]`, so `events_observed > 1` -- the old fragmentation_safety test --
-    # was satisfied by a gateway that emitted the entire response as ONE chunk.
+    # Events with data (excluding `[DONE]`).
     data_events_observed: int = 0
-    # Data frames the CAPTURE actually wrote for the response `data_events_observed` was
-    # read from -- counted at the socket by `_respond`, not recomputed from the case. The
-    # pair is the coalescing comparison: fewer received than sent is coalescing PROVED.
-    # 0 means the capture wrote nothing for this case, so there is nothing to compare and
-    # the case is not evidence either way.
+    # Capture written data frames.
     upstream_data_events: int = 0
-    # Capture responses observed during the gateway request paired with the client
-    # response. Exactly one is required for a coalescing comparison; with multiple
-    # responses there is no protocol-level evidence of which one the gateway returned.
+    # Capture responses during the request.
     upstream_responses_observed: int = 0
     # Every request-target the capture was actually asked for, for this case.
     upstream_paths: list[str] = field(default_factory=list)
-    # Which internal partitions of the value were tried, and which of them leaked.
-    # One midpoint two-part partition by default; whole families under a stronger oracle.
-    # A single_chunk case has exactly one UNCUT attempt, which is not a partition -- the
-    # `252 splits` erratum came from summing this field over both arms and calling the
-    # total "splits".
+    # Internal partitions tried/leaked. Single chunk is 1 try.
     split_points_tried: int = 1
     split_points_leaked: int = 0
-    # Which oracle produced those partitions, and the per-family breakdown behind the
-    # union statistic. Empty for a single_chunk case.
+    # Oracle and family breakdown.
     oracle: str = "midpoint"
     partitions_attempted: dict[str, int] = field(default_factory=dict)
     partitions_leaked: dict[str, int] = field(default_factory=dict)
-    # True for a family whose enumeration would have exceeded the resource cap. The
-    # family was NOT shortened and NOT run; the case is inconclusive for it. A capped
-    # family must never contribute a non-leak to a denominator.
+    # Whether a family was capped.
     partitions_capped: dict[str, bool] = field(default_factory=dict)
     partition_cap: int = DEFAULT_PARTITION_CAP
     partition_seconds: float = 0.0
@@ -1650,22 +1211,7 @@ class RunResult:
 def _serve(
     handler: type[BaseHTTPRequestHandler], port: int = 0
 ) -> tuple[ThreadingHTTPServer, str]:
-    # SO_REUSEADDR is set per PLATFORM, because the option does not mean the same thing
-    # on both and the hazard it caused here is Windows-only.
-    #
-    # Windows: SO_REUSEADDR lets a SECOND socket bind a port another process already
-    # holds, and the OLDER socket keeps receiving. A stale capture from a previous run
-    # then answered every request while the new one recorded nothing, and the case
-    # scored as "did not leak" because the stale fixture's needles differ from the
-    # current one's. It must stay off, and binding must fail loudly.
-    #
-    # POSIX: SO_REUSEADDR cannot steal a live listener -- that is SO_REUSEPORT. All it
-    # permits is rebinding a port held in TIME_WAIT by a CLOSED connection. Leaving it
-    # off there does not buy the protection above; it just makes an honest rebind fail
-    # with EADDRINUSE, which is what happened on the Linux CI runners: the capture's own
-    # `Connection: close` puts the accepted socket into TIME_WAIT on the capture port, so
-    # serving two cases on one fixed port could never work. The stale-capture hazard is
-    # still covered on POSIX -- a live listener on the port makes bind() fail either way.
+    # Allow port reuse only on POSIX to avoid silent port stealing on Windows.
     ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1675,14 +1221,7 @@ def _serve(
 
 
 def _stop(server: ThreadingHTTPServer) -> None:
-    """Stop accepting AND release the listening socket.
-
-    `shutdown()` alone only ends the accept loop; it leaves the socket bound and leaves
-    live handler threads running. The capture is rebound to the SAME fixed port for every
-    case of an external-gateway run, so a half-closed predecessor is not a tidiness
-    problem -- it answers the next case with the previous case's fixture. See the
-    `Connection: close` note on the capture handler.
-    """
+    """Stop accepting AND release the listening socket."""
     server.shutdown()
     server.server_close()
 
@@ -1703,27 +1242,8 @@ _SSE_LINE_SPLIT = re.compile(r"\r\n|\r|\n")
 
 
 def _parse_sse(body: str) -> ParsedStream:
-    """WHATWG HTML 9.2.6 "interpreting an event stream", not a `startswith` test.
-
-    The previous version kept only lines beginning with the six characters `data: ` and
-    discarded every other byte of the response. Three shapes a real client accepts were
-    therefore never inspected, and each one is a FALSE PASS -- the value reached the
-    client and the case scored as no leak:
-
-        `data:{...}`          the space after the colon is OPTIONAL in the spec
-        a non-SSE 200 body    a gateway answering application/json instead of a stream
-        a multi-line `data`   the spec joins those lines with U+000A into ONE event;
-          payload             the old code saw three unrelated ones
-
-    Measured end to end: a relay that redacted nothing and re-emitted with `data:`
-    instead of `data: ` scored LeakRate 0.00/0.00, where the identical relay with the
-    space scored 1.00/1.00.
-
-    Everything the parser does not dispatch still arrived at the client, so it goes to
-    `residue` and is scanned as raw text. Dropping it would recreate the same class one
-    level down -- comments, unknown field values and an unterminated trailing event are
-    all places a value can sit, and the spec tells a CLIENT to ignore them, not an
-    INSPECTOR.
+    """Conformant WHATWG HTML 9.2.6 event stream parsing.
+    Prevents false passes from trailing spaces or multi-line events.
     """
     events: list[str] = []
     residue: list[str] = []
@@ -1733,8 +1253,7 @@ def _parse_sse(body: str) -> ParsedStream:
     saw_field = False
 
     def dispatch() -> None:
-        # A blank line with an empty buffer fires nothing (spec), and it also cannot be
-        # hiding anything, so there is no fail-closed question here.
+        # A blank line with an empty buffer fires nothing.
         if buffer:
             events.append("\n".join(buffer))
         buffer.clear()
@@ -1760,9 +1279,7 @@ def _parse_sse(body: str) -> ParsedStream:
             saw_field = True
             residue.append(value)
         else:
-            # Not an SSE field at all: either a gateway invented one, or this body was
-            # never a stream -- a plain JSON object arrives here as a single line. Both
-            # reached the client verbatim.
+            # Treat unknown fields or plain JSON as residue.
             unknown.append(name)
             residue.append(line)
 
@@ -1779,34 +1296,12 @@ def _parse_sse(body: str) -> ParsedStream:
     )
 
 
-# The one channel whose join is the client's visible text. Named because
-# `RunResult.client_text`, and therefore `delivery_confirmed`, is derived from it.
+# The channel representing the client's visible text.
 CONTENT_CHANNEL = ".choices[].delta.content"
 
 
 def _ordered_channels(node: Any, flat: list[tuple[str, str]], path: str = "") -> None:
-    """Every string in one event, tagged with its JSON PATH, list indices collapsed.
-
-    This replaces two hand-picked ordered streams and a skip-list of key names. That
-    design had a hole in the worst possible direction: the sibling stream skipped any
-    key called `content` or `text` AT ANY DEPTH, so a value split across two events in,
-    say, `delta.raw.text` sat in neither ordered stream -- and the fallback join
-    interleaves object keys between the two halves, so it did not reassemble it either.
-
-    Measured, not theorised. The same policy was run twice, changing nothing but the
-    JSON key its text came out under. `chunk-local` as published went DeltaFrag 0.875 to
-    -0.125; `chunk-local` given a detector that also percent-decodes -- so nothing leaks
-    unfragmented, and it is still chunk-local -- went LeakRate(adversarial) 1.00 /
-    DeltaFrag 1.00 / `fail` to 0.00 / 0.00 / `pass`. The corpus escaped only because its
-    own sibling carrier happens to be called `record_field`.
-
-    Keying by path removes the class instead of the instance: two fragments join only
-    if they arrived at the SAME path, so nothing is ever spliced between them and no
-    key name needs special-casing. Indices collapse to `[]` so `choices[0]` and
-    `choices[1]` share a channel -- which is what "every element of choices" has always
-    meant -- and so a content array carried as a list of parts reassembles across
-    events.
-    """
+    """Every string in one event tagged with JSON path. Ensures cross-event reassembly."""
     if isinstance(node, dict):
         for key, value in node.items():
             _ordered_channels(value, flat, f"{path}.{key}")
@@ -1821,26 +1316,7 @@ def _ordered_channels(node: Any, flat: list[tuple[str, str]], path: str = "") ->
 
 
 def _haystack_groups(sse: str) -> dict[str, list[str]]:
-    """Everything the client could see, over the WHOLE body, decodings included,
-    grouped by HOW STRONG a match in each group is.
-
-    Three kinds of haystack, and the separation is load-bearing twice -- once for what
-    gets found, and once for what the report is then entitled to claim:
-
-      SAME-PATH JOIN -- strings joined in arrival order within one JSON path, so a value
-        split across events reassembles. Nothing from another path may enter a channel:
-        splicing other text between two halves stops the join from working. A match here
-        is a value the client could read off one field.
-      CROSS-FIELD JOIN -- the legacy non-content stream, the whole-document join, and the
-        `_collect` sibling join. These reassemble a value split across DIFFERENT keys,
-        and they are also the only place this inspector can manufacture a value nothing
-        sent. Kept, because dropping them is a false pass; ranked, because reporting a
-        concatenation of two unrelated fields as the same fact as a verbatim leak is how
-        a harness turns a coincidence into a vendor defect.
-      SINGLE FIELD -- each event walked recursively by v1's `_collect` (nested objects,
-        lists, numbers, keys, base64/hex/percent runs, character-code arrays), plus every
-        byte the SSE parser did not dispatch.
-    """
+    """Groups of strings a client could see, categorized by reconstruction fidelity."""
     from pii_leak_benchmark.http_profile import _Inspection, _collect  # noqa: I001
 
     parsed = _parse_sse(sse)
@@ -2135,14 +1611,7 @@ def run_case(
     needle = segments.injection[case["entity"]]
     # The request does not vary with the split point -- only the capture's RESPONSE does.
     body = json.dumps(build_request(segments, case, model=model)).encode()
-    # ONE CLIENT PER CASE, CONSTRUCTED OUTSIDE THE TIMED REGION. Building an
-    # `httpx.Client` per request put a transport, a connection pool and an SSL context
-    # inside `client_observed_latency`, which is a PUBLISHED field: measured on
-    # chunk-local/seed 3, mean went 17.9ms -> 43.1ms and p95 38.6ms -> 70.5ms for traffic
-    # that had not changed. A transport swap must not move a number a reader takes as the
-    # target's latency. Per-case independence is preserved by `Connection: close` on every
-    # request, not by rebuilding the client: the server closes each connection, so nothing
-    # is pooled across cases even though the client object is reused within one.
+    # One client per case constructed outside the timed region to avoid timing overhead.
     client = httpx.Client(timeout=_client_timeout(), trust_env=False)
     try:
         partitions_started = time.perf_counter()
@@ -2150,9 +1619,7 @@ def run_case(
             state.cuts = cuts
             sse = ""
             for _ in range(iterations):
-                # Correlate capture responses to THIS gateway request by a bounded
-                # before/after slice. The old `[-1]` silently paired the client response
-                # with whichever upstream response happened to append last.
+                # Correlate capture responses to this gateway request via before/after slice.
                 with state.response_records_lock:
                     response_record_start = len(state.response_records)
                 started = time.perf_counter()
@@ -2161,50 +1628,23 @@ def run_case(
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
                 headers.update(_extra_gateway_headers())
-                # `Connection: close` so no socket outlives the case that opened it. The
-                # capture is rebound per case and, on an external-gateway run, to the SAME
-                # fixed port every time -- a pooled connection therefore reaches the
-                # PREVIOUS case's fixture. `urlopen` sent this header for us; a pooling
-                # client has to be told.
+                # Force `Connection: close` so pooled connections don't reach previous fixtures.
                 headers["Connection"] = "close"
                 try:
                     response = client.post(gateway_url, content=body, headers=headers)
                     statuses.append(int(response.status_code))
                     if response.status_code >= 400:
-                        # `urlopen` raised `HTTPError` here, so a refused case landed in
-                        # the handler below. httpx returns the response instead, and a 4xx
-                        # silently scored as a measurement would be far worse than the
-                        # timeout this block exists to fix: NeMo Guardrails answers 422 to
-                        # a request carrying an unrecognised top-level key, and that case
-                        # must stay INCONCLUSIVE.
+                        # Raise explicit HTTPStatusError for 4xx/5xx to fail inconclusive.
                         raise httpx.HTTPStatusError(
                             f"{response.status_code} {response.reason_phrase}",
                             request=response.request,
                             response=response,
                         )
-                    # `.content.decode(...)`, not `.text`: httpx would pick a codec from
-                    # the Content-Type charset, and a gateway that mislabels one would
-                    # change what the leak inspector sees. The bytes are decoded the same
-                    # way they were under `urlopen`.
+                    # Explicit decode instead of `.text` to ignore gateway Content-Type codec.
                     sse = response.content.decode("utf-8", "replace")
                     content_types.append(response.headers.get("Content-Type", "") or "")
                 except Exception as exc:  # noqa: BLE001
-                    # Refusing a case is a legitimate gateway behaviour and it is also the
-                    # end of the measurement for that case. Aborting the whole run would
-                    # lose the eleven cases that did work; scoring it 0 would credit the
-                    # gateway with a clean result it never earned. Inconclusive is the only
-                    # honest third answer, and the schema already forbids a pass when any
-                    # case is inconclusive.
-                    #
-                    # A TIMEOUT ARRIVES HERE TOO, which is the point of bounding it: a
-                    # stalled socket costs one case rather than the sweep.
-                    #
-                    # No status is recovered from the exception. `urlopen` raised
-                    # `HTTPError` and carried the code on it, so this block used to read
-                    # `if isinstance(exc, HTTPError): statuses.append(exc.code)`. The
-                    # httpx path appends the status before it raises, so that branch could
-                    # never run again -- a line that reads like a check and cannot fire is
-                    # the defect this module keeps finding elsewhere.
+                    # Gateway refused the case (or timeout). Score as inconclusive.
                     transport_error = f"{type(exc).__name__}: {exc}"
                     sse = ""
                 with state.response_records_lock:
@@ -2214,10 +1654,7 @@ def run_case(
                     attempt_upstream_events = sum(
                         record.data_events_written for record in attempt_records
                     )
-                # `sse` is the last iteration's response, so overwrite these on every
-                # iteration at the first split point as well. Exactly one response is
-                # required for a pairwise coalescing comparison; totals remain empirical
-                # when there are zero or several.
+                # Extract first-attempt totals.
                 if index == 0:
                     upstream_events_first = attempt_upstream_events
                     upstream_responses_first = len(attempt_records)
@@ -2234,19 +1671,14 @@ def run_case(
             if index == 0:
                 first_sse = sse
                 events_first = observed
-                # Keep the termination fact paired with `events_first`. `done_marker`
-                # above is deliberately an AND over every split for SSE validity; using
-                # that aggregate to classify the first response made a later malformed
-                # split turn the first response's [DONE] sentinel into a data event.
+                # Keep the [DONE] marker boolean paired with events_first.
                 done_marker_first = "[DONE]" in parsed.events
             tier = _leak_tier(needle, sse)
             if tier is not None:
                 leaked_points += 1
                 if families:
                     leaked_by_family[families[index]] += 1
-                # Keep the STRONGEST evidence seen across split points, so a case that
-                # leaked verbatim at one offset is not reported as a concatenation
-                # because a later offset only matched a cross-field join.
+                # Keep the strongest leak tier seen across split points.
                 if leak_tier is None or _LEAK_TIER_RANK[tier] < _LEAK_TIER_RANK[leak_tier]:
                     leak_tier = tier
     finally:
@@ -2255,18 +1687,13 @@ def run_case(
         if gateway is not None:
             _stop(gateway)
 
-    # A response that did not come from THIS capture proves nothing about the gateway.
-    # Zero recorded requests means something else answered -- a stale capture on the same
-    # port, a proxy cache, another process -- and the client text belongs to a fixture
-    # this case never used, so its needles are absent and the case would score as a
-    # non-leak. Fail the case rather than accept the flattering answer.
+    # Fail case if the response did not hit this run's capture.
     if not state.received_bodies and transport_error is None:
         transport_error = (
             "capture recorded no request: the response did not come from this run's "
             "upstream, so nothing about the gateway was measured"
         )
-    # Echo fidelity and delivery are properties of the case, not of one split point, so
-    # they are read from the first attempt. The leak verdict is read from every attempt.
+    # Fidelity read from first attempt; leak verdict from all attempts.
     hay = _haystacks(first_sse)
     site_text = None
     if state.received_bodies:
@@ -2332,11 +1759,7 @@ def _rate(flags: Iterable[bool]) -> float:
 
 
 def _percentile(values: list[float], q: float) -> float:
-    """V2's recorded round-to-nearest order statistic; v1 uses nearest-rank floor.
-
-    The estimators remain unchanged while published evidence is frozen. Harmonising them
-    is an evidence-regenerating change, not a documentation cleanup.
-    """
+    """Round-to-nearest order statistic."""
     if not values:
         return 0.0
     ordered = sorted(values)
@@ -2350,24 +1773,7 @@ def _assert_derivations(
     published_digest: str,
     axes: dict[str, tuple[str, ...]] | None = None,
 ) -> bool:
-    """Recompute the published metrics FROM THE RESULTS, and refuse to emit on a mismatch.
-
-    `derivation_recomputed` and `sidecar_case_count_matches` are `const: true` in the
-    schema, and the schema's own words are what the harness is promising by setting them.
-    They were hardcoded `True`, which is worth less than no field because a reader spends
-    trust on it.
-
-    The first repair was not enough. It took `leak_single`, `leak_adv` and `delta_frag`
-    as arguments and recomputed `leak_adv - leak_single` -- the same expression, from the
-    same variables the caller had just used -- so it could only catch an edit to one
-    line. And its second half compared `cases_scored` (which was `len(results)`) with
-    `len(case_defs)`, where `case_defs` is a comprehension over `results`: identically
-    equal, for every input, so `sidecar_case_count_matches` stayed a literal in effect.
-
-    This version takes the RESULTS and the FINISHED metrics block, rebuilds every
-    published number from the raw run, and rebuilds the digest too. Nothing it compares
-    shares a variable with what produced it.
-    """
+    """Recompute published metrics from results and refuse to emit on mismatch."""
     scored = [r for r in results if r.transport_error is None]
     single = [r for r in scored if r.case["fragmentation"] == "single_chunk"]
     adversarial = [r for r in scored if r.case["fragmentation"] == "adversarial"]
@@ -2406,8 +1812,7 @@ def _assert_derivations(
                 "do not come from the measurement beside them"
             )
 
-    # The sidecar half: rebuild the case records and their digest independently of the
-    # ones the report carries.
+    # Rebuild the sidecar case records and digest independently.
     rebuilt = sorted(
         ({k: r.case[k] for k in sorted(AXES if axes is None else axes)} for r in results),
         key=lambda c: tuple(sorted(c.items())),
@@ -2429,19 +1834,7 @@ def _assert_derivations(
 
 
 def _discordance(results: list[RunResult]) -> dict[str, Any]:
-    """The PAIRED 2x2 table behind DeltaFrag, which the difference of rates discards.
-
-    Every adversarial case has exactly one single-chunk twin differing only in
-    fragmentation, so the run is a matched-pairs design and DeltaFrag is exactly
-    `(adversarial_only - single_only) / pairs`. Publishing only the difference throws
-    away which pairs disagree, and the discordant counts are what a paired test needs:
-    a run with 8 pairs disagreeing each way and a run with 0 disagreeing both report
-    DeltaFrag 0.00 and are not the same evidence.
-
-    A pair is INCLUDED only if both twins were scored. A case that died in transport
-    removes its twin from the table too -- half a pair is not a pair, and keeping the
-    survivor would put an unmatched observation into a matched-pairs statistic.
-    """
+    """The paired 2x2 table behind DeltaFrag."""
     scored = {
         (_twin_key(r.case), r.case["fragmentation"]): r
         for r in results
@@ -2471,9 +1864,7 @@ def _discordance(results: list[RunResult]) -> dict[str, Any]:
         "adversarial_only": adv_only,
         "single_chunk_only": single_only,
         "neither_arm_leaked": neither,
-        # The identity that makes the difference of marginal rates a paired statistic
-        # on this design. Recomputed and published so a reader can check it rather than
-        # take the emitter's word for the pairing.
+        # Recomputed marginal rate difference for manual verification.
         "delta_frag_from_discordance": (
             round((adv_only - single_only) / pairs, 4) if pairs else 0.0
         ),
@@ -2483,18 +1874,7 @@ def _discordance(results: list[RunResult]) -> dict[str, Any]:
 def _axis_arms(
     results: list[RunResult], axes: dict[str, tuple[str, ...]]
 ) -> dict[str, dict[str, Any]]:
-    """Per axis value, the TWO ARMS separately, and the DeltaFrag between them.
-
-    `by_axis` publishes one leak rate per axis value over both arms pooled. That is the
-    wrong statistic for every question this profile is for: pooling the fragmented and
-    unfragmented cases of one entity hides exactly the contrast the profile measures, so
-    a reader wanting per-entity DeltaFrag had to reconstruct it and could not.
-
-    It also carries the denominators, because the arms of a slice can be uneven even
-    though the array is paired -- a case that died in transport is removed from one arm
-    and not the other, and a difference of two rates over different populations is the
-    defect the fragmentation twin was added to fix.
-    """
+    """Per axis value, the two fragmentation arms separately and their DeltaFrag."""
     scored = [r for r in results if r.transport_error is None]
     out: dict[str, dict[str, Any]] = {}
     for axis in axes:
@@ -2537,38 +1917,11 @@ def _twin_key(case: dict[str, str]) -> tuple[tuple[str, str], ...]:
 
 
 def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
-    """What was enumerated, what leaked, and the union-based worst case over it.
-
-    THREE THINGS THIS EXISTS TO STOP.
-
-    1. **An aborted combinatorial run scoring as containment.** A family whose
-       enumeration exceeded the resource cap was not shortened and not run. Its cases are
-       counted in `cases_capped` and are excluded from that family's denominator. They
-       are never a non-leak.
-
-    2. **The `252 splits` erratum.** Internal adversarial partitions, uncut single-chunk
-       requests, and captured requests total are three different numbers. The published
-       tree reported the third under the name of the first for every exhaustive row.
-
-    3. **An unbounded "worst case".** The union statistic is the case rate under the
-       union of the ENUMERATED two- and three-part families over THE MEASURED CORPUS
-       VALUES. It is not a worst case over arbitrary streams, arbitrary values, arbitrary
-       interleavings, or partitions into more than three pieces, and the block says so in
-       the field a reader quotes.
-
-    Per-family DeltaFrag is computed against the PAIRED single-chunk twins of exactly the
-    adversarial cases that family enumerated, not against the whole baseline arm. When a
-    family is capped on some cases the two arms would otherwise be different populations
-    again -- the defect the fragmentation twin was added to fix.
-    """
+    """Summary of partitions enumerated, what leaked, and the union-based worst case."""
     scored = [r for r in results if r.transport_error is None]
     adversarial = [r for r in scored if r.case["fragmentation"] == "adversarial"]
     single = {_twin_key(r.case): r for r in scored if r.case["fragmentation"] == "single_chunk"}
-    # READ FROM EVERY RESULT, not from the surviving adversarial ones. `run_case` records
-    # the oracle on every case including the single-chunk arm, and a run whose adversarial
-    # cases ALL died in transport would otherwise report `midpoint` -- a report
-    # contradicting its own method, which is the exact defect `fragmentation_strategy` had
-    # when it said `exhaustive-2-part` about a midpoint cut.
+    # Read the oracle from every result.
     oracles = {r.oracle for r in results} or {"midpoint"}
     oracle = oracles.pop() if len(oracles) == 1 else "mixed"
     caps = {r.partition_cap for r in results}
@@ -2590,10 +1943,7 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
     for family in PARTITION_FAMILIES:
         enumerated = [r for r in adversarial if r.partitions_attempted.get(family)]
         capped = [r for r in adversarial if r.partitions_capped.get(family)]
-        # A family present in the request but empty for this value -- `choose(N-1,2)` is
-        # zero for a value shorter than three characters -- is neither enumerated nor
-        # capped. Recorded rather than dropped: silently absent would be indistinguishable
-        # from never asked for.
+        # Record families that were requested but empty for short values.
         too_short = [
             r for r in adversarial
             if family in r.partitions_attempted
@@ -2627,12 +1977,7 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
     ]
     if union_families:
         worst = _arm(union_rows, [r.injection_leaked for r in union_rows])
-        # THE COMPARISON DENOMINATOR MUST BE THE UNION'S, not each family's own. A family
-        # capped on some cases has a different case set from the union, and a component
-        # rate over a different population can legitimately exceed the union rate -- which
-        # would make `never_below_components` false for a run in which nothing is wrong.
-        # Restricting the components to `union_rows` is what makes the inequality a real
-        # arithmetic check rather than a denominator artefact.
+        # Restrict component checks to the union denominator.
         on_union = {
             family: _rate(r.partitions_leaked.get(family, 0) > 0 for r in union_rows)
             for family in union_families
@@ -2642,12 +1987,7 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
             worst["leak_rate_adversarial"] >= rate for rate in on_union.values()
         )
     else:
-        # NO FAMILY WAS ENUMERATED, so there is no worst case. Publishing 0.0 here would
-        # assert that the union statistic was measured and came out zero, and 46 of the
-        # rows in the published tree are midpoint rows for which it was never computed.
-        # `null` is the same answer `coalescing_rate` already gives when nothing was
-        # comparable: "never observed" and "measured at zero" are different claims and
-        # 0.0 asserts the second.
+        # Return null worst-case stats if no family was enumerated.
         worst = {
             "cases_enumerated": 0,
             "cases_leaked": 0,
@@ -2709,8 +2049,7 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
 
     return {
         "oracle": oracle,
-        # From EVERY result, for the same reason `oracle` is: a run whose adversarial arm
-        # died entirely must not report the default as though it were the cap in force.
+        # Read the cap from every result.
         "resource_cap_per_case_per_family": (
             caps.pop() if len(caps) == 1 else max(caps, default=DEFAULT_PARTITION_CAP)
         ),
@@ -2743,24 +2082,14 @@ def build_report(
     claim: dict[str, Any] | None = None,
     schema_id: str = SCHEMA_ID,
 ) -> dict[str, Any]:
-    """Assemble an http-profile report from the full covering array.
-
-    `axes`, `corpus`, `scope` and `schema_id` are what make one instrument serve two
-    profiles. They are ARGUMENTS rather than module globals on purpose: the FIDE profile
-    adds a sixth axis, and a global would mean importing that profile silently changed
-    what a v2 run measures. Both profiles share the listed scoring path and therefore
-    carry the same selected-source `inspector_sha256`. That fingerprint is one
-    change-detection check; the full source tag, corpus metadata, report validation, and
-    completeness gates are also required for a cross-profile claim.
-    """
+    """Assemble an http-profile report from the full covering array."""
     context = context or {}
     axes = AXES if axes is None else axes
     by_frag: dict[str, list[RunResult]] = {"single_chunk": [], "adversarial": []}
     for r in results:
         by_frag[r.case["fragmentation"]].append(r)
 
-    # A refused case measured nothing. Leaving it in the denominator as a non-leak would
-    # let a gateway improve its LeakRate by rejecting the cases it cannot handle.
+    # Filter out refused cases from denominators.
     scored = [r for r in results if r.transport_error is None]
     inconclusive = [r for r in results if r.transport_error is not None]
     by_frag = {k: [r for r in v if r.transport_error is None] for k, v in by_frag.items()}
@@ -2768,26 +2097,10 @@ def build_report(
     leak_adv = _rate(r.injection_leaked for r in by_frag["adversarial"])
     leak_overall = _rate(r.injection_leaked for r in scored)
     observable = [r for r in scored if r.echo_observable]
-    # No observable case means the gateway forwarded none of the request sites, so there
-    # is no fidelity claim to make either way. 0.0 would assert a failure that was not
-    # measured.
+    # No observable case skips fidelity tracking entirely.
     fidelity = _rate(v for r in observable for v in r.echo_recovered.values()) if observable else 0.0
     delta_frag = round(leak_adv - leak_single, 4)
-    # A NEGATIVE delta_frag is possible and is not necessarily an artefact. Two causes,
-    # and only the first was a defect:
-    #
-    #   1. Unpaired populations. Fixed: the covering array now pairs every case with its
-    #      fragmentation twin, so the two conditions differ in nothing else.
-    #   2. A false positive on a fragment suppressing a true leak. Measured, seed
-    #      0000000000000001, presidio-chunk-local, USPHONE 590-555-0126:
-    #        "Reference record: 590-555-0126" -> not detected, the value leaks
-    #        "590-55" -> not detected;  "5-0126" -> REDACTED
-    #      Split, the detector matched the FRAGMENT for an unrelated reason, so the
-    #      reassembled client text no longer held the complete needle and the case scored
-    #      as "did not leak". The fragmented condition passed by accident.
-    #
-    # So delta_frag < 0 must never be read as "fragmentation is safe here". Read it with
-    # leak_rate.single_chunk and detector_blind_entities, which is where cause 2 shows up.
+    # A negative delta_frag is possible due to false positives on fragments.
 
     case_defs = sorted(
         ({k: r.case[k] for k in sorted(axes)} for r in results),
@@ -2800,30 +2113,10 @@ def build_report(
     covered: set[tuple[str, str, str, str]] = set()
     for r in results:
         covered |= _pairs_of(r.case, axes)
-    # A pair that no case in the axis product could ever carry is not an uncovered pair,
-    # it is an impossible one, and requiring it makes `proof_complete` unsatisfiable. The
-    # profile supplies its own feasibility predicate; the v2 axes are unconstrained and
-    # pass None, which reproduces the previous behaviour exactly.
+    # Exclude infeasible pairs from the required product.
     required = _all_pairs(axes, context.get("feasible"))
 
-    # An entity the target never catches EVEN UNFRAGMENTED is outside its detectable
-    # set, and its leak rate is not a fragmentation result. Reporting the two together
-    # would blame chunk boundaries for a value the detector was never going to find.
-    #
-    # This is not hypothetical and it is not the detector's fault. The fixture draws SSNs
-    # from area 900-999, which the SSA has never assigned -- deliberately, so a published
-    # corpus cannot contain a living person's SSN. Google Cloud DLP validates the area
-    # number and therefore never flags them, while Presidio does not validate and does.
-    # Verified directly: DLP flags 219-09-9999 (an assignable area) and ignores
-    # 950-36-9596. **For identifier types with assignment validation there is no value
-    # space that is both safe to publish and detectable by a validating detector**, so
-    # this is declared rather than engineered away.
-    # Read as "blind IN THIS CARRIER", not "blind". Detectability is context-scored in at
-    # least one commercial detector: Google Cloud DLP flags 212-555-0143 in "Call me on
-    # ... tomorrow" and does not flag the same number in "Reference record: ...". The
-    # corpus carries one sentence, so a context-scored recogniser is being measured
-    # against that sentence rather than in general. A carrier-context axis is the fix and
-    # is not built.
+    # Identify entities the target completely misses even when unfragmented.
     detector_blind = {}
     for entity in axes["entity"]:
         baseline = [
@@ -2841,11 +2134,7 @@ def build_report(
     )
 
     def _axis_slice(axis: str) -> dict[str, dict[str, Any]]:
-        """Per-axis-value leak and fidelity, in the shape the schema requires.
-
-        `applicable` is the case count behind each rate. A rate without its denominator
-        is not checkable, which is why the schema demands both.
-        """
+        """Per-axis-value leak and fidelity stats."""
         out: dict[str, dict[str, Any]] = {}
         for value in axes[axis]:
             rows = [r for r in scored if r.case[axis] == value]
@@ -2862,12 +2151,7 @@ def build_report(
                     else 0.0
                 ),
                 "applicable": len(rows),
-                # The denominator behind fidelity_rate, and it is not len(rows). A
-                # gateway that drops the field never presented anything to restore, so
-                # 0 here means fidelity_rate was NOT MEASURED for this slice -- which is
-                # a different statement from "measured and failed" and must not be read
-                # as one. Portkey drops an unrecognised top-level key, which is how this
-                # case arose rather than a hypothetical.
+                # The denominator for fidelity_rate counts only observable sites.
                 "echo_observable": len(visible),
                 "leaked": sum(1 for r in rows if r.injection_leaked),
             }
@@ -2889,11 +2173,7 @@ def build_report(
             "version": EMITTER_VERSION,
             "labels_are_operator_supplied": True,
         },
-        # WHAT WAS ACTUALLY MEASURED. These three were hardcoded to the in-process
-        # defaults in every report, including the external-gateway rows: a run driven at
-        # `http://127.0.0.1:8788/v1/chat/completions` with `--model capture` published
-        # `http://127.0.0.1/v1 (ephemeral loopback)` and `test`. A reader could not tell
-        # which target a row measured from the row.
+        # Target details.
         "target": {
             "base_url": context.get("base_url", "http://127.0.0.1/v1 (ephemeral loopback)"),
             "model": context.get("model", "test"),
@@ -2908,15 +2188,9 @@ def build_report(
         "capture": {
             "mode": "loopback",
             "bind_host": "127.0.0.1",
-            # 0 means an ephemeral port per case. An external-gateway run pins it, and
-            # every such row used to publish 0 regardless.
+            # 0 means an ephemeral port per case.
             "port": context.get("capture_port", 0),
-            # THE CAPTURE'S OWN BEHAVIOUR, not the target's. This was
-            # `bool(V2_GATEWAY_TOKEN)` -- the bearer token the harness sends TO THE
-            # GATEWAY -- and it read `true` in four gateway rows for a capture that reads
-            # no headers and rejects nothing. It matters: an unauthenticated capture is
-            # the condition `_self_probe` exists to guard, so overstating it hides the
-            # very risk the probe was added for.
+            # Honest claim about the capture's own authentication.
             "authentication_required": CAPTURE_REQUIRES_AUTHENTICATION,
             "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
             # Measured. `_self_probe` sends a nonce to the capture before any target
@@ -3126,18 +2400,11 @@ def build_report(
             "derivation_recomputed": False,
             "sidecar_case_count_matches": False,
             "by_axis": {axis: _axis_slice(axis) for axis in axes},
-            # WHAT THE ORACLE ACTUALLY ENUMERATED, beside the rates it produced. A
-            # DeltaFrag quoted without the partition family it came from is the same
-            # defect as a rate quoted without its denominator: the midpoint and the
-            # union statistic are different estimands and this block is what tells them
-            # apart in the file a reader cites.
+            # Explicitly state what the oracle enumerated to contextualize rates.
             "partition_oracle": partition_oracle,
-            # PER AXIS VALUE, THE TWO ARMS SEPARATELY. `by_axis` pools them, which hides
-            # the only contrast this profile measures. See `_axis_arms`.
+            # Per axis value, the two arms separately. See `_axis_arms`.
             "by_axis_arm": _axis_arms(results, axes),
-            # THE PAIRED 2x2 TABLE. DeltaFrag is a difference of marginal rates over a
-            # matched-pairs design, and the difference alone cannot distinguish "no pair
-            # disagreed" from "equally many disagreed each way". See `_discordance`.
+            # The paired 2x2 table underlying DeltaFrag. See `_discordance`.
             "discordance": _discordance(results),
         },
         "entity_scope": scope or {
@@ -3150,14 +2417,11 @@ def build_report(
             "source": "pii_leak_benchmark.v2_emitter._DETECTORS",
         },
         "cases_digest": digest,
-        # WHICH INSTRUMENT PRODUCED THIS ROW. See `inspector_digest`.
+        # See `inspector_digest`.
         "instrument": instrument_block(),
     }
 
-    # THE CHECK RUNS ON THE FINISHED BLOCK. `_assert_derivations` rebuilds every
-    # published metric from `results` and rebuilds `cases_digest` too, so nothing it
-    # compares shares a variable with what produced it. It raises rather than returning
-    # False, so these two can only be True because the recomputation agreed.
+    # Ensure generated derivations match raw data before returning.
     verified = _assert_derivations(results, report["metrics"], digest, axes)
     report["metrics"]["derivation_recomputed"] = verified
     report["metrics"]["sidecar_case_count_matches"] = verified
@@ -3165,19 +2429,7 @@ def build_report(
 
 
 def _value_space() -> dict[str, int]:
-    """Distinct values each entity draws from, from the v1 fixture generator.
-
-    USPHONE IS ADDED HERE BECAUSE v1 DOES NOT HAVE IT. The v2 corpus gained a fourth
-    entity and this block kept describing three, so every published report has been
-    stating a value space for three quarters of its own corpus. Same defect as the
-    `method_limits` line that said "Three entity types" for as long as the corpus had
-    four: a block that describes a narrower run than the one performed.
-
-    The count is derived from `make_seeded_fixture`'s own draw -- `randint(2, 9)` for the
-    area hundreds digit, `randint(0, 99)` for the rest of the area code, `randint(0, 99)`
-    for the line number inside the 555-01xx block -- rather than written down, so it
-    cannot drift from the generator.
-    """
+    """Distinct values each entity draws from, incorporating v2-specific entities."""
     from .http_profile import fixture_value_space
 
     space = fixture_value_space()
@@ -3189,9 +2441,7 @@ def _value_space() -> dict[str, int]:
             continue
         if count >= 1:
             out[_v2_id(key)] = count
-    # The three factors `make_seeded_fixture` draws for USPHONE: 8 hundreds digits
-    # (2..9), 100 remainders (0..99) for the area code, and 100 line numbers (0..99)
-    # inside 555-01xx.
+    # USPHONE combinations from make_seeded_fixture.
     out["USPHONE"] = 8 * 100 * 100
     return out or {"EMAIL": 1}
 
@@ -3199,22 +2449,7 @@ def _value_space() -> dict[str, int]:
 def _derive_outcome(
     leak_adv: float, fidelity: float, separated: bool, boundary_leaked: bool = False
 ) -> str:
-    """`outcome` is derived from BOTH paths, which it was not while one could not fail.
-
-    `fail` is reserved for a measured leak of a protected value, and a value that reached
-    the gateway's configured upstream is exactly that -- it is v1's entire measurement.
-    While `_boundary_check` returned a literal there was never a request-path leak to
-    derive from, so this function read the response path alone and the omission was
-    invisible. The schema always required the pairing: `no_leak_outcome_requires_no_leak`
-    forbids `no-leak-profile-not-met` alongside a non-empty
-    `configured_upstream_boundary.leaked_entity_types`, and it rejected the first real
-    report the fixed check produced.
-
-    Historical-name warning: callers pass the overall leak rate as `leak_adv`, so any
-    leak in either response arm fails the report. Renaming this instrumented parameter is
-    deferred to an evidence-regenerating release; passing only the adversarial rate would
-    be a behavioral regression.
-    """
+    """Outcome derived from both leak rates and boundary check results."""
     if not separated:
         return "inconclusive"
     if leak_adv > 0.0 or boundary_leaked:
@@ -3225,21 +2460,7 @@ def _derive_outcome(
 
 
 # --------------------------------------------------------------------------------------
-# What the client-side inspector actually does, as data rather than as prose.
-#
-# WHY THIS IS A LIST AND NOT A SENTENCE. The report's `inspection_scope` used to be a
-# hand-written paragraph copied from the v1 harness, describing a recursive walk with
-# decoding that the v2 inspector did not perform. The sentence and the code were in
-# different files with nothing connecting them, so the sentence stayed true of v1 and
-# false of v2 for as long as nobody re-read both. Six placements -- nested objects, lists,
-# `choices[1]`, top-level fields, `tool_calls[].function.arguments`, base64 -- reached the
-# client and scored as NO LEAK while the report claimed they were inspected.
-#
-# The fix is not "be careful when editing the sentence". It is that the sentence is now
-# GENERATED from this list, every entry has a `key`, and
-# `tests/conformance/test_v2_leak_inspector_scope.py` fails if any key lacks a test that
-# demonstrates it. A capability cannot be claimed without a proof, and a claim cannot be
-# quietly widened: adding a clause here breaks the build until the proof exists.
+# What the client-side inspector actually does, as tested data.
 # --------------------------------------------------------------------------------------
 
 
@@ -3303,18 +2524,7 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
 CLIENT_INSPECTION_SCOPE = "; ".join(c.clause for c in CLIENT_INSPECTION_CAPABILITIES)
 
 
-# WHAT THE REQUEST-PATH INSPECTOR ACTUALLY DOES, as data rather than as prose.
-#
-# The client-side scope was converted to a generated list after a copied sentence was
-# found describing a walk the code did not perform. The BOUNDARY scope was left as the
-# hand-written paragraph, and it was worse than the one that got fixed: `_boundary_check`
-# returned a LITERAL. It never opened `upstream_bodies`. A relay that forwarded every
-# protected value verbatim to the capture was certified `passed: true`,
-# `leaked_entity_types: []`, under sixty words describing a recursive decoding walk.
-#
-# Same disease, same cure: the sentence is generated from this list, every entry has a
-# `key`, and `tests/conformance/test_inspection_scope_is_proved.py` fails if any key
-# lacks a test that demonstrates it.
+# What the request-path inspector actually does, as tested data.
 BOUNDARY_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
     InspectionCapability(
         "boundary_every_request",
@@ -3356,30 +2566,7 @@ BOUNDARY_INSPECTION_SCOPE = "; ".join(c.clause for c in BOUNDARY_INSPECTION_CAPA
 
 
 # --------------------------------------------------------------------------------------
-# SELECTED SCORER FINGERPRINT: an enumerated, non-transitive source digest.
-#
-# `inspection_scope` is generated from the capability registries, which is what makes it
-# a good anchor for a CLAIM -- and a bad one for BEHAVIOUR. The two registries describe
-# declared reach, so an emitter can change what it measures without either string moving.
-# Demonstrated three ways against the staleness guard that keys on them:
-#
-#   * `_fidelity_check(results)` -> `_fidelity_check(observable)` flipped a published
-#     row's `response_fidelity.passed` from false to true. 411 tests passed either way
-#     and both scope strings were identical.
-#   * Ten of the nineteen published artefacts were emitted by a build that did not yet
-#     have `redaction_claim.request_path_redaction_configured`, so the directory held two
-#     emitter builds at once. The guard was green.
-#   * Deleting the residue scan, which is a false pass, left both scope strings unchanged
-#     (that one is caught by test_v2_sse_parsing.py, not by the guard).
-#
-# So the report carries a digest of the SOURCE of an explicitly enumerated scorer subset,
-# plus three named v1 normalization helpers. It is intentionally non-transitive: helpers,
-# reference-policy methods, transport setup, and other producers outside that list are not
-# covered. The selected source is normalized through the AST so reformatting, comments, and
-# docstrings do not move it, while behavior-bearing edits to a listed function do. A match is
-# a change-detection fingerprint for that selected source, not proof of complete execution,
-# configuration identity, target identity, or report eligibility; the full evidence tag and
-# validation gates carry those separate responsibilities.
+# Fingerprint of enumerated scorer source.
 # --------------------------------------------------------------------------------------
 
 _INSTRUMENTED = (
@@ -3398,15 +2585,9 @@ _INSTRUMENTED = (
     "_fidelity_check",
     "_sse_check",
     "_fragmentation_check",
-    # Both decide a published field and NEITHER was digested. `_one_character_events` was
-    # added as the fix for a const that could not fail and could itself be rewritten
-    # without marking a single row stale -- the exact hole the digest exists to close.
+    # Functions that decide published fields.
     "_one_character_events",
-    # `_upstream_data_events` was here and is gone: it derived the capture's emission
-    # count from the case definition instead of measuring it. `_make_upstream` contains
-    # the nested `_respond` method that now records each successful socket write;
-    # `_coalescing_rows` turns those records into the per-case verdict. Both producer and
-    # consumer must move the digest when their behaviour changes.
+    # Core capture response tracking.
     "_coalescing_rows",
     "_injection_check",
     "_injection_evidence",
@@ -3414,8 +2595,7 @@ _INSTRUMENTED = (
     "_assert_derivations",
     "_count_invalid_events",
     "_rate",
-    # The partition oracle. All five decide which bytes reach the target and how the
-    # result is scored, so all five must move the digest.
+    # The partition oracle logic.
     "_family_partitions",
     "injection_partitions",
     "_partition_pieces",
@@ -3424,12 +2604,7 @@ _INSTRUMENTED = (
     "_twin_key",
     "_axis_arms",
     "_discordance",
-    # Decides `fixture.value_space_nominal`, a PUBLISHED field, and was not digested.
-    # Found 2026-09-09 while correcting it: v1 has no phone entity, so the block had been
-    # describing three of the corpus's four entities since USPHONE was added, and the
-    # correction would have landed with every existing row still reading "current". A
-    # published field whose producer is outside the digest is a row that can change
-    # meaning without going stale.
+    # Entity value space config.
     "_value_space",
     "run_case",
     "build_report",
@@ -3461,16 +2636,11 @@ def _behaviour_source(function: Any) -> str:
 
 
 def inspector_digest() -> str:
-    """Fingerprint the enumerated scorer source; return 16 SHA-256 hex characters.
-
-    This non-transitive digest is a change detector for `_INSTRUMENTED` and the three
-    named v1 normalization helpers below. It is not a completeness, execution-validity,
-    configuration-identity, or target-identity proof.
-    """
+    """Fingerprint the enumerated scorer source; return 16 SHA-256 hex characters."""
     from pii_leak_benchmark import http_profile
 
     parts = [_behaviour_source(globals()[name]) for name in _INSTRUMENTED]
-    # The decoding and folding walk lives in v1 and is just as load-bearing.
+    # Include decoding and folding logic from v1.
     parts += [
         _behaviour_source(getattr(http_profile, name))
         for name in ("_collect", "_normalize", "_normalize_confusable_digits")
@@ -3488,7 +2658,7 @@ def instrument_block() -> dict[str, str]:
         "emitter_version": EMITTER_VERSION,
         "client_scope_sha256": digest(CLIENT_INSPECTION_SCOPE),
         "boundary_scope_sha256": digest(BOUNDARY_INSPECTION_SCOPE),
-        # The one that moves when behaviour moves rather than when the claim does.
+        # Digest sensitive to behavior changes.
         "inspector_sha256": inspector_digest(),
     }
 
@@ -3527,20 +2697,7 @@ def _boundary_haystacks(bodies: Iterable[str]) -> list[str]:
 def _boundary_evidence(
     bodies: list[str], per_body: list[list[str]], all_bodies: list[str], needle: str
 ) -> tuple[str, str, str] | None:
-    """The STRONGEST provenance available for one value, or None if it never egressed.
-
-    The schema requires this and its wording is the reason: "a bare entity name is an
-    accusation with no way for the accused to check it." So the report says how the value
-    was recovered, weakest claim last:
-
-      literal / per-request     the value appeared verbatim in one body the target sent
-      normalized / per-request  recovered from one body only after folding and joining
-      normalized / cross-request  recovered only by joining several bodies together
-
-    A cross-request normalized match is the one that can collide, and it is the one a
-    reader should discount first. Reporting all three as the same fact is how a harness
-    turns a coincidence into a vendor defect.
-    """
+    """The strongest provenance available for one value, or None if it never egressed."""
     for body in bodies:
         if needle in body:
             return ("body", "per-request", "literal")
@@ -3553,19 +2710,7 @@ def _boundary_evidence(
 
 
 def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, Any]:
-    """Did the protected values reach the gateway's configured upstream unmasked?
-
-    This is the check that used to be a constant: it returned `passed: True`,
-    `leaked_entity_types: []` without ever opening `upstream_bodies`. A relay forwarding
-    all four protected values verbatim to the capture was certified clean.
-
-    It is also the column the module docstring calls not-optional. FidelityRate 1.00 means
-    "the originals came back", and only the prompt the upstream received separates a
-    gateway that masked and restored from one that never masked at all.
-
-    The values themselves are NOT published, only which entity types were present and how
-    they were recovered, because `fixture.values_published` is false and must stay false.
-    """
+    """Check if protected values reached upstream unmasked."""
     bodies = [body for result in results for body in result.upstream_bodies]
     unparseable = 0
     for body in bodies:
@@ -3589,9 +2734,7 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
             {"entity_type": name, "channel": channel, "scope": scope, "match": match}
         )
 
-    # An injection value in a REQUEST body would mean the harness contaminated its own
-    # control, not that the gateway leaked. It is reported so the run is not silently
-    # trusted; `check_segment_separation` is what normally prevents it.
+    # Check for test control contamination.
     contaminated: list[str] = []
     contaminated_evidence: list[dict[str, str]] = []
     for name, value in sorted(segments.injection.items()):
@@ -3611,15 +2754,11 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
         "uninspectable_requests": unparseable,
         "uninspectable_reasons": (["body did not parse as JSON"] if unparseable else []),
         "leaked_entity_types": leaked,
-        # Recorded by the capture handler, not asserted. This was the literal
-        # `["/v1/chat/completions"]` while `_make_upstream` kept no note of `self.path`,
-        # so a gateway calling any other route was reported as calling that one.
+        # Observed upstream paths.
         "upstream_paths_observed": sorted({p for r in results for p in r.upstream_paths}),
         "marker_words_required": 3,
         "marker_words_total": 5,
-        # Zero BY CONSTRUCTION, not by failure. See `boundary_correlation` above: the
-        # capture is in-process and records the request itself, which is a stronger
-        # correlation than counting marker words in a public capture.
+        # Captured in-process, marker words not needed.
         "marker_words_observed_max": 0,
         "payload_content_included": False,
         "inspection_scope": BOUNDARY_INSPECTION_SCOPE,
@@ -3636,25 +2775,7 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
 
 
 def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
-    """Did the harness actually emit a single-character data event?
-
-    Derived rather than asserted, and the FIRST derivation was wrong in a way that made it
-    a constant again. It asked whether BOTH pieces of a split were one character, which is
-    possible only for a value of two characters; the shortest rendered corpus value is
-    eleven. So it returned False by arithmetic on the first adversarial case it looked at,
-    for every input this harness can produce -- the same defect as the `const: true` it
-    replaced, pointing the other way, and its own docstring stated the wrong rule ("a value
-    that is itself two characters long").
-
-    A piece is one character whenever a cut lands one away from EITHER end, or two cuts
-    land one apart, for a value of any length. Every exhaustive family enumerates offsets
-    from `1`, so under any of them this emitter really does emit a one-character data
-    event and must report true. The midpoint default does not, for any value longer than
-    three.
-
-    It reads the partitions back from the SAME enumerator `run_case` drove, at the same
-    oracle and cap the case recorded, rather than guessing from a count.
-    """
+    """Check if a single-character data event was actually emitted."""
     for result in results:
         if result.case.get("fragmentation") != "adversarial":
             continue
@@ -3675,22 +2796,7 @@ def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
 def _coalescing_rows(
     results: list[RunResult], axes: dict[str, tuple[str, ...]] | None = None
 ) -> list[dict[str, Any]]:
-    """Per case: what the capture wrote, what the client received, and the verdict.
-
-    THREE OUTCOMES, NOT TWO. The predecessor collapsed them into one boolean read off a
-    single adversarially-selected case, and got both halves wrong:
-
-      * `coalesced: true`  -- the client received FEWER data events than the capture
-        wrote. Coalescing proved, not inferred from a low absolute count.
-      * `coalesced: false` -- it received at least as many. Nothing was merged.
-      * `coalesced: null`  -- there is nothing to compare. Either the case failed, the
-        client received NO data events at all (`stream_failure`), the capture wrote none,
-        or the gateway made other than one upstream request. The old
-        expression `0 < observed < upstream` returned **false** for the first of these,
-        which reads as "this gateway does not coalesce" about a gateway that dropped the
-        payload on the floor. NeMo Guardrails truncates the stream when it sees PII, so
-        this is the exonerating answer for a real measured behaviour, not a hypothetical.
-    """
+    """Record events emitted vs observed and the coalescing verdict per case."""
     rows: list[dict[str, Any]] = []
     for result in results:
         upstream = result.upstream_data_events
@@ -3706,8 +2812,7 @@ def _coalescing_rows(
             "upstream_data_events_emitted": upstream,
             "upstream_responses_observed": result.upstream_responses_observed,
             "data_events_observed": observed,
-            # A transport-errored case produced no complete stream measurement even if
-            # an earlier split point delivered data. Distinct from "carried fewer".
+            # Track transport failures distinctly.
             "stream_failure": failed,
             "coalesced": observed < upstream if comparison_available else None,
         })
@@ -3719,25 +2824,7 @@ def _fragmentation_check(
     segments: Segments,
     axes: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
-    """Event counts over the WHOLE array, and coalescing as a rate rather than a verdict.
-
-    Two defects, both from the same source. `build_report` used to pick one case --
-    `max(results, key=lambda r: (r.injection_leaked, -r.events_observed))`, the leaking
-    case with the fewest events -- and read this entire block off it.
-
-      1. `events_observed_max` was read off that case too, so the "maximum" reported a
-         minimum: `chunk-local` runs 16 cases at 4 events and 16 at 5, and the report
-         said max 4.
-      2. Coalescing was that one case's boolean. One case in 32 arriving a frame short --
-         a coalesced TCP segment, a scheduler hiccup -- branded the whole gateway as
-         buffering. An adversarial selector is right for a leak, where one leak is a leak;
-         it is wrong for a transport property, where the question is how often.
-
-    So: the scalars are honest extrema over every scored case, and coalescing is a rate
-    over the cases where the comparison could be made at all. `events_observed` stays the
-    MINIMUM because that is the published E15 column -- LiteLLM's `2` against an upstream
-    that wrote 3 or 4 -- and `coalescing_per_case` carries the full detail beside it.
-    """
+    """Event counts over the whole array, reporting coalescing as a rate."""
     scored = [r for r in results if r.transport_error is None]
     counts = [max(r.events_observed, r.events_observed_max) for r in scored] or [0]
     rows = _coalescing_rows(results, axes)
@@ -3745,57 +2832,31 @@ def _fragmentation_check(
     coalesced = [r for r in comparable if r["coalesced"]]
     failures = [r for r in rows if r["stream_failure"]]
     return {
-        # `events_observed` COUNTS THE `[DONE]` SENTINEL, so `> 1` was satisfied by a
-        # gateway that emitted the whole response as a single chunk followed by `[DONE]`.
-        # Both `litellm-presidio` and `llm-guard-buffered` -- the two rows the write-up
-        # cites as "buffers everything and re-emits one chunk, E15" -- were certified
-        # `fragmentation_safety: passed: true` by that test. The decision now uses
-        # data-bearing events only, and it quantifies over EVERY scored case rather than
-        # the one the old adversarial selector happened to pick.
+        # Ensure we check for actual data-bearing fragmentation.
         "passed": bool(
             scored
             and all(r.data_events_observed > 1 and r.client_text for r in scored)
         ),
-        # DERIVED, not asserted -- and the first derivation was still a constant. See
-        # `_one_character_events`: it tested for BOTH pieces being one character, which no
-        # corpus value can satisfy, so it answered False by arithmetic while the emitter
-        # was demonstrably writing a one-character event at split point 1 under
-        # `--exhaustive-splits`. It now answers the question it asks.
+        # Derive whether single-character events were requested.
         "one_character_events_requested": _one_character_events(segments, results),
-        # Extrema over the scored array. Both were read off one case before, which is how
-        # a maximum came to report a minimum.
+        # Extrema over the scored array.
         "events_observed": min((r.events_observed for r in scored), default=0),
         "events_observed_max": max(counts),
         "data_events_observed": min((r.data_events_observed for r in scored), default=0),
-        # NOT a limitation of this profile, though it was published as `const: true` until
-        # 2026-09-06 on the argument that a limitation disclosure is not a capability
-        # claim. The category is real; the disclosure is not true HERE. v1 cannot tell a
-        # gateway that coalesced several upstream events from an upstream that emitted
-        # fewer, because v1 does not control the upstream. v2 IS the upstream and COUNTS
-        # what it wrote, so the second hypothesis is excluded by measurement and the
-        # comparison below is available. Kept as a boolean rather than deleted so a
-        # profile that genuinely cannot make it can still say so.
+        # Coalescing is distinguished since v2 controls the upstream.
         "coalescing_not_distinguished": False,
-        # EMPIRICAL TOTALS. `upstream_data_events_emitted` used to be a per-case constant
-        # recomputed from the case definition by `_upstream_data_events` ("3 for a
-        # single-chunk case and 4 for a split one, fixed by construction"). It is now
-        # summed from the counter `_respond` increments as it writes each frame, so it
-        # reports what went out rather than what was supposed to.
+        # Empirical sums of events.
         "upstream_data_events_emitted_total": sum(
             r["upstream_data_events_emitted"] for r in rows
         ),
         "data_events_observed_total": sum(r["data_events_observed"] for r in rows),
-        # THE RATE, over the cases where both counts exist. None -- not 0.0 -- when no
-        # case was comparable, because "never observed" and "measured at zero" are
-        # different claims and 0.0 asserts the second.
+        # Rate computed over valid comparisons.
         "coalescing_rate": (
             round(len(coalesced) / len(comparable), 4) if comparable else None
         ),
         "coalescing_cases": len(coalesced),
         "coalescing_cases_compared": len(comparable),
-        # THE FAIL-OPEN, closed. A case whose client received no data event at all is not
-        # evidence that the gateway does not coalesce; it is evidence the stream did not
-        # arrive. It is excluded from the rate's denominator and counted here instead.
+        # Stream failures indicate no events arrived.
         "stream_failure": bool(failures),
         "stream_failure_cases": len(failures),
         "coalescing_per_case": rows,
@@ -3804,12 +2865,7 @@ def _fragmentation_check(
 
 
 def _sse_check(results: list[RunResult]) -> dict[str, Any]:
-    """Framing facts read off the responses, not asserted about them.
-
-    Every field here used to be a literal. A gateway answering `application/json` with
-    zero events was reported as `content_type_valid: true, status_codes: [200],
-    invalid_events: 0, errors: []`.
-    """
+    """Framing facts validated against responses."""
     statuses = sorted({code for r in results for code in r.status_codes})
     types = sorted({t for r in results for t in r.content_types})
     invalid = sum(r.invalid_events for r in results)
@@ -3818,12 +2874,7 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
         {t for t in types if not t.split(";")[0].strip().lower() == "text/event-stream"}
     )
     missing_done = [r.case for r in scored if not r.done_marker]
-    # A case that never returned has no framing to validate, and it contributed no
-    # status code either -- a timeout or a reset appends nothing to `status_codes`, and
-    # it is excluded from `missing_done` because it is not in `scored`. So a run in which
-    # cases died in transport came out `passed: true, status_codes: [200], errors: []`.
-    # Measured: one good case beside one timed-out case passed this check. Fail closed;
-    # "we could not look" is not "we looked and it was fine".
+    # Unanswered cases fail the validation.
     unanswered = [r for r in results if r.transport_error is not None]
     errors: list[str] = []
     if bad_types:
@@ -3850,27 +2901,7 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
 
 
 def _fidelity_check(observable: list[RunResult], attempted: list[RunResult]) -> dict[str, Any]:
-    """Echo fidelity over the cases where the echo was MEASURABLE, with both denominators.
-
-    Two defects, and they are the same defect at two strengths.
-
-    This check used to be handed the full result list, so `iterations_requested` and
-    `iterations_completed` were the same number by construction and the pair could never
-    say that a run was incomplete. Narrowing it to `observable` fixed the denominator and
-    broke something worse: `observable` CAN be empty, and `matching == total` is
-    `0 == 0`, so a gateway that reconstructed nothing was published as
-    `passed: true, expected_value_reconstructed: true` beside `fidelity_rate: 0.0`.
-    Measured end to end against a relay that canonicalises the request and forwards none
-    of the four request sites -- pre-change `passed: false`, post-change `passed: true`.
-
-    `manuscript-v3.md` C6 states the rule this violated: a rate without its denominator
-    is not a measurement, and the failure is asymmetric. Removing the unmeasurable cases
-    from the numerator AND the denominator of a BOOLEAN turns missing data into a pass,
-    which is that asymmetry pointed the other way.
-
-    So: requested counts every echo assertion the run set out to make, completed counts
-    the ones that were measurable, and nothing is a pass on zero measurements.
-    """
+    """Echo fidelity over cases where echo was measurable."""
     matching = sum(1 for r in observable for v in r.echo_recovered.values() if v)
     completed = sum(len(r.echo_recovered) for r in observable)
     requested = sum(len(r.echo_recovered) for r in attempted)
@@ -3902,7 +2933,7 @@ def _injection_evidence(
                 "entity_type": entity,
                 "observed": best,
                 "cases_leaked": str(len(tiers)),
-                # Named so a reader can act on the distinction without reading this file.
+                # Highlight concatenation.
                 "weakest_tier_is_a_concatenation": str(
                     all(t == "cross-field-join" for t in tiers) if tiers else False
                 ).lower(),
@@ -3912,14 +2943,7 @@ def _injection_evidence(
 
 
 def _fragmentation_strategy_label(results: list[RunResult]) -> str:
-    """WHAT WAS ACTUALLY DONE, read off the adversarial cases.
-
-    This field said `exhaustive-2-part` while the code cut the value once at its midpoint
-    and `limitations.method_limits` in the same report said "not every split point". A
-    report cannot contradict itself about its own method. It is now the oracle the run
-    recorded, mapped onto the schema enum, so a three-part or union run cannot be
-    published under the two-part label.
-    """
+    """Fragmentation strategy recorded during the run."""
     # EVERY result, not just the adversarial ones. `run_case` records the oracle on both
     # arms, and a run whose adversarial cases all died in transport would otherwise be
     # published under the midpoint label whatever oracle was actually requested.
@@ -4191,9 +3215,7 @@ def main(argv: list[str] | None = None) -> int:
             f"leak_single={summary['leak_single_chunk']:<6} "
             f"leak_adv={summary['leak_adversarial']:<6} "
             f"DeltaFrag={summary['delta_frag']:<7} "
-            # n= is cases_applicable, the denominator of the four rates to its left, over
-            # the cases attempted. A console line carrying rates and no denominator is
-            # the same trap as the report field that carried rates and no denominator.
+            # Include denominator for rates in console output.
             f"n={summary['cases_applicable']}/{summary['cases_attempted']:<6} "
             f"outcome={report['outcome']:<24} schema={status}"
         )
