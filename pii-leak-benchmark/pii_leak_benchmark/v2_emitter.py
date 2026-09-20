@@ -1317,9 +1317,6 @@ def _ordered_channels(node: Any, flat: list[tuple[str, str]], path: str = "") ->
 
 def _haystack_groups(sse: str) -> dict[str, list[str]]:
     """Groups of strings a client could see, categorized by reconstruction fidelity."""
-        lists, numbers, keys, base64/hex/percent runs, character-code arrays), plus every
-        byte the SSE parser did not dispatch.
-    """
     from pii_leak_benchmark.http_profile import _Inspection, _collect  # noqa: I001
 
     parsed = _parse_sse(sse)
