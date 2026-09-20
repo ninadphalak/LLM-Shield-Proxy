@@ -1,6 +1,32 @@
 """Minimal v2.0.0 profile emitter — demonstrates the echo/injection response split.
+
 Drives two loopback HTTP servers (upstream and gateway) with a streaming client to measure
 FidelityRate (rehydration of echoed placeholders) and LeakRate (redaction of new injected values).
+
+THE POINT. On the response path a correct gateway must do two OPPOSITE things at once:
+
+    ECHO segment      -- the upstream replays the MASKED prompt. The gateway must
+                         REHYDRATE its own placeholders back to the originals.
+                         Measured as FidelityRate.
+    INJECTION segment -- the upstream emits values that were never in the prompt. The
+                         gateway must REDACT them. Measured as LeakRate.
+
+=== FRAGMENTATION ANALYSIS ===
+We measure inspection robustness against chunk boundaries by comparing
+'single_chunk' (entity sent whole) vs 'adversarial' (aggressively chunked).
+The difference between these leakage rates proves whether a gateway actually
+assembles streams correctly, or just gets lucky when a value isn't split.
+
+EXTERNAL GATEWAYS. `--gateway-url` skips the in-process policies entirely and drives a real
+proxy that is already running. Two things make that mode honest:
+
+  - The capture must answer each case with ITS OWN fixture. It is rebound to the same fixed
+    port every case, so it sends `Connection: close`; without that a pooling gateway gets
+    the previous case's response and the case scores as a non-leak. See `_stop`.
+  - The report's `capture.upstream_bodies` is not optional colour. FidelityRate and
+    LeakRate are response-path measurements, and a gateway that masks nothing scores
+    FidelityRate 1.0 for the trivial reason that there was nothing to restore. Only the
+    prompt the upstream received separates that from real rehydration.
 """
 
 from __future__ import annotations
@@ -66,9 +92,17 @@ class Segments:
 
 
 # Map v1 entity IDs to v2's 10-char cap to bound vault retention costs.
-_V2_ENTITY_ID = {"email": "EMAIL", "ssn": "SSN", "card": "CARDPAN", "credit_card": "CARDPAN",
-                 "CREDIT_CARD": "CARDPAN", "EMAIL": "EMAIL", "SSN": "SSN",
-                 "phone": "USPHONE", "USPHONE": "USPHONE"}
+_V2_ENTITY_ID = {
+    "email": "EMAIL",
+    "ssn": "SSN",
+    "card": "CARDPAN",
+    "credit_card": "CARDPAN",
+    "CREDIT_CARD": "CARDPAN",
+    "EMAIL": "EMAIL",
+    "SSN": "SSN",
+    "phone": "USPHONE",
+    "USPHONE": "USPHONE",
+}
 
 
 def _v2_id(key: str) -> str:
@@ -101,10 +135,7 @@ def make_seeded_fixture(rng: "random.Random") -> dict[str, str]:
             continue
         break
 
-    local = "".join(
-        rng.choice(_FIXTURE_EMAIL_LOCAL_ALPHABET)
-        for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH)
-    )
+    local = "".join(rng.choice(_FIXTURE_EMAIL_LOCAL_ALPHABET) for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH))
     card = rng.choice(_FIXTURE_TEST_CARDS)
 
     # USPHONE uses fictitious ranges to balance publish safety and detector visibility.
@@ -172,9 +203,7 @@ def check_segment_separation(segments: Segments, request_body: str) -> dict[str,
     normalized_ok = _normalized_disjoint(segments.echo, segments.injection)
     values_ok = not (set(echo_values) & set(injection_values))
     normalized_request = _normalize(request_body)
-    injection_absent = all(
-        _normalize(v) not in normalized_request for v in injection_values
-    )
+    injection_absent = all(_normalize(v) not in normalized_request for v in injection_values)
     shared = _longest_shared_substring(echo_values, injection_values)
     shortest = min(len(_normalize(v)) for v in echo_values + injection_values)
     return {
@@ -288,9 +317,7 @@ class Retaining(Policy):
     def __init__(self, vault: dict[str, str]) -> None:
         super().__init__(vault)
         self._buffer = ""
-        self._bound = max(
-            [len(t) for t in vault] + [len(v) for v in vault.values()] + [24]
-        )
+        self._bound = max([len(t) for t in vault] + [len(v) for v in vault.values()] + [24])
 
     def _cut(self) -> int:
         """Cut prefix at the last whitespace before the tail to prevent partial emission."""
@@ -396,7 +423,6 @@ class PresidioRetaining(Retaining):
         return out
 
 
-
 # --------------------------------------------------------------------------------------
 # Credentialed cloud detectors.
 # Evaluates commercial SaaS detectors (DLP/Model Armor) under real billing accounts.
@@ -447,14 +473,10 @@ def _gcp_context() -> tuple[str, str]:
     """Get access token and project ID, refreshing the token before expiration."""
     with _GCP_TOKEN_LOCK:
         if "project" not in _GCP_TOKEN_CACHE:
-            _GCP_TOKEN_CACHE["project"] = _gcloud(
-                ["gcloud", "config", "get-value", "project"], "project"
-            )
+            _GCP_TOKEN_CACHE["project"] = _gcloud(["gcloud", "config", "get-value", "project"], "project")
         issued = _GCP_TOKEN_CACHE.get("issued_at")
         if issued is None or (time.monotonic() - issued) >= GCP_TOKEN_TTL_SECONDS:
-            _GCP_TOKEN_CACHE["token"] = _gcloud(
-                ["gcloud", "auth", "print-access-token"], "token"
-            )
+            _GCP_TOKEN_CACHE["token"] = _gcloud(["gcloud", "auth", "print-access-token"], "token")
             _GCP_TOKEN_CACHE["issued_at"] = time.monotonic()
         return _GCP_TOKEN_CACHE["token"], _GCP_TOKEN_CACHE["project"]
 
@@ -602,12 +624,7 @@ def _model_armor_redact(text: str) -> str:
         ":sanitizeModelResponse"
     )
     result = _gcp_post(url, {"modelResponseData": {"text": text}})
-    sdp = (
-        result.get("sanitizationResult", {})
-        .get("filterResults", {})
-        .get("sdp", {})
-        .get("sdpFilterResult", {})
-    )
+    sdp = result.get("sanitizationResult", {}).get("filterResults", {}).get("sdp", {}).get("sdpFilterResult", {})
     findings = sdp.get("inspectResult", {}).get("findings", [])
     spans = []
     for finding in findings:
@@ -678,22 +695,19 @@ class ModelArmorRetaining(PresidioRetaining):
 
 
 POLICIES: dict[str, type[Policy]] = {
-    p.name: p for p in (Passthrough, RedactAll, ChunkLocal, Retaining, RetainingDecoding,
-                    PresidioChunkLocal, PresidioRetaining)
+    p.name: p
+    for p in (Passthrough, RedactAll, ChunkLocal, Retaining, RetainingDecoding, PresidioChunkLocal, PresidioRetaining)
 }
 
 # Billed, network-dependent and therefore NOT part of a default run. `--only` opts in.
 CLOUD_POLICIES: dict[str, type[Policy]] = {
-    p.name: p for p in (DlpChunkLocal, DlpRetaining,
-                        ModelArmorChunkLocal, ModelArmorRetaining)
+    p.name: p for p in (DlpChunkLocal, DlpRetaining, ModelArmorChunkLocal, ModelArmorRetaining)
 }
 POLICIES.update(CLOUD_POLICIES)
 
 # The default sweep is the local set; a cloud row costs money per delta and must be asked
 # for by name.
-DEFAULT_POLICIES: tuple[str, ...] = tuple(
-    n for n in POLICIES if n not in CLOUD_POLICIES
-)
+DEFAULT_POLICIES: tuple[str, ...] = tuple(n for n in POLICIES if n not in CLOUD_POLICIES)
 
 
 # --------------------------------------------------------------------------------------
@@ -859,9 +873,7 @@ def covering_array(
     return chosen
 
 
-def _pairs_of(
-    case: dict[str, str], axes: dict[str, tuple[str, ...]] | None = None
-) -> set[tuple[str, str, str, str]]:
+def _pairs_of(case: dict[str, str], axes: dict[str, tuple[str, ...]] | None = None) -> set[tuple[str, str, str, str]]:
     names = list(AXES if axes is None else axes)
     out: set[tuple[str, str, str, str]] = set()
     for i, a in enumerate(names):
@@ -893,9 +905,7 @@ def _sse_frames(events: Iterable[dict[str, Any]]) -> list[bytes]:
         for key, value in event.items():
             if key != "content":
                 delta[key] = value
-        frames.append(
-            b"data: " + json.dumps({"choices": [{"delta": delta}]}).encode() + b"\n\n"
-        )
+        frames.append(b"data: " + json.dumps({"choices": [{"delta": delta}]}).encode() + b"\n\n")
     return frames
 
 
@@ -1018,9 +1028,7 @@ def _partition_pieces(rendered: str, cuts: tuple[int, ...]) -> list[str]:
     return pieces
 
 
-def _injection_events(
-    segments: Segments, case: dict[str, str], cuts: tuple[int, ...] = ()
-) -> list[dict[str, Any]]:
+def _injection_events(segments: Segments, case: dict[str, str], cuts: tuple[int, ...] = ()) -> list[dict[str, Any]]:
     """Build the injection segment for one case: one entity, encoded, carried, split."""
     raw = segments.injection[case["entity"]]
     rendered = _encode(raw, case["encoding"])
@@ -1208,9 +1216,7 @@ class RunResult:
     self_probe_url: str = ""
 
 
-def _serve(
-    handler: type[BaseHTTPRequestHandler], port: int = 0
-) -> tuple[ThreadingHTTPServer, str]:
+def _serve(handler: type[BaseHTTPRequestHandler], port: int = 0) -> tuple[ThreadingHTTPServer, str]:
     # Allow port reuse only on POSIX to avoid silent port stealing on Windows.
     ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -1380,7 +1386,7 @@ def _haystack_groups(sse: str) -> dict[str, list[str]]:
         for index, segment in enumerate(segments):
             if segment.rstrip("[]") not in ("content", "text"):
                 continue
-            rest = segments[index + 1:]
+            rest = segments[index + 1 :]
             if all(s.rstrip("[]") in ("content", "text", "") for s in rest):
                 # `content` and `content[]` are the SAME subtree -- the string form and
                 # the list-of-parts form of one field -- so the key drops the brackets.
@@ -1572,9 +1578,7 @@ def run_case(
     until the next evidence round can change this instrumented function and regenerate
     every affected report.
     """
-    points, families, attempted, capped = injection_partitions(
-        segments, case, oracle=oracle, cap=partition_cap
-    )
+    points, families, attempted, capped = injection_partitions(segments, case, oracle=oracle, cap=partition_cap)
     leaked_by_family: dict[str, int] = {f: 0 for f in attempted}
     state = UpstreamState(segments=segments, case=case)
     upstream, upstream_url = _serve(_make_upstream(state), port=upstream_port)
@@ -1648,12 +1652,8 @@ def run_case(
                     transport_error = f"{type(exc).__name__}: {exc}"
                     sse = ""
                 with state.response_records_lock:
-                    attempt_records = list(
-                        state.response_records[response_record_start:]
-                    )
-                    attempt_upstream_events = sum(
-                        record.data_events_written for record in attempt_records
-                    )
+                    attempt_records = list(state.response_records[response_record_start:])
+                    attempt_upstream_events = sum(record.data_events_written for record in attempt_records)
                 # Extract first-attempt totals.
                 if index == 0:
                     upstream_events_first = attempt_upstream_events
@@ -1783,19 +1783,13 @@ def _assert_derivations(
         "leak_rate.single_chunk": _rate(r.injection_leaked for r in single),
         "leak_rate.adversarial": _rate(r.injection_leaked for r in adversarial),
         "leak_rate.overall": _rate(r.injection_leaked for r in scored),
-        "fidelity_rate": (
-            _rate(v for r in observable for v in r.echo_recovered.values())
-            if observable
-            else 0.0
-        ),
+        "fidelity_rate": (_rate(v for r in observable for v in r.echo_recovered.values()) if observable else 0.0),
         "cases_scored": len(results),
         "cases_applicable": len(scored),
         "cases_inconclusive": len(results) - len(scored),
         "cases_echo_observable": len(observable),
     }
-    expected["delta_frag"] = round(
-        expected["leak_rate.adversarial"] - expected["leak_rate.single_chunk"], 4
-    )
+    expected["delta_frag"] = round(expected["leak_rate.adversarial"] - expected["leak_rate.single_chunk"], 4)
 
     def _get(path: str) -> Any:
         node: Any = published
@@ -1817,9 +1811,7 @@ def _assert_derivations(
         ({k: r.case[k] for k in sorted(AXES if axes is None else axes)} for r in results),
         key=lambda c: tuple(sorted(c.items())),
     )
-    rebuilt_digest = hashlib.sha256(
-        json.dumps(rebuilt, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    rebuilt_digest = hashlib.sha256(json.dumps(rebuilt, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     if rebuilt_digest != published_digest:
         raise RuntimeError(
             "cases_digest does not match a digest recomputed from the run results; the "
@@ -1835,13 +1827,8 @@ def _assert_derivations(
 
 def _discordance(results: list[RunResult]) -> dict[str, Any]:
     """The paired 2x2 table behind DeltaFrag."""
-    scored = {
-        (_twin_key(r.case), r.case["fragmentation"]): r
-        for r in results
-        if r.transport_error is None
-    }
-    keys = sorted({k for k, arm in scored if (k, "single_chunk") in scored
-                   and (k, "adversarial") in scored})
+    scored = {(_twin_key(r.case), r.case["fragmentation"]): r for r in results if r.transport_error is None}
+    keys = sorted({k for k, arm in scored if (k, "single_chunk") in scored and (k, "adversarial") in scored})
     both = adv_only = single_only = neither = 0
     for key in keys:
         s = scored[(key, "single_chunk")].injection_leaked
@@ -1857,23 +1844,17 @@ def _discordance(results: list[RunResult]) -> dict[str, Any]:
     pairs = len(keys)
     return {
         "pairs_complete": pairs,
-        "pairs_incomplete": len(
-            {k for k, _arm in scored}
-        ) - pairs,
+        "pairs_incomplete": len({k for k, _arm in scored}) - pairs,
         "both_arms_leaked": both,
         "adversarial_only": adv_only,
         "single_chunk_only": single_only,
         "neither_arm_leaked": neither,
         # Recomputed marginal rate difference for manual verification.
-        "delta_frag_from_discordance": (
-            round((adv_only - single_only) / pairs, 4) if pairs else 0.0
-        ),
+        "delta_frag_from_discordance": (round((adv_only - single_only) / pairs, 4) if pairs else 0.0),
     }
 
 
-def _axis_arms(
-    results: list[RunResult], axes: dict[str, tuple[str, ...]]
-) -> dict[str, dict[str, Any]]:
+def _axis_arms(results: list[RunResult], axes: dict[str, tuple[str, ...]]) -> dict[str, dict[str, Any]]:
     """Per axis value, the two fragmentation arms separately and their DeltaFrag."""
     scored = [r for r in results if r.transport_error is None]
     out: dict[str, dict[str, Any]] = {}
@@ -1887,9 +1868,7 @@ def _axis_arms(
                 continue
             single = [r for r in rows if r.case["fragmentation"] == "single_chunk"]
             adv = [r for r in rows if r.case["fragmentation"] == "adversarial"]
-            paired = len(
-                {_twin_key(r.case) for r in single} & {_twin_key(r.case) for r in adv}
-            )
+            paired = len({_twin_key(r.case) for r in single} & {_twin_key(r.case) for r in adv})
             s_rate = _rate(r.injection_leaked for r in single)
             a_rate = _rate(r.injection_leaked for r in adv)
             slice_out[value] = {
@@ -1945,7 +1924,8 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
         capped = [r for r in adversarial if r.partitions_capped.get(family)]
         # Record families that were requested but empty for short values.
         too_short = [
-            r for r in adversarial
+            r
+            for r in adversarial
             if family in r.partitions_attempted
             and not r.partitions_attempted[family]
             and not r.partitions_capped.get(family)
@@ -1956,12 +1936,8 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
         block.update(
             {
                 "enumerated": bool(enumerated),
-                "partitions_attempted": sum(
-                    r.partitions_attempted.get(family, 0) for r in enumerated
-                ),
-                "partitions_leaked": sum(
-                    r.partitions_leaked.get(family, 0) for r in enumerated
-                ),
+                "partitions_attempted": sum(r.partitions_attempted.get(family, 0) for r in enumerated),
+                "partitions_leaked": sum(r.partitions_leaked.get(family, 0) for r in enumerated),
                 "cases_capped": len(capped),
                 "cases_value_too_short": len(too_short),
             }
@@ -1979,13 +1955,10 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
         worst = _arm(union_rows, [r.injection_leaked for r in union_rows])
         # Restrict component checks to the union denominator.
         on_union = {
-            family: _rate(r.partitions_leaked.get(family, 0) > 0 for r in union_rows)
-            for family in union_families
+            family: _rate(r.partitions_leaked.get(family, 0) > 0 for r in union_rows) for family in union_families
         }
         worst["component_leak_rates_on_union_denominator"] = on_union
-        worst["never_below_components"] = all(
-            worst["leak_rate_adversarial"] >= rate for rate in on_union.values()
-        )
+        worst["never_below_components"] = all(worst["leak_rate_adversarial"] >= rate for rate in on_union.values())
     else:
         # Return null worst-case stats if no family was enumerated.
         worst = {
@@ -2015,34 +1988,41 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
         }
     )
 
-    adversarial_partitions = sum(
-        r.split_points_tried for r in results if r.case["fragmentation"] == "adversarial"
-    )
+    adversarial_partitions = sum(r.split_points_tried for r in results if r.case["fragmentation"] == "adversarial")
     uncut = sum(1 for r in results if r.case["fragmentation"] == "single_chunk")
     total = sum(r.split_points_tried for r in results)
 
     if oracle == "midpoint":
         sentence = (
             "Fragmentation is a two-part split at the value midpoint, not every split "
-            "point (" + str(adversarial_partitions) + " midpoint partitions over "
-            + str(uncut) + " uncut single-chunk requests; "
-            + str(total) + " captured requests total)."
+            "point ("
+            + str(adversarial_partitions)
+            + " midpoint partitions over "
+            + str(uncut)
+            + " uncut single-chunk requests; "
+            + str(total)
+            + " captured requests total)."
         )
     else:
         what = {
             "exhaustive-2-part": "every internal two-part split of the value",
             "exhaustive-3-part": "every internal three-part partition of the value",
             "union-worst-case": (
-                "the union of every internal two-part split and every internal "
-                "three-part partition of the value"
+                "the union of every internal two-part split and every internal three-part partition of the value"
             ),
         }[oracle]
         sentence = (
-            "Fragmentation is " + what + " ("
-            + str(adversarial_partitions) + " internal adversarial partitions over "
+            "Fragmentation is "
+            + what
+            + " ("
+            + str(adversarial_partitions)
+            + " internal adversarial partitions over "
             + str(len([r for r in results if r.case["fragmentation"] == "adversarial"]))
-            + " adversarial cases, plus " + str(uncut) + " uncut single-chunk requests = "
-            + str(total) + " captured requests total); a case leaks if any enumerated "
+            + " adversarial cases, plus "
+            + str(uncut)
+            + " uncut single-chunk requests = "
+            + str(total)
+            + " captured requests total); a case leaks if any enumerated "
             "partition leaks. Bounded to these corpus values and these partition "
             "families, not to arbitrary streams."
         )
@@ -2059,12 +2039,8 @@ def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
         "uncut_single_chunk_requests": uncut,
         "captured_requests_total": total,
         "partition_seconds_total": round(sum(r.partition_seconds for r in results), 4),
-        "cases_inconclusive_by_cap": sum(
-            1 for r in adversarial if any(r.partitions_capped.values())
-        ),
-        "cases_inconclusive_in_transport": sum(
-            1 for r in results if r.transport_error is not None
-        ),
+        "cases_inconclusive_by_cap": sum(1 for r in adversarial if any(r.partitions_capped.values())),
+        "cases_inconclusive_in_transport": sum(1 for r in results if r.transport_error is not None),
         "method_limit_sentence": sentence,
     }
 
@@ -2106,9 +2082,7 @@ def build_report(
         ({k: r.case[k] for k in sorted(axes)} for r in results),
         key=lambda c: tuple(sorted(c.items())),
     )
-    digest = hashlib.sha256(
-        json.dumps(case_defs, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    digest = hashlib.sha256(json.dumps(case_defs, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     covered: set[tuple[str, str, str, str]] = set()
     for r in results:
@@ -2119,19 +2093,14 @@ def build_report(
     # Identify entities the target completely misses even when unfragmented.
     detector_blind = {}
     for entity in axes["entity"]:
-        baseline = [
-            r for r in scored
-            if r.case["entity"] == entity and r.case["fragmentation"] == "single_chunk"
-        ]
+        baseline = [r for r in scored if r.case["entity"] == entity and r.case["fragmentation"] == "single_chunk"]
         detector_blind[entity] = bool(baseline) and all(r.injection_leaked for r in baseline)
 
     leaked_types = sorted({r.case["entity"] for r in results if r.injection_leaked})
     latencies = [ms for r in results for ms in r.latency_ms]
     boundary = _boundary_check(results, segments)
     partition_oracle = _partition_oracle_block(results)
-    boundary_leaked = bool(
-        boundary["leaked_entity_types"] or boundary["unattributed_leaked_entity_types"]
-    )
+    boundary_leaked = bool(boundary["leaked_entity_types"] or boundary["unattributed_leaked_entity_types"])
 
     def _axis_slice(axis: str) -> dict[str, dict[str, Any]]:
         """Per-axis-value leak and fidelity stats."""
@@ -2145,11 +2114,7 @@ def build_report(
                 "leak_rate": _rate(r.injection_leaked for r in rows),
                 # Only meaningful on the entity axis; False elsewhere.
                 "detector_blind": bool(axis == "entity" and detector_blind.get(value)),
-                "fidelity_rate": (
-                    _rate(v for r in visible for v in r.echo_recovered.values())
-                    if visible
-                    else 0.0
-                ),
+                "fidelity_rate": (_rate(v for r in visible for v in r.echo_recovered.values()) if visible else 0.0),
                 "applicable": len(rows),
                 # The denominator for fidelity_rate counts only observable sites.
                 "echo_observable": len(visible),
@@ -2222,12 +2187,7 @@ def build_report(
                 "p99": _percentile(latencies, 0.99),
             },
         },
-        "passed": bool(
-            leak_overall == 0.0
-            and fidelity == 1.0
-            and separation["passed"]
-            and not boundary_leaked
-        ),
+        "passed": bool(leak_overall == 0.0 and fidelity == 1.0 and separation["passed"] and not boundary_leaked),
         "limitations": {
             "run_validity": [
                 "Reference response-path policies, not products. No third-party gateway is measured here.",
@@ -2240,9 +2200,13 @@ def build_report(
                 # reader had one number to divide by and it was the wrong one whenever
                 # any case died in transport.
                 (
-                    "Every rate is over cases_applicable=" + str(len(scored))
-                    + " of the " + str(len(results)) + " cases attempted; "
-                    + str(len(inconclusive)) + " were inconclusive and are excluded from "
+                    "Every rate is over cases_applicable="
+                    + str(len(scored))
+                    + " of the "
+                    + str(len(results))
+                    + " cases attempted; "
+                    + str(len(inconclusive))
+                    + " were inconclusive and are excluded from "
                     "the denominator rather than counted as no-leak."
                 ),
                 # DERIVED. This said "Three entity types" for as long as the corpus has
@@ -2250,9 +2214,7 @@ def build_report(
                 # describing the axes was not. A limitations block that describes a
                 # narrower run than the one performed is the same defect as one that
                 # describes a wider one; both are the report disagreeing with itself.
-                ", ".join(
-                    f"{len(values)} {axis}" for axis, values in axes.items()
-                ) + ".",
+                ", ".join(f"{len(values)} {axis}" for axis, values in axes.items()) + ".",
                 "Request sites are four shapes, not a survey of real client payloads.",
                 # THREE NUMBERS, NOT ONE, AND THEY ARE NOT INTERCHANGEABLE. This field
                 # read "252 splits over 16 adversarial cases" for every exhaustive row in
@@ -2273,7 +2235,8 @@ def build_report(
         # from, and a row for a policy defined in another module cited THIS module's
         # docstrings -- the same defect that was fixed once already when a third-party
         # gateway row cited these docstrings as the source of a vendor's claim.
-        "redaction_claim": claim or {
+        "redaction_claim": claim
+        or {
             "vendor_claims_pii_redaction": "claimed",
             # A row for a third-party gateway used to cite THIS MODULE'S OWN policy
             # docstrings as the source of that vendor's redaction claim. The emitter
@@ -2297,13 +2260,9 @@ def build_report(
             # asked to mask the request. Reporting that as a coverage defect would be
             # measuring this repository's config file rather than the product -- the
             # mistake this README has already recorded twice.
-            "request_path_redaction_configured": os.environ.get(
-                "V2_REQUEST_PATH_REDACTION", "unknown"
-            ),
+            "request_path_redaction_configured": os.environ.get("V2_REQUEST_PATH_REDACTION", "unknown"),
         },
-        "outcome": _derive_outcome(
-            leak_overall, fidelity, separation["passed"], boundary_leaked
-        ),
+        "outcome": _derive_outcome(leak_overall, fidelity, separation["passed"], boundary_leaked),
         # EVERY RATE CARRIES ITS OWN DENOMINATOR, and the denominator is
         # `cases_applicable` -- never `cases_scored`, which is `len(results)`, the number
         # of cases ATTEMPTED including the ones that died in transport.
@@ -2321,19 +2280,30 @@ def build_report(
         # presented nothing to restore), and the two leak rates are over their own
         # fragmentation arm, not over the whole array.
         "outcome_rationale": (
-            "FidelityRate=" + str(fidelity)
-            + " over " + str(len(observable)) + " echo-observable"
-            + ", LeakRate(single_chunk)=" + str(leak_single)
-            + " over " + str(len(by_frag["single_chunk"]))
-            + ", LeakRate(adversarial)=" + str(leak_adv)
-            + " over " + str(len(by_frag["adversarial"]))
-            + ", DeltaFrag=" + str(delta_frag)
-            + ", request-path leak=" + (
-                ",".join(boundary["leaked_entity_types"]) or "none"
-            )
-            + ". Rates are over cases_applicable=" + str(len(scored))
-            + " of " + str(len(results)) + " attempted ("
-            + str(len(inconclusive)) + " inconclusive, excluded from every denominator "
+            "FidelityRate="
+            + str(fidelity)
+            + " over "
+            + str(len(observable))
+            + " echo-observable"
+            + ", LeakRate(single_chunk)="
+            + str(leak_single)
+            + " over "
+            + str(len(by_frag["single_chunk"]))
+            + ", LeakRate(adversarial)="
+            + str(leak_adv)
+            + " over "
+            + str(len(by_frag["adversarial"]))
+            + ", DeltaFrag="
+            + str(delta_frag)
+            + ", request-path leak="
+            + (",".join(boundary["leaked_entity_types"]) or "none")
+            + ". Rates are over cases_applicable="
+            + str(len(scored))
+            + " of "
+            + str(len(results))
+            + " attempted ("
+            + str(len(inconclusive))
+            + " inconclusive, excluded from every denominator "
             "rather than counted as no-leak)."
         ),
         # OVERRIDABLE, because a profile with a different needle set has a different
@@ -2341,7 +2311,8 @@ def build_report(
         # carries four fixed secret literals alongside the four generated PII values;
         # publishing the PII description alone would say the run drew from a value space
         # it did not use and would omit four of its eight needles entirely.
-        "fixture": fixture or {
+        "fixture": fixture
+        or {
             "varies_per_run": True,
             "values_published": False,
             # Frozen-report metadata debt: USPHONE is enabled and represented in
@@ -2407,7 +2378,8 @@ def build_report(
             # The paired 2x2 table underlying DeltaFrag. See `_discordance`.
             "discordance": _discordance(results),
         },
-        "entity_scope": scope or {
+        "entity_scope": scope
+        or {
             "mechanism": "reference-policy detector set",
             "enabled": [name for name, _ in _DETECTORS],
             "not_enabled": [],
@@ -2446,9 +2418,7 @@ def _value_space() -> dict[str, int]:
     return out or {"EMAIL": 1}
 
 
-def _derive_outcome(
-    leak_adv: float, fidelity: float, separated: bool, boundary_leaked: bool = False
-) -> str:
+def _derive_outcome(leak_adv: float, fidelity: float, separated: bool, boundary_leaked: bool = False) -> str:
     """Outcome derived from both leak rates and boundary check results."""
     if not separated:
         return "inconclusive"
@@ -2477,17 +2447,13 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
     InspectionCapability("json_parsed", "event data parsed as JSON"),
     InspectionCapability(
         "recursive_walk",
-        "walked recursively over all JSON types, including nested objects, lists, "
-        "numbers and object keys",
+        "walked recursively over all JSON types, including nested objects, lists, numbers and object keys",
     ),
     InspectionCapability("all_choices", "every element of choices, not only the first"),
-    InspectionCapability(
-        "ordered_content_join", "delta content reassembled in arrival order"
-    ),
+    InspectionCapability("ordered_content_join", "delta content reassembled in arrival order"),
     InspectionCapability(
         "ordered_sibling_join",
-        "non-content string fields reassembled in arrival order, in a stream kept "
-        "separate from delta content",
+        "non-content string fields reassembled in arrival order, in a stream kept separate from delta content",
     ),
     InspectionCapability(
         "ordered_whole_document_join",
@@ -2499,9 +2465,7 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
         "content and text members of one content subtree reassembled together, so a "
         "value split between a content string and a content list of parts is recovered",
     ),
-    InspectionCapability(
-        "unparseable_events", "events that do not parse as JSON scanned as raw text"
-    ),
+    InspectionCapability("unparseable_events", "events that do not parse as JSON scanned as raw text"),
     InspectionCapability(
         "shadowed_duplicate_keys",
         "events carrying duplicate JSON object names also scanned as raw text, because "
@@ -2511,9 +2475,7 @@ CLIENT_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
     InspectionCapability("hex", "hex-encoded runs decoded"),
     InspectionCapability("percent", "percent-encoded runs decoded"),
     InspectionCapability("char_code_arrays", "character-code arrays reconstructed"),
-    InspectionCapability(
-        "separators_removed", "matched literally and with separators removed"
-    ),
+    InspectionCapability("separators_removed", "matched literally and with separators removed"),
     InspectionCapability(
         "nfkd_confusables",
         "over NFKD-decomposed text with non-Latin digits resolved to their decimal value "
@@ -2533,8 +2495,7 @@ BOUNDARY_INSPECTION_CAPABILITIES: tuple[InspectionCapability, ...] = (
     InspectionCapability("boundary_json_parsed", "bodies parsed as JSON"),
     InspectionCapability(
         "boundary_recursive_walk",
-        "walked recursively over all JSON types, including nested objects, lists, "
-        "numbers and object keys",
+        "walked recursively over all JSON types, including nested objects, lists, numbers and object keys",
     ),
     InspectionCapability(
         "boundary_ordered_join",
@@ -2730,9 +2691,7 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
             continue
         leaked.append(name)
         channel, scope, match = found
-        evidence.append(
-            {"entity_type": name, "channel": channel, "scope": scope, "match": match}
-        )
+        evidence.append({"entity_type": name, "channel": channel, "scope": scope, "match": match})
 
     # Check for test control contamination.
     contaminated: list[str] = []
@@ -2743,9 +2702,7 @@ def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, A
             continue
         contaminated.append(name)
         channel, scope, match = found
-        contaminated_evidence.append(
-            {"entity_type": name, "channel": channel, "scope": scope, "match": match}
-        )
+        contaminated_evidence.append({"entity_type": name, "channel": channel, "scope": scope, "match": match})
 
     return {
         "passed": not leaked and not contaminated and unparseable == 0 and bool(bodies),
@@ -2779,9 +2736,7 @@ def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
     for result in results:
         if result.case.get("fragmentation") != "adversarial":
             continue
-        rendered = _encode(
-            segments.injection[result.case["entity"]], result.case["encoding"]
-        )
+        rendered = _encode(segments.injection[result.case["entity"]], result.case["encoding"])
         points, _families, _attempted, _capped = injection_partitions(
             segments, result.case, oracle=result.oracle, cap=result.partition_cap
         )
@@ -2793,29 +2748,25 @@ def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
     return False
 
 
-def _coalescing_rows(
-    results: list[RunResult], axes: dict[str, tuple[str, ...]] | None = None
-) -> list[dict[str, Any]]:
+def _coalescing_rows(results: list[RunResult], axes: dict[str, tuple[str, ...]] | None = None) -> list[dict[str, Any]]:
     """Record events emitted vs observed and the coalescing verdict per case."""
     rows: list[dict[str, Any]] = []
     for result in results:
         upstream = result.upstream_data_events
         observed = result.data_events_observed
         failed = result.transport_error is not None or observed == 0
-        comparison_available = (
-            not failed
-            and upstream > 0
-            and result.upstream_responses_observed == 1
+        comparison_available = not failed and upstream > 0 and result.upstream_responses_observed == 1
+        rows.append(
+            {
+                "case": {k: result.case[k] for k in sorted(AXES if axes is None else axes)},
+                "upstream_data_events_emitted": upstream,
+                "upstream_responses_observed": result.upstream_responses_observed,
+                "data_events_observed": observed,
+                # Track transport failures distinctly.
+                "stream_failure": failed,
+                "coalesced": observed < upstream if comparison_available else None,
+            }
         )
-        rows.append({
-            "case": {k: result.case[k] for k in sorted(AXES if axes is None else axes)},
-            "upstream_data_events_emitted": upstream,
-            "upstream_responses_observed": result.upstream_responses_observed,
-            "data_events_observed": observed,
-            # Track transport failures distinctly.
-            "stream_failure": failed,
-            "coalesced": observed < upstream if comparison_available else None,
-        })
     return rows
 
 
@@ -2833,10 +2784,7 @@ def _fragmentation_check(
     failures = [r for r in rows if r["stream_failure"]]
     return {
         # Ensure we check for actual data-bearing fragmentation.
-        "passed": bool(
-            scored
-            and all(r.data_events_observed > 1 and r.client_text for r in scored)
-        ),
+        "passed": bool(scored and all(r.data_events_observed > 1 and r.client_text for r in scored)),
         # Derive whether single-character events were requested.
         "one_character_events_requested": _one_character_events(segments, results),
         # Extrema over the scored array.
@@ -2846,14 +2794,10 @@ def _fragmentation_check(
         # Coalescing is distinguished since v2 controls the upstream.
         "coalescing_not_distinguished": False,
         # Empirical sums of events.
-        "upstream_data_events_emitted_total": sum(
-            r["upstream_data_events_emitted"] for r in rows
-        ),
+        "upstream_data_events_emitted_total": sum(r["upstream_data_events_emitted"] for r in rows),
         "data_events_observed_total": sum(r["data_events_observed"] for r in rows),
         # Rate computed over valid comparisons.
-        "coalescing_rate": (
-            round(len(coalesced) / len(comparable), 4) if comparable else None
-        ),
+        "coalescing_rate": (round(len(coalesced) / len(comparable), 4) if comparable else None),
         "coalescing_cases": len(coalesced),
         "coalescing_cases_compared": len(comparable),
         # Stream failures indicate no events arrived.
@@ -2870,9 +2814,7 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
     types = sorted({t for r in results for t in r.content_types})
     invalid = sum(r.invalid_events for r in results)
     scored = [r for r in results if r.transport_error is None]
-    bad_types = sorted(
-        {t for t in types if not t.split(";")[0].strip().lower() == "text/event-stream"}
-    )
+    bad_types = sorted({t for t in types if not t.split(";")[0].strip().lower() == "text/event-stream"})
     missing_done = [r.case for r in scored if not r.done_marker]
     # Unanswered cases fail the validation. A case dying in transport appends no status
     # code and is excluded from missing_done. Previously, runs failing in transport
@@ -2886,10 +2828,7 @@ def _sse_check(results: list[RunResult]) -> dict[str, Any]:
     if invalid:
         errors.append(f"{invalid} dispatched events did not parse as JSON")
     if unanswered:
-        errors.append(
-            f"{len(unanswered)} cases produced no complete response, so their framing "
-            "was never observed"
-        )
+        errors.append(f"{len(unanswered)} cases produced no complete response, so their framing was never observed")
     if not results:
         errors.append("no cases were run")
     return {
@@ -2924,17 +2863,11 @@ def _fidelity_check(observable: list[RunResult], attempted: list[RunResult]) -> 
     }
 
 
-def _injection_evidence(
-    results: list[RunResult], leaked_types: list[str]
-) -> list[dict[str, str]]:
+def _injection_evidence(results: list[RunResult], leaked_types: list[str]) -> list[dict[str, str]]:
     """Strongest recovery tier per leaked entity, and how many cases reached it."""
     evidence: list[dict[str, str]] = []
     for entity in leaked_types:
-        tiers = [
-            r.leak_tier
-            for r in results
-            if r.case["entity"] == entity and r.injection_leaked and r.leak_tier
-        ]
+        tiers = [r.leak_tier for r in results if r.case["entity"] == entity and r.injection_leaked and r.leak_tier]
         best = min(tiers, key=lambda t: _LEAK_TIER_RANK[t]) if tiers else "unrecorded"
         evidence.append(
             {
@@ -3174,8 +3107,7 @@ def main(argv: list[str] | None = None) -> int:
     # `exhaustive-2-part` for a midpoint cut.
     if args.exhaustive_splits and args.oracle not in (None, "exhaustive-2-part"):
         parser.error(
-            "--exhaustive-splits is an alias for --oracle exhaustive-2-part and "
-            f"contradicts --oracle {args.oracle}"
+            f"--exhaustive-splits is an alias for --oracle exhaustive-2-part and contradicts --oracle {args.oracle}"
         )
     oracle = args.oracle or ("exhaustive-2-part" if args.exhaustive_splits else "midpoint")
 
@@ -3188,9 +3120,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate:
         import jsonschema
 
-        schema = json.loads(
-            pathlib.Path("spec/v2.0.0/http-profile.schema.json").read_text(encoding="utf-8")
-        )
+        schema = json.loads(pathlib.Path("spec/v2.0.0/http-profile.schema.json").read_text(encoding="utf-8"))
 
         def validator(report: dict[str, Any]) -> list[str]:  # type: ignore[misc]
             v = jsonschema.Draft202012Validator(schema)
