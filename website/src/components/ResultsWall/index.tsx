@@ -133,20 +133,10 @@ function Flags({flags}: {flags?: {count: number; issue: number}}): ReactNode {
 }
 
 /**
- * WHY ONLY TWO COLUMNS ARE LIT, and never a whole row.
- *
- * Highlighting rather than filtering, because a filter answers "which should I pick" by
- * removing the evidence for the other answer. Nothing here disappears.
- *
- * Only `sent` and `restored` are lit, and only at their unambiguous value. Nothing
- * reaching the provider is good however the rest of the row reads, and every value coming
- * back is good on its own terms. The leak columns are deliberately NOT lit: a low count
- * there can mean the gateway caught everything, or that it returned almost nothing to the
- * client, and the page says so in as many words. Colouring `0 of 16` green would assert
- * the flattering reading of a number that has two.
- *
- * No row is lit as a whole, because a row that scored well on every column would be the
- * ranking this page does not publish.
+ * Only `sent` and `restored` are lit, at their unambiguous value. The leak columns are
+ * not: a low count there can mean the gateway caught everything OR returned almost
+ * nothing, so colouring `0 of 16` green asserts the flattering reading of a number with
+ * two. No whole row is lit; that would be the ranking this page does not publish.
  */
 
 /**

@@ -375,32 +375,11 @@ export const MEASURED_ROWS: ResultRow[] = [
 ];
 
 /**
- * Rows submitted from outside, read from `submitted-rows.json`.
+ * Rows submitted from outside, read from `submitted-rows.json` and validated here.
  *
- * WHY THE VALIDATOR. A submitted entry is written into that file by a workflow, from the
- * body of an issue anyone can open. Docusaurus will bundle whatever is in there, so the
- * check that it is a well-formed row has to happen somewhere, and the build is the right
- * place: a bad entry stops the deploy instead of reaching the page.
- *
- * WHAT `status` MEANS. The workflow writes `published` when it could read the measured
- * columns out of the linked run's build artifact, which is the normal case, and the row
- * goes up without anyone approving it. It writes nothing at all when it could not: a
- * submission whose artifact was unreadable is answered on the issue rather than parked
- * here, because a row nobody can see helps nobody. `draft` therefore exists for a row a
- * person is still working on by hand, and such a row renders nowhere.
- *
- * An earlier version of this comment described a manual flow where every submission
- * landed as a draft for a maintainer to complete. That was the design before the intake
- * read artifacts; it is not what the code does, and the two public data files saying so
- * were caught in review rather than by anything executable. If this paragraph and
- * `scripts/process_conformance_submission.py` ever disagree again, the script is right.
- *
- * The validator below is what keeps either path safe: a `published` entry that is missing
- * a field, or that carries a value outside one of the two unions, throws here rather than
- * shipping. Note what it does NOT require, and why. The four leak columns are optional
- * because only the response-split profile measures them, and there is no honest default
- * for a missing one: `0 of 16` is the strongest claim on this page and an absent count
- * would sort as though it were the weakest.
+ * JSON rather than TypeScript because a workflow writes it from an issue anyone can open:
+ * there it is data, here it would be bundled source. A bad entry stops the build rather
+ * than reaching the page, and a submitted row claiming `measured-here` is refused.
  */
 type SubmittedEntry = {status?: unknown} & Partial<Record<keyof ResultRow, unknown>>;
 
@@ -487,13 +466,8 @@ export const ROWS: ResultRow[] = [...MEASURED_ROWS, ...SUBMITTED_ROWS];
  * restating it in code is not a judgement: a row either met it or it did not.
  */
 /**
- * Is this a row for the gateway this project wrote?
- *
- * A plain prefix test rather than a regular expression, because the first version used
- * one and shipped a literal backspace character where a word boundary was intended. The
- * pattern then matched nothing, our own row took the milestone meant for somebody else's
- * gateway, and the page rendered the one claim it must never make. There is nothing here
- * that a regular expression does better.
+ * A prefix test, not a regular expression: the first version shipped a literal backspace
+ * where a word boundary belonged, matched nothing, and our own row took the milestone.
  */
 function isOurs(project: string): boolean {
   return project.toLowerCase().startsWith('llm-shield-proxy');
@@ -511,27 +485,13 @@ export function passes(row: ResultRow): boolean {
 /**
  * The first pass by a gateway this project did not write, or undefined while there is none.
  *
- * ELIGIBILITY IS ABOUT THE GATEWAY, NOT ABOUT WHO MEASURED IT. An earlier version filtered
- * on `provenance !== 'measured-here'`, which was backwards twice over. It excluded every
- * third-party gateway this project measured itself, which are exactly the gateways "we did
- * not write", so the page promised a mark the code could never render for them. And
- * `measured-here` is the provenance a reader can check MOST easily, since the reports are
- * in this repository, so the rule handed the mark to the least checkable rows and withheld
- * it from the most.
+ * Eligibility is about the GATEWAY, not who measured it. Filtering on `measured-here` was
+ * backwards twice: it excluded third-party gateways measured in this repository, which are
+ * exactly the ones we did not write, and that provenance is the easiest for a reader to
+ * check. `submitted-unverified` is excluded because no run stands behind the numbers.
  *
- * `submitted-unverified` is excluded for the opposite reason: with no run to open, there is
- * nothing behind the numbers but the submission itself, and this is the one mark on the
- * page worth fabricating.
- *
- * WHAT THIS STILL DOES NOT PREVENT. A submitted row's numbers come from an artifact built
- * in the submitter's own CI, so a determined project could publish a report saying whatever
- * it likes and the mark would follow. The run is public and the repository is named, so the
- * fabrication is discoverable rather than impossible, which is the same standing every
- * other number on this page has. The page must therefore not claim the mark cannot be
- * claimed; it can say it is computed rather than granted, which is true.
- *
- * Earliest date wins, and ties go to neither: a tie means two projects got there the same
- * day and the page has no basis for splitting them.
+ * Not unforgeable: a submitted row's numbers come from the submitter's own CI artifact, so
+ * the page must not claim the mark cannot be claimed. Ties go to neither.
  */
 export function firstIndependentPass(rows: ResultRow[]): ResultRow | undefined {
   const winners = rows

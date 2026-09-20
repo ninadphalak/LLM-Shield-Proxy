@@ -1,23 +1,12 @@
 #!/usr/bin/env python3
-"""Count open disputes against each published row, so the wall can show them.
+"""Count open disputes against each published row.
 
-WHY THE PAGE SHOWS A COUNT RATHER THAN A JUDGEMENT. Somebody who thinks a row is wrong is
-the most useful reader this table has, and the worst thing to do with them is to arbitrate
-quietly in a footnote. The row carries the number of open questions about it and links to
-them, so a reader can go and read the argument and decide. When the questions are closed
-the number goes away on its own.
+A count, never a verdict: a disputed row is never hidden or downranked, which is the same
+rule that keeps two disagreeing runs both on the page. An open issue labelled
+`result-dispute` whose body names a row's submission issue counts against it, so the count
+comes from the tracker each run and clears itself when the issue closes.
 
-A disputed row is never hidden, downranked or flagged as untrustworthy. That is the same
-rule that keeps two disagreeing runs of the same target both on the page: this wall
-publishes disagreements, it does not resolve them.
-
-HOW A DISPUTE IS ATTACHED TO A ROW. Every published row records the issue it came from.
-A dispute is an open issue labelled `result-dispute` whose body names that issue number.
-Nothing needs to be typed into the row itself, and nothing here can be gamed by editing
-this repository: the count comes from the issue tracker each time it runs.
-
-Standard library plus `gh`. Runs on a schedule, so a closed dispute stops being counted
-without anybody doing anything.
+Standard library plus `gh`.
 """
 
 from __future__ import annotations

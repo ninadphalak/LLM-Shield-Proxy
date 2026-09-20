@@ -1,30 +1,17 @@
 #!/usr/bin/env python3
-"""Turn a benchmark result posted as an issue into a published row, without a person.
+"""Turn a benchmark result posted as an issue into a published row.
 
-THE SUBMISSION IS NOT THE EVIDENCE. The issue supplies the three facts no report records:
-the gateway's name, its licence, and how it reads a streaming response. Everything
-measured is read from the REPORT ARTIFACT of the CI run the submitter linked, downloaded
-here from the GitHub API. A pasted citation block is a claim; an artifact attached to a
-run in a named repository on a named branch is a thing a reader can go and check, and it
-is what every number on the wall comes from.
+Measured values come from the REPORT ARTIFACT of the linked CI run, never from the issue
+text. The issue supplies only what no report records: gateway name, licence, architecture.
 
-That is also what makes the verification real rather than a formality. Nobody reads the
-numbers off the issue and retypes them, so there is nothing to mistype and nothing to
-forge that would not also have to be forged in a public Actions run.
+Constraints that shaped this, all of which bite if forgotten:
+  - The response-split columns are absent, never zero, when the artifact lacks them.
+  - A PR opened with GITHUB_TOKEN starts no workflows, so it can never satisfy a required
+    check. RESULTS_WALL_TOKEN is used instead and the merge is --auto.
+  - The content scan and the site build both run BEFORE the commit; ci.yml is
+    path-filtered for this file on the strength of that.
 
-WHAT IS STILL NOT AUTOMATED, AND CANNOT BE. The two response-split columns are produced by
-a different profile from the one that runs in a gateway's CI. When the artifact does not
-contain them the row leaves them unset and the table prints "not measured". They are never
-defaulted to zero: `0 of 16` is the strongest claim the page makes.
-
-WHY IT VALIDATES BY BUILDING. Two GitHub mechanisms mean a pull request here would be
-checked by nothing: a PR opened with GITHUB_TOKEN triggers no workflows at all, and the
-site build runs on push to main rather than on pull requests. So this script runs the real
-site build itself, before it commits. The gate is the same gate, moved to the only place it
-actually executes.
-
-Standard library only, plus `gh` for the calls that need it. Nothing here imports either
-distribution: it runs on a bare runner.
+Standard library plus `gh`. Imports neither distribution: it runs on a bare runner.
 """
 
 from __future__ import annotations
@@ -748,32 +735,17 @@ def build_site() -> None:
 
 
 def publish(row: dict[str, Any], issue_number: int) -> None:
-    """Land the row through a pull request, which is what the branch rule asks for.
+    """Land the row through a pull request, which is what the branch rule requires.
 
-    THROUGH A PR, NOT AROUND ONE. `main` requires changes to arrive via a pull request,
-    and the first version of this pushed straight at it and was refused: GH006, protected
-    branch hook declined. The obvious fixes were all worse than the rule. A bypass list
-    cannot express "the bot but not me" on a user-owned repository, because the only
-    bypass actors offered there are roles and roles are hierarchical, so exempting Write
-    exempts Admin too. A deploy key or a token would express it, at the cost of a
-    write-capable credential sitting in secrets for any workflow to pick up.
+Not around it. A bypass list cannot say "this job but not me" on a user-owned repository
+(bypass actors are roles, and roles are hierarchical), and a deploy key or token would mean
+a write credential in secrets. The rule wants a pull request, not an approval: zero
+approvals required, so one from this job is immediately mergeable.
 
-    None of that is needed. The rule requires a pull request; it does not require anyone
-    to approve one. Measured on this repository: zero approvals, no required checks, no
-    last-push approval. So a pull request from this job is immediately mergeable, and
-    opening and merging one satisfies the rule rather than evading it. Nothing gains a
-    bypass, no credential is stored, and every published row leaves a reviewable PR behind
-    instead of a bare commit.
-
-    WHAT THIS DOES NOT GET. A pull request opened with GITHUB_TOKEN starts no workflows, so
-    the reviewers do not run on it. That is the right trade only because of what the diff
-    can contain: the guard below means one JSON data file or nothing. Were this ever to
-    carry a code change, the absence of review would matter and this comment would be
-    wrong.
-
-    The branch, commit and PR name no agent, model or provider, which is a repository rule
-    and applies to text a workflow generates too.
-    """
+`--auto` because PR-Agent's check is required and a merge attempted before it reports is
+refused. The staged-file guard below is the only control here that is a check rather than
+an argument: this job is issue-triggered, so anyone can cause a run of it.
+"""
     _run("git", "config", "user.name", "github-actions[bot]")
     _run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
     _run("git", "add", str(ROWS_FILE.relative_to(REPO_ROOT)))
