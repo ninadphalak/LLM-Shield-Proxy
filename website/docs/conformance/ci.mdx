@@ -141,7 +141,7 @@ numbers come out.
 
 </details>
 
-**Eight gateways have already been measured this way.** The
+**Other gateways have already been measured this way.** The
 [results wall](./who-has-run-it) shows what each one scored and exactly how it was configured,
 including several that sent every data type straight through with redaction switched on. It is
 the quickest way to pick one worth trying.
@@ -170,7 +170,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
 
-      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2
         with:
           target-base-url: http://127.0.0.1:4000/v1
           start-command: ./scripts/start-test-gateway.sh
@@ -214,6 +214,35 @@ the verdict you actually got rather than a generic one.
 Red means your gateway sent that value to the provider unmasked, and the job blocks the merge
 if you require the check. Nobody is emailed and nothing is sent anywhere: the result stays in
 the pull request.
+
+### Publishing the result, from the summary
+
+The summary ends with everything needed to say something checkable about the run:
+
+- **The citation block**, in a collapsible section. It names the harness revision, the test data
+  and the configuration the numbers came from, so a reader can rerun your exact run. It is right
+  there in the page, so nobody has to download a zip and run a second command to get it.
+- **Where the reports are**, spelled out, because "it is in the artifact" is not directions:
+
+  1. Open the **Actions** tab of your repository.
+  2. Click the run, which is the one named after your workflow.
+  3. Scroll to the **bottom** of that page, past the job list, to the **Artifacts** section.
+  4. Download **`pii-leak-benchmark`**, or whatever you set `artifact-name` to.
+
+  The zip holds `summary.md` (this page, as a file), `current.json` (the operator result),
+  `current.raw.json` (everything measured) and `pii-leak-badge.json` (the README badge).
+  Artifacts expire, 90 days by default, so a link to a run is not a permanent link to its
+  reports.
+- **A one-click link** to the [results wall](./who-has-run-it), prefilled with the version, the
+  outcome and a link back to this exact run. You add the gateway name and the licence, which a
+  run cannot know, and your row is published automatically from there.
+
+Nothing leaves your repository unless you click that link. The link carries the citation, never
+the report: a report can hold your gateway's base URL and your capture hostname.
+
+The published row's numbers are read from this run's artifact rather than from anything you
+type, which is why the run has to be public and why artifacts expiring matters. Submit while
+the run is still there.
 
 That is the whole setup. Everything below is optional.
 
@@ -309,7 +338,7 @@ runner builds both versions; the old one needs no permanent deployment.
     ref: ${{ github.event.pull_request.base.sha }}
     path: baseline
 # Build both versions here in separate environments or container images.
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2
   with:
     target-base-url: http://127.0.0.1:4000/v1
     start-command: cd candidate && ./scripts/start-test-gateway.sh --port 4000
@@ -341,7 +370,7 @@ steps:
     run: |
       id=$(gh run list --workflow pii-leak-check.yml --branch main --status success              --limit 1 --json databaseId --jq '.[0].databaseId')
       gh run download "$id" --name pii-leak-benchmark --dir baseline || echo "no baseline yet"
-  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1
+  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2
     with:
       target-base-url: http://127.0.0.1:4000/v1
       start-command: ./scripts/start-test-gateway.sh
@@ -405,7 +434,7 @@ fresh `--out` directory each time.
 To pin the Git source instead of the PyPI package:
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2#subdirectory=pii-leak-benchmark"
 ```
 
 </details>

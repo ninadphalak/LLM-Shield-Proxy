@@ -117,3 +117,28 @@
   font-weight: 600;
   white-space: nowrap;
 }
+
+/*
+ * Open disputes against a row. Deliberately quiet: it is a pointer to a conversation, not
+ * a warning badge. Making it loud would turn "someone asked a question" into a verdict the
+ * page has not reached, and this table does not rank or judge its rows.
+ */
+.flag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-800);
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.flag:hover {
+  border-color: var(--ifm-color-emphasis-500);
+  color: var(--ifm-color-emphasis-900);
+  text-decoration: none;
+}

@@ -2,7 +2,7 @@
 title: Which gateways leaked, and which did not
 sidebar_label: Results wall
 sidebar_position: 2
-description: Eight LLM gateways measured with pii-leak-benchmark, with the exact version and configuration each result came from.
+description: LLM gateways measured with pii-leak-benchmark, with the exact version and configuration each result came from.
 image: /img/wall-social-card.png
 ---
 
@@ -41,6 +41,9 @@ pipx run pii-leak-benchmark --target-base-url http://localhost:4000/v1
 
 It prints what it sent, what came back, and which of the three questions your gateway answered.
 About a minute. To put the result in CI and on your README, see [the CI setup](./ci).
+
+Nothing running yet? [Try it from scratch](./try-it-from-scratch) starts with an empty machine
+and ends with two results you measured yourself, ours and LiteLLM's, side by side.
 
 ## Everything we have tested
 
@@ -105,9 +108,54 @@ provider URL.
 
 **2. Make the result checkable.** Run `pii-leak-benchmark cite` on the report. It prints a short
 block naming the version of the check and the test data it used, so someone else can repeat your
-exact run.
+exact run. If the run happened in CI, that block is already in the job summary, no download
+needed.
 
-**3. Post it.** [Open a prefilled issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?title=Result%3A%20%3Cyour%20gateway%20name%3E&body=Gateway%20and%20version%3A%0ALink%20to%20the%20project%3A%0AHow%20it%20inspects%20streaming%20responses%20%28one%20chunk%20at%20a%20time%2C%20buffered%2C%20other%29%3A%0A%0A%23%23%23%20Citation%20block%0A%0AOutput%20of%20%60pii-leak-benchmark%20cite%60%3A%0A%0A%60%60%60%0Apaste%20here%0A%60%60%60%0A%0A%23%23%23%20The%20result%0A%0A-%20Outcome%20%28CLEAN%20%2F%20LEAK%20%2F%20CHECK%20FAILED%20%2F%20NOT%20MEASURED%29%3A%0A-%20If%20something%20changed%20since%20a%20previous%20run%2C%20what%20and%20in%20which%20version%3A%0A-%20Anything%20that%20looked%20wrong%20or%20that%20you%20think%20the%20check%20got%20wrong%3A%0A&labels=conformance-result) and paste the block in. We add your row.
+**3. Post it.** One command, from wherever the report is:
+
+```bash
+pii-leak-benchmark submit
+```
+
+It finds the report, builds the citation and opens the submission, filled in. With the GitHub
+CLI installed it posts the issue directly; without it, your browser opens on the form. The report
+itself is never uploaded, only the citation block: a report can hold your gateway's base URL and
+your capture hostname, and this goes to a public tracker.
+
+`submit` arrived in `pii-leak-benchmark` 0.3.2. On an older one, use the form below.
+
+If you would rather do it by hand, [open the form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=conformance-result.yml)
+and paste the block in. A run from CI also puts a one-click link straight in the job summary.
+
+### What happens after you post
+
+Nobody approves it. A check reads the submission as soon as it arrives, opens the CI run you
+linked, **downloads that run's own build artifact, and reads the numbers out of it**. Then it
+builds this site to prove the row does not break it, commits, and closes your issue with the
+link. A few minutes, start to finish.
+
+The numbers are never retyped from your issue. That is the point of requiring a public run
+rather than a pasted report: there is nothing to mistype, nothing for us to shade in your
+favour or against it, and nothing you could send that would not also have to exist as a public
+Actions run in a named repository on a named branch. That branch is also what fills in the "Who
+ran it" column.
+
+What this establishes is where the run happened and what it recorded. Not that your gateway was
+the version you named, which nothing outside your repository can establish. The three things a
+report does not record, the gateway's name, its licence and how it reads a stream, are yours to
+state and are marked as self-reported like everything else on this page.
+
+If the artifact cannot be read, and an expired one often cannot, the check says so on the issue
+and publishes nothing. Rerun and resubmit; a second submission replaces your row rather than
+adding a second one.
+
+### If you think a row is wrong
+
+Ours included. [Open a question](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)
+and the count appears next to that row, linking to what you wrote. Nothing is hidden or moved
+down the table while it is open: this page publishes disagreements rather than settling them
+quietly, which is the same reason two runs of the same gateway that disagree both stay up. The
+count clears when the question is closed.
 
 ### Forks and branches are welcome
 

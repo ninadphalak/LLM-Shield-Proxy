@@ -43,6 +43,16 @@ citation for it. Two subcommands measure the same thing without publishing one:
       compares an optional previous version and writes a Markdown summary and
       artifacts. See `pii-leak-benchmark ci --help`.
 
+Two more read a finished report and measure nothing:
+
+  pii-leak-benchmark cite REPORT
+      The citation block: the harness revision, the corpus and the configuration the
+      numbers came from, so a reader can rerun your exact run.
+
+  pii-leak-benchmark submit [REPORT]
+      Open that result as a submission to the public results wall. Sends the citation
+      block, never the report itself.
+
 The gateway under test must already be configured to send its upstream traffic to the
 capture this command starts (default http://127.0.0.1:8765/v1). Nothing is measured
 about a gateway that never reaches the capture: that run reports
@@ -258,6 +268,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from pii_leak_benchmark.cite import main as cite_main
 
         return cite_main(arguments[1:])
+
+    # `submit` posts a finished report's citation to the results wall. It sends the
+    # citation block and never the report: a report can hold the gateway's base URL and
+    # the capture hostname, and this goes to a public tracker.
+    if arguments and arguments[0] == "submit":
+        from pii_leak_benchmark.submit import main as submit_main
+
+        return submit_main(arguments[1:])
 
     # `badge` renders a finished report as a Shields.io endpoint file. It exists so a
     # README badge carries the result rather than the workflow's exit status.

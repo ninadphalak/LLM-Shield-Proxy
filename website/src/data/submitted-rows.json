@@ -1,0 +1,11 @@
+{
+  "comment": [
+    "Rows submitted from outside this project, written here by scripts/process_conformance_submission.py.",
+    "JSON and not TypeScript on purpose: every string in an entry arrived from a stranger's issue, and",
+    "in JSON it is data. In a .ts file it would be source that gets bundled into the site.",
+    "A 'draft' entry is parked, not published: it reaches no page until a maintainer fills the measured",
+    "columns from the submitted report and flips status to 'published'. See results-wall.ts for the",
+    "validator that enforces that, and for why a submission cannot fill those columns by itself."
+  ],
+  "entries": []
+}

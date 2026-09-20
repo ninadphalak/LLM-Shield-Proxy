@@ -1,0 +1,105 @@
+name: Benchmark result
+description: Submit a pii-leak-benchmark run for the results wall.
+title: "Result: "
+labels:
+  - conformance-result
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Send your result whatever it says. A leak is as worth publishing as a pass, and a run
+        from a branch or a fork gets a row like any other.
+
+        **Your row is published automatically**, usually within a few minutes. The measured
+        columns are read from your CI run's own build artifact, so nothing is retyped and nothing
+        waits on a maintainer. What is asked for below is only what no report records: the
+        gateway's name, its licence, and how it reads a streaming response.
+
+        Do not paste request or response bodies from a real deployment. Nothing here needs them.
+  - type: input
+    id: gateway
+    attributes:
+      label: Gateway
+      description: The project name, as it should appear in the row.
+      placeholder: your-gateway
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version and configuration
+      description: The exact version or image digest, and the configuration it ran in.
+      placeholder: 1.2.3, default settings
+    validations:
+      required: true
+  - type: input
+    id: project_url
+    attributes:
+      label: Project link
+      description: Where someone can find the gateway.
+    validations:
+      required: false
+  - type: input
+    id: run_url
+    attributes:
+      label: CI run link
+      description: >-
+        The GitHub Actions run that produced the report. **Required, and the run must be public.**
+        Every measured number in your row is read from that run's build artifact rather than from
+        anything typed here, so this link is the result. It also decides the "Who ran it" column.
+      placeholder: https://github.com/OWNER/REPO/actions/runs/123456789
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: How it reads the stream
+      description: >-
+        This is the honest substitute for a latency column, so it is asked rather than timed.
+      options:
+        - checks each chunk alone (per-chunk)
+        - waits for the whole response (buffered)
+        - holds back a short tail (held-tail)
+        - does not inspect responses (none)
+        - not stated
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: License
+      description: SPDX identifier, or "proprietary". A fact a reader can check in a repository.
+      placeholder: Apache-2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - CLEAN
+        - LEAK
+        - CHECK FAILED
+        - NOT MEASURED
+    validations:
+      required: true
+  - type: textarea
+    id: citation
+    attributes:
+      label: Citation block
+      description: >-
+        Optional. Output of `pii-leak-benchmark cite`, if you have it to hand. The numbers are read
+        from the run's artifact, so this is a convenience for human readers of the issue rather
+        than the source of anything published.
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: >-
+        What changed since a previous run, and anything that looked wrong or that you think the
+        check itself got wrong.
+    validations:
+      required: false

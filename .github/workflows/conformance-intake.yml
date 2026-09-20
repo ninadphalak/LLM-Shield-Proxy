@@ -1,0 +1,87 @@
+name: Conformance submission intake
+
+# A benchmark result posted as an issue becomes a row on the results wall, with no manual
+# step in between.
+#
+# WHAT RUNS WHERE, because it matters. The submitter runs the benchmark in THEIR OWN
+# repository's CI. They then open an issue here, which is text and executes nothing. This
+# workflow is this repository's own code, from its own default branch, on its own runner;
+# it READS their public run's artifact over the API, derives the row from it, builds this
+# site, and commits. No code from a submitter ever executes here, and nobody outside opens
+# a pull request against this repository to get a row.
+#
+# WHY IT COMMITS TO MAIN RATHER THAN OPENING A PR. A pull request opened with GITHUB_TOKEN
+# triggers no workflows at all, by design, so such a PR would carry no checks; and
+# deploy-docs.yml builds the site on push to main, never on a pull request. A PR here would
+# therefore add a step without adding a gate. The gate is the real `npm run build`, which
+# the script runs BEFORE it commits. A bad row fails the job and never lands.
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One publish at a time across the whole repository, not one per issue. Two submissions
+  # landing together would otherwise race to push the same file to main.
+  group: conformance-intake
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (contains(github.event.issue.labels.*.name, 'conformance-result') ||
+       startsWith(github.event.issue.title, 'Result:'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      # For reading the artifact of the submitter's run. Whether a token issued for this
+      # repository can read another public repository's artifacts is a question only a
+      # real run answers; the script treats a refusal as "no report", which produces a
+      # comment asking for one rather than a failed job.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # A shallow checkout cannot rebase before pushing, and this job pushes.
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Read the submission, verify the run, publish the row
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+        # The issue body is read from the event payload file on disk. It is never
+        # interpolated into this script: the body is attacker-controlled text, and
+        # ${{ github.event.issue.body }} on a `run:` line is a shell injection.
+        run: python scripts/process_conformance_submission.py
+
+      # THE SITE IS DEPLOYED FROM HERE, not by deploy-docs.yml, and this is not a
+      # duplication to tidy away. The same rule that stops a GITHUB_TOKEN pull request
+      # from getting checks also stops a GITHUB_TOKEN PUSH from starting a workflow: the
+      # commit above lands on main and deploy-docs.yml never fires. Without this step a
+      # row would be committed and then sit there, invisible, until somebody happened to
+      # push something else.
+      #
+      # `npm run build` already ran inside the script, before the commit, so this only
+      # uploads what was built. The build is the gate; this is the delivery.
+      - name: Deploy the built site
+        if: steps.publish.outcome == 'success'
+        uses: w9jds/firebase-action@f527de56a76155c20044753433bc6b5b379f4641 # master, pinned 2026-09-12
+        with:
+          args: deploy --only hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_PATH: ./website

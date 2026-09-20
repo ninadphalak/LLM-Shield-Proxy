@@ -17,6 +17,17 @@ PUBLIC_DIRECTORIES = (
     REPO_ROOT / "website" / "src",
 )
 PUBLIC_SUFFIXES = {".md", ".mdx", ".tsx"}
+# The results wall keeps its rows in data files rather than in the page, and both of them
+# are published prose the moment the site builds: `results-wall.ts` holds the rows this
+# project measured, `submitted-rows.json` holds the ones a workflow writes from an issue
+# anyone can open. Neither suffix was in the set above, so neither was checked by
+# anything, and an em dash in a row's "What happened" column shipped.
+#
+# Scoped to this directory rather than added to the suffix set, deliberately. `.json`
+# across the whole tree would sweep the frozen evidence under `benchmarks/results/`, which
+# is reproduction input rather than prose and must not be edited to satisfy a style rule.
+PUBLIC_DATA_DIRECTORY = REPO_ROOT / "website" / "src" / "data"
+PUBLIC_DATA_SUFFIXES = {".ts", ".json"}
 BANNED_TEXT = {
     "\N{EM DASH}": "Use a short sentence, colon, comma, or hyphen instead of an em dash.",
     "reference implementation": "Name LLM-Shield-Proxy directly.",
@@ -35,6 +46,11 @@ def _public_files() -> list[Path]:
             for path in directory.rglob("*")
             if path.is_file() and path.suffix.lower() in PUBLIC_SUFFIXES
         )
+    files.extend(
+        path
+        for path in PUBLIC_DATA_DIRECTORY.rglob("*")
+        if path.is_file() and path.suffix.lower() in PUBLIC_DATA_SUFFIXES
+    )
     return sorted(set(files))
 
 

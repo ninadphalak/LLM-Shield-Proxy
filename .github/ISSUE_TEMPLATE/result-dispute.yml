@@ -1,0 +1,57 @@
+name: Question a published result
+description: Say why you think a row on the results wall is wrong, misleading, or out of date.
+title: "Question: "
+labels:
+  - result-dispute
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is welcome and it is not a complaint form. A row that nobody can question is
+        a claim, not a measurement. The number of open questions shows next to the row so
+        readers can come and read yours, and it clears when the question is settled.
+
+        Nothing gets hidden or downranked while this is open. Disagreement is published
+        here, not resolved behind the scenes.
+  - type: input
+    id: row
+    attributes:
+      label: Which row
+      description: >-
+        The submission issue number the row came from, as `#123`. It is linked from the
+        "Who ran it" column. If you cannot find it, name the gateway and version and we
+        will fill it in.
+      placeholder: "#123"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem
+      options:
+        - The configuration is not what the row says
+        - The version is wrong or has been superseded
+        - The measurement looks wrong to me
+        - The check itself is measuring the wrong thing
+        - The wording of the row is misleading
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: What is wrong, and what would be right
+      description: >-
+        Be as concrete as you can. A rerun, a config file, or a link to the behaviour you
+        expected is worth more than an assertion, but an assertion is still worth posting.
+    validations:
+      required: true
+  - type: input
+    id: affiliation
+    attributes:
+      label: Your affiliation, if any
+      description: >-
+        Say so if you work on the gateway in question. It is not a problem and it does not
+        weaken the point; it is just context a reader should have.
+    validations:
+      required: false

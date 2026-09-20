@@ -151,3 +151,66 @@ def test_startup_failure_has_a_summary_and_is_not_a_leak(tmp_path):
                     "--start-command", f'"{sys.executable}" -c "raise SystemExit(3)"',
                     "--readiness-timeout", "2", "--out", str(tmp_path / "failed")]) == 2
     assert "NOT MEASURED" in (tmp_path / "failed/summary.md").read_text()
+
+
+def _complete_run(**overrides):
+    run = {"schema": "pii-leak-benchmark/operator-run/v1",
+           "contract": {"profile": "pii-v1", "duty": "restore", "seed": "a"},
+           "verdict": "LEAK", "reason": "An unmasked value reached the capture.",
+           "target_version": "1.2.3", "entities": {"EMAIL": "leak"},
+           "required_checks": {"sse_validity": True}, "coverage": []}
+    run.update(overrides)
+    return run
+
+
+def test_the_summary_carries_the_citation_and_a_way_to_publish_it():
+    """Both of the steps that used to sit between a finished run and a published one."""
+    run = _complete_run(attestation={"run_url": "https://github.com/o/r/actions/runs/42",
+                                     "repository": "o/r"})
+    summary = ci.render_summary(run)
+    assert "<details><summary><b>Citation block" in summary
+    assert "pii-leak-benchmark citation" in summary
+    assert "issues/new?" in summary and "conformance-result" in summary
+    # The run this result came from, so a reader of the issue can open it.
+    assert "actions/runs/42" in summary
+
+
+def test_the_summary_says_where_the_reports_are_without_naming_the_artifact():
+    """`artifact-name` is an input to the action, so this command cannot know it."""
+    summary = ci.render_summary(_complete_run())
+    assert "uploaded as a build artifact" in summary
+    assert "current.raw.json" in summary
+
+
+def test_rendering_the_summary_reads_no_environment(monkeypatch):
+    """It is called directly by tests and by `main`; the run carries its own provenance."""
+    for name in ("GITHUB_SHA", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_SERVER_URL",
+                 "GITHUB_ACTIONS", "GITHUB_WORKFLOW_REF"):
+        monkeypatch.delenv(name, raising=False)
+    summary = ci.render_summary(_complete_run())
+    assert "Add this result to the benchmark results wall" in summary
+    # No run to point at, and no invented one either.
+    assert "actions/runs" not in summary
+
+
+def test_a_setup_failure_is_not_offered_for_publication():
+    """A run with no contract measured nothing, so there is nothing to submit."""
+    summary = ci.render_summary({"verdict": "NOT MEASURED", "reason": "Setup failed."})
+    assert "Publish this result" not in summary
+
+
+def test_the_operator_run_records_its_own_provenance(monkeypatch):
+    """Without this the citation on `current.json` printed no repository and no run URL."""
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    from pii_leak_benchmark.cite import build_citation
+    from pii_leak_benchmark.provenance import build_attestation
+
+    attestation = build_attestation()
+    assert attestation["run_url"] == "https://github.com/o/r/actions/runs/42"
+    citation = build_citation(_complete_run(attestation=attestation))
+    assert "Run URL" in citation and "actions/runs/42" in citation
+    # Self-reported, and the block has to keep saying so.
+    assert attestation["verification"] == "self-reported"

@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -19,6 +20,7 @@ from urllib.parse import urlsplit
 from . import __version__, explain
 from .artifact import write_json_artifact
 from .operator_profile import PROFILE_VERSION, coverage, seeded_fixture
+from .provenance import build_attestation
 from .selfcheck import (
     VERDICT_CHECK_FAILED,
     VERDICT_CLEAN,
@@ -78,6 +80,50 @@ def _cell(value: Any) -> str:
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
+def render_submission(run: dict[str, Any]) -> list[str]:
+    """The part of the summary that turns a finished run into a publishable result.
+
+    A maintainer who has just watched a check go red or green is the one person who has
+    the result to hand, and until now the summary asked them to download a zip and run a
+    second command before they could say anything checkable about it. Both are here now.
+
+    The link and the headings come from `submit`, not from a copy kept here. Three things
+    have to agree on the shape of a submission and none of them sees the other two, so
+    there is one definition and two callers.
+    """
+    from .cite import build_citation
+    from .submit import submission_url
+
+    citation = build_citation(run).rstrip("\n")
+    # The same delimiter rule `cite._code_cell` uses, for the same reason: a fence is
+    # closed only by a run of its own length, so one longer than anything inside cannot be
+    # terminated early by a value that happens to contain backticks.
+    longest = max((len(run_of) for run_of in re.findall(r"`+", citation)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [
+        "",
+        "## Publish this result",
+        "",
+        "The reports for this run were uploaded as a build artifact on this Actions run: "
+        "`summary.md`, `current.json`, `current.raw.json` and `pii-leak-badge.json`.",
+        "",
+        "<details><summary><b>Citation block, for pasting into a submission</b></summary>",
+        "",
+        fence,
+        citation,
+        fence,
+        "",
+        "</details>",
+        "",
+        f"[Add this result to the benchmark results wall]({submission_url(run)})",
+        "",
+        "That link opens a prefilled issue on the results wall. Paste the block above into "
+        "it and fill in the gateway name and licence, which a run cannot know. Send the "
+        "result whatever it says: a leak is as worth publishing as a pass, and a run from "
+        "a branch or a fork gets a row like any other.",
+    ]
+
+
 def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) -> str:
     lines = ["# PII Leak Benchmark", "", f"**{run['verdict']}**", "", run["reason"], ""]
     if "contract" not in run:
@@ -133,6 +179,8 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) 
     if fixed:
         lines.append("Credential checks use fixed examples: " + ", ".join(fixed) + ". Passing these examples does not establish general credential detection.")
     lines.extend(["", "A no-regression result can still contain existing leaks. Current failures always fail this job.", ""])
+    lines.extend(render_submission(run))
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -306,8 +354,15 @@ def main(argv: list[str] | None = None) -> int:
             for f in explain.findings_from_report(report, seed=args.seed, duty=args.duty)
         ]
         ignored = {"response_fidelity", "fragmentation_safety"} if args.duty == "anonymize" else set()
+        # From `provenance`, not re-read from GITHUB_* here. That module exists to keep the
+        # env-var reading in one place, and it already assembles the run URL the same way
+        # the raw report's attestation does. Without this the operator run carried none,
+        # so `cite current.json` printed no Repository or Run URL row even on a run that
+        # had both, and the summary had no run to link a submission to.
+        attestation = build_attestation()
         return {"schema": "pii-leak-benchmark/operator-run/v1", "contract": contract,
                 "verdict": verdict, "reason": reason, "target_version": version,
+                **({"attestation": attestation} if attestation else {}),
                 "generated_at": report["generated_at"], "entities": measured_entities(report),
                 "required_checks": {name: check["passed"] for name, check in report["checks"].items() if name not in ignored},
                 "findings": findings,

@@ -70,6 +70,24 @@ The `passed` raw measurement is never overwritten. The `outcome` field is strict
 2. Open a Pull Request adding the artifact and configuration to `benchmarks/results/`, or attach them to a GitHub Issue.
 3. State your affiliation. Vendor-submitted runs are welcome, count toward total runs, and will be labeled `vendor-submitted`.
 
+### The short path, for a results-wall row
+
+A row on the [results wall](./who-has-run-it) needs less than a full artifact submission, because
+it publishes fewer claims. For that, run:
+
+```bash
+pii-leak-benchmark submit
+```
+
+It opens a prefilled submission carrying the citation block and the facts a report records. The
+report itself is never uploaded. A check reads the submission when it arrives, confirms the
+linked CI run exists and on which branch it ran, and posts back the draft row or a list of what
+is missing. A person then fills in the measurement columns and merges it.
+
+Use the full pull request above when you are submitting the artifact itself, which is what the
+[published results](./results) page and its replication counts are built from. The two are
+different things: a wall row is a pointer to a run, an artifact submission is the run.
+
 We accept submissions for any OpenAI-compatible gateway, including unlisted platforms or runs that dispute existing rows.
 
 ## CI Automation
