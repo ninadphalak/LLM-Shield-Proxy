@@ -79,9 +79,8 @@ def build_parser(
         action="append",
         default=_target_headers_from_env(),
         metavar="NAME=VALUE",
-        help="Additional target request header; repeat as needed. Values are not written to "
-        "the report. Prefer newline-delimited CONFORMANCE_TARGET_HEADERS when values are "
-        "credentials, because process listings expose argv.",
+        help="Additional request header (NAME=VALUE); repeat as needed. Not written to report. "
+        "Prefer CONFORMANCE_TARGET_HEADERS for credentials (argv is visible in process listings).",
     )
     parser.add_argument(
         "--capture-host",
@@ -94,28 +93,22 @@ def build_parser(
         "--capture-public-url",
         default=os.getenv("CONFORMANCE_CAPTURE_PUBLIC_URL") or None,
         metavar="URL",
-        help="Externally reachable /v1 base URL the target will be configured with -- your "
-        "tunnel or VPS. Required whenever --capture-host is not loopback, because a "
-        "wildcard bind has no address a target can connect to. Env: "
-        "CONFORMANCE_CAPTURE_PUBLIC_URL.",
+        help="Externally reachable /v1 base URL of the capture. Required if --capture-host "
+        "is not loopback (a wildcard bind has no routable address).",
     )
     parser.add_argument(
         "--capture-token",
         default=None,
         metavar="TOKEN",
-        help="Bearer token the capture requires, so arbitrary internet traffic cannot enter "
-        "the capture record. Required in public mode. PREFER the CONFORMANCE_CAPTURE_TOKEN "
-        "environment variable: process listings show argv, so a token passed as a flag is "
-        "visible to every other user on the host. The token is never written to the report.",
+        help="Bearer token required by the capture in public mode. Prefer CONFORMANCE_CAPTURE_TOKEN "
+        "over argv flags to prevent credential exposure in process listings.",
     )
     parser.add_argument(
         "--redaction-claimed",
         choices=["claimed", "not-offered", "unknown"],
         default="unknown",
-        help="What the target's vendor CLAIMS about PII redaction. 'not-offered' marks a "
-        "product that does not advertise redaction at all (caching/routing/observability "
-        "gateways); its run is reported as not-applicable and MUST NOT be published as a "
-        "failure. Default 'unknown' yields outcome=claim-unstated, which is not publishable.",
+        help="Vendor's PII redaction claim. 'not-offered' (for routing/caching gateways) yields "
+        "not-applicable. Default 'unknown' yields claim-unstated. Neither is publishable as a failure.",
     )
     parser.add_argument(
         "--redaction-claim-citation",
@@ -132,16 +125,15 @@ def build_parser(
     parser.add_argument(
         "--redaction-enabled",
         action="store_true",
-        help="The target's redaction feature was enabled for this run. Without it a run "
-        "against a redacting product is reported as redaction-not-enabled: a configuration "
-        "statement, not a verdict.",
+        help="Target's redaction was enabled. Without this, runs against redacting products yield "
+        "redaction-not-enabled (a configuration state, not a verdict).",
     )
     parser.add_argument(
         "--redaction-config-reference",
         default=None,
         metavar="TEXT",
         help="The exact setting/guardrail/config that enabled redaction. Required with "
-        "--redaction-enabled so the row reproduces.",
+        "--redaction-enabled to ensure reproducibility.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     return parser
