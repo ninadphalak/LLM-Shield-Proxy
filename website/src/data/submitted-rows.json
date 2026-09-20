@@ -7,5 +7,29 @@
     "columns from the submitted report and flips status to 'published'. See results-wall.ts for the",
     "validator that enforces that, and for why a submission cannot fill those columns by itself."
   ],
-  "entries": []
+  "entries": [
+    {
+      "status": "published",
+      "date": "2026-09-20",
+      "project": "no-gateway control (intake test)",
+      "version": "capture://self, direct connection with no gateway",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "all",
+      "restoredN": 1.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Handed every value back to the client.",
+      "provenance": "submitted-main",
+      "architecture": "none",
+      "license": "Apache-2.0",
+      "runUrl": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/35490370868",
+      "pricingUrl": "https://github.com/ninadphalak/llm-shield-intake-test",
+      "_submission": {
+        "issue": 53,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/llm-shield-intake-test",
+        "evidence": "Read from the artifact `pii-leak-benchmark` on that run.",
+        "notes": "End-to-end test of the automated results-wall intake. This is the negative control: a direct connection with no gateway in the middle, so every data type is expected to leak. Retriggering intake after switching publication to the pull-request path. Retrigger: Actions may now open pull requests."
+      }
+    }
+  ]
 }
