@@ -281,3 +281,41 @@ def test_a_research_report_still_records_its_own_field_names():
 def test_provenance_is_always_marked_self_reported():
     for report in (_report(), _operator()):
         assert build_badge(report)["pii_leak_benchmark"]["verification"] == "self-reported"
+
+
+def test_the_neutral_style_says_a_check_ran_and_not_what_it_found():
+    """For a project that wants a badge without its README advertising a leak."""
+    leaking = {"verdict": "LEAK", "entities": {"EMAIL": "leak", "SSN": "leak"}}
+    result = build_badge(leaking)
+    neutral = build_badge(leaking, style="neutral")
+    assert "leaked" in result["message"]
+    assert neutral["message"] == "benchmarked"
+    assert "EMAIL" not in json.dumps(neutral), "the neutral badge must not carry the finding"
+
+
+@pytest.mark.parametrize("verdict", ["LEAK", "CLEAN", "CHECK FAILED", "NOT MEASURED"])
+def test_the_neutral_badge_is_never_green(verdict):
+    """Green is the pass signal on every badge anybody has read.
+
+    A neutral badge coloured green would be a leaking gateway wearing a pass, which is
+    worse than no badge at all.
+    """
+    made = build_badge({"verdict": verdict}, style="neutral")
+    assert made["color"] == "blue"
+    assert "green" not in made["color"]
+
+
+def test_the_neutral_badge_says_in_the_file_what_it_withheld():
+    made = build_badge({"verdict": "LEAK"}, style="neutral")
+    block = made["pii_leak_benchmark"]
+    assert block["style"] == "neutral"
+    assert "does not say what the check found" in block["note"]
+    # The provenance the result badge carries is still there: a reader opening the JSON
+    # should see who ran it and that nobody verified it.
+    assert "verification" in block
+
+
+def test_an_unknown_style_falls_back_to_the_result_badge():
+    """A typo must not silently publish a neutral badge for a leaking gateway."""
+    made = build_badge({"verdict": "LEAK", "entities": {"EMAIL": "leak"}}, style="nuetral")
+    assert "leaked" in made["message"]

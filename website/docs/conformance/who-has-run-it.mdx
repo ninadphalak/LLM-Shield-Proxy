@@ -42,9 +42,12 @@ A result from the people who built the instrument is the most conflicted row her
 why the "Who ran it" column sorts our own runs alongside the self-reported ones rather than
 above them. That does not change because the number improved.
 
-**Nobody else has passed yet.** The first gateway we did not write that answers all three
-gets a mark on its row in the table below, and keeps it. It is worked out from the results
-rather than handed out, so it cannot be claimed, only earned.
+**No gateway other than ours has passed yet.** The first one that does gets a mark on its
+row in the table below, and keeps it. It goes to any gateway we did not write, whether we
+measured it or its own maintainers did, as long as there is a run behind the numbers to
+open. It is computed from the published rows rather than handed out, which is not the same
+as saying it cannot be gamed: a project that fabricated a report could take it, and would
+be doing so in public under its own name.
 
 Find a case that trips either configuration and we will add it to the corpus and credit you.
 
@@ -174,6 +177,19 @@ reports and you publish that file from your own repository. Nothing is hosted he
 nothing to register, and no permission is asked for or given. Deleting the line from your
 README removes it, and deleting the file stops it updating. We never add a badge to anybody's
 project and cannot.
+
+**If you would rather not publish what it found**, there is a quieter one:
+
+```bash
+pii-leak-benchmark badge current.json --style neutral
+```
+
+That badge reads `benchmarked` and nothing else. It is blue rather than green, deliberately,
+because a neutral badge wearing the pass colour would be worse than no badge at all. It says
+the true and much smaller thing: this project runs the check. What the check found stays in
+the run.
+
+Three options, then: publish the result, publish that a check ran, or publish neither.
 
 **Anywhere else**, link this page. It carries a preview card, and any row is fair to point
 at, including one that is not yours. A gateway quietly forwarding data its users assume is

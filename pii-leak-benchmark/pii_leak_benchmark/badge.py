@@ -161,16 +161,53 @@ def _provenance(report: dict[str, Any], verdict: Any) -> dict[str, str]:
     return block
 
 
+# The neutral badge. Says a check ran and nothing else.
+#
+# WHY IT EXISTS. The result badge advertises a leak on the project's own README, and a
+# maintainer who does not want that publishes no badge at all, which helps nobody: the
+# check still ran and a reader still has no way to know. This says the true and much
+# weaker thing instead.
+#
+# DELIBERATELY NOT GREEN. Green is the pass signal on every badge anybody has ever read,
+# and a neutral badge coloured green would be a leaking gateway wearing a pass. Blue reads
+# as informational, which is exactly what this is.
+_NEUTRAL_BADGE: tuple[str, str] = ("benchmarked", "blue")
+
+
 def build_badge(
     report: dict[str, Any],
     *,
     label: str = DEFAULT_LABEL,
+    style: str = "result",
 ) -> dict[str, Any]:
     """Render one conformance report as a Shields.io endpoint payload.
 
     The returned dict is the whole file: Shields reads `schemaVersion`, `label`,
     `message` and `color` and ignores the rest.
+
+    `style="neutral"` publishes that a check ran without publishing what it found. What it
+    asserts is true and small: this project runs the check. It does not assert a pass, and
+    the colour is chosen so it cannot be mistaken for one.
     """
+    if style == "neutral":
+        message, color = _NEUTRAL_BADGE
+        return {
+            "schemaVersion": 1,
+            "label": label,
+            "message": message,
+            "color": color,
+            "pii_leak_benchmark": {
+                **_provenance(report, report.get("verdict")),
+                "style": "neutral",
+                # Stated in the file itself, because the badge no longer carries it and
+                # somebody reading the JSON should not have to infer what was withheld.
+                "note": (
+                    "This badge says a conformance check ran. It does not say what the "
+                    "check found. The run's own report holds the result."
+                ),
+            },
+        }
+
     # The operator verdict wins where there is one, because on that report shape
     # `outcome` is not a verdict about the gateway at all. See `_VERDICT_BADGE`.
     verdict = report.get("verdict")
@@ -226,6 +263,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help=f"Where to write the badge JSON (default: {DEFAULT_OUTPUT}). Use - for stdout.",
     )
     parser.add_argument(
+        "--style",
+        choices=("result", "neutral"),
+        default="result",
+        help=(
+            "result: say what the check found. neutral: say only that it ran, for a "
+            "project that does not want its README advertising a leak. Neutral asserts "
+            "less rather than something friendlier, and is never green."
+        ),
+    )
+    parser.add_argument(
         "--label",
         default=DEFAULT_LABEL,
         help=f"Left-hand text on the badge (default: {DEFAULT_LABEL!r}).",
@@ -246,7 +293,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("Report is not a JSON object.", file=sys.stderr)
         return 2
 
-    badge = build_badge(report, label=args.label)
+    badge = build_badge(report, label=args.label, style=args.style)
     rendered = json.dumps(badge, indent=2, ensure_ascii=False) + "\n"
 
     if args.out == "-":
