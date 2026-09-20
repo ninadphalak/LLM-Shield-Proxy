@@ -688,13 +688,24 @@ def test_publishing_refuses_to_push_anything_but_the_rows_file(monkeypatch):
     assert not any("push" in call for call in calls), "nothing may be pushed after a refusal"
 
 
-def test_publishing_proceeds_when_only_the_rows_file_is_staged(monkeypatch):
+def test_publishing_lands_through_a_pull_request_rather_than_around_the_rule(monkeypatch):
+    """`main` requires a PR, so the job opens one instead of being exempted from the rule.
+
+    A bypass list cannot express "the bot but not me" on a user-owned repository: the only
+    bypass actors offered there are roles, and roles are hierarchical, so exempting Write
+    exempts Admin with it. A pull request needs no bypass at all, because the rule asks for
+    a pull request and does not ask anyone to approve one.
+    """
     calls = []
     monkeypatch.setattr(
         intake.subprocess, "run", _fake_git(["website/src/data/submitted-rows.json"], calls)
     )
     intake.publish(_row(), 7)
-    assert any("push" in call for call in calls), "the normal path still pushes"
+    flat = [" ".join(call) for call in calls]
+    assert any("HEAD:intake/issue-7" in line for line in flat), "the branch is pushed"
+    assert any(line.startswith("gh pr create") for line in flat)
+    assert any(line.startswith("gh pr merge") and "--squash" in line for line in flat)
+    assert not any("HEAD:main" in line for line in flat), "never straight at the protected branch"
 
 
 # ------------------------------------------------------------------- flood resistance

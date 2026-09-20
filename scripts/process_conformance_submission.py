@@ -686,12 +686,31 @@ def build_site() -> None:
 
 
 def publish(row: dict[str, Any], issue_number: int) -> None:
-    """Commit the row to the default branch, after the build has passed.
+    """Land the row through a pull request, which is what the branch rule asks for.
 
-    Direct to main rather than through a pull request, deliberately. A PR from this token
-    would carry no checks at all, so it would add a review step without adding a gate; the
-    gate is the build above. The commit names no agent, model or provider, which is a
-    repository rule and applies to text a workflow generates too.
+    THROUGH A PR, NOT AROUND ONE. `main` requires changes to arrive via a pull request,
+    and the first version of this pushed straight at it and was refused: GH006, protected
+    branch hook declined. The obvious fixes were all worse than the rule. A bypass list
+    cannot express "the bot but not me" on a user-owned repository, because the only
+    bypass actors offered there are roles and roles are hierarchical, so exempting Write
+    exempts Admin too. A deploy key or a token would express it, at the cost of a
+    write-capable credential sitting in secrets for any workflow to pick up.
+
+    None of that is needed. The rule requires a pull request; it does not require anyone
+    to approve one. Measured on this repository: zero approvals, no required checks, no
+    last-push approval. So a pull request from this job is immediately mergeable, and
+    opening and merging one satisfies the rule rather than evading it. Nothing gains a
+    bypass, no credential is stored, and every published row leaves a reviewable PR behind
+    instead of a bare commit.
+
+    WHAT THIS DOES NOT GET. A pull request opened with GITHUB_TOKEN starts no workflows, so
+    the reviewers do not run on it. That is the right trade only because of what the diff
+    can contain: the guard below means one JSON data file or nothing. Were this ever to
+    carry a code change, the absence of review would matter and this comment would be
+    wrong.
+
+    The branch, commit and PR name no agent, model or provider, which is a repository rule
+    and applies to text a workflow generates too.
     """
     _run("git", "config", "user.name", "github-actions[bot]")
     _run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
@@ -716,12 +735,30 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
             f"{sorted(allowed)}, and it staged {sorted(staged)}"
         )
 
-    _run("git", "commit", "-m", f"feat(results-wall): add {row['project']} {row['version']} (#{issue_number})")
-    # Rebase before pushing. The workflow serialises its own runs, but main still moves
-    # underneath a job that has been building for two minutes, and a rejected push would
-    # lose a row that has already been announced on the issue.
+    title = f"feat(results-wall): add {row['project']} {row['version']} (#{issue_number})"
+    _run("git", "commit", "-m", title)
+
+    # Rebase before pushing the branch. The workflow serialises its own runs, but main
+    # still moves underneath a job that has been building for two minutes, and a branch
+    # cut from a stale main makes a PR with an unrelated diff in it.
     _run("git", "pull", "--rebase", "origin", "main")
-    _run("git", "push", "origin", "HEAD:main")
+    branch = f"intake/issue-{issue_number}"
+    _run("git", "push", "--set-upstream", "origin", f"HEAD:{branch}")
+
+    body = (
+        f"Automated from #{issue_number}.\n\n"
+        f"Every measured column was read from the artifact of the run linked in that "
+        f"issue, not from anything typed in it. Provenance: `{row['provenance']}`.\n\n"
+        f"The site was built before this branch was pushed, so the row is known not to "
+        f"break it. This pull request may only ever contain "
+        f"`{ROWS_FILE.relative_to(REPO_ROOT).as_posix()}`; the job refuses to push if "
+        f"anything else is staged.\n\n"
+        f"Closes #{issue_number}\n"
+    )
+    _run("gh", "pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", body)
+    # Squash, so one row is one commit on main whatever the branch looks like, and delete
+    # the branch behind it: these accumulate one per submission otherwise.
+    _run("gh", "pr", "merge", branch, "--squash", "--delete-branch")
 
 
 def _try(*command: str) -> bool:

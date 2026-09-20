@@ -39,6 +39,10 @@ jobs:
     permissions:
       contents: write
       issues: write
+      # The row lands through a pull request this job opens and merges, because `main`
+      # requires changes to arrive that way. Satisfying the rule beats being exempted from
+      # it: no bypass list, no deploy key, no stored token, and a reviewable PR per row.
+      pull-requests: write
       # For reading the artifact of the submitter's run. Whether a token issued for this
       # repository can read another public repository's artifacts is a question only a
       # real run answers; the script treats a refusal as "no report", which produces a
