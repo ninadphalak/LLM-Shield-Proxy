@@ -659,6 +659,26 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
     _run("git", "config", "user.name", "github-actions[bot]")
     _run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
     _run("git", "add", str(ROWS_FILE.relative_to(REPO_ROOT)))
+
+    # THE ONLY FILE THIS JOB MAY EVER CHANGE, checked rather than intended.
+    #
+    # This workflow is triggered by issues, which anyone can open, so an outsider can
+    # cause a run of it that holds a token able to write to the default branch. Every
+    # other control here is an argument that the run cannot be steered: the body never
+    # reaches a shell, no submitted code executes, only JSON is parsed. This one is not an
+    # argument. It reads back what is actually staged and refuses to push anything but the
+    # rows file, so a bug anywhere upstream of it cannot become a commit to main.
+    staged = subprocess.run(  # nosec B603 B607 - fixed argument list
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    allowed = {ROWS_FILE.relative_to(REPO_ROOT).as_posix()}
+    if set(staged) - allowed:
+        raise RuntimeError(
+            "refusing to publish: this job may only change "
+            f"{sorted(allowed)}, and it staged {sorted(staged)}"
+        )
+
     _run("git", "commit", "-m", f"feat(results-wall): add {row['project']} {row['version']} (#{issue_number})")
     # Rebase before pushing. The workflow serialises its own runs, but main still moves
     # underneath a job that has been building for two minutes, and a rejected push would
@@ -758,7 +778,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Build BEFORE the commit, never after. This is the only place the site build runs on
     # this path, so a row that breaks it has to fail here or it reaches the deploy.
     build_site()
-    publish(row, issue_number)
+    try:
+        publish(row, issue_number)
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        # Say so on the issue rather than only in a log the submitter cannot see. A run
+        # that parsed their result, verified it and built the site, and then could not
+        # write it, is our problem and not theirs: the first time this happened the job
+        # went red and the issue stayed silent.
+        comment(
+            issue_number,
+            "This result was read and verified, and then could not be published "
+            f"({type(exc).__name__}). Nothing is wrong with your submission and nothing "
+            "needs redoing. The failure is on this side and someone will pick it up.",
+        )
+        label(issue_number, "needs-info")
+        print(f"Publishing failed after a successful build: {exc}", file=sys.stderr)
+        return 1
     comment(issue_number, text)
     close_issue(issue_number)
     return 0

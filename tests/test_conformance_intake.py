@@ -649,3 +649,43 @@ def test_an_unreadable_repository_lookup_does_not_invent_a_default_branch():
 
     value, _, _ = intake.classify_provenance("https://github.com/o/r/actions/runs/42", fetch=fetch)
     assert value == "submitted-branch"
+
+
+def _fake_git(staged, calls):
+    """Stand in for git: record every call, answer the staged-files query."""
+    class Result:
+        returncode = 0
+        stdout = "\n".join(staged)
+        stderr = ""
+
+    def run(command, *args, **kwargs):
+        calls.append(list(command))
+        return Result()
+
+    return run
+
+
+def test_publishing_refuses_to_push_anything_but_the_rows_file(monkeypatch):
+    """The one control here that is a check rather than an argument.
+
+    This workflow is triggered by issues, which anyone can open, so a run of it holds a
+    token that can write to the default branch. Everything else is reasoning about why the
+    run cannot be steered. This reads back what is actually staged.
+    """
+    calls = []
+    monkeypatch.setattr(
+        intake.subprocess, "run",
+        _fake_git(["website/src/data/submitted-rows.json", ".github/workflows/ci.yml"], calls),
+    )
+    with pytest.raises(RuntimeError, match="refusing to publish"):
+        intake.publish(_row(), 7)
+    assert not any("push" in call for call in calls), "nothing may be pushed after a refusal"
+
+
+def test_publishing_proceeds_when_only_the_rows_file_is_staged(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        intake.subprocess, "run", _fake_git(["website/src/data/submitted-rows.json"], calls)
+    )
+    intake.publish(_row(), 7)
+    assert any("push" in call for call in calls), "the normal path still pushes"
