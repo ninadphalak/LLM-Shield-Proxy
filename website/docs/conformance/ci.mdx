@@ -22,17 +22,17 @@ Setup is one file and three lines. No account, no API key, no paid model.
 **The hard part is that nothing tells you.** Redaction is a pattern-matching rule, and rules
 break quietly. Someone edits a prompt template. Someone narrows a regex to kill a false alarm.
 The provider adds a field. Your tests still pass, because the reply coming back still looks
-right. But real customer data is now leaving your network, and you will not know until
-somebody finds it in OpenAI's logs.
+right, while real customer data leaves your network and nobody knows until it turns up in
+OpenAI's logs.
 
-You only find out if you check. That is what this does: it checks on the pull request that
-broke it, names the data type, shows you the value as it left your network, and says what to
-do about it, while the fix is still one line.
+So it has to be checked. This checks on the pull request that broke it, names the data type,
+shows you the value as it left your network, and says what to do about it, while the fix is
+still one line.
 
 ## See it work in 30 seconds, with no gateway at all
 
-You do not need to set anything up to see the output. This runs the same check against a
-direct connection with no gateway in the middle, so every value leaks, on purpose:
+Nothing to set up. This runs the same check against a direct connection with no gateway in the
+middle, so every value leaks, on purpose:
 
 ```bash
 pipx run pii-leak-benchmark selfcheck --target-base-url capture://self
@@ -52,62 +52,74 @@ LEAK  EMAIL reached the model provider
 ```
 
 That is the failure the job catches. Nothing leaves your machine, the values are fake, and
-`capture://self` is the control: it has no gateway in it, so it *must* say `LEAK`. If it ever
-says anything else, the instrument itself is broken.
+`capture://self` is the control: with no gateway in it, it *must* say `LEAK`. Anything else
+means the instrument itself is broken.
 
-Point `--target-base-url` at a real gateway instead and you have the same check your CI will run.
+Point `--target-base-url` at a real gateway instead and it is the same check your CI will run.
 
 ## How it can tell
 
 <CaptureFlow />
 
-There is no trick to it. The check stands where the provider normally does, so it sees the
-request your gateway actually sent and compares it against what went in. Anything that comes
-out the far side unchanged is something OpenAI would have received.
+The check stands where the provider normally does, so it sees the request your gateway actually
+sent and compares it against what went in. Anything that comes out the far side unchanged is
+something OpenAI would have received.
 
-The same trip back is worth as much. A gateway that masks on the way out and never puts the
-value back is not leaking, but it is handing your caller a placeholder where its own data
-should be, and that breaks the app just as effectively. The capture replies with the message
-it received, one character at a time, so the value your gateway has to rebuild arrives split
-across as many events as it has characters. `response_fidelity` records whether the caller got
-its own text back and `fragmentation_safety` records whether it survived being split, which is
-why a run can report no leak and still fail.
+The trip back matters as much. A gateway that masks on the way out and never puts the value
+back is not leaking, but it hands your caller a placeholder where its own data should be, which
+breaks the app just as effectively. The capture replies with the message it received, one
+character at a time, so the value your gateway has to rebuild arrives split across as many
+events as it has characters. `response_fidelity` records whether the caller got its own text
+back, `fragmentation_safety` whether it survived being split, and that is why a run can report
+no leak and still fail.
 
 ### No gateway of your own? Point the check at someone else's
 
-`capture://self` has no gateway in it, so it measures nothing about any product. For a real
-result you need something in the middle. Whichever gateway you pick, the shape is the same:
+`capture://self` measures nothing about any product, because there is no product in it. For a
+real result you need something in the middle. Whichever gateway you pick, the shape is the same:
 
 1. **Tell the gateway its provider is the capture.** The check listens on `http://127.0.0.1:8765`.
    Whatever setting normally holds your OpenAI base URL gets that address instead.
 2. **Start the gateway**, however its own documentation says to.
 3. **Point the check at the gateway** rather than at a provider.
 
-Only step 1 differs between products, and it is one setting: the one your gateway already uses
-to reach OpenAI. It is usually called something like `api_base`, `base_url`, `custom_host` or
-an `OPENAI_BASE_URL` environment variable, and it lives wherever that gateway keeps its
-provider configuration.
+Only step 1 differs between products, and it is the one setting your gateway already uses to
+reach OpenAI: usually `api_base`, `base_url`, `custom_host` or an `OPENAI_BASE_URL` environment
+variable, wherever that gateway keeps its provider configuration.
 
-**Their documentation is the authority on that, not this page.** Setting names change, and a
-copy here would go stale without anyone noticing, so what follows links to each project's own
-instructions instead of repeating them. If a link below is dead or the setting has moved,
-theirs is right and ours is out of date: please
+**Their documentation is the authority on that, not this page.** Setting names change and a copy
+here would go stale unnoticed, so what follows links to each project's own instructions instead
+of repeating them. If a link below is dead or the setting has moved, theirs is right and ours is
+out of date: please
 [tell us](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new) and we will fix it.
 
 <details>
 <summary><b>LLM-Shield-Proxy</b> (the fastest way to see a real result)</summary>
 
-Ours, so this one is exact and kept working:
+Ours, so this one is exact and kept working. Installing it brings the check along with it, so
+there is nothing else to fetch.
 
 ```bash
-pip install llm-shield-proxy "uvicorn[standard]"
+pip install llm-shield-proxy
 
-UPSTREAM_BASE_URL=http://127.0.0.1:8765 VALID_VIRTUAL_KEYS=sk-demo   python -m uvicorn llm_shield_proxy.api.main:app --port 4000 &
+UPSTREAM_BASE_URL=http://127.0.0.1:8765 VALID_VIRTUAL_KEYS=sk-demo llm-shield-proxy --port 4000 &
 
 pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
 ```
 
-Full options: [deployment guide](../deployment).
+On Windows PowerShell, where per-command environment variables and `&` do not work:
+
+```powershell
+pip install llm-shield-proxy
+
+$env:UPSTREAM_BASE_URL = "http://127.0.0.1:8765"; $env:VALID_VIRTUAL_KEYS = "sk-demo"
+Start-Process -NoNewWindow llm-shield-proxy -ArgumentList "--port 4000"
+
+pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
+```
+
+That should print `CLEAN`, against the `LEAK` you got with nothing in the middle. Full options:
+[deployment guide](../deployment.md).
 
 </details>
 
@@ -200,12 +212,19 @@ red check in the PR, and the full result is written to the **job summary**, the 
 on from **Details**. You do not have to read the logs.
 
 The summary opens with the verdict, one of `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`,
-then a row per data type:
+then one row for each of the six data types every run sends: `EMAIL`, `SSN`, `CREDIT_CARD`,
+`AWS_ACCESS_KEY_ID`, `GITHUB_TOKEN` and `SLACK_TOKEN`. You get all six whether you went looking
+for them or not, so a gateway written around email addresses finds out in the same minute what
+it does with a card number and an AWS key.
 
 | Data type | Baseline | Current | Next step |
 | :--- | :--- | :--- | :--- |
 | EMAIL | not run | leak | Enable or repair request redaction for this format. |
 | SSN | not run | contained | No leak observed for this test shape. |
+
+Those six are also the whole list, and the summary says so in a **Not tested by this profile**
+section, so a clean run is not mistaken for coverage of names, addresses, clinical data,
+government IDs or private keys.
 
 `Baseline` reads `not run` until you set up a previous version to compare against, which is
 optional and covered below.
@@ -228,12 +247,12 @@ the pull request.
 The summary ends with everything needed to say something checkable about the run:
 
 - **The citation block**, in a collapsible section. It names the harness revision, the test data
-  and the configuration the numbers came from, so a reader can rerun your exact run. It is right
-  there in the page, so nobody has to download a zip and run a second command to get it.
+  and the configuration the numbers came from, so a reader can rerun your exact run, and it is
+  in the page rather than behind a zip and a second command.
 - **Where the reports are**, spelled out, because "it is in the artifact" is not directions:
 
   1. Open the **Actions** tab of your repository.
-  2. Click the run, which is the one named after your workflow.
+  2. Click the run, named after your workflow.
   3. Scroll to the **bottom** of that page, past the job list, to the **Artifacts** section.
   4. Download **`pii-leak-benchmark`**, or whatever you set `artifact-name` to.
 
@@ -288,11 +307,19 @@ file. Publish it anywhere your repository serves raw files, then point Shields a
 [![PII leak check](https://img.shields.io/endpoint?url=https://OWNER.github.io/REPO/pii-leak-badge.json)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
 ```
 
-The badge then reads `contained`, or `leaked 4 of 16`, or one of the grey outcomes below.
-Nothing is hosted by this project and there is nowhere to register: the file comes from your
-run and is served by you, which is also why it is not evidence to anyone else. A reader who
-wants to check it follows the badge to the run and reruns the instrument named in
+Nothing is hosted by this project and there is nowhere to register: the file comes from your run
+and is served by you, which is also why it is not evidence to anyone else. A reader who wants to
+check it follows the badge to the run and reruns the instrument named in
 `pii-leak-benchmark cite`.
+
+The Action renders it from the operator result, so it names the types rather than a rate:
+
+| Badge reads | Colour | What it means |
+| :--- | :--- | :--- |
+| `contained` | green | No test value reached the upstream and the required checks passed |
+| `leaked: EMAIL, SSN` | red | Those data types were seen arriving upstream, listed in full |
+| `checks failed` | yellow | Nothing leaked, but a required check did not hold |
+| `not measured` | grey | Setup, attribution, inspection or comparison was incomplete |
 
 To render one by hand from any finished report:
 
@@ -300,17 +327,12 @@ To render one by hand from any finished report:
 pii-leak-benchmark badge ./PII_LEAK_BENCHMARK_LATEST.json --out ./pii-leak-badge.json
 ```
 
-| Badge reads | Colour | What it means |
-| :--- | :--- | :--- |
-| `contained` | green | Redaction was on, the run was attributable, nothing reached the upstream |
-| `leaked N of M` | red | Protected values were observed upstream |
-| `no leak, profile not met` | yellow | Nothing leaked, but some other required check did not hold |
-| `inconclusive` | grey | The run could not attribute what it saw |
-| `redaction not enabled` | grey | Redaction was off, so the run says nothing about the product |
-| `claim unstated` | grey | No redaction claim was recorded, so the run is not a verdict |
-| `no redaction offered` | blue | The product does not claim to redact |
+Handed a research-profile report instead, the same command counts scored cases
+(`leaked 4 of 16`) and reads the redaction claim rather than the verdict. That adds
+`no leak, profile not met` in yellow, `no redaction offered` in blue for a product that does not
+claim to redact, and the greys `inconclusive`, `redaction not enabled` and `claim unstated`.
 
-Only a real pass is green. A grey badge is not a soft pass: it means the run did not learn
+Only a real pass is ever green. A grey badge is not a soft pass: it means the run did not learn
 anything about the gateway, and it is worth fixing the configuration and rerunning.
 
 </details>
@@ -363,8 +385,8 @@ versions too: any of them can cause a difference.
 
 A scheduled or push job needs an explicitly selected baseline commit or released image.
 
-The cheaper option is to reuse the last result from your default branch instead of building
-the old gateway at all. The job fetches it itself; nobody downloads anything:
+The cheaper option is to reuse the last result from your default branch instead of building the
+old gateway at all. The job fetches that result itself, so there is nothing to do by hand:
 
 ```yaml
 permissions:
@@ -376,7 +398,7 @@ steps:
     env:
       GH_TOKEN: ${{ github.token }}
     run: |
-      id=$(gh run list --workflow pii-leak-check.yml --branch main --status success              --limit 1 --json databaseId --jq '.[0].databaseId')
+      id=$(gh run list --workflow pii-leak-check.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')
       gh run download "$id" --name pii-leak-benchmark --dir baseline || echo "no baseline yet"
   - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0
     with:
@@ -429,11 +451,11 @@ local capture and cannot inspect arbitrary production traffic from a URL alone.
 <details>
 <summary><b>Run it on your laptop first</b></summary>
 
+Kept to one line per command, so it pastes into PowerShell as well as a POSIX shell:
+
 ```bash
 pip install "pii-leak-benchmark>=0.3.0"
-pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 \
-  --start-command ./scripts/start-test-gateway.sh --upstream-env UPSTREAM_BASE_URL \
-  --out privacy-check
+pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --start-command ./scripts/start-test-gateway.sh --upstream-env UPSTREAM_BASE_URL --out privacy-check
 ```
 
 `pii-leak-benchmark ci --help` lists every input, with the same meanings as the Action. Use a
@@ -465,6 +487,7 @@ and looking at exactly what arrived upstream when a result surprises you.
 | `baseline.json` | Optional previous operator result |
 | `baseline.raw.json` | Raw baseline when measured during this job |
 | `control.raw.json` | Negative-control evidence |
+| `pii-leak-badge.json` | Shields.io endpoint file for the README badge |
 
 </details>
 
