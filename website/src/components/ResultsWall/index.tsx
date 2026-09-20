@@ -131,6 +131,23 @@ function Flags({flags}: {flags?: {count: number; issue: number}}): ReactNode {
 }
 
 /**
+ * WHY ONLY TWO COLUMNS ARE LIT, and never a whole row.
+ *
+ * Highlighting rather than filtering, because a filter answers "which should I pick" by
+ * removing the evidence for the other answer. Nothing here disappears.
+ *
+ * Only `sent` and `restored` are lit, and only at their unambiguous value. Nothing
+ * reaching the provider is good however the rest of the row reads, and every value coming
+ * back is good on its own terms. The leak columns are deliberately NOT lit: a low count
+ * there can mean the gateway caught everything, or that it returned almost nothing to the
+ * client, and the page says so in as many words. Colouring `0 of 16` green would assert
+ * the flattering reading of a number that has two.
+ *
+ * No row is lit as a whole, because a row that scored well on every column would be the
+ * ranking this page does not publish.
+ */
+
+/**
  * One leak cell, which may have nothing in it.
  *
  * The two leak columns come from the response-split profile. The operator check that runs
@@ -242,8 +259,10 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                     <Flags flags={row.flags} />
                   </td>
                   <td className={styles.muted}>{row.version}</td>
-                  <td>{row.sent}</td>
-                  <td>{row.restored}</td>
+                  <td className={row.sentN === 0 ? styles.good : undefined}>{row.sent}</td>
+                  <td className={row.restoredN === 1 ? styles.good : undefined}>
+                    {row.restored}
+                  </td>
                   <td>
                     <Leak
                       label={row.leakWhole}

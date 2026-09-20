@@ -164,3 +164,13 @@
   color: var(--ifm-color-emphasis-900);
   text-decoration: none;
 }
+
+/*
+ * A cell at its unambiguously good value. Quiet on purpose: this helps a reader scan, it
+ * does not award anything. See the component for why only two columns get it.
+ */
+.good {
+  background: var(--ifm-color-success-contrast-background);
+  color: var(--ifm-color-success-contrast-foreground);
+  font-weight: 600;
+}
