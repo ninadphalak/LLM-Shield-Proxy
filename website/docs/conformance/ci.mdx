@@ -170,7 +170,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
 
-      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0
         with:
           target-base-url: http://127.0.0.1:4000/v1
           start-command: ./scripts/start-test-gateway.sh
@@ -338,7 +338,7 @@ runner builds both versions; the old one needs no permanent deployment.
     ref: ${{ github.event.pull_request.base.sha }}
     path: baseline
 # Build both versions here in separate environments or container images.
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0
   with:
     target-base-url: http://127.0.0.1:4000/v1
     start-command: cd candidate && ./scripts/start-test-gateway.sh --port 4000
@@ -370,7 +370,7 @@ steps:
     run: |
       id=$(gh run list --workflow pii-leak-check.yml --branch main --status success              --limit 1 --json databaseId --jq '.[0].databaseId')
       gh run download "$id" --name pii-leak-benchmark --dir baseline || echo "no baseline yet"
-  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2
+  - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0
     with:
       target-base-url: http://127.0.0.1:4000/v1
       start-command: ./scripts/start-test-gateway.sh
@@ -434,7 +434,7 @@ fresh `--out` directory each time.
 To pin the Git source instead of the PyPI package:
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.2#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0#subdirectory=pii-leak-benchmark"
 ```
 
 </details>
