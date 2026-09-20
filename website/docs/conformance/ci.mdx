@@ -65,6 +65,14 @@ There is no trick to it. The check stands where the provider normally does, so i
 request your gateway actually sent and compares it against what went in. Anything that comes
 out the far side unchanged is something OpenAI would have received.
 
+The same trip back is worth as much. A gateway that masks on the way out and never puts the
+value back is not leaking, but it is handing your caller a placeholder where its own data
+should be, and that breaks the app just as effectively. The capture replies with the message
+it received, one character at a time, so the value your gateway has to rebuild arrives split
+across as many events as it has characters. `response_fidelity` records whether the caller got
+its own text back and `fragmentation_safety` records whether it survived being split, which is
+why a run can report no leak and still fail.
+
 ### No gateway of your own? Point the check at someone else's
 
 `capture://self` has no gateway in it, so it measures nothing about any product. For a real
