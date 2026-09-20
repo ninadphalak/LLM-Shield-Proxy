@@ -791,3 +791,62 @@ def test_a_failed_pull_request_takes_its_branch_back_down(monkeypatch):
         intake.publish(_row(), 7)
     flat = [" ".join(call) for call in calls]
     assert any("push origin --delete intake/issue-7" in line for line in flat)
+
+
+@pytest.mark.parametrize(
+    "rate,restored,number",
+    [(1.0, "all", 1.0), (0.0, "none", 0.0), (0.75, "some", 0.75), (0.5, "some", 0.5)],
+)
+def test_a_partial_fidelity_rate_is_reported_as_partial(rate, restored, number):
+    """A rate is not a boolean, and this once read `bool(rate)`.
+
+    0.75 is truthy, so a run that restored three cases in four was published as "all" with
+    `restoredN: 1.0` and a note saying every value came back. That is the strongest claim
+    this column makes, asserted from a measurement that says otherwise.
+    """
+    split = _split_report()
+    split["metrics"]["fidelity_rate"] = rate
+    derived = intake.derive_measurements({"v2.json": split})
+    assert derived["restored"] == restored
+    assert derived["restoredN"] == number
+
+
+@pytest.mark.parametrize("rate", [-0.1, 1.5, True, "1.0", None])
+def test_a_fidelity_rate_that_is_not_a_rate_asserts_nothing(rate):
+    split = _split_report()
+    split["metrics"]["fidelity_rate"] = rate
+    derived = intake.derive_measurements({"v2.json": split})
+    assert "restored" not in derived
+
+
+def test_a_boolean_check_still_wins_over_the_rate():
+    """The two per-run checks are genuinely boolean; only the profile reports a rate."""
+    derived = intake.derive_measurements(
+        {"current.raw.json": _raw_report(fidelity=True), "v2.json": _split_report()}
+    )
+    assert derived["restored"] == "all"
+
+
+def test_an_artifact_larger_than_the_cap_is_never_fetched():
+    """The listing's size is refused before anything is downloaded.
+
+    The download checks the real bytes too, because a listing is the submitter's claim
+    about their own artifact. This check means an oversized one costs no transfer at all.
+    """
+    fetched = []
+
+    def download(owner, repo, artifact_id):
+        fetched.append(artifact_id)
+        return b""
+
+    reports, evidence = intake.collect_reports(
+        "o", "r", "42",
+        api=lambda u: {"artifacts": [
+            {"id": 1, "name": "huge", "expired": False,
+             "size_in_bytes": intake.MAX_ARTIFACT_BYTES + 1},
+        ]},
+        download=download,
+    )
+    assert reports == {}
+    assert not fetched, "an oversized artifact must not be downloaded at all"
+    assert "larger than" in evidence

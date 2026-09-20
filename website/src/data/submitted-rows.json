@@ -1,11 +1,14 @@
 {
   "comment": [
     "Rows submitted from outside this project, written here by scripts/process_conformance_submission.py.",
-    "JSON and not TypeScript on purpose: every string in an entry arrived from a stranger's issue, and",
+    "JSON and not TypeScript on purpose: every string in an entry arrived from a stranger issue, and",
     "in JSON it is data. In a .ts file it would be source that gets bundled into the site.",
-    "A 'draft' entry is parked, not published: it reaches no page until a maintainer fills the measured",
-    "columns from the submitted report and flips status to 'published'. See results-wall.ts for the",
-    "validator that enforces that, and for why a submission cannot fill those columns by itself."
+    "A row is written with status published when the intake could read the measured columns out of the",
+    "linked run build artifact, which is the normal case and needs no approval. A submission whose",
+    "artifact could not be read is answered on the issue instead and nothing is written here.",
+    "Status draft is for a row a person is still completing by hand; it renders nowhere.",
+    "See results-wall.ts for the build-time validator, and CONTEXT-DETAIL section Q for why the",
+    "measured columns come from the artifact rather than from anything typed in the issue."
   ],
   "entries": [
     {

@@ -36,6 +36,7 @@ import os
 import re
 import subprocess  # nosec B404 - git, gh and npm with fixed argument lists
 import sys
+import tempfile
 import unicodedata
 import urllib.error
 import urllib.request
@@ -213,17 +214,31 @@ def _download_zip(owner: str, repo: str, artifact_id: int) -> bytes:
     handler forwards the header, so the download fails with a 403 that reads like a
     permissions problem and is not one. `gh api` handles the handover correctly.
     """
-    finished = subprocess.run(  # nosec B603 B607 - fixed argument list, resolved via PATH
-        ["gh", "api", f"repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip"],
-        capture_output=True,
-        timeout=180,
-        check=False,
-    )
-    if finished.returncode != 0:
-        raise RuntimeError((finished.stderr or b"").decode("utf-8", "replace").strip()[:300])
-    if len(finished.stdout) > MAX_ARTIFACT_BYTES:
-        raise RuntimeError("artifact is larger than this job will unpack")
-    return finished.stdout
+    # STREAMED TO DISK, NOT INTO MEMORY. This used `capture_output=True` and then checked
+    # `len(stdout)` against the cap, which is a guard that runs after the allocation it
+    # exists to prevent: the whole artifact was already buffered by the time the cap was
+    # consulted. The artifact is named by the submitter and can be any size they like.
+    #
+    # The size is now refused twice: from the listing before anything is fetched, and from
+    # the file on disk after, because a listing is a claim and the bytes are the fact.
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as handle:
+        destination = Path(handle.name)
+    try:
+        with destination.open("wb") as sink:
+            finished = subprocess.run(  # nosec B603 B607 - fixed argument list, resolved via PATH
+                ["gh", "api", f"repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip"],
+                stdout=sink,
+                stderr=subprocess.PIPE,
+                timeout=180,
+                check=False,
+            )
+        if finished.returncode != 0:
+            raise RuntimeError((finished.stderr or b"").decode("utf-8", "replace").strip()[:300])
+        if destination.stat().st_size > MAX_ARTIFACT_BYTES:
+            raise RuntimeError("artifact is larger than this job will unpack")
+        return destination.read_bytes()
+    finally:
+        destination.unlink(missing_ok=True)
 
 
 def reports_from_zip(data: bytes) -> dict[str, Any]:
@@ -277,6 +292,13 @@ def collect_reports(
     for artifact in artifacts:
         if artifact.get("expired"):
             problems.append(f"`{artifact.get('name')}` has expired")
+            continue
+        # Refuse on the listed size before fetching anything. The download checks the real
+        # bytes afterwards, because this number is the submitter's claim about their own
+        # artifact, but declining here means an oversized one is never fetched at all.
+        declared = artifact.get("size_in_bytes")
+        if isinstance(declared, int) and declared > MAX_ARTIFACT_BYTES:
+            problems.append(f"`{artifact.get('name')}` is larger than this job will fetch")
             continue
         try:
             reports = reports_from_zip(download(owner, repo, int(artifact["id"])))
@@ -438,12 +460,23 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     if fidelity is None and operator:
         value = (operator.get("required_checks") or {}).get("response_fidelity")
         fidelity = value if isinstance(value, bool) else None
-    if fidelity is None and split:
-        rate = (split.get("metrics") or {}).get("fidelity_rate")
-        fidelity = bool(rate) if isinstance(rate, (int, float)) else None
     if fidelity is not None:
         derived["restored"] = "all" if fidelity else "none"
         derived["restoredN"] = 1.0 if fidelity else 0.0
+    elif split:
+        # A RATE IS NOT A BOOLEAN. This read `bool(rate)`, so a fidelity rate of 0.75 was
+        # truthy and published as "all" with `restoredN: 1.0` and a note saying every
+        # value came back. That is the strongest claim this column can make, asserted from
+        # a measurement that says the opposite, and it is reachable from any profile that
+        # restores some cases and not others.
+        #
+        # The two checks above are genuinely boolean: a run either reconstructed the
+        # expected value or it did not. Only the response-split profile reports a rate
+        # across a case set, and a partial one is reported as partial.
+        rate = (split.get("metrics") or {}).get("fidelity_rate")
+        if isinstance(rate, (int, float)) and not isinstance(rate, bool) and 0.0 <= rate <= 1.0:
+            derived["restored"] = "all" if rate == 1.0 else "none" if rate == 0.0 else "some"
+            derived["restoredN"] = float(rate)
 
     if split:
         metrics = split.get("metrics") or {}

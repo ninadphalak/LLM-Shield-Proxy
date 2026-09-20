@@ -322,15 +322,25 @@ export const MEASURED_ROWS: ResultRow[] = [
  * check that it is a well-formed row has to happen somewhere, and the build is the right
  * place: a bad entry stops the deploy instead of reaching the page.
  *
- * WHY `draft` EXISTS. A submission cannot fill this table. The four measurement columns
- * come from the response-split profile, and what a submitter posts is a citation block
- * plus a verdict, which names the instrument rather than the numbers. There is no honest
- * default for a missing leak count either: `0 of 16` is the strongest claim on the page,
- * and an absent one would sort as though it were the weakest. So the workflow always
- * writes `draft`, which is parked and rendered nowhere, and a maintainer fills the
- * measured columns from the report and flips it to `published`. The validator below is
- * what makes that flip safe: a `published` entry that is missing a field, or that carries
- * a value outside one of the two unions, throws here rather than shipping.
+ * WHAT `status` MEANS. The workflow writes `published` when it could read the measured
+ * columns out of the linked run's build artifact, which is the normal case, and the row
+ * goes up without anyone approving it. It writes nothing at all when it could not: a
+ * submission whose artifact was unreadable is answered on the issue rather than parked
+ * here, because a row nobody can see helps nobody. `draft` therefore exists for a row a
+ * person is still working on by hand, and such a row renders nowhere.
+ *
+ * An earlier version of this comment described a manual flow where every submission
+ * landed as a draft for a maintainer to complete. That was the design before the intake
+ * read artifacts; it is not what the code does, and the two public data files saying so
+ * were caught in review rather than by anything executable. If this paragraph and
+ * `scripts/process_conformance_submission.py` ever disagree again, the script is right.
+ *
+ * The validator below is what keeps either path safe: a `published` entry that is missing
+ * a field, or that carries a value outside one of the two unions, throws here rather than
+ * shipping. Note what it does NOT require, and why. The four leak columns are optional
+ * because only the response-split profile measures them, and there is no honest default
+ * for a missing one: `0 of 16` is the strongest claim on this page and an absent count
+ * would sort as though it were the weakest.
  */
 type SubmittedEntry = {status?: unknown} & Partial<Record<keyof ResultRow, unknown>>;
 
