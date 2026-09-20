@@ -204,7 +204,6 @@ def print_summary(report: dict[str, Any], destination: str) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    print("DEBUG MAIN:", arguments, argv, sys.argv, file=sys.stderr)
     if arguments and arguments[0] == "ci":
         from pii_leak_benchmark.ci import main as ci_main
 
