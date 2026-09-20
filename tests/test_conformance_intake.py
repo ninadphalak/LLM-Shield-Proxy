@@ -767,3 +767,27 @@ def test_the_repository_a_run_happened_in_is_recorded_beside_the_claimed_name():
     """Nothing stops somebody labelling another project's genuine run as their own."""
     row = _row()
     assert row["_submission"]["ranIn"] == "o/r"
+
+
+def test_a_failed_pull_request_takes_its_branch_back_down(monkeypatch):
+    """A branch left behind makes the retry collide with it."""
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "website/src/data/submitted-rows.json"
+        stderr = ""
+
+    def run(command, *args, **kwargs):
+        calls.append(list(command))
+        # `_run(*command)` hands subprocess a TUPLE, so slice-compare as a list or this
+        # never matches and the test passes for the wrong reason.
+        if list(command[:3]) == ["gh", "pr", "create"]:
+            raise intake.subprocess.CalledProcessError(1, "gh pr create")
+        return Result()
+
+    monkeypatch.setattr(intake.subprocess, "run", run)
+    with pytest.raises(intake.subprocess.CalledProcessError):
+        intake.publish(_row(), 7)
+    flat = [" ".join(call) for call in calls]
+    assert any("push origin --delete intake/issue-7" in line for line in flat)

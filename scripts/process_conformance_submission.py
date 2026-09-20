@@ -755,10 +755,17 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
         f"anything else is staged.\n\n"
         f"Closes #{issue_number}\n"
     )
-    _run("gh", "pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", body)
-    # Squash, so one row is one commit on main whatever the branch looks like, and delete
-    # the branch behind it: these accumulate one per submission otherwise.
-    _run("gh", "pr", "merge", branch, "--squash", "--delete-branch")
+    try:
+        _run("gh", "pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", body)
+        # Squash, so one row is one commit on main whatever the branch looks like, and
+        # delete the branch behind it: these accumulate one per submission otherwise.
+        _run("gh", "pr", "merge", branch, "--squash", "--delete-branch")
+    except (OSError, subprocess.SubprocessError):
+        # Take the branch back down before giving up. A failure between pushing it and
+        # merging it used to leave `intake/issue-N` behind on the remote, so a retry hit a
+        # branch that already existed and the repository slowly filled with dead ones.
+        _try("git", "push", "origin", "--delete", branch)
+        raise
 
 
 def _try(*command: str) -> bool:
