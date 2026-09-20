@@ -5,6 +5,7 @@ import {
   ARCHITECTURE,
   PROVENANCE,
   ROWS,
+  firstIndependentPass,
   type ResultRow,
 } from '@site/src/data/results-wall';
 import {safeHref} from '@site/src/utils/safeHref';
@@ -183,6 +184,9 @@ function Leak({
 }
 
 export default function ResultsWall({rows = ROWS}: Props): ReactNode {
+  // Computed, so the mark is earned by the row rather than granted in a data file. It is
+  // undefined until a gateway this project did not write answers all three questions.
+  const milestone = useMemo(() => firstIndependentPass(rows), [rows]);
   const [key, setKey] = useState<string>('date');
   const [ascending, setAscending] = useState(false);
 
@@ -257,6 +261,13 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                 <tr key={`${row.project}-${row.version}`}>
                   <td>
                     {row.project}
+                    {row === milestone && (
+                      <span
+                        className={styles.milestone}
+                        title="The first gateway not written by this project to answer all three questions. Computed from the rows, not awarded.">
+                        first independent pass
+                      </span>
+                    )}
                     <Flags flags={row.flags} />
                     <span className={styles.sub}>{row.version}</span>
                     <span className={styles.sub}>

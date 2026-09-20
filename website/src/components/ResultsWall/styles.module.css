@@ -198,3 +198,37 @@
   font-weight: 400;
   color: var(--ifm-color-emphasis-700);
 }
+
+/*
+ * The one mark on this page that is worth wanting, and the only one that glows.
+ *
+ * It goes to the first gateway this project did not write that answers all three
+ * questions, and it is computed from the rows rather than set in a data file, because a
+ * milestone somebody can award themselves is not one. Nothing holds it yet.
+ *
+ * Loud on purpose, and still not a ranking: there is exactly one of these ever, it is
+ * decided by date, and it says nothing about the rows it is not on.
+ */
+.milestone {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f5c542, #f59e0b);
+  color: #3b2606;
+  font-size: 0.65rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.5), 0 0 10px rgba(245, 197, 66, 0.55);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .milestone {
+    animation: milestoneGlow 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes milestoneGlow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.5), 0 0 6px rgba(245, 197, 66, 0.45); }
+  50%      { box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.7), 0 0 16px rgba(245, 197, 66, 0.85); }
+}

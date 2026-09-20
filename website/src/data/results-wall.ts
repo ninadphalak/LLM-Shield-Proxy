@@ -477,3 +477,41 @@ export const SUBMITTED_ROWS: ResultRow[] = publishedRows(
  * sorts client side and defaults to date, and nothing on this page is ranked.
  */
 export const ROWS: ResultRow[] = [...MEASURED_ROWS, ...SUBMITTED_ROWS];
+
+
+/**
+ * Does this row answer all three questions the page asks?
+ *
+ * Nothing to the provider, everything back to the caller, and nothing the caller never
+ * sent reaching the client, whole or split. That is the page's own stated criterion, so
+ * restating it in code is not a judgement: a row either met it or it did not.
+ */
+export function passes(row: ResultRow): boolean {
+  return (
+    row.sentN === 0 &&
+    row.restoredN === 1 &&
+    row.leakWholeN === 0 &&
+    row.leakSplitN === 0
+  );
+}
+
+/**
+ * The first pass by a gateway this project did not write, or undefined while there is none.
+ *
+ * COMPUTED, NEVER SET BY HAND. A milestone somebody can award themselves is not one, and
+ * this is the single most valuable mark the page can carry, so it is derived from the rows
+ * and cannot be granted in a data file. `measured-here` is excluded because we wrote the
+ * check, which the provenance table already calls the most conflicted position on the page
+ * rather than the strongest.
+ *
+ * Earliest date wins, and ties go to neither: a tie means two projects got there the same
+ * day and the page has no basis for splitting them.
+ */
+export function firstIndependentPass(rows: ResultRow[]): ResultRow | undefined {
+  const winners = rows
+    .filter((row) => row.provenance !== 'measured-here' && passes(row))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (winners.length === 0) return undefined;
+  if (winners.length > 1 && winners[0].date === winners[1].date) return undefined;
+  return winners[0];
+}
