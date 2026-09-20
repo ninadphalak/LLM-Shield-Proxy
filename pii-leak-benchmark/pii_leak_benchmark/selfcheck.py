@@ -1,13 +1,13 @@
 """``pii-leak-benchmark selfcheck`` -- the operator smoke test.
 
-Answers "does my deployment leak?" without the friction of the publishable `flat` command 
-(which requires vendor claims and citations). 
+Answers "does my deployment leak?" without the friction of the publishable `flat` command
+(which requires vendor claims and citations).
 
 *   `outcome` (Publishable Row): Remains `claim-unstated` (fail-closed, not publishable).
 *   `verdict` (Operator Action): Defined here to provide actionable feedback.
 
-Crucially, this command refuses to return CLEAN if traffic never reached the capture (e.g., 
-a misconfigured proxy), returning NOT MEASURED (exit 2) instead. Every needle check passing 
+Crucially, this command refuses to return CLEAN if traffic never reached the capture (e.g.,
+a misconfigured proxy), returning NOT MEASURED (exit 2) instead. Every needle check passing
 because nothing was inspected is not a clean bill of health.
 """
 
@@ -49,7 +49,7 @@ claim, so its outcome is claim-unstated by design. To publish a comparative resu
 the flat command and record the claim.
 """
 
-# Re-derive attributable/leaked from the report to prevent the selfcheck verdict from 
+# Re-derive attributable/leaked from the report to prevent the selfcheck verdict from
 # drifting from the outcome derivation without tests noticing.
 _BOUNDARY = "configured_upstream_boundary"
 
@@ -95,8 +95,8 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
     parser.add_argument(
         "--target-header",
         action="append",
-        # Uses the same default as `flat` so `append` adds to the environment rather than 
-        # replacing it. A `None` default would silently discard CONFORMANCE_TARGET_HEADERS 
+        # Uses the same default as `flat` so `append` adds to the environment rather than
+        # replacing it. A `None` default would silently discard CONFORMANCE_TARGET_HEADERS
         # (credentials/routing) when a single CLI header is provided, causing unauthenticated
         # requests and false NOT MEASURED reports.
         default=_target_headers_from_env(),
@@ -146,7 +146,7 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).
 
-    Attributability is checked first. If a run never reached the capture, it inspected 
+    Attributability is checked first. If a run never reached the capture, it inspected
     nothing and passed vacuously; returning CLEAN here would actively mislead the operator.
     """
     boundary = report["checks"][_BOUNDARY]
@@ -197,7 +197,7 @@ def _print_per_entity(report: dict[str, Any], boundary: dict[str, Any]) -> None:
     """Prints one row per entity TESTED.
 
     Printing only leaks makes a clean run unreadable, as it fails to distinguish between
-    "SSN was tested and contained" and "SSN was never tested". 
+    "SSN was tested and contained" and "SSN was never tested".
     """
     tested = sorted(report.get("fixture", {}).get("formats", {}))
     if not tested:
@@ -247,7 +247,7 @@ def findings_for(
 ) -> list[explain.Finding]:
     """What this run should SAY, under the duty the operator declared.
 
-    Maintained as a named wrapper so the duty logic (e.g. preventing anonymizing gateways 
+    Maintained as a named wrapper so the duty logic (e.g. preventing anonymizing gateways
     from being told their values didn't return on a CLEAN run) can be tested directly.
     """
     return explain.findings_from_report(report, specimens, duty=duty)
@@ -282,8 +282,8 @@ def _print_report(
 
     _print_per_entity(report, boundary)
 
-    # Print the synthetic specimens (`reveal=True`) above the matcher table. Showing the 
-    # actual generated values makes the failure actionable, whereas the matcher table 
+    # Print the synthetic specimens (`reveal=True`) above the matcher table. Showing the
+    # actual generated values makes the failure actionable, whereas the matcher table
     # ("EMAIL / literal / body") only explains how the finding was produced.
     explain.print_findings(
         findings_for(report, specimens, duty=duty), reveal=specimens is not None
@@ -339,7 +339,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from pii_leak_benchmark.http_profile import run_http_conformance
 
     args = build_parser().parse_args(argv)
-    # Passed separately from the report to prevent the generated synthetic specimens 
+    # Passed separately from the report to prevent the generated synthetic specimens
     # from leaking into the on-disk JSON artifact.
     specimens = OperatorSpecimens()
 
@@ -357,12 +357,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             capture_token=os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token,
             capture_public_url=args.capture_public_url,
             extra_headers=headers_from_args(args),
-            # Credentials are ON by default here (unlike the `flat` command) because 
+            # Credentials are ON by default here (unlike the `flat` command) because
             # operator self-checks typically care about secrets as much as personal data.
-            # This doesn't corrupt historical comparisons because selfchecks are not 
+            # This doesn't corrupt historical comparisons because selfchecks are not
             # publishable rows.
             include_credentials=args.profile == "pii-secrets-v1" and not args.no_credentials,
-            # Force `claim-unstated`. This explicitly declines participation in the 
+            # Force `claim-unstated`. This explicitly declines participation in the
             # publishable-row machinery.
             redaction_claim=None,
             specimens=specimens,

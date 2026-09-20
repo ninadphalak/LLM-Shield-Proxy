@@ -1045,9 +1045,9 @@ async def rehydrate_sse_stream(
                                     and settings.ENABLE_RESPONSE_PII_REDACTION
                                 ):
                                     # This scan is vault-scoped, so ANY open window answers.
-                                    # Calling `_buffer_for` directly could trip the 
-                                    # fail-closed window cap on finishing events, abruptly 
-                                    # cutting off completing streams. We borrow an existing 
+                                    # Calling `_buffer_for` directly could trip the
+                                    # fail-closed window cap on finishing events, abruptly
+                                    # cutting off completing streams. We borrow an existing
                                     # window instead.
                                     sweep_buffer = next(iter(buffers.values()), None)
                                     if sweep_buffer is None:
@@ -1129,8 +1129,8 @@ async def rehydrate_sse_stream(
                             yield ready
 
                     # A deliberate safety limit is never forgiven by FAIL_OPEN.
-                    # Limits bound work an upstream controls; treating them as ordinary 
-                    # failures turns them into a redaction bypass (e.g., opening 257 choice 
+                    # Limits bound work an upstream controls; treating them as ordinary
+                    # failures turns them into a redaction bypass (e.g., opening 257 choice
                     # indices to flip the handler into raw passthrough).
                     capacity_breach = isinstance(e, StreamCapacityExceeded)
                     if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED" or capacity_breach:

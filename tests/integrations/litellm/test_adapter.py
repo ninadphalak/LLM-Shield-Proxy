@@ -1,14 +1,14 @@
 """The LiteLLM adapter ships as an example artifact, not as a module of this package.
 
-The example adapter subclasses `CustomGuardrail` and must import LiteLLM, but a bare 
-`pip install llm-shield-proxy` has no LiteLLM. Shipping the adapter inside the package 
+The example adapter subclasses `CustomGuardrail` and must import LiteLLM, but a bare
+`pip install llm-shield-proxy` has no LiteLLM. Shipping the adapter inside the package
 would break module import audits.
 
 The dependency direction these tests defend is:
     the example       --may-import-->     litellm
     llm_shield_proxy  --never-imports-->  litellm
 
-Tests run in subprocesses because the parent pytest process has already imported the package, 
+Tests run in subprocesses because the parent pytest process has already imported the package,
 making in-process assertions vacuously true.
 """
 
@@ -52,8 +52,8 @@ def _modules_imported_by(import_statement: str) -> set[str]:
 
 def test_base_install_never_reaches_the_host():
     """Importing the gateway must not import LiteLLM.
-    
-    Prevents every install from carrying LiteLLM's dependency tree for a feature only 
+
+    Prevents every install from carrying LiteLLM's dependency tree for a feature only
     LiteLLM users need.
     """
     imported = _modules_imported_by("import llm_shield_proxy")
@@ -77,7 +77,7 @@ def test_no_packaged_module_imports_litellm():
 def test_example_config_points_at_a_class_that_the_shipped_file_defines():
     """The documented dotted path must name a class that exists in the mounted file.
 
-    A rename in the code or config would leave the `guardrail:` string stale and surface 
+    A rename in the code or config would leave the `guardrail:` string stale and surface
     at the user's proxy startup. We catch it here instead.
     """
     config = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
@@ -98,8 +98,8 @@ def test_example_config_points_at_a_class_that_the_shipped_file_defines():
 
 def test_example_config_asks_for_both_lifecycle_modes():
     """Ensures the example teaches the correct configuration.
-    
-    `pre_call` alone returns placeholders to the caller. The two modes are complements, 
+
+    `pre_call` alone returns placeholders to the caller. The two modes are complements,
     not alternatives.
     """
     config = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))

@@ -106,7 +106,7 @@ class DistributedRateLimiter:
                         raise
                 return bool(result)
             except Exception as e:
-                # Invalidate SHA so distributed limiting is retried once Redis recovers, 
+                # Invalidate SHA so distributed limiting is retried once Redis recovers,
                 # rather than permanently degrading to per-process limiting.
                 self._lua_sha = None
                 logging.getLogger(__name__).warning(
@@ -167,7 +167,7 @@ class DistributedBlastRadiusLimiter:
                         raise
                 return bool(result)
             except Exception as e:
-                # To prevent failing open on Redis errors, invalidate the SHA for future 
+                # To prevent failing open on Redis errors, invalidate the SHA for future
                 # recovery and fall back to the strict per-process in-memory limit.
                 self._lua_sha = None
                 logging.getLogger(__name__).warning(
@@ -180,7 +180,7 @@ class DistributedBlastRadiusLimiter:
                 if virtual_key_id not in self._in_memory_buckets:
                     self._in_memory_buckets[virtual_key_id] = InMemoryBucket(rate_per_sec, burst)
 
-        # Inline logic to acquire `requested` tokens, since `InMemoryBucket.acquire()` 
+        # Inline logic to acquire `requested` tokens, since `InMemoryBucket.acquire()`
         # is hardcoded to 1 token.
         bucket = self._in_memory_buckets[virtual_key_id]
         now = time.monotonic()

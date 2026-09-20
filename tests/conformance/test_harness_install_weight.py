@@ -1,14 +1,14 @@
 """The benchmark must not carry the gateway in its imports, its install, or its name.
 
-The dependency direction is strictly one-way to ensure the benchmark remains 
+The dependency direction is strictly one-way to ensure the benchmark remains
 gateway-independent:
     llm-shield-proxy  --may-use-->  pii-leak-benchmark
     pii-leak-benchmark  --never-->  llm-shield-proxy
 
-Import graph, declared dependencies, and a real installation are three different claims; 
+Import graph, declared dependencies, and a real installation are three different claims;
 all three are asserted below.
 
-Tests run in subprocesses because the parent pytest process has already imported the proxy, 
+Tests run in subprocesses because the parent pytest process has already imported the proxy,
 making in-process assertions vacuously true.
 """
 
@@ -25,7 +25,7 @@ BENCHMARK_DIST = REPO_ROOT / "pii-leak-benchmark"
 BENCHMARK_PACKAGE = BENCHMARK_DIST / "pii_leak_benchmark"
 
 # The floor: httpx's dependency tree. The profile itself needs nothing beyond it.
-# Listed generously (including click/rich/pygments/attr from httpx[cli]) because the 
+# Listed generously (including click/rich/pygments/attr from httpx[cli]) because the
 # assertion is a subset check -- what matters is that no gateway package appears.
 HTTPX_TREE = {
     "anyio",
@@ -219,7 +219,7 @@ def test_the_benchmark_never_depends_on_the_thing_it_measures():
 
 def test_installing_the_proxy_installs_the_gateway_again():
     """`pip install llm-shield-proxy` must give you the proxy.
-    
+
     Ensures we haven't reverted to the old packaging where the base install was just the harness.
     """
     manifest = _manifest(REPO_ROOT / "pyproject.toml")

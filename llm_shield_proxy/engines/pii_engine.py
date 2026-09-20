@@ -1076,12 +1076,12 @@ class PIIEngine:
     ) -> str:
         """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
 
-        The blob's edges are inspected first to avoid skipping limits, which tells an 
-        attacker how much padding to add. Measured: a 12 KB base64 blob carrying an 
+        The blob's edges are inspected first to avoid skipping limits, which tells an
+        attacker how much padding to add. Measured: a 12 KB base64 blob carrying an
         email at its head was caught before hitting the base64 character limit.
         The interior is not decoded; this bound avoids the cost of full inspection.
-        
-        A `data:` URI is skipped. Rewriting declared media breaks vision models, 
+
+        A `data:` URI is skipped. Rewriting declared media breaks vision models,
         which is a worse failure than the risk it removes.
         """
         policy = settings.UNMAPPED_BLOB_POLICY
@@ -1114,7 +1114,7 @@ class PIIEngine:
         )
 
         if edge_scan == "pii_found":
-            # Return a FIXED marker. Minting a vault token would hash and retain the 
+            # Return a FIXED marker. Minting a vault token would hash and retain the
             # entire blob in plaintext in Redis, making the payload size bound pointless.
             return "[UNMAPPED_BLOB_PII_REDACTED]"
 
