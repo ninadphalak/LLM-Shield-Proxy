@@ -707,6 +707,22 @@ def _run(*command: str, cwd: Optional[Path] = None) -> None:
     subprocess.run(command, check=True, cwd=cwd or REPO_ROOT)  # nosec B603 - fixed argument lists
 
 
+def check_row_content() -> None:
+    """Run the public-docs style scan over the row before it is committed.
+
+    MOVED HERE FROM CI, AND EARLIER IS THE POINT. This scan is the only automated check on
+    the CONTENT of a submitted row: the em dash and banned-phrase list over
+    `website/src/data`. It used to run in `ci.yml` after the pull request opened, which
+    meant a whole test matrix started in order to check one line of JSON, and the check
+    landed after the row was already committed.
+
+    Running it here fails a bad row before it is written anywhere, and lets `ci.yml` skip
+    a row-only change entirely. `clean()` already substitutes the em dash, so this is the
+    belt to that pair of braces rather than the first line of defence.
+    """
+    _run("python", "-m", "pytest", "tests/test_public_docs_style.py", "-q")
+
+
 def build_site() -> None:
     """Run the real site build, which is the check a pull request here would not get.
 
@@ -918,6 +934,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     append_row(row)
+    # Content check first, then the build. Both run BEFORE the commit, so a row that
+    # carries banned text or that breaks the site fails here rather than reaching main.
+    check_row_content()
     # Build BEFORE the commit, never after. This is the only place the site build runs on
     # this path, so a row that breaks it has to fail here or it reaches the deploy.
     build_site()

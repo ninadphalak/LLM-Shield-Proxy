@@ -854,3 +854,29 @@ def test_an_artifact_larger_than_the_cap_is_never_fetched():
     assert reports == {}
     assert not fetched, "an oversized artifact must not be downloaded at all"
     assert "larger than" in evidence
+
+
+def test_the_row_content_is_checked_before_anything_is_committed(monkeypatch):
+    """The style scan moved out of CI and into the intake, so it must actually run here.
+
+    `ci.yml` now skips a row-only change on the strength of this call. If it is removed,
+    that filter has to go with it or stranger-supplied text reaches the site unchecked.
+    """
+    calls = []
+    monkeypatch.setattr(
+        intake.subprocess, "run",
+        lambda command, *a, **k: calls.append(list(command)) or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    intake.check_row_content()
+    flat = " ".join(calls[0])
+    assert "pytest" in flat and "test_public_docs_style.py" in flat
+
+
+def test_the_ci_filter_and_the_content_check_agree():
+    """A filter justified by a call that no longer exists is how content goes unchecked."""
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    script = (REPO_ROOT / "scripts" / "process_conformance_submission.py").read_text(encoding="utf-8")
+    if "submitted-rows.json" in workflow and "paths-ignore" in workflow:
+        assert "test_public_docs_style.py" in script, (
+            "ci.yml skips row-only changes, so the intake must run the content scan itself"
+        )

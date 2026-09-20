@@ -26,6 +26,11 @@ Do all three and you pass.
 
 ## No gateway here has passed yet
 
+> **First to pass, unclaimed.** Nobody has answered all three questions yet. The first
+> gateway that does gets named here with the date and the exact version it passed on, and
+> that entry stays whatever happens afterwards. It is a milestone rather than a placing:
+> there is no second and no ranking, only the date something first worked.
+
 **Ours has not either, and we wrote the check.** With its response scan on, 1.6.0 leaked 2 of the
 16 values sent whole and 4 of the 16 sent split, and that row is below. We have since fixed those
 cases, and the passing row goes up when the evidence does, not before. Find a case that trips us
@@ -150,13 +155,21 @@ they are things a reader can click and check.
 ```
 
 It reads `contained`, or `leaked 4 of 16`, rather than merely saying your workflow exited
-cleanly. The run writes `pii-leak-badge.json` beside its other reports; publish that file
-from your own repository. Nothing is hosted here and there is nothing to register.
+cleanly, and it names the version it measured.
 
-**Anywhere else**, link this page. It carries a preview card, and the row is yours to point at:
+**The badge is yours, not ours.** The run writes `pii-leak-badge.json` beside its other
+reports and you publish that file from your own repository. Nothing is hosted here, there is
+nothing to register, and no permission is asked for or given. Deleting the line from your
+README removes it, and deleting the file stops it updating. We never add a badge to anybody's
+project and cannot.
+
+**Anywhere else**, link this page. It carries a preview card, and any row is fair to point
+at, including one that is not yours. A gateway quietly forwarding data its users assume is
+redacted is worth telling people about, and a row here is checkable in a way a screenshot is
+not: the version, the configuration and the run behind it are all on the page.
 
 - [Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it)
-- [Share on X](https://twitter.com/intent/tweet?url=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it&text=We%20ran%20the%20PII%20leak%20check%20on%20our%20LLM%20gateway.%20Here%20is%20what%20it%20found%3A)
+- [Share on X](https://twitter.com/intent/tweet?url=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it&text=Which%20LLM%20gateways%20send%20your%20users%27%20data%20to%20the%20model%20provider%2C%20measured%20rather%20than%20asserted%3A)
 - [Share on Hacker News](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it)
 
 Posting a leak is worth as much as posting a pass. A row going from `leak` to `contained` in a

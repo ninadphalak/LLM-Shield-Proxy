@@ -48,9 +48,31 @@
   color: var(--ifm-color-primary);
 }
 
+/*
+ * The sort affordance, made visible rather than discoverable by accident.
+ *
+ * Sorting is the one reordering this page positively wants a reader to do: choosing your
+ * own order is explicitly fine, while the site shipping a ranked order is not. A control
+ * nobody notices is a control nobody uses, so the idle arrows sit at a readable weight
+ * instead of nearly invisible, and the active column is unmistakable.
+ */
 .arrow {
   font-size: 0.8em;
-  opacity: 0.7;
+  opacity: 0.45;
+  transition: opacity 120ms ease;
+}
+
+.head:hover .arrow {
+  opacity: 0.9;
+}
+
+.active .arrow {
+  opacity: 1;
+  color: var(--ifm-color-primary);
+}
+
+.active {
+  background: var(--ifm-color-emphasis-100);
 }
 
 .muted {

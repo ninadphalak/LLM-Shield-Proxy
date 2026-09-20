@@ -10,11 +10,15 @@ name: Conformance submission intake
 # site, and commits. No code from a submitter ever executes here, and nobody outside opens
 # a pull request against this repository to get a row.
 #
-# WHY IT COMMITS TO MAIN RATHER THAN OPENING A PR. A pull request opened with GITHUB_TOKEN
-# triggers no workflows at all, by design, so such a PR would carry no checks; and
-# deploy-docs.yml builds the site on push to main, never on a pull request. A PR here would
-# therefore add a step without adding a gate. The gate is the real `npm run build`, which
-# the script runs BEFORE it commits. A bad row fails the job and never lands.
+# HOW THE ROW LANDS. Through a pull request, which `main` requires, opened under
+# RESULTS_WALL_TOKEN and left to auto-merge. It is not opened under GITHUB_TOKEN because
+# such a pull request has its workflow runs created and then held at `action_required` with
+# zero jobs: PR-Agent never reports, the required check never goes green, and auto-merge
+# would wait forever.
+#
+# The gates run BEFORE the commit, inside the script: the public-docs content scan over the
+# row, then a real `npm run build`. A row carrying banned text or breaking the site fails
+# there and never reaches a branch.
 
 on:
   issues:
@@ -61,6 +65,9 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: website/package-lock.json
+      - name: Install the content checker
+        run: pip install pytest
+
       - name: Read the submission, verify the run, publish the row
         id: publish
         env:

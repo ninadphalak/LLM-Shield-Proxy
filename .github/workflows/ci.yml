@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # A published results-wall row is one line of JSON in a data file. Without this, every
+    # submission started eleven jobs here, including the container tests, ONNX inference,
+    # Helm rendering and the benchmark floor on five Python versions, to add a table row.
+    #
+    # Safe only because the check that DOES apply to a row moved earlier: the intake runs
+    # `tests/test_public_docs_style.py` itself before it commits, so banned text in a
+    # submitted row fails before the row is written rather than after it is merged. If that
+    # call is ever removed from `scripts/process_conformance_submission.py`, remove this
+    # filter with it or stranger-supplied text reaches the site unchecked.
+    paths-ignore:
+      - 'website/src/data/submitted-rows.json'
 
 permissions:
   contents: read

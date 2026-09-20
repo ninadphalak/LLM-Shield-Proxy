@@ -199,9 +199,10 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
   return (
     <div className={styles.wrap}>
       <p className={styles.hint}>
-        Click any column heading to sort. This changes only your view of the table and
-        nothing is scored or ranked. An arrow next to a leak count compares that gateway
-        with its own earlier version on this page, never with another project.
+        <strong>Click any column heading to sort</strong>, including "Who ran it" and "How
+        it reads the stream". That changes only your view: nothing here is scored or ranked,
+        and the order the page ships in is the date. An arrow next to a leak count compares
+        a gateway with its own earlier version on this page, never with another project.
       </p>
       <div className={styles.scroll}>
         <table className={styles.table}>
