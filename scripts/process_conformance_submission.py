@@ -654,16 +654,30 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
     _run("git", "push", "origin", "HEAD:main")
 
 
-def comment(issue_number: int, text: str) -> None:
-    _run("gh", "issue", "comment", str(issue_number), "--body", text)
+def _try(*command: str) -> bool:
+    """Run a courtesy that must never cost a row.
+
+    Commenting, labelling and closing all happen AFTER the row is committed and the site
+    deployed. By then the submitter's result is live, and failing the job over a label
+    that does not exist would report the whole submission as broken when the only thing
+    that broke was the thank-you note. The failure is printed and the job carries on.
+    """
+    finished = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)  # nosec B603
+    if finished.returncode != 0:
+        print(f"Could not {' '.join(command[:3])}: {(finished.stderr or '').strip()[:200]}", file=sys.stderr)
+    return finished.returncode == 0
 
 
-def label(issue_number: int, name: str) -> None:
-    _run("gh", "issue", "edit", str(issue_number), "--add-label", name)
+def comment(issue_number: int, text: str) -> bool:
+    return _try("gh", "issue", "comment", str(issue_number), "--body", text)
 
 
-def close_issue(issue_number: int) -> None:
-    _run("gh", "issue", "close", str(issue_number), "--reason", "completed")
+def label(issue_number: int, name: str) -> bool:
+    return _try("gh", "issue", "edit", str(issue_number), "--add-label", name)
+
+
+def close_issue(issue_number: int) -> bool:
+    return _try("gh", "issue", "close", str(issue_number), "--reason", "completed")
 
 
 # ------------------------------------------------------------------------------ main

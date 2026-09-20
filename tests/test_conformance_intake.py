@@ -596,3 +596,17 @@ def test_an_archive_with_too_many_members_is_not_walked_to_the_end(monkeypatch):
 def test_no_more_reports_are_parsed_than_a_run_could_have(monkeypatch):
     monkeypatch.setattr(intake, "MAX_REPORTS", 3)
     assert len(intake.reports_from_zip(_zip_of({f"f{n}.json": {"n": n} for n in range(40)}))) == 3
+
+
+def test_a_courtesy_that_fails_does_not_fail_the_job(monkeypatch, capsys):
+    """Commenting and labelling happen after the row is live; they cannot cost it."""
+    class Failed:
+        returncode = 1
+        stderr = "label 'needs-info' not found"
+        stdout = ""
+
+    monkeypatch.setattr(intake.subprocess, "run", lambda *a, **k: Failed())
+    assert intake.label(7, "needs-info") is False
+    assert intake.comment(7, "hello") is False
+    assert intake.close_issue(7) is False
+    assert "Could not" in capsys.readouterr().err
