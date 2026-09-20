@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""Count what a change set is actually made of, so "it is huge" can be checked.
+"""Count lines by kind (code, comment, blank) to evaluate change size and comment density.
 
-WHY THIS EXISTS. A diff of a few thousand lines reads as bloat and sometimes is. Often it
-is tests, prose and YAML, and the logic underneath is a fraction of it. Guessing which is
-expensive; counting is not, and the count settles it in one command.
-
+Usage:
   python scripts/line_census.py                     new files against house style
   python scripts/line_census.py <rev>..<rev>        a range, broken down by kind
-
-The comment ratio is the useful number for a single file. This repository runs around a
-third comments by design, so a new file near that is in keeping and one far above it is
-padded. Compare against the repo, never against a number in the abstract.
 """
 
 from __future__ import annotations
@@ -30,12 +23,7 @@ HOUSE_STYLE = (
 
 
 def classify(path: pathlib.Path) -> tuple[int, int, int]:
-    """Code, comment and blank line counts for one Python file.
-
-    Docstrings count as comments, which is the point: this repository carries most of its
-    reasoning in them, and a counter that ignored them would call every well-explained
-    file bloated.
-    """
+    """Return code, comment, and blank line counts for one Python file. Docstrings count as comments."""
     code = comment = blank = 0
     in_docstring = False
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -75,7 +63,7 @@ def report(label: str, paths: list[pathlib.Path]) -> None:
 
 
 def bucket(path: str) -> str:
-    """Which kind of line this is, for judging a range."""
+    """Categorize file path by kind (e.g. tests, scripts)."""
     if path.startswith("tests/"):
         return "tests"
     if path.endswith((".md", ".mdx")):
