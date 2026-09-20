@@ -228,6 +228,7 @@ def _operator_run(entities=None, fidelity=False):
         "verdict": "LEAK",
         "entities": entities or {"EMAIL": "leak", "SSN": "contained", "CREDIT_CARD": "contained"},
         "required_checks": {"response_fidelity": fidelity},
+        "contract": {"harness_version": "0.3.1"},
     }
 
 
@@ -880,3 +881,19 @@ def test_the_ci_filter_and_the_content_check_agree():
         assert "test_public_docs_style.py" in script, (
             "ci.yml skips row-only changes, so the intake must run the content scan itself"
         )
+
+
+def test_the_harness_version_is_recorded_on_the_row():
+    """The instrument moves, so a row has to say which one measured it."""
+    derived = intake.derive_measurements({"current.json": _operator_run()})
+    assert derived["harness"] == "0.3.1"
+
+
+def test_the_research_spelling_of_the_harness_version_is_read_too():
+    split = _split_report()
+    split["harness_revision"] = "0.4.0"
+    assert intake.derive_measurements({"v2.json": split})["harness"] == "0.4.0"
+
+
+def test_a_report_with_no_harness_version_records_none():
+    assert "harness" not in intake.derive_measurements({"v2.json": _split_report()})

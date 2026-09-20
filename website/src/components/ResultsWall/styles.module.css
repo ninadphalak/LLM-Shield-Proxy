@@ -174,3 +174,27 @@
   color: var(--ifm-color-success-contrast-foreground);
   font-weight: 600;
 }
+
+/*
+ * The harness version that produced a row, under its date.
+ *
+ * Quiet, because most readers do not need it, and present, because the instrument moves:
+ * two rows measured with different harness versions were produced by different code, and
+ * a reader comparing them is entitled to know. It sits with the date rather than in its
+ * own column because both answer HOW a row was measured rather than WHAT was measured.
+ */
+.harness {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--ifm-color-emphasis-600);
+  white-space: nowrap;
+}
+
+/* Version and licence, under the gateway name. Identity, not measurement. */
+.sub {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--ifm-color-emphasis-700);
+}

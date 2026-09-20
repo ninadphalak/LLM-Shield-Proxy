@@ -478,6 +478,19 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
             derived["restored"] = "all" if rate == 1.0 else "none" if rate == 0.0 else "some"
             derived["restoredN"] = float(rate)
 
+    # The instrument that produced the row, so the table does not silently mix versions as
+    # the harness moves. Both report shapes spell it differently, which is the same split
+    # `report_fields.harness_revision` exists for in the benchmark; it cannot be imported
+    # here, because this script runs on a bare runner and that package is not installed.
+    for source in (operator, raw, split):
+        if not source:
+            continue
+        value = ((source.get("contract") or {}).get("harness_version")
+                 or source.get("harness_revision"))
+        if value:
+            derived["harness"] = str(value)[:32]
+            break
+
     if split:
         metrics = split.get("metrics") or {}
         leak = metrics.get("leak_rate") or {}

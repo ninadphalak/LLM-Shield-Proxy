@@ -141,6 +141,18 @@ export type ResultRow = {
   /** Link to the CI run behind a submitted row, so the provenance claim is clickable. */
   runUrl?: string;
   /**
+   * The harness version that produced the row.
+   *
+   * WHY IT IS ON THE ROW. The instrument moves. A result measured with 0.2.1 and one
+   * measured with 0.3.2 were produced by different code, and a reader comparing two rows
+   * is entitled to know whether they were measured the same way. Without this the table
+   * silently mixes instruments, and the longer it runs the more it mixes them.
+   *
+   * It is shown beside the date rather than as a column of its own, because it says HOW a
+   * row was measured rather than WHAT was measured, which is what the date says too.
+   */
+  harness?: string;
+  /**
    * The same configuration's previous measurement, for the trend indicator. Set this
    * only when the earlier row is on this page too: the arrow is a comparison a reader
    * can verify by looking up, never a number we assert on its own.
@@ -169,6 +181,46 @@ export type ResultRow = {
  */
 export const MEASURED_ROWS: ResultRow[] = [
   {
+    date: '2026-09-20',
+    project: 'LLM-Shield-Proxy (ours)',
+    version: '1.6.6, response scan on',
+    sent: 'none',
+    sentN: 0,
+    restored: 'all',
+    restoredN: 1.0,
+    leakWhole: '0 of 16',
+    leakWholeN: 0.0,
+    leakSplit: '0 of 16',
+    leakSplitN: 0.0,
+    note: 'Kept everything out of the provider request, handed every value back to the client, and caught every injected value whole and split across two chunks.',
+    provenance: 'measured-here',
+    harness: '0.2.1',
+    architecture: 'held-tail',
+    license: 'Apache-2.0',
+    reportUrl: './results',
+    previous: {version: '1.6.0, response scan on', leakWholeN: 0.125, leakSplitN: 0.25},
+  },
+  {
+    date: '2026-09-20',
+    project: 'LLM-Shield-Proxy (ours)',
+    version: '1.6.6, default settings',
+    sent: 'none',
+    sentN: 0,
+    restored: 'all',
+    restoredN: 1.0,
+    leakWhole: '16 of 16',
+    leakWholeN: 1.0,
+    leakSplit: '16 of 16',
+    leakSplitN: 1.0,
+    note: 'Kept everything out of the provider request and handed every value back. Response scanning is off by default, so values the model produced were not caught.',
+    provenance: 'measured-here',
+    harness: '0.2.1',
+    architecture: 'none',
+    license: 'Apache-2.0',
+    reportUrl: './results',
+    previous: {version: '1.6.0, default settings', leakWholeN: 1.0, leakSplitN: 1.0},
+  },
+  {
     date: '2026-09-09',
     project: 'LLM-Shield-Proxy (ours)',
     version: '1.6.0, default settings',
@@ -181,6 +233,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '16 of 16',
     leakSplitN: 1.0,
     note: 'Kept everything out of the provider request, then handed every value back to the client.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'none',
     license: 'Apache-2.0',
@@ -199,6 +252,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '4 of 16',
     leakSplitN: 0.25,
     note: 'Kept everything out of the provider request. Still leaks some back to the client, and twice as much once a value is split.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'held-tail',
     license: 'Apache-2.0',
@@ -217,6 +271,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '12 of 16',
     leakSplitN: 0.75,
     note: 'Phone numbers reached the provider. Gave the caller their data back. Splitting a value tripled what leaked to the client.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'per-chunk',
     license: 'MIT',
@@ -235,6 +290,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '5 of 16',
     leakSplitN: 0.3125,
     note: 'Phone numbers reached the provider. Splitting changed nothing, because it waits for the whole response before sending any of it.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'buffered',
     license: 'MIT',
@@ -253,6 +309,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '2 of 16',
     leakSplitN: 0.125,
     note: 'All four data types reached the provider, and none of the caller’s own data came back.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'held-tail',
     license: 'Apache-2.0',
@@ -271,6 +328,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '0 of 16',
     leakSplitN: 0.0,
     note: 'All four data types reached the provider even though redaction was switched on, and none of the caller’s data came back.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'not-stated',
     license: 'MIT',
@@ -289,6 +347,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '0 of 12',
     leakSplitN: 0.0,
     note: 'All four data types reached the provider. Nothing was restored, and 8 of 32 cases produced no stream at all.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'not-stated',
     license: 'Apache-2.0',
@@ -307,6 +366,7 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplit: '16 of 16',
     leakSplitN: 1.0,
     note: 'All four data types reached the provider, and everything it should have withheld went through to the client.',
+    harness: '0.2.1',
     provenance: 'measured-here',
     architecture: 'none',
     license: 'Apache-2.0',

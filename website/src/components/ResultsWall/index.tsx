@@ -25,8 +25,10 @@ type Col = {
 // or every gateway that buffers, can have that; the site still ships none of those
 // orders as the default. See the page for why that distinction is load-bearing.
 const COLUMNS: Col[] = [
-  {key: 'project', label: 'Gateway', sortOn: (r) => r.project},
-  {key: 'version', label: 'Version', sortOn: (r) => r.version},
+  // Gateway, version and licence share one cell. They are three facts about WHICH row
+  // this is rather than three measurements, they are always read together, and as separate
+  // columns they pushed the four numbers that matter off the side of a narrow screen.
+  {key: 'project', label: 'Gateway', sortOn: (r) => `${r.project} ${r.version}`},
   {key: 'sent', label: "Sent the caller's data to the provider", sortOn: (r) => r.sentN, numeric: true},
   {key: 'restored', label: "Gave back the caller's own data", sortOn: (r) => r.restoredN, numeric: true},
   // `?? -1` sorts an unmeasured row below every measured one, in both directions, rather
@@ -40,7 +42,6 @@ const COLUMNS: Col[] = [
     sortOn: (r) => ARCHITECTURE[r.architecture].rank,
     numeric: true,
   },
-  {key: 'license', label: 'Licence', sortOn: (r) => r.license},
   {
     key: 'provenance',
     label: 'Who ran it',
@@ -257,8 +258,17 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                   <td>
                     {row.project}
                     <Flags flags={row.flags} />
+                    <span className={styles.sub}>{row.version}</span>
+                    <span className={styles.sub}>
+                      {safeHref(row.pricingUrl) ? (
+                        <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
+                          {row.license}
+                        </a>
+                      ) : (
+                        row.license
+                      )}
+                    </span>
                   </td>
-                  <td className={styles.muted}>{row.version}</td>
                   <td className={row.sentN === 0 ? styles.good : undefined}>{row.sent}</td>
                   <td className={row.restoredN === 1 ? styles.good : undefined}>
                     {row.restored}
@@ -279,15 +289,6 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                   </td>
                   <td className={styles.muted} title={architecture.hint}>
                     {architecture.label}
-                  </td>
-                  <td className={styles.muted}>
-                    {safeHref(row.pricingUrl) ? (
-                      <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
-                        {row.license}
-                      </a>
-                    ) : (
-                      row.license
-                    )}
                   </td>
                   <td>
                     <span className={styles.badge} title={provenance.hint}>
@@ -312,6 +313,13 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                         className={styles.stale}
                         title="Measured a while ago. The project has probably shipped since.">
                         worth rerunning
+                      </span>
+                    )}
+                    {row.harness && (
+                      <span
+                        className={styles.harness}
+                        title={`Measured with pii-leak-benchmark ${row.harness}. Two rows measured with different harness versions were produced by different code.`}>
+                        harness {row.harness}
                       </span>
                     )}
                   </td>
