@@ -37,12 +37,29 @@ PUBLIC_NESTED_FILES = ("pii-leak-benchmark/README.md",)
 # a pattern that demanded the prefix would have exempted them silently. A leading `/`
 # is excluded because that is a site route, not a file path, and rewriting the repo's
 # absolute `/docs/...` convention is a separate decision from checking links resolve.
-RELATIVE_LINK = re.compile(
-    r"\]\((?!https?://|#|mailto:|/)([^)#?\s]+)(?:[#?][^)\s]*)?\)"
+#
+# The destination may be wrapped in angle brackets and may carry a title, so
+# `](<./page>)` and `](./page "Title")` match too. Written either way it is the
+# same link, and a pattern that saw only the bare form would pass it unread.
+_DESTINATION = r"""
+    \]\(\s*<?                      # opening bracket, optional angle bracket
+    (?!https?://|\#|mailto:|/)     # not absolute, an anchor, or a site route
+    ([^)>\#?\s]+)                  # the path itself
+    (?:[\#?][^)>\s]*)?             # anchor or query, kept out of the path
+    >?(?:\s+"[^"]*")?\s*\)         # optional angle close, title, whitespace
+"""
+RELATIVE_LINK = re.compile(_DESTINATION, re.VERBOSE)
+REPO_RELATIVE_LINK = RELATIVE_LINK
+# A reference-style link keeps its destination in a definition line instead.
+REFERENCE_DEFINITION = re.compile(
+    r"""^\[[^\]]+\]:[ \t]*<?(?!https?://|\#|mailto:|/)([^>\s\#?]+)""", re.MULTILINE
 )
-REPO_RELATIVE_LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)#?\s]+)(?:[#?][^)\s]*)?\)")
+# Restricted to refs that describe the current tree. A link pinned to a tag names a
+# path as it was then, so checking that against today's files would be wrong.
 GITHUB_BLOB_LINK = re.compile(
-    r"https://github\.com/ninadphalak/LLM-Shield-Proxy/(?:blob|tree)/main/([^)\s#?]+)"
+    r"https://(?:github\.com/ninadphalak/LLM-Shield-Proxy/(?:blob|tree)"
+    r"|raw\.githubusercontent\.com/ninadphalak/LLM-Shield-Proxy)"
+    r"/(?:main|HEAD)/([^)\s#?]+)"
 )
 
 
@@ -72,14 +89,22 @@ def test_relative_doc_links_carry_their_file_extension() -> None:
         for line_number, line in enumerate(text.splitlines(), start=1):
             for match in RELATIVE_LINK.finditer(line):
                 target = match.group(1)
-                if target.endswith(DOC_SUFFIXES) or target.endswith("/"):
+                if target.endswith(DOC_SUFFIXES):
+                    continue
+                # A trailing slash says "directory" outright, so there is no
+                # missing extension to report and no sensible suffix to suggest.
+                # Whether that directory exists is the next test's business, and
+                # it no longer exempts one.
+                if target.endswith("/"):
                     continue
                 # A non-document asset keeps whatever extension it has; only a
                 # bare page reference is the bug.
                 if Path(target).suffix:
                     continue
                 # A directory is a legitimate extensionless target: GitHub renders
-                # one and it does not 404. Only a bare PAGE name is the bug.
+                # one and it does not 404. Only a bare PAGE name is the bug. A
+                # trailing slash says "directory" but does not make one exist, so
+                # it is not grounds to skip; the existence test below covers it.
                 if (path.parent / target).resolve().is_dir():
                     continue
                 # Name the fix rather than hint at it: the suffix is whichever one
@@ -105,14 +130,20 @@ def test_relative_doc_links_point_at_a_file_that_exists() -> None:
     for path in _doc_files():
         text = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(text.splitlines(), start=1):
-            for match in RELATIVE_LINK.finditer(line):
-                target = match.group(1)
-                if target.endswith("/"):
-                    continue
-                resolved = (path.parent / target).resolve()
-                if not resolved.exists():
-                    relative_path = path.relative_to(REPO_ROOT)
-                    failures.append(f"{relative_path}:{line_number}: '{target}' does not exist")
+            # Inline destinations and reference-style definitions both name a
+            # file, so both are checked. A broken target hidden in a `[ref]:`
+            # line is no less broken for being written out of line.
+            for pattern in (RELATIVE_LINK, REFERENCE_DEFINITION):
+                for match in pattern.finditer(line):
+                    target = match.group(1)
+                    # No skip for a trailing slash. `](./who-has-run-it/)` names a
+                    # directory that does not exist and 404s on GitHub exactly like
+                    # a missing file; exempting it made the gate pass a broken link.
+                    if not (path.parent / target).resolve().exists():
+                        relative_path = path.relative_to(REPO_ROOT)
+                        failures.append(
+                            f"{relative_path}:{line_number}: '{target}' does not exist"
+                        )
 
     assert not failures, "\n" + "\n".join(failures)
 
@@ -129,11 +160,15 @@ def test_public_readme_links_into_the_repository_resolve() -> None:
             continue
         text = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(text.splitlines(), start=1):
-            # A path relative to the file itself, as GitHub renders it.
-            for match in REPO_RELATIVE_LINK.finditer(line):
-                target = match.group(1)
-                if not (path.parent / target).resolve().exists():
-                    failures.append(f"{relative_name}:{line_number}: '{target}' does not exist")
+            # A path relative to the file itself, as GitHub renders it, written
+            # either inline or as a reference definition.
+            for pattern in (REPO_RELATIVE_LINK, REFERENCE_DEFINITION):
+                for match in pattern.finditer(line):
+                    target = match.group(1)
+                    if not (path.parent / target).resolve().exists():
+                        failures.append(
+                            f"{relative_name}:{line_number}: '{target}' does not exist"
+                        )
             # An absolute blob/tree URL naming a path in this repository.
             for match in GITHUB_BLOB_LINK.finditer(line):
                 target = match.group(1)
