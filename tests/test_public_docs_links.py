@@ -51,8 +51,15 @@ _DESTINATION = r"""
 RELATIVE_LINK = re.compile(_DESTINATION, re.VERBOSE)
 REPO_RELATIVE_LINK = RELATIVE_LINK
 # A reference-style link keeps its destination in a definition line instead.
+#
+# `[^1]: some prose` is a GFM footnote, not a link, and shares the shape exactly.
+# Reading one as a path sent the gate looking for a file called "see" and failed
+# the build on ordinary text, so footnote labels are excluded and the value has
+# to look like a destination: a path separator, or a document suffix.
 REFERENCE_DEFINITION = re.compile(
-    r"""^\[[^\]]+\]:[ \t]*<?(?!https?://|\#|mailto:|/)([^>\s\#?]+)""", re.MULTILINE
+    r"""^\[(?!\^)[^\]]+\]:[ \t]*<?(?!https?://|\#|mailto:|/)"""
+    r"""((?=[^>\s\#?]*[/])[^>\s\#?]+|[^>\s\#?]+\.mdx?)""",
+    re.MULTILINE,
 )
 # Restricted to refs that describe the current tree. A link pinned to a tag names a
 # path as it was then, so checking that against today's files would be wrong.
