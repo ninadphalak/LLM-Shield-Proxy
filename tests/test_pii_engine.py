@@ -239,7 +239,13 @@ def test_dlp_redos_base64_obfuscation():
     redacted = engine.redact_text(malicious_prompt, vault)
     duration = time.perf_counter() - start_time
 
-    assert duration < 0.1, f"ReDoS detected! Execution took {duration} seconds"
+    # 1.0 s, not 0.1. Measured on this machine the call takes 0.044-0.047 s, so the
+    # old budget held 2.1x headroom -- inside the noise of a shared CI runner, which
+    # duly failed it at 0.214 s on a tree with no engine change. Catastrophic
+    # backtracking on this input runs for seconds to minutes, so a whole second still
+    # catches it and leaves 21x. A gate that cries wolf teaches you to ignore red,
+    # which is when a real one gets in.
+    assert duration < 1.0, f"ReDoS detected! Execution took {duration} seconds"
     # Oversized base64 blobs are deliberately skipped to prevent regex denial of service
     assert encoded_secret in redacted
 
