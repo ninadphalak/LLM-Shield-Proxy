@@ -13,6 +13,7 @@ are what hold the fix.
 
 from __future__ import annotations
 
+import time
 import uuid
 
 import pytest
@@ -222,6 +223,26 @@ def test_request_id_is_propagated_on_a_proxied_response(httpx_mock):
     assert ok.headers["X-Request-ID"] == supplied
 
 
+def _audit_lines_once_written(caplog, event, timeout=10.0):
+    """Audit records matching `event`, waited for rather than raced.
+
+    `AuditLogger` hands the record to a background thread, which hashes, signs
+    and only then calls `audit_logger.critical`. The HTTP response returns
+    before any of that, so reading `caplog.records` straight after the request
+    finds nothing on a loaded machine. Durability here is `best_effort`, so the
+    caller gets no completion event to wait on.
+
+    Returns as soon as the record lands, and gives up after `timeout` so a real
+    regression still fails, with the same assertion and message as before.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        lines = [r.getMessage() for r in caplog.records if event in r.getMessage()]
+        if lines or time.monotonic() > deadline:
+            return lines
+        time.sleep(0.02)
+
+
 def test_request_id_reaches_the_audit_record_on_the_500_path(monkeypatch, caplog):
     """Server-side correlation survives an unhandled exception.
 
@@ -235,9 +256,9 @@ def test_request_id_reaches_the_audit_record_on_the_500_path(monkeypatch, caplog
 
     with caplog.at_level("CRITICAL", logger="llm_shield.audit"):
         failed = _chat({"X-Request-ID": supplied})
+        audit_lines = _audit_lines_once_written(caplog, "UNHANDLED_EXCEPTION")
 
     assert failed.status_code == 500
-    audit_lines = [r.getMessage() for r in caplog.records if "UNHANDLED_EXCEPTION" in r.getMessage()]
     assert audit_lines, "the 500 path emitted no UNHANDLED_EXCEPTION audit record"
     assert any(f'"request_id": "{supplied}"' in line for line in audit_lines)
 
