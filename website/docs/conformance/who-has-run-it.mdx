@@ -32,7 +32,7 @@ split. We wrote the check and it caught us.
 **1.6.6 passes.** Nothing reaches the provider, every value comes back to the caller, and
 every injected value is caught both whole and split across two chunks. Both rows are below,
 so the change is something you can see rather than take on trust, and the report behind it
-is on the [results page](./results).
+is on the [results page](./results.md).
 
 **On the default settings it still does not pass.** Response scanning is off unless you turn
 it on, because it changes what callers receive, so the out-of-the-box row leaks 16 of 16
@@ -60,9 +60,9 @@ pipx run pii-leak-benchmark --target-base-url http://localhost:4000/v1
 ```
 
 It prints what it sent, what came back, and which of the three questions your gateway answered.
-About a minute. To put the result in CI and on your README, see [the CI setup](./ci).
+About a minute. To put the result in CI and on your README, see [the CI setup](./ci.mdx).
 
-Nothing running yet? [Try it from scratch](./try-it-from-scratch) starts with an empty machine
+Nothing running yet? [Try it from scratch](./try-it-from-scratch.md) starts with an empty machine
 and ends with two results you measured yourself, ours and LiteLLM's, side by side.
 
 ## Everything we have tested
@@ -132,7 +132,7 @@ flowchart LR
   style C fill:#d4f4dd,stroke:#2d7a4a,color:#14532d
 ```
 
-**1. Run it in your CI.** Copy [the CI setup](./ci) and change three lines: where your gateway
+**1. Run it in your CI.** Copy [the CI setup](./ci.mdx) and change three lines: where your gateway
 listens, the command that starts it, and the environment variable it reads for its provider URL.
 
 **2. Send the result.** Your job summary ends with a link that opens a prefilled submission.
@@ -250,7 +250,7 @@ earlier version on this page. That is revision history rather than a ranking: it
 fixed something, which is the entire behaviour this page exists to encourage.
 
 Full numbers for every run above, including the reference policies we use to calibrate the
-instrument, are on the [published results](./results) page, generated from the report files in
+instrument, are on the [published results](./results.md) page, generated from the report files in
 the repository.
 
 Questions about any of this are welcome in the same issue tracker.

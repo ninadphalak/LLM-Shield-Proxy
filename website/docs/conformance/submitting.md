@@ -1,6 +1,6 @@
 # Submitting a Result
 
-The [results table](./results) is open to independent verification. This page outlines how to submit a run, what the submission should contain, how it is validated, and the criteria for a result to be considered "replicated".
+The [results table](./results.md) is open to independent verification. This page outlines how to submit a run, what the submission should contain, how it is validated, and the criteria for a result to be considered "replicated".
 
 To submit a run, you must provide both the generated report and the exact configuration used. A result only achieves "replicated" status when three separate individuals submit runs for the exact same gateway and configuration.
 
@@ -66,13 +66,13 @@ The `passed` raw measurement is never overwritten. The `outcome` field is strict
 
 ## How to Submit
 
-1. Run the profile using the [Reproduction Guide](./reproducing) or the [Hosted Gateway Runbook](./hosted-gateway-runbook).
+1. Run the profile using the [Reproduction Guide](./reproducing.md) or the [Hosted Gateway Runbook](./hosted-gateway-runbook.md).
 2. Open a Pull Request adding the artifact and configuration to `benchmarks/results/`, or attach them to a GitHub Issue.
 3. State your affiliation. Vendor-submitted runs are welcome, count toward total runs, and will be labeled `vendor-submitted`.
 
 ### The short path, for a results-wall row
 
-A row on the [results wall](./who-has-run-it) needs less than a full artifact submission, because
+A row on the [results wall](./who-has-run-it.mdx) needs less than a full artifact submission, because
 it publishes fewer claims. For that, run:
 
 ```bash
@@ -85,7 +85,7 @@ linked CI run exists and on which branch it ran, and posts back the draft row or
 is missing. A person then fills in the measurement columns and merges it.
 
 Use the full pull request above when you are submitting the artifact itself, which is what the
-[published results](./results) page and its replication counts are built from. The two are
+[published results](./results.md) page and its replication counts are built from. The two are
 different things: a wall row is a pointer to a run, an artifact submission is the run.
 
 We accept submissions for any OpenAI-compatible gateway, including unlisted platforms or runs that dispute existing rows.
@@ -125,4 +125,4 @@ gh attestation verify pii-leak-benchmark-report.json -R submitter/repository
 
 - **Replication Status:** Currently, all rows are `unreplicated`.
 - **Identity Verification:** The GitHub signature proves which workflow created the report, but does not definitively prove the remote gateway process used the exact version stated. Peer review is still required.
-- **Formatting Shims:** A gateway that purely formats data without true redaction may pass the fixture (see [Fixture Threat Model](./fixture-threat-model)).
+- **Formatting Shims:** A gateway that purely formats data without true redaction may pass the fixture (see [Fixture Threat Model](./fixture-threat-model.md)).

@@ -167,7 +167,7 @@ numbers come out.
 </details>
 
 **Other gateways have already been measured this way.** The
-[results wall](./who-has-run-it) shows what each one scored and exactly how it was configured,
+[results wall](./who-has-run-it.mdx) shows what each one scored and exactly how it was configured,
 including several that sent every data type straight through with redaction switched on. It is
 the quickest way to pick one worth trying.
 
@@ -265,7 +265,7 @@ The summary ends with everything needed to say something checkable about the run
   `current.raw.json` (everything measured) and `pii-leak-badge.json` (the README badge).
   Artifacts expire, 90 days by default, so a link to a run is not a permanent link to its
   reports.
-- **A one-click link** to the [results wall](./who-has-run-it), prefilled with the version, the
+- **A one-click link** to the [results wall](./who-has-run-it.mdx), prefilled with the version, the
   outcome and a link back to this exact run. You add the gateway name and the licence, which a
   run cannot know, and your row is published automatically from there.
 
@@ -317,14 +317,19 @@ and is served by you, which is also why it is not evidence to anyone else. A rea
 check it follows the badge to the run and reruns the instrument named in
 `pii-leak-benchmark cite`.
 
-The Action renders it from the operator result, so it names the types rather than a rate:
+The Action renders it from the operator result, so it names the types rather than a rate. These
+four are the only badges a CI run can produce, and the one you get is decided by the
+measurement, not by anything you configure:
 
-| Badge reads | Colour | What it means |
-| :--- | :--- | :--- |
-| `contained` | green | No test value reached the upstream and the required checks passed |
-| `leaked: EMAIL, SSN` | red | Those data types were seen arriving upstream, listed in full |
-| `checks failed` | yellow | Nothing leaked, but a required check did not hold |
-| `not measured` | grey | Setup, attribution, inspection or comparison was incomplete |
+| Badge | What earns it |
+| :--- | :--- |
+| ![contained](https://img.shields.io/badge/PII%20leak%20check-contained-brightgreen) | No test value reached the upstream and the required checks passed |
+| ![leaked](https://img.shields.io/badge/PII%20leak%20check-leaked%3A%20EMAIL%2C%20SSN-critical) | Those data types were seen arriving upstream, named in full |
+| ![checks failed](https://img.shields.io/badge/PII%20leak%20check-checks%20failed-yellow) | Nothing leaked, but a required check did not hold |
+| ![not measured](https://img.shields.io/badge/PII%20leak%20check-not%20measured-lightgrey) | Setup, attribution, inspection or comparison was incomplete |
+
+The green one is the only one worth putting on a README, and it is the only one you cannot get
+by accident: it takes a run that measured something and found nothing.
 
 To render one by hand from any finished report:
 
@@ -448,7 +453,7 @@ your image first. A bridge-network container has its own loopback, so its `127.0
 the runner's.
 
 For a gateway on another host, use the CLI's authenticated public-capture options from the
-[hosted gateway guide](./hosted-gateway-runbook). The Action example above uses the runner's
+[hosted gateway guide](./hosted-gateway-runbook.md). The Action example above uses the runner's
 local capture and cannot inspect arbitrary production traffic from a URL alone.
 
 </details>
@@ -521,7 +526,7 @@ omit `start-command` and `upstream-env`. Authenticate to your gateway with
 do not, so a program written for those formats can pass without being a general detector.
 Credential examples are fixed shapes, not a representative sample. Only the capture and client
 boundaries are watched: logs, internal stores and other outbound destinations are outside this
-check. Run [response fragmentation tests](./reproduce-fragmentation) separately for injected
+check. Run [response fragmentation tests](./reproduce-fragmentation.md) separately for injected
 response data.
 
 </details>
