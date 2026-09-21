@@ -238,7 +238,7 @@ Use `selfcheck`. It answers one question - *does my deployment leak?* - and it d
 you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1#subdirectory=pii-leak-benchmark"
 
 # Establish the floor FIRST. No gateway at all: this must report LEAK.
 pii-leak-benchmark selfcheck --target-base-url capture://self

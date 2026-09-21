@@ -17,7 +17,7 @@ a negative control, and writes a job summary with results for each tested data t
 It saves reports even when the check fails. An optional baseline shows new failures and fixes.
 
 ```yaml
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1
   with:
     target-base-url: http://127.0.0.1:4000/v1
     start-command: ./scripts/start-test-gateway.sh
@@ -37,7 +37,7 @@ pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --out pii-check
 ```
 
 To pin the source rather than the package, install
-`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.0#subdirectory=pii-leak-benchmark`.
+`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1#subdirectory=pii-leak-benchmark`.
 
 The local command expects upstream routing to `http://127.0.0.1:8765/v1`. It writes a Markdown
 summary, raw measurements and a versioned operator report. These smoke checks are separate
