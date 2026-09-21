@@ -38,18 +38,28 @@ PUBLIC_NESTED_FILES = ("pii-leak-benchmark/README.md",)
 # is excluded because that is a site route, not a file path, and rewriting the repo's
 # absolute `/docs/...` convention is a separate decision from checking links resolve.
 #
-# The destination may be wrapped in angle brackets and may carry a title, so
-# `](<./page>)` and `](./page "Title")` match too. Written either way it is the
-# same link, and a pattern that saw only the bare form would pass it unread.
-_DESTINATION = r"""
-    \]\(\s*<?                      # opening bracket, optional angle bracket
-    (?!https?://|\#|mailto:|/)     # not absolute, an anchor, or a site route
-    ([^)>\#?\s]+)                  # the path itself
-    (?:[\#?][^)>\s]*)?             # anchor or query, kept out of the path
-    >?(?:\s+"[^"]*")?\s*\)         # optional angle close, title, whitespace
-"""
-RELATIVE_LINK = re.compile(_DESTINATION, re.VERBOSE)
+# Angle brackets and titles are handled once, shared by both patterns below.
+# They drifted apart otherwise: the inline form accepted only a double-quoted
+# title while the reference form accepted all three, so the same link checked or
+# escaped depending on which way it was written. A destination containing a space
+# is legal only inside angle brackets, which is the whole reason the form exists,
+# so the bracketed branch allows one and the bare branch does not.
+_NOT_A_FILE_PATH = r"(?!https?://|\#|mailto:|/)"
+_TITLE = r"""(?:[ 	]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?"""
+_FRAGMENT = r"(?:[\#?][^)>\s]*)?"
+
+RELATIVE_LINK = re.compile(
+    rf"""\]\([ 	]*
+        (?:
+            <{_NOT_A_FILE_PATH}([^>
+]+?){_FRAGMENT}>     # bracketed, spaces legal
+          | {_NOT_A_FILE_PATH}([^)<>\#?\s]+){_FRAGMENT}  # bare
+        )
+        {_TITLE}[ 	]*\)""",
+    re.VERBOSE,
+)
 REPO_RELATIVE_LINK = RELATIVE_LINK
+
 # A reference-style link keeps its destination in a definition line instead.
 #
 # Two shapes have to be kept out. `[^1]: some prose` is a GFM footnote, excluded
@@ -60,14 +70,17 @@ REPO_RELATIVE_LINK = RELATIVE_LINK
 # prose but also hid `[pii]: supported-pii-types`, a bare name that is exactly the
 # broken link this module exists to catch.
 REFERENCE_DEFINITION = re.compile(
-    r"""^\[(?!\^)[^\]]+\]:[ \t]*          # label, not a footnote
-        <?(?!https?://|\#|mailto:|/)      # not absolute, an anchor, or a route
-        ([^>\s\#?]+)                      # the destination
-        (?:[\#?][^>\s]*)?>?[ \t]*         # anchor or query, optional bracket
-        (?:"[^"]*"|'[^']*'|\([^)]*\))?    # an optional title, and nothing else
-        [ \t]*$""",
+    rf"""^\[(?!\^)[^\]]+\]:[ 	]*
+        (?:
+            <{_NOT_A_FILE_PATH}([^>
+]+?){_FRAGMENT}>
+          | {_NOT_A_FILE_PATH}([^<>\s\#?]+){_FRAGMENT}
+        )
+        {_TITLE}[ 	]*$""",
     re.MULTILINE | re.VERBOSE,
 )
+
+
 # Restricted to refs that describe the current tree. A link pinned to a tag names a
 # path as it was then, so checking that against today's files would be wrong.
 GITHUB_BLOB_LINK = re.compile(
@@ -75,6 +88,11 @@ GITHUB_BLOB_LINK = re.compile(
     r"|raw\.githubusercontent\.com/ninadphalak/LLM-Shield-Proxy)"
     r"/(?:main|HEAD)/([^)\s#?]+)"
 )
+
+
+def _target(match: "re.Match[str]") -> str:
+    """The destination, from whichever of the two branches matched."""
+    return next(group for group in match.groups() if group is not None)
 
 
 def _doc_files() -> list[Path]:
@@ -105,7 +123,7 @@ def test_relative_doc_links_carry_their_file_extension() -> None:
             # does, so a bare page name written that way is the same bug.
             matches = [m for p in (RELATIVE_LINK, REFERENCE_DEFINITION) for m in p.finditer(line)]
             for match in matches:
-                target = match.group(1)
+                target = _target(match)
                 if target.endswith(DOC_SUFFIXES):
                     continue
                 # A trailing slash says "directory" outright, so there is no
@@ -151,7 +169,7 @@ def test_relative_doc_links_point_at_a_file_that_exists() -> None:
             # line is no less broken for being written out of line.
             for pattern in (RELATIVE_LINK, REFERENCE_DEFINITION):
                 for match in pattern.finditer(line):
-                    target = match.group(1)
+                    target = _target(match)
                     # No skip for a trailing slash. `](./who-has-run-it/)` names a
                     # directory that does not exist and 404s on GitHub exactly like
                     # a missing file; exempting it made the gate pass a broken link.
@@ -180,14 +198,14 @@ def test_public_readme_links_into_the_repository_resolve() -> None:
             # either inline or as a reference definition.
             for pattern in (REPO_RELATIVE_LINK, REFERENCE_DEFINITION):
                 for match in pattern.finditer(line):
-                    target = match.group(1)
+                    target = _target(match)
                     if not (path.parent / target).resolve().exists():
                         failures.append(
                             f"{relative_name}:{line_number}: '{target}' does not exist"
                         )
             # An absolute blob/tree URL naming a path in this repository.
             for match in GITHUB_BLOB_LINK.finditer(line):
-                target = match.group(1)
+                target = _target(match)
                 if not (REPO_ROOT / target).exists():
                     failures.append(
                         f"{relative_name}:{line_number}: blob URL names '{target}', "
