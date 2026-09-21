@@ -31,7 +31,15 @@ PUBLIC_NESTED_FILES = ("pii-leak-benchmark/README.md",)
 
 # The fragment is captured separately so an anchored link is still checked. Matching
 # it with the path is what let `./page#section` slip through a previous sweep.
-RELATIVE_LINK = re.compile(r"\]\((\.{1,2}/[^)#?\s]*)(?:[#?][^)\s]*)?\)")
+#
+# The `./` prefix is optional on purpose: `](supported-pii-types.md)` is the same kind
+# of link as `](./supported-pii-types.md)` and four of them are already in the tree, so
+# a pattern that demanded the prefix would have exempted them silently. A leading `/`
+# is excluded because that is a site route, not a file path, and rewriting the repo's
+# absolute `/docs/...` convention is a separate decision from checking links resolve.
+RELATIVE_LINK = re.compile(
+    r"\]\((?!https?://|#|mailto:|/)([^)#?\s]+)(?:[#?][^)\s]*)?\)"
+)
 REPO_RELATIVE_LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)#?\s]+)(?:[#?][^)\s]*)?\)")
 GITHUB_BLOB_LINK = re.compile(
     r"https://github\.com/ninadphalak/LLM-Shield-Proxy/(?:blob|tree)/main/([^)\s#?]+)"
@@ -39,12 +47,21 @@ GITHUB_BLOB_LINK = re.compile(
 
 
 def _doc_files() -> list[Path]:
-    return sorted(
+    """Fail closed. A gate that finds no inputs must not report success.
+
+    If `website/docs` is renamed or this module is run from outside the tree,
+    `rglob` yields nothing and every assertion below passes having checked
+    nothing. That is the exact shape of the bug this module exists to catch, so
+    it is an error here rather than a quiet pass.
+    """
+    files = sorted(
         path
         for suffix in DOC_SUFFIXES
         for path in DOCS_ROOT.rglob(f"*{suffix}")
         if path.is_file()
     )
+    assert files, f"no documentation found under {DOCS_ROOT}; this gate would pass vacuously"
+    return files
 
 
 def test_relative_doc_links_carry_their_file_extension() -> None:
@@ -60,6 +77,10 @@ def test_relative_doc_links_carry_their_file_extension() -> None:
                 # A non-document asset keeps whatever extension it has; only a
                 # bare page reference is the bug.
                 if Path(target).suffix:
+                    continue
+                # A directory is a legitimate extensionless target: GitHub renders
+                # one and it does not 404. Only a bare PAGE name is the bug.
+                if (path.parent / target).resolve().is_dir():
                     continue
                 # Name the fix rather than hint at it: the suffix is whichever one
                 # the target happens to have, and guessing .md is how an .mdx page
@@ -102,6 +123,9 @@ def test_public_readme_links_into_the_repository_resolve() -> None:
     for relative_name in (*PUBLIC_ROOT_FILES, *PUBLIC_NESTED_FILES):
         path = REPO_ROOT / relative_name
         if not path.exists():
+            # Fail closed, as above. Skipping here would mean a rename or a typo
+            # in the list silently stops checking that file.
+            failures.append(f"{relative_name}: listed as public but not in the tree")
             continue
         text = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(text.splitlines(), start=1):
