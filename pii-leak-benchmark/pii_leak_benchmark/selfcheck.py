@@ -292,10 +292,11 @@ def _print_report(
     evidence = boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]
     if evidence:
         print("  How it leaked")
-        print(f"    {'ENTITY':<14}{'MATCH':<12}{'SCOPE':<14}CHANNEL")
+        # AWS_ACCESS_KEY_ID is 17 characters and ran into the next column at 14.
+        print(f"    {'ENTITY':<20}{'MATCH':<12}{'SCOPE':<14}CHANNEL")
         for item in sorted(evidence, key=lambda e: (e["entity_type"], e["channel"])):
             print(
-                f"    {item['entity_type']:<14}{item['match']:<12}"
+                f"    {item['entity_type']:<20}{item['match']:<12}"
                 f"{item['scope']:<14}{item['channel']}"
             )
         print()

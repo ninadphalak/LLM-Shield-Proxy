@@ -223,7 +223,7 @@ the exact test data, so a third person can repeat what you just did.
 the one that produces a **publishable** row, and it requires you to record what the vendor
 claims about redaction and where they claim it, because a number published next to a
 product name without that context is not a fair comparison. See
-[submitting a result](./submitting) for the flags.
+[submitting a result](./submitting.md) for the flags.
 :::
 
 ## If something goes wrong
@@ -250,14 +250,14 @@ and it appears next to the row it disputes.
 ## Publish what you found
 
 If you ran this in CI rather than on your laptop, your result can go on the
-[results wall](./who-has-run-it) by itself:
+[results wall](./who-has-run-it.mdx) by itself:
 
 ```bash
 pii-leak-benchmark submit
 ```
 
 Every measured number is read from your CI run's own build artifact, so nothing is retyped.
-See [the CI setup](./ci) for the workflow file.
+See [the CI setup](./ci.mdx) for the workflow file.
 
 ## What this does and does not tell you
 
@@ -267,4 +267,4 @@ this fake data on your machine today.
 It does not tell you which product is better. Each result is one version in one
 configuration, a gateway that fails one data type may handle everything else, and a leak
 count can mean two different bugs, which is why
-[the results wall is not a scoreboard](./who-has-run-it#two-bugs).
+[the results wall is not a scoreboard](./who-has-run-it.mdx#two-bugs).

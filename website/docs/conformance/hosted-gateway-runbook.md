@@ -6,7 +6,7 @@ sidebar_position: 8
 
 This runbook covers Cloudflare AI Gateway and Portkey, the two hosted targets evaluated in the comparison table.
 
-Items that do not require a vendor account have been executed and verified. Items that require a vendor account are marked **(NOT RUN)** and are based on vendor documentation, cited inline. A row in [the results table](./results) should remain marked as `Not run` until the pinned configuration and JSON report are produced and verified.
+Items that do not require a vendor account have been executed and verified. Items that require a vendor account are marked **(NOT RUN)** and are based on vendor documentation, cited inline. A row in [the results table](./results.md) should remain marked as `Not run` until the pinned configuration and JSON report are produced and verified.
 
 ## Understanding Output Claims
 

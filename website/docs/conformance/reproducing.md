@@ -9,7 +9,7 @@ How to run the v1.0.0 conformance harness: the local in-process profile, and the
 profile against a gateway.
 
 Looking for the paper's fragmentation result instead? That is a different, smaller
-experiment: [reproduce the fragmentation result](./reproduce-fragmentation).
+experiment: [reproduce the fragmentation result](./reproduce-fragmentation.md).
 
 ## Steps: local profile
 
@@ -121,7 +121,7 @@ actually found. A failed check is not by itself a leak.
 
 A hosted gateway cannot reach your loopback address, so the capture server needs a public
 address - a VPS, or a tunnel such as `ngrok` or `cloudflared`. See the
-[hosted-gateway runbook](./hosted-gateway-runbook) first.
+[hosted-gateway runbook](./hosted-gateway-runbook.md) first.
 
 ### 1. Expose the capture server
 
@@ -176,7 +176,7 @@ Open a GitHub Discussion or pull request with:
 3. The exact command you ran.
 4. Your relationship to the implementation you measured.
 
-Publish unsuccessful runs and deviations too. See [submitting a result](./submitting).
+Publish unsuccessful runs and deviations too. See [submitting a result](./submitting.md).
 
 ## Explanation
 
@@ -259,7 +259,7 @@ Listed in `limitations.method_limits`, and true of every run:
 
 ## Related
 
-- [Reproduce the fragmentation result](./reproduce-fragmentation)
-- [Hosted-gateway runbook](./hosted-gateway-runbook)
-- [Published results](./results)
-- [Submit a run](./submitting)
+- [Reproduce the fragmentation result](./reproduce-fragmentation.md)
+- [Hosted-gateway runbook](./hosted-gateway-runbook.md)
+- [Published results](./results.md)
+- [Submit a run](./submitting.md)
