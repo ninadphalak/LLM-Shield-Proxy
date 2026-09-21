@@ -17,7 +17,7 @@ offline.
 
 `fail` means one thing and nothing else: a value we asked the gateway to protect arrived at
 the capture server unmasked. It is not a score, and not every non-`pass` is a leak. The
-[outcome table](./reproducing#4-read-outcome) says what each value means.
+[outcome table](./reproducing.md#4-read-outcome) says what each value means.
 
 **Request path** is a separate result from the four response rates, and a row can be clean on
 one and not the other. It answers a single question: did unmasked test values go *out* to the
@@ -165,7 +165,7 @@ Scope: in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and mod
 
 None submitted yet. The six CI runners that reproduce the fragmentation rows on every push do
 not count as independent: they run the author's code from the author's repository. See
-[what a green Track 1 run proves, and what it does not](./reproduce-fragmentation#what-a-green-track-1-run-proves-and-what-it-does-not).
+[what a green Track 1 run proves, and what it does not](./reproduce-fragmentation.md#what-a-green-track-1-run-proves-and-what-it-does-not).
 
 To add yours, see [submitting a result](./submitting.md).
 

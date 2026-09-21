@@ -267,4 +267,4 @@ this fake data on your machine today.
 It does not tell you which product is better. Each result is one version in one
 configuration, a gateway that fails one data type may handle everything else, and a leak
 count can mean two different bugs, which is why
-[the results wall is not a scoreboard](./who-has-run-it#two-bugs).
+[the results wall is not a scoreboard](./who-has-run-it.mdx#two-bugs).
