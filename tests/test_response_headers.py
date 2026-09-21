@@ -13,7 +13,9 @@ are what hold the fix.
 
 from __future__ import annotations
 
-import time
+import contextlib
+import logging
+import threading
 import uuid
 
 import pytest
@@ -223,24 +225,33 @@ def test_request_id_is_propagated_on_a_proxied_response(httpx_mock):
     assert ok.headers["X-Request-ID"] == supplied
 
 
-def _audit_lines_once_written(caplog, event, timeout=10.0):
-    """Audit records matching `event`, waited for rather than raced.
+@contextlib.contextmanager
+def _audit_record_for(event):
+    """Yield an Event that is set the moment the audit thread logs `event`.
 
     `AuditLogger` hands the record to a background thread, which hashes, signs
     and only then calls `audit_logger.critical`. The HTTP response returns
     before any of that, so reading `caplog.records` straight after the request
     finds nothing on a loaded machine. Durability here is `best_effort`, so the
-    caller gets no completion event to wait on.
+    enqueue path offers no completion event of its own to wait on.
 
-    Returns as soon as the record lands, and gives up after `timeout` so a real
-    regression still fails, with the same assertion and message as before.
+    A handler rather than a poll: the waiter wakes on the write itself, so it
+    costs nothing while waiting and does not depend on a sleep interval.
     """
-    deadline = time.monotonic() + timeout
-    while True:
-        lines = [r.getMessage() for r in caplog.records if event in r.getMessage()]
-        if lines or time.monotonic() > deadline:
-            return lines
-        time.sleep(0.02)
+    arrived = threading.Event()
+
+    class _Waiter(logging.Handler):
+        def emit(self, record):
+            if event in record.getMessage():
+                arrived.set()
+
+    audit_logger = logging.getLogger("llm_shield.audit")
+    handler = _Waiter()
+    audit_logger.addHandler(handler)
+    try:
+        yield arrived
+    finally:
+        audit_logger.removeHandler(handler)
 
 
 def test_request_id_reaches_the_audit_record_on_the_500_path(monkeypatch, caplog):
@@ -255,10 +266,14 @@ def test_request_id_reaches_the_audit_record_on_the_500_path(monkeypatch, caplog
     supplied = "trace-me-0002"
 
     with caplog.at_level("CRITICAL", logger="llm_shield.audit"):
-        failed = _chat({"X-Request-ID": supplied})
-        audit_lines = _audit_lines_once_written(caplog, "UNHANDLED_EXCEPTION")
+        with _audit_record_for("UNHANDLED_EXCEPTION") as written:
+            failed = _chat({"X-Request-ID": supplied})
+            # Before waiting. Without a 500 there is no audit record coming, and
+            # waiting first would spend the timeout to report the wrong problem.
+            assert failed.status_code == 500
+            written.wait(timeout=10)
+        audit_lines = [r.getMessage() for r in caplog.records if "UNHANDLED_EXCEPTION" in r.getMessage()]
 
-    assert failed.status_code == 500
     assert audit_lines, "the 500 path emitted no UNHANDLED_EXCEPTION audit record"
     assert any(f'"request_id": "{supplied}"' in line for line in audit_lines)
 
