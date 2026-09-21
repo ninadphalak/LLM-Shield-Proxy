@@ -213,3 +213,70 @@ def test_public_readme_links_into_the_repository_resolve() -> None:
                     )
 
     assert not failures, "\n" + "\n".join(failures)
+
+
+# The version the docs tell a reader to install, as a tag on a pinned Action or a
+# `git+...@tag` source. Only this exact shape: `pii-leak-benchmark>=0.3.0` is a
+# deliberate floor, not a claim about the current release, and flagging one would
+# teach people to stop trusting this test.
+PINNED_BENCHMARK_TAG = re.compile(r"benchmark-v(\d+\.\d+\.\d+)")
+BENCHMARK_ROOT = REPO_ROOT / "pii-leak-benchmark"
+VERSIONED_PUBLIC_FILES = (
+    "README.md",
+    "examples/ci/gateway-pii-check.yml",
+    "pii-leak-benchmark/README.md",
+    "website/docs/conformance/ci.mdx",
+    "website/docs/conformance/reproduce-fragmentation.md",
+)
+
+
+def _packaged_version() -> str:
+    """The version the package will actually build as."""
+    text = (BENCHMARK_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r"^version = \"([^\"]+)\"", text, re.MULTILINE)
+    assert match, "no version in pii-leak-benchmark/pyproject.toml"
+    return match.group(1)
+
+
+def test_the_packaged_version_and_the_importable_one_agree() -> None:
+    """Two files carry the version, so they can disagree, and a wheel would ship both."""
+    init = (BENCHMARK_ROOT / "pii_leak_benchmark" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r"^__version__ = \"([^\"]+)\"", init, re.MULTILINE)
+    assert match, "no __version__ in pii_leak_benchmark/__init__.py"
+    assert match.group(1) == _packaged_version(), (
+        f"__init__.py says {match.group(1)} and pyproject.toml says {_packaged_version()}. "
+        "A release bump has to move both."
+    )
+
+
+def test_docs_pin_the_version_that_is_being_released() -> None:
+    """A stale pin sends a reader to a tag that does not exist.
+
+    The failure this catches is a partial bump: `pyproject.toml` moves and one of
+    the eight places the docs name the tag does not, so a copied command installs
+    the wrong version or 404s. It compares files only, and deliberately says
+    nothing about whether the tag has been cut yet, because the release order here
+    is to merge first and tag from the merge commit. A test demanding the tag
+    exist would fail every release pull request for the wrong reason.
+    """
+    expected = _packaged_version()
+    failures: list[str] = []
+    seen = 0
+    for relative_name in VERSIONED_PUBLIC_FILES:
+        path = REPO_ROOT / relative_name
+        if not path.exists():
+            failures.append(f"{relative_name}: listed as version-bearing but not in the tree")
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for match in PINNED_BENCHMARK_TAG.finditer(line):
+                seen += 1
+                if match.group(1) != expected:
+                    failures.append(
+                        f"{relative_name}:{line_number}: pins benchmark-v{match.group(1)}, "
+                        f"but the package builds as {expected}"
+                    )
+
+    assert not failures, "\n" + "\n".join(failures)
+    # Fail closed, as elsewhere in this module. Finding no pins at all means the
+    # pattern or the file list has gone stale, not that everything is consistent.
+    assert seen, "no pinned benchmark tag found in any listed file; this check went blind"
