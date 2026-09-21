@@ -114,9 +114,14 @@ pip install llm-shield-proxy
 
 $env:UPSTREAM_BASE_URL = "http://127.0.0.1:8765"; $env:VALID_VIRTUAL_KEYS = "sk-demo"
 Start-Process -NoNewWindow llm-shield-proxy -ArgumentList "--port 4000"
+Remove-Item Env:UPSTREAM_BASE_URL, Env:VALID_VIRTUAL_KEYS
 
 pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
 ```
+
+The started process keeps both settings, and the third line takes them back out of your shell.
+Without it they last as long as the window, and the next gateway you start in it would be
+pointed at the capture without saying so. The POSIX form scopes them to the one command already.
 
 That should print `CLEAN`, against the `LEAK` you got with nothing in the middle. Full options:
 [deployment guide](../deployment.md).
@@ -451,7 +456,9 @@ local capture and cannot inspect arbitrary production traffic from a URL alone.
 <details>
 <summary><b>Run it on your laptop first</b></summary>
 
-Kept to one line per command, so it pastes into PowerShell as well as a POSIX shell:
+One line per command, so there is no continuation to get wrong in any shell. `--start-command`
+takes whatever starts your own gateway, and the `.sh` path below is a placeholder: on Windows it
+would be your own script or a `py` call.
 
 ```bash
 pip install "pii-leak-benchmark>=0.3.0"
