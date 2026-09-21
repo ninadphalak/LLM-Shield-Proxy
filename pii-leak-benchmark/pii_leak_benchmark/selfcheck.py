@@ -253,6 +253,27 @@ def findings_for(
     return explain.findings_from_report(report, specimens, duty=duty)
 
 
+def _print_leak_evidence(evidence: list[dict[str, Any]]) -> None:
+    """The matcher table: which entity was found, by what match, in which channel."""
+    if not evidence:
+        return
+    print("  How it leaked")
+    # Any fixed width collides the moment a name outgrows it, silently and only for
+    # the long name: AWS_ACCESS_KEY_ID is 17 and printed flush against MATCH at 14,
+    # while the five shorter names stayed legible. Measure the rows instead.
+    width = max(len("ENTITY"), max(len(e["entity_type"]) for e in evidence)) + 3
+    print(f"    {'ENTITY':<{width}}{'MATCH':<12}{'SCOPE':<14}CHANNEL")
+    for item in sorted(evidence, key=lambda e: (e["entity_type"], e["channel"])):
+        print(
+            f"    {item['entity_type']:<{width}}{item['match']:<12}"
+            f"{item['scope']:<14}{item['channel']}"
+        )
+    print()
+    print("    A 'literal' match is the value verbatim. A 'normalized' match was")
+    print("    recovered only after joining fragments and stripping separators.")
+    print()
+
+
 def _print_report(
     report: dict[str, Any],
     verdict: str,
@@ -289,20 +310,9 @@ def _print_report(
         findings_for(report, specimens, duty=duty), reveal=specimens is not None
     )
 
-    evidence = boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]
-    if evidence:
-        print("  How it leaked")
-        # AWS_ACCESS_KEY_ID is 17 characters and ran into the next column at 14.
-        print(f"    {'ENTITY':<20}{'MATCH':<12}{'SCOPE':<14}CHANNEL")
-        for item in sorted(evidence, key=lambda e: (e["entity_type"], e["channel"])):
-            print(
-                f"    {item['entity_type']:<20}{item['match']:<12}"
-                f"{item['scope']:<14}{item['channel']}"
-            )
-        print()
-        print("    A 'literal' match is the value verbatim. A 'normalized' match was")
-        print("    recovered only after joining fragments and stripping separators.")
-        print()
+    _print_leak_evidence(
+        boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]
+    )
 
     print("  Checks")
     for name in sorted(report["checks"]):

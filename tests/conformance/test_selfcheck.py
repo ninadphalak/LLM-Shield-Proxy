@@ -408,3 +408,29 @@ def test_a_gateway_that_never_forwards_is_reported_as_not_measured(tmp_path: Pat
     # The operator must not be told which of the three causes it was, because the harness
     # genuinely cannot tell them apart from here.
     assert "indistinguishable" in result.stdout
+
+
+def _evidence(*entity_types: str) -> list[dict[str, str]]:
+    return [
+        {"entity_type": e, "match": "literal", "scope": "per-request", "channel": "all"}
+        for e in entity_types
+    ]
+
+
+def test_a_long_entity_name_does_not_run_into_the_next_column(capsys) -> None:
+    """A fixed width fails silently and only for the long row, so measure the rows.
+
+    `AWS_ACCESS_KEY_ID` is 17 characters and printed `AWS_ACCESS_KEY_IDliteral`
+    against a 14-wide column, while the five shorter names stayed legible. Widening
+    the literal only moves the collision to the next name that outgrows it.
+    """
+    selfcheck._print_leak_evidence(_evidence("SSN", "AWS_SECRET_ACCESS_KEY"))
+    lines = capsys.readouterr().out.splitlines()
+    header = next(line for line in lines if line.strip().startswith("ENTITY"))
+    rows = [line for line in lines if "per-request" in line]
+    assert len(rows) == 2
+    match_column = header.index("MATCH")
+    for row in rows:
+        # The name must end before MATCH begins, and every row must start MATCH at
+        # the same offset as the header - a wider name may not shove the column.
+        assert row.index("literal") == match_column, row
