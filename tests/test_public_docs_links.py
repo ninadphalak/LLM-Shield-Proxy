@@ -52,14 +52,21 @@ RELATIVE_LINK = re.compile(_DESTINATION, re.VERBOSE)
 REPO_RELATIVE_LINK = RELATIVE_LINK
 # A reference-style link keeps its destination in a definition line instead.
 #
-# `[^1]: some prose` is a GFM footnote, not a link, and shares the shape exactly.
-# Reading one as a path sent the gate looking for a file called "see" and failed
-# the build on ordinary text, so footnote labels are excluded and the value has
-# to look like a destination: a path separator, or a document suffix.
+# Two shapes have to be kept out. `[^1]: some prose` is a GFM footnote, excluded
+# by the label guard. `[Note]: this is prose not a link` is not a definition at
+# all, and is excluded by requiring what CommonMark requires: the destination is
+# followed by the end of the line or by a title, and nothing else. An earlier
+# attempt demanded the destination "look like a path" instead, which did stop the
+# prose but also hid `[pii]: supported-pii-types`, a bare name that is exactly the
+# broken link this module exists to catch.
 REFERENCE_DEFINITION = re.compile(
-    r"""^\[(?!\^)[^\]]+\]:[ \t]*<?(?!https?://|\#|mailto:|/)"""
-    r"""((?=[^>\s\#?]*[/])[^>\s\#?]+|[^>\s\#?]+\.mdx?)""",
-    re.MULTILINE,
+    r"""^\[(?!\^)[^\]]+\]:[ \t]*          # label, not a footnote
+        <?(?!https?://|\#|mailto:|/)      # not absolute, an anchor, or a route
+        ([^>\s\#?]+)                      # the destination
+        (?:[\#?][^>\s]*)?>?[ \t]*         # anchor or query, optional bracket
+        (?:"[^"]*"|'[^']*'|\([^)]*\))?    # an optional title, and nothing else
+        [ \t]*$""",
+    re.MULTILINE | re.VERBOSE,
 )
 # Restricted to refs that describe the current tree. A link pinned to a tag names a
 # path as it was then, so checking that against today's files would be wrong.
@@ -94,7 +101,10 @@ def test_relative_doc_links_carry_their_file_extension() -> None:
     for path in _doc_files():
         text = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(text.splitlines(), start=1):
-            for match in RELATIVE_LINK.finditer(line):
+            # A reference definition names a destination just as an inline link
+            # does, so a bare page name written that way is the same bug.
+            matches = [m for p in (RELATIVE_LINK, REFERENCE_DEFINITION) for m in p.finditer(line)]
+            for match in matches:
                 target = match.group(1)
                 if target.endswith(DOC_SUFFIXES):
                     continue
@@ -108,18 +118,17 @@ def test_relative_doc_links_carry_their_file_extension() -> None:
                 # bare page reference is the bug.
                 if Path(target).suffix:
                     continue
-                # A directory is a legitimate extensionless target: GitHub renders
-                # one and it does not 404. Only a bare PAGE name is the bug. A
-                # trailing slash says "directory" but does not make one exist, so
-                # it is not grounds to skip; the existence test below covers it.
-                if (path.parent / target).resolve().is_dir():
+                # An extensionless target that is a real file or a directory
+                # resolves everywhere. LICENSE, Makefile and a section directory
+                # are all legitimate; only a bare PAGE name is the bug.
+                resolved = (path.parent / target).resolve()
+                if resolved.is_file() or resolved.is_dir():
                     continue
                 # Name the fix rather than hint at it: the suffix is whichever one
                 # the target happens to have, and guessing .md is how an .mdx page
                 # gets a link that still does not resolve.
-                base = (path.parent / target).resolve()
                 suffix = next(
-                    (s for s in DOC_SUFFIXES if base.with_suffix(s).exists()), None
+                    (s for s in DOC_SUFFIXES if resolved.with_suffix(s).exists()), None
                 )
                 remedy = f"write '{target}{suffix}'" if suffix else "no such page exists"
                 relative_path = path.relative_to(REPO_ROOT)
