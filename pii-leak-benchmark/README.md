@@ -11,7 +11,7 @@ Standard library plus `httpx`. You should not have to install one gateway to mea
 
 ## A gateway check in your pull request
 
-Use the [GitHub Action and regression guide](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/ci.md).
+Use the [GitHub Action and regression guide](https://llmshieldproxy.com/docs/conformance/ci).
 The Action starts your test gateway when given a startup command, checks the capture with
 a negative control, and writes a job summary with results for each tested data type.
 It saves reports even when the check fails. An optional baseline shows new failures and fixes.
