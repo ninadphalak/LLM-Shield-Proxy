@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmshieldproxy.com/spec/product-reproduction/v1/catalog.schema.json",
+  "title": "Released product reproduction catalog",
+  "type": "object",
+  "required": ["schema", "release_sources", "targets"],
+  "properties": {
+    "schema": {"const": "pii-leak-benchmark/product-catalog/v1"},
+    "release_sources": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/releaseSource"}
+    },
+    "targets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/target"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "safeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+      "maxLength": 100
+    },
+    "httpsUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://[^@/?#\\s]+(?:/[^?#\\s]*)?$",
+      "maxLength": 500
+    },
+    "repoPath": {
+      "type": "string",
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+      "maxLength": 500
+    },
+    "releaseSource": {
+      "type": "object",
+      "required": [
+        "id",
+        "project_id",
+        "project_url",
+        "source_type",
+        "api_base_url",
+        "version_pattern",
+        "exclude",
+        "assets",
+        "pagination_limit",
+        "maximum_response_bytes",
+        "checksum_policy",
+        "eligible_adapters",
+        "eligible_configurations"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/safeId"},
+        "project_id": {"$ref": "#/$defs/safeId"},
+        "project_url": {"$ref": "#/$defs/httpsUrl"},
+        "source_type": {"enum": ["github-releases", "pypi-json"]},
+        "api_base_url": {"$ref": "#/$defs/httpsUrl"},
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$", "maxLength": 200},
+        "package": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 200},
+        "version_pattern": {"type": "string", "minLength": 3, "maxLength": 160},
+        "exclude": {
+          "type": "object",
+          "required": ["prereleases", "drafts", "yanked", "release_candidates"],
+          "properties": {
+            "prereleases": {"type": "boolean"},
+            "drafts": {"type": "boolean"},
+            "yanked": {"type": "boolean"},
+            "release_candidates": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        },
+        "assets": {
+          "type": "object",
+          "required": ["name_pattern", "media_types"],
+          "properties": {
+            "name_pattern": {"type": "string", "minLength": 1, "maxLength": 160},
+            "media_types": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^[a-z0-9.+-]+/[a-zA-Z0-9.+-]+$"}
+            }
+          },
+          "additionalProperties": false
+        },
+        "container_registry": {"type": "string", "pattern": "^[a-z0-9.-]+$"},
+        "container_repository": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+$"},
+        "pagination_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        "maximum_response_bytes": {"type": "integer", "minimum": 1024, "maximum": 10485760},
+        "checksum_policy": {"enum": ["sha256-required", "vendor-checksum-and-sha256", "sha256-observed"]},
+        "eligible_adapters": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/safeId"}
+        },
+        "eligible_configurations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/safeId"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source_type": {"const": "github-releases"}}},
+          "then": {"required": ["repository"]}
+        },
+        {
+          "if": {"properties": {"source_type": {"const": "pypi-json"}}},
+          "then": {"required": ["package"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "id",
+        "project",
+        "project_url",
+        "license",
+        "artifact_kind",
+        "adapter",
+        "release_source",
+        "configuration_id",
+        "configuration_path",
+        "architecture",
+        "duty",
+        "model",
+        "profiles",
+        "dispatchable",
+        "runner",
+        "accepted_baselines"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/safeId"},
+        "project": {"type": "string", "minLength": 1, "maxLength": 160},
+        "project_url": {"$ref": "#/$defs/httpsUrl"},
+        "license": {"type": "string", "pattern": "^[A-Za-z0-9.+()-]+$", "maxLength": 100},
+        "artifact_kind": {"enum": ["container", "wheel", "container-or-wheel", "archive"]},
+        "adapter": {"$ref": "#/$defs/safeId"},
+        "release_source": {"$ref": "#/$defs/safeId"},
+        "configuration_id": {"$ref": "#/$defs/safeId"},
+        "configuration_path": {"$ref": "#/$defs/repoPath"},
+        "architecture": {"enum": ["per-chunk", "buffered", "held-tail", "none", "not-stated"]},
+        "duty": {"enum": ["restore", "redact", "detect", "block"]},
+        "model": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "maxLength": 100},
+        "profiles": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "allOf": [
+            {"contains": {"const": "operator"}},
+            {"contains": {"const": "response-midpoint"}}
+          ],
+          "items": {"enum": ["operator", "response-midpoint"]}
+        },
+        "dispatchable": {"type": "boolean"},
+        "runner": {"$ref": "#/$defs/runner"},
+        "accepted_baselines": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/baseline"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "runner": {
+      "type": "object",
+      "required": ["class", "minimum_memory_mib", "minimum_disk_mib", "service_limits"],
+      "properties": {
+        "class": {"enum": ["standard-ubuntu", "high-memory-ubuntu"]},
+        "minimum_memory_mib": {"type": "integer", "minimum": 1},
+        "minimum_disk_mib": {"type": "integer", "minimum": 1},
+        "service_limits": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["service", "memory_mib"],
+            "properties": {
+              "service": {"$ref": "#/$defs/safeId"},
+              "memory_mib": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "larger_runner_variable": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "maxLength": 100}
+      },
+      "additionalProperties": false
+    },
+    "baseline": {
+      "type": "object",
+      "required": [
+        "id",
+        "released_version",
+        "artifact_reference",
+        "artifact_identity",
+        "reports",
+        "primary_outcomes",
+        "comparison_policy",
+        "accepted_by_pr",
+        "canary"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/safeId"},
+        "released_version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$", "maxLength": 100},
+        "artifact_reference": {"type": "string", "minLength": 1, "maxLength": 500},
+        "artifact_identity": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "reports": {
+          "type": "object",
+          "required": ["operator", "response-midpoint"],
+          "properties": {
+            "operator": {"oneOf": [{"$ref": "#/$defs/repoPath"}, {"type": "null"}]},
+            "response-midpoint": {"$ref": "#/$defs/repoPath"}
+          },
+          "additionalProperties": false
+        },
+        "primary_outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^/(?:[^~/]|~0|~1)+(?:/(?:[^~/]|~0|~1)+)*$", "maxLength": 300}
+        },
+        "comparison_policy": {"const": "product-reproduction/v1"},
+        "accepted_by_pr": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$"},
+        "canary": {
+          "type": "object",
+          "required": ["enabled", "interval_days"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interval_days": {"type": "integer", "minimum": 1, "maximum": 31}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
