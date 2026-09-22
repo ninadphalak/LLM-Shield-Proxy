@@ -18,6 +18,8 @@ class RunContext:
     output_dir: Path
     working_dir: Path
     environment: Mapping[str, str] = field(default_factory=dict)
+    profile: Profile | None = None
+    readiness_deadline_monotonic: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ class ProductAdapter(ABC):
 
     @abstractmethod
     def acquire(self, context: RunContext) -> ArtifactIdentity:
-        """Acquire reviewed release bytes and return their immutable identity."""
+        """Acquire reviewed release bytes with per-operation timeouts and return immutable identity."""
 
     @abstractmethod
     def render_config(self, context: RunContext, profile: Profile, capture: CaptureEndpoint) -> Path:
@@ -66,7 +68,7 @@ class ProductAdapter(ABC):
 
     @abstractmethod
     def wait_ready(self, context: RunContext) -> None:
-        """Apply the product-specific readiness deadline and functional probe."""
+        """Apply context's monotonic hard deadline to every readiness operation and functional probe."""
 
     @abstractmethod
     def assert_identity(self, context: RunContext, artifact: ArtifactIdentity) -> None:
