@@ -18,7 +18,7 @@ from .resources import (
     collect_resource_snapshot,
     validate_resource_admission,
 )
-from .retry import RetryAttempt, RetryPolicy, run_acquisition_with_retry
+from .retry import AcquisitionRetryExhausted, RetryAttempt, RetryPolicy, run_acquisition_with_retry
 from .sanitizer import SensitiveValue, build_sanitizer
 
 MAX_DIAGNOSTICS = 64
@@ -150,6 +150,17 @@ class ProductLifecycleRunner:
                     exit_codes=exit_codes,
                     diagnostics=tuple(diagnostics[:MAX_DIAGNOSTICS]),
                     retry_attempts=retry_attempts,
+                    resource_snapshot=snapshot,
+                    run_suffix=run_suffix,
+                )
+            except AcquisitionRetryExhausted as exc:
+                diagnostics.extend(self._safe_diagnostics(acquisition_adapter, acquire_context, sanitizer.sanitize))
+                diagnostics.append("acquisition retries exhausted")
+                return LifecycleResult(
+                    health=ExperimentHealth.INFRASTRUCTURE_ERROR,
+                    exit_codes=exit_codes,
+                    diagnostics=tuple(diagnostics[:MAX_DIAGNOSTICS]),
+                    retry_attempts=exc.attempts,
                     resource_snapshot=snapshot,
                     run_suffix=run_suffix,
                 )

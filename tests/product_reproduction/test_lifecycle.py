@@ -36,6 +36,8 @@ def _run(
     behavior: FakeBehavior | None = None,
     snapshot: ResourceSnapshot = SUFFICIENT,
     retry_policy: RetryPolicy | None = None,
+    monotonic=None,
+    readiness_timeout_seconds: float = 60.0,
 ):
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -45,6 +47,7 @@ def _run(
     runner = ProductLifecycleRunner(
         adapter_factory=lambda: FakeGatewayAdapter(shared_state, selected_behavior),
         resource_probe=lambda _: snapshot,
+        **({"monotonic": monotonic} if monotonic is not None else {}),
     )
     result = runner.run(
         target_id="test-gateway-default",
@@ -52,7 +55,10 @@ def _run(
         output_dir=output,
         repo_root=repo,
         sensitive_values=[SensitiveValue(label="FIXTURE_EMAIL", value="alice.fixture@example.test")],
-        options=LifecycleOptions(retry_policy=retry_policy or RetryPolicy(max_attempts=3)),
+        options=LifecycleOptions(
+            retry_policy=retry_policy or RetryPolicy(max_attempts=3),
+            readiness_timeout_seconds=readiness_timeout_seconds,
+        ),
     )
     return result, shared_state, output
 
@@ -124,12 +130,25 @@ def test_acquisition_retries_but_scored_requests_do_not(tmp_path: Path) -> None:
 
     assert result.health is ExperimentHealth.COMPLETE
     assert state.acquire_calls == 3
+    assert [attempt.outcome for attempt in result.retry_attempts] == ["retrying", "retrying", "succeeded"]
 
     failing_state = FakeState()
     failing = FakeBehavior(operator_error=RetryableAcquisitionError("do not retry", category="scored"))
     result, _, _ = _run(tmp_path / "scored", state=failing_state, behavior=failing)
     assert result.health is ExperimentHealth.INFRASTRUCTURE_ERROR
     assert failing_state.operator_calls == 1
+
+
+def test_exhausted_acquisition_retains_attempt_history(tmp_path: Path) -> None:
+    result, state, _ = _run(
+        tmp_path,
+        behavior=FakeBehavior(acquire_failures=3),
+        retry_policy=RetryPolicy(max_attempts=3, base_delay_seconds=0),
+    )
+
+    assert result.health is ExperimentHealth.INFRASTRUCTURE_ERROR
+    assert state.acquire_calls == 3
+    assert [attempt.outcome for attempt in result.retry_attempts] == ["retrying", "retrying", "exhausted"]
 
 
 def test_exit_two_is_not_measured_but_exit_one_is_complete(tmp_path: Path) -> None:
@@ -210,3 +229,17 @@ def test_readiness_deadline_is_present_before_gateway_start(tmp_path: Path) -> N
     assert result.health is ExperimentHealth.COMPLETE
     assert state.readiness_deadlines
     assert all(deadline > 0 for deadline in state.readiness_deadlines)
+
+
+def test_readiness_result_returned_after_deadline_is_rejected(tmp_path: Path) -> None:
+    readings = iter((0.0, 0.0, 2.0))
+
+    result, state, _ = _run(
+        tmp_path,
+        monotonic=lambda: next(readings),
+        readiness_timeout_seconds=1.0,
+    )
+
+    assert result.health is ExperimentHealth.INFRASTRUCTURE_ERROR
+    assert state.operator_calls == 0
+    assert any(event[0] == "stop" for event in state.events)

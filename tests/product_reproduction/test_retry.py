@@ -45,7 +45,9 @@ def test_acquisition_retry_is_bounded_and_records_safe_metadata() -> None:
     assert result == "sha256:resolved"
     assert calls == 3
     assert clock.sleeps == [1.0, 2.0]
-    assert [attempt.category for attempt in attempts] == ["registry-timeout", "registry-timeout"]
+    assert [attempt.category for attempt in attempts] == ["registry-timeout", "registry-timeout", None]
+    assert [attempt.outcome for attempt in attempts] == ["retrying", "retrying", "succeeded"]
+    assert all(attempt.operation_class == "artifact-acquisition" for attempt in attempts)
     assert "secret" not in repr(attempts)
 
 
@@ -55,7 +57,7 @@ def test_retry_after_is_honored_without_exceeding_elapsed_cap() -> None:
     def operation() -> str:
         raise RetryableAcquisitionError("busy", category="rate-limit", retry_after_seconds=7)
 
-    with pytest.raises(AcquisitionRetryExhausted, match="elapsed-time limit"):
+    with pytest.raises(AcquisitionRetryExhausted, match="elapsed-time limit") as caught:
         run_acquisition_with_retry(
             operation,
             policy=RetryPolicy(max_attempts=3, max_elapsed_seconds=5, base_delay_seconds=1, max_delay_seconds=10),
@@ -65,6 +67,8 @@ def test_retry_after_is_honored_without_exceeding_elapsed_cap() -> None:
         )
 
     assert clock.sleeps == []
+    assert caught.value.attempts[-1].outcome == "exhausted"
+    assert caught.value.attempts[-1].category == "rate-limit"
 
 
 def test_non_acquisition_exceptions_are_never_retried() -> None:
@@ -101,3 +105,21 @@ def test_jitter_never_exceeds_delay_cap() -> None:
     )
 
     assert attempts[0].delay_seconds == 4
+
+
+def test_attempt_exhaustion_retains_sanitized_attempt_history() -> None:
+    clock = FakeClock()
+
+    def operation() -> str:
+        raise RetryableAcquisitionError("response carried sensitive detail", category="registry-timeout")
+
+    with pytest.raises(AcquisitionRetryExhausted) as caught:
+        run_acquisition_with_retry(
+            operation,
+            policy=RetryPolicy(max_attempts=2, base_delay_seconds=0),
+            monotonic=clock.monotonic,
+            sleep=clock.sleep,
+        )
+
+    assert [attempt.outcome for attempt in caught.value.attempts] == ["retrying", "exhausted"]
+    assert "sensitive" not in repr(caught.value.attempts)
