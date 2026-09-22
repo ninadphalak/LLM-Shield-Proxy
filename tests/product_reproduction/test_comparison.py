@@ -107,12 +107,31 @@ def test_comparison_policy_rejects_ignored_primary_subtree() -> None:
         ComparisonPolicy(frozenset({"/summary/time"}), frozenset({"/summary"}))
 
 
-def test_report_snapshot_rejects_nonstandard_json_constants(tmp_path: Path) -> None:
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+def test_report_snapshot_rejects_nonfinite_json_numbers(tmp_path: Path, number: str) -> None:
     path = tmp_path / "report.json"
-    path.write_text('{"outcome":NaN}', encoding="utf-8")
+    path.write_text('{"outcome":' + number + "}", encoding="utf-8")
 
     with pytest.raises(ComparisonError, match="valid UTF-8 JSON"):
         ReportSnapshot.read(path)
+
+
+def test_snapshot_detects_symlink_retargeting(tmp_path: Path) -> None:
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+    link = tmp_path / "baseline.json"
+    first.write_text('{"outcome":3}', encoding="utf-8")
+    second.write_text('{"outcome":4}', encoding="utf-8")
+    try:
+        link.symlink_to(first)
+    except OSError:
+        pytest.skip("symbolic links are unavailable on this host")
+    snapshot = ReportSnapshot.read(link)
+    link.unlink()
+    link.symlink_to(second)
+
+    with pytest.raises(BaselineChangedError, match="changed during"):
+        snapshot.assert_source_unchanged()
 
 
 def test_snapshotted_baseline_refuses_mid_run_mutation(tmp_path: Path) -> None:

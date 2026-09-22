@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -32,6 +33,13 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(value)
 
 
+def parse_finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("JSON numbers must be finite")
+    return parsed
+
+
 def canonical_json_bytes(document: JSONValue | Mapping[str, Any]) -> bytes:
     return (
         json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -44,6 +52,7 @@ def _load_json_object(data: bytes, *, label: str) -> dict[str, JSONValue]:
         document = json.loads(
             data.decode("utf-8"),
             parse_constant=_reject_json_constant,
+            parse_float=parse_finite_json_float,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ComparisonError(f"{label} is not valid UTF-8 JSON") from exc
@@ -60,7 +69,7 @@ class ReportSnapshot:
 
     @classmethod
     def read(cls, path: Path, *, expected_sha256: str | None = None) -> ReportSnapshot:
-        source = path.resolve(strict=True)
+        source = path.absolute()
         raw = source.read_bytes()
         digest = sha256_bytes(raw)
         if expected_sha256 is not None and digest != expected_sha256:

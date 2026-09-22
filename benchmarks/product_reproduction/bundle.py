@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal
 
-from .comparison import canonical_json_bytes, sha256_bytes
+from .comparison import canonical_json_bytes, parse_finite_json_float, sha256_bytes
 from .paths import validate_fresh_output_path
 from .results import ExperimentHealth
 from .sanitizer import SensitiveValue, build_sanitizer
@@ -193,6 +193,7 @@ def _strict_json_loads(data: bytes, *, path: str) -> Any:
         return json.loads(
             data.decode("utf-8"),
             parse_constant=_reject_json_constant,
+            parse_float=parse_finite_json_float,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise BundleError(f"bundle JSON member is invalid: {path}") from exc

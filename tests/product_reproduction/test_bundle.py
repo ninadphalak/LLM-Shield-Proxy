@@ -357,10 +357,10 @@ def test_embedded_submission_rejects_circular_manifest_digest(tmp_path: Path) ->
         _build(tmp_path, members=members)
 
 
-@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
-def test_json_source_rejects_nonstandard_numeric_constants(tmp_path: Path, constant: str) -> None:
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+def test_json_source_rejects_nonfinite_numeric_values(tmp_path: Path, number: str) -> None:
     source = tmp_path / "source.json"
-    source.write_text('{"value":' + constant + "}", encoding="utf-8")
+    source.write_text('{"value":' + number + "}", encoding="utf-8")
 
     with pytest.raises(BundleError, match="JSON member is invalid"):
         BundleContent.from_path("provenance/source.json", source)
