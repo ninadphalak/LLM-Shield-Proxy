@@ -217,6 +217,13 @@ def test_build_and_verify_canonical_bundle_after_zip_round_trip(tmp_path: Path) 
     assert verify_bundle(result.bundle_dir, sensitive_values=SENSITIVE).manifest == result.verified.manifest
 
 
+def test_verification_requires_sensitive_value_registry(tmp_path: Path) -> None:
+    result = _build(tmp_path)
+
+    with pytest.raises(BundleError, match="nonempty sensitive-value registry"):
+        verify_bundle(result.archive_path, sensitive_values=())
+
+
 def test_fake_adapter_lifecycle_produces_complete_leaking_canonical_bundle(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -300,7 +307,7 @@ def test_duplicate_normalized_zip_member_is_rejected(tmp_path: Path) -> None:
         archive.writestr("readme.md", "two")
 
     with pytest.raises(BundleError, match="duplicate normalized"):
-        verify_bundle(archive_path)
+        verify_bundle(archive_path, sensitive_values=SENSITIVE)
 
 
 def test_noncanonical_zip_metadata_is_rejected(tmp_path: Path) -> None:
@@ -309,7 +316,7 @@ def test_noncanonical_zip_metadata_is_rejected(tmp_path: Path) -> None:
         archive.writestr("README.md", "not canonical")
 
     with pytest.raises(BundleError, match="metadata is not canonical"):
-        verify_bundle(archive_path)
+        verify_bundle(archive_path, sensitive_values=SENSITIVE)
 
 
 @pytest.mark.parametrize(
@@ -415,6 +422,11 @@ def test_submission_run_url_must_match_manifest_workflow(tmp_path: Path) -> None
             {"outcome": "fail", "cases_inconclusive": 0},
             "response product result",
         ),
+        (
+            "reports/response-midpoint.json",
+            {"cases_inconclusive": 0},
+            "unrecognized outcome",
+        ),
     ],
 )
 def test_manifest_product_result_must_match_embedded_report(
@@ -437,7 +449,7 @@ def test_zip_path_traversal_is_rejected_before_extraction(tmp_path: Path) -> Non
     path.write_bytes(buffer.getvalue())
 
     with pytest.raises(BundleError, match="path"):
-        verify_bundle(path)
+        verify_bundle(path, sensitive_values=SENSITIVE)
 
 
 def test_directory_member_size_is_rejected_before_read(
@@ -449,4 +461,4 @@ def test_directory_member_size_is_rejected_before_read(
     monkeypatch.setattr(bundle_module, "MAX_MEMBER_BYTES", 4)
 
     with pytest.raises(BundleError, match="member exceeds size limit"):
-        verify_bundle(source)
+        verify_bundle(source, sensitive_values=SENSITIVE)

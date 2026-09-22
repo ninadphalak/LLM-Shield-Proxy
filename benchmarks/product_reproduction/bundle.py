@@ -164,6 +164,11 @@ def _scan_sensitive(files: Mapping[str, bytes], sensitive_values: Sequence[Sensi
             raise BundleError(f"bundle member contains a sensitive fixture or credential: {path}")
 
 
+def _require_sensitive_registry(sensitive_values: Sequence[SensitiveValue]) -> None:
+    if not sensitive_values:
+        raise BundleError("bundle verification requires a nonempty sensitive-value registry")
+
+
 def _required_member_paths(manifest: Mapping[str, Any]) -> set[str]:
     reports = manifest.get("reports")
     if not isinstance(reports, dict) or set(reports) != REQUIRED_REPORT_KEYS:
@@ -269,11 +274,16 @@ def _validate_cross_document_consistency(
     if not isinstance(operator_report, dict) or not isinstance(response_report, dict):
         raise BundleError("product reports must be JSON objects")
     operator_result = operator_report.get("verdict")
-    response_result = {
+    response_results = {
         "pass": "CLEAN",
         "fail": "LEAK",
         "no-leak-profile-not-met": "CHECK FAILED",
-    }.get(response_report.get("outcome"), "NOT MEASURED")
+        "inconclusive": "NOT MEASURED",
+    }
+    response_outcome = response_report.get("outcome")
+    if response_outcome not in response_results:
+        raise BundleError("response report has an unrecognized outcome")
+    response_result = response_results[response_outcome]
     expected_results = manifest["product_results"]
     if operator_result != expected_results["operator"]:
         raise BundleError("operator product result disagrees with its report")
@@ -337,6 +347,7 @@ def build_bundle(
     sensitive_values: Sequence[SensitiveValue],
     frozen_roots: Iterable[Path] = (),
 ) -> BundleBuildResult:
+    _require_sensitive_registry(sensitive_values)
     destination = validate_fresh_output_path(bundle_dir, repo_root=repo_root, frozen_roots=frozen_roots)
     archive = validate_fresh_output_path(archive_path, repo_root=repo_root, frozen_roots=frozen_roots)
     if destination == archive or destination in archive.parents or archive in destination.parents:
@@ -476,8 +487,9 @@ def _read_directory(path: Path) -> dict[str, bytes]:
 def verify_bundle(
     source: Path,
     *,
-    sensitive_values: Sequence[SensitiveValue] = (),
+    sensitive_values: Sequence[SensitiveValue],
 ) -> VerifiedBundle:
+    _require_sensitive_registry(sensitive_values)
     resolved = source.resolve(strict=True)
     files = _read_directory(resolved) if resolved.is_dir() else _read_zip(resolved)
     _validate_unique_paths(files)
