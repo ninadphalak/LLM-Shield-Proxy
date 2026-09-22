@@ -483,12 +483,36 @@ def test_zip_member_limit_is_checked_before_opening_the_archive(
         verify_bundle(path, sensitive_values=SENSITIVE)
 
 
-def test_directory_member_size_is_rejected_before_read(
+def test_directory_member_size_is_rejected_by_bounded_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "bundle"
     source.mkdir()
     (source / "oversized.txt").write_bytes(b"12345")
+    monkeypatch.setattr(bundle_module, "MAX_MEMBER_BYTES", 4)
+
+    with pytest.raises(BundleError, match="member exceeds size limit"):
+        verify_bundle(source, sensitive_values=SENSITIVE)
+
+
+def test_directory_member_growth_cannot_bypass_the_read_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "bundle"
+    source.mkdir()
+    growing = source / "growing.txt"
+    growing.write_bytes(b"12345")
+    original_stat = Path.stat
+
+    class StaleStat:
+        st_size = 1
+
+    def stale_stat(path: Path, *args, **kwargs):
+        if path == growing:
+            return StaleStat()
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stale_stat)
     monkeypatch.setattr(bundle_module, "MAX_MEMBER_BYTES", 4)
 
     with pytest.raises(BundleError, match="member exceeds size limit"):

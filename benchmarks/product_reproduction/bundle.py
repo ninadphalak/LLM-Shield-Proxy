@@ -550,13 +550,14 @@ def _read_directory(path: Path) -> dict[str, bytes]:
     for candidate in sorted(candidates, key=lambda item: item.relative_to(path).as_posix()):
         relative = candidate.relative_to(path).as_posix()
         _normalize_member_path(relative)
-        size = candidate.stat().st_size
-        if size > MAX_MEMBER_BYTES:
+        with candidate.open("rb") as source:
+            data = source.read(MAX_MEMBER_BYTES + 1)
+        if len(data) > MAX_MEMBER_BYTES:
             raise BundleError(f"bundle directory member exceeds size limit: {relative}")
-        total += size
+        total += len(data)
         if total > MAX_ARTIFACT_BYTES:
             raise BundleError("bundle directory expands beyond its total size limit")
-        files[relative] = candidate.read_bytes()
+        files[relative] = data
     return files
 
 

@@ -263,6 +263,17 @@ def test_measure_comparison_requires_not_compared_profiles(
     assert errors
 
 
+def test_partial_bundle_can_report_an_unmeasured_profile(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    document = copy.deepcopy(valid_documents["bundle-manifest.schema.json"])
+    document["experiment_health"] = "partial"
+    document["product_results"]["response_midpoint"] = "NOT MEASURED"
+    document["reproduction_status"]["response_midpoint"] = "not-compared"
+
+    _validator("bundle-manifest.schema.json").validate(document)
+
+
 def test_embedded_submission_template_does_not_require_circular_manifest_hash(
     valid_documents: dict[str, dict[str, Any]],
 ) -> None:
