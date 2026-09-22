@@ -8,6 +8,7 @@ PUBLIC_ROOT_FILES = (
     "CONTRIBUTING.md",
     "STABILITY.md",
     "LIMITATIONS.md",
+    ".github/actions/README.md",
 )
 PUBLIC_DIRECTORIES = (
     REPO_ROOT / "benchmarks",
