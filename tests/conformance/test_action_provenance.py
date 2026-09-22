@@ -5,6 +5,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 ACTION = ROOT / ".github" / "actions" / "pii-leak-benchmark" / "action.yml"
+ROOT_ACTION = ROOT / "action.yml"
+ACTION_README = ROOT / ".github" / "actions" / "README.md"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 BENCHMARK = ROOT / ".github" / "workflows" / "benchmark.yml"
 DOCKER_PUBLISH = ROOT / ".github" / "workflows" / "docker-publish.yml"
@@ -13,6 +15,146 @@ SUBMITTING = ROOT / "website" / "docs" / "conformance" / "submitting.md"
 
 ATTEST_V4_SHA = "1e69f48acb82d1966a394da916b4c1698aa569d6"
 UPLOAD_ARTIFACT_V7_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+
+ROOT_ACTION_INPUTS = {
+    "target-base-url": (True, None),
+    "start-command": (False, ""),
+    "upstream-env": (False, ""),
+    "target-model": (False, "conformance-model"),
+    "target-version": (False, "current"),
+    "duty": (False, "restore"),
+    "profile": (False, "pii-secrets-v1"),
+    "seed": (False, "gateway-ci-v1"),
+    "baseline-base-url": (False, ""),
+    "baseline-start-command": (False, ""),
+    "baseline-version": (False, "baseline"),
+    "baseline-report": (False, ""),
+    "artifact-name": (False, "pii-leak-benchmark"),
+}
+
+RESEARCH_ACTION_INPUTS = {
+    "target-base-url": (True, None),
+    "target-name": (False, "external-openai-compatible-endpoint"),
+    "target-version": (False, "unspecified"),
+    "target-api-key": (False, "conformance-key"),
+    "target-model": (False, "conformance-model"),
+    "target-header": (False, ""),
+    "iterations": (False, "3"),
+    "capture-host": (False, "127.0.0.1"),
+    "capture-port": (False, "8765"),
+    "capture-public-url": (False, ""),
+    "capture-token": (False, ""),
+    "redaction-claimed": (False, "unknown"),
+    "redaction-claim-citation": (False, ""),
+    "redaction-claim-quote": (False, ""),
+    "redaction-enabled": (False, "false"),
+    "redaction-config-reference": (False, ""),
+    "python-version": (False, "3.12"),
+    "source": (False, "pii-leak-benchmark"),
+    "json-out": (False, "pii-leak-benchmark-report.json"),
+    "artifact-name": (False, "pii-leak-benchmark-report"),
+    "fail-on-non-pass": (False, "true"),
+    "attest-report": (False, "false"),
+}
+
+
+def _assert_input_contract(document, expected):
+    assert set(document["inputs"]) == set(expected)
+    for name, (required, default) in expected.items():
+        metadata = document["inputs"][name]
+        assert bool(metadata.get("required", False)) is required, name
+        if default is None:
+            assert "default" not in metadata, name
+        else:
+            assert metadata.get("default") == default, name
+
+
+def test_public_action_input_and_output_contracts_are_pinned():
+    operator = yaml.safe_load(ROOT_ACTION.read_text(encoding="utf-8"))
+    research = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+
+    _assert_input_contract(operator, ROOT_ACTION_INPUTS)
+    _assert_input_contract(research, RESEARCH_ACTION_INPUTS)
+
+    assert operator["outputs"] == {
+        "report-directory": {
+            "description": "Directory with operator reports, raw measurements and summary.md",
+            "value": "${{ steps.setup.outputs.out }}",
+        }
+    }
+    assert research["outputs"] == {
+        "outcome": {
+            "description": (
+                "What a published row may say: pass, fail, no-leak-profile-not-met, "
+                "not-applicable, redaction-not-enabled, inconclusive, or claim-unstated."
+            ),
+            "value": "${{ steps.run.outputs.outcome }}",
+        },
+        "passed": {
+            "description": "The raw measurement: did every check pass.",
+            "value": "${{ steps.run.outputs.passed }}",
+        },
+        "leaked-entity-types": {
+            "description": (
+                "Comma-separated entity types that reached the capture. Empty on a clean run."
+            ),
+            "value": "${{ steps.run.outputs.leaked }}",
+        },
+        "report-path": {
+            "description": "Path to the raw report.",
+            "value": "${{ steps.run.outputs.report }}",
+        },
+        "attestation-url": {
+            "description": (
+                "Verification page for the detached report attestation; empty when "
+                "attest-report is false."
+            ),
+            "value": "${{ steps.attest.outputs.attestation-url }}",
+        },
+    }
+
+    assert operator["inputs"]["start-command"]["description"] == (
+        "Optional foreground command to start the gateway; stopped after measurement"
+    )
+    assert operator["inputs"]["upstream-env"]["description"] == (
+        "Gateway environment variable that receives the benchmark capture URL"
+    )
+    assert research["inputs"]["target-version"]["description"] == (
+        "Exact version or image digest measured. A row without this is unpublishable."
+    )
+    assert research["inputs"]["target-api-key"]["description"] == (
+        "Credential the target expects. Pass a secret; it is never written to the report."
+    )
+    assert research["inputs"]["attest-report"]["description"] == (
+        "Create detached GitHub/Sigstore provenance over the raw report. The caller must "
+        "grant id-token: write and attestations: write. Required for a submitted run to "
+        "count toward the independent-replication floor."
+    )
+
+
+def test_action_roles_are_documented_without_conflating_attestation():
+    note = ACTION_README.read_text(encoding="utf-8")
+
+    assert "supported operator CI and regression" in note
+    assert "legacy research HTTP profile" in note
+    assert "detached attestation" in note
+    assert "does not create a detached attestation" in note
+
+
+def test_submission_short_path_is_automatic_and_artifact_derived():
+    instructions = SUBMITTING.read_text(encoding="utf-8")
+    short_path = instructions.split("### The short path, for a results-wall row", 1)[1].split(
+        "## CI Automation", 1
+    )[0]
+    normalized = " ".join(short_path.split())
+
+    assert "A person then fills in the measurement columns" not in short_path
+    assert (
+        "The intake downloads the linked public run’s recognized report artifact, derives the "
+        "measurement columns from its JSON reports, builds the site, and publishes the row "
+        "through a controlled pull request."
+    ) in normalized
+    assert "bundle-manifest" not in short_path
 
 
 def test_composite_action_attests_the_finished_report_as_a_detached_subject():
