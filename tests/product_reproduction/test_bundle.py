@@ -462,3 +462,24 @@ def test_directory_member_size_is_rejected_before_read(
 
     with pytest.raises(BundleError, match="member exceeds size limit"):
         verify_bundle(source, sensitive_values=SENSITIVE)
+
+
+def test_directory_member_limit_is_enforced_during_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "bundle"
+    source.mkdir()
+    for index in range(4):
+        (source / f"member-{index}.txt").write_text("value", encoding="utf-8")
+    monkeypatch.setattr(bundle_module, "MAX_MEMBERS", 3)
+
+    def guarded_rglob(path: Path, pattern: str):
+        assert path == source
+        assert pattern == "*"
+        yield from source.iterdir()
+        raise AssertionError("directory traversal continued beyond the member limit")
+
+    monkeypatch.setattr(Path, "rglob", guarded_rglob)
+
+    with pytest.raises(BundleError, match="too many members"):
+        verify_bundle(source, sensitive_values=SENSITIVE)

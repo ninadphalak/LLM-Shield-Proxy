@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import re
 import stat
 import zipfile
@@ -465,13 +466,27 @@ def _read_zip(path: Path) -> dict[str, bytes]:
 def _read_directory(path: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     total = 0
-    for candidate in sorted(path.rglob("*")):
-        if candidate.is_symlink():
-            raise BundleError("bundle directory contains a symbolic link")
-        if not candidate.is_file():
-            continue
-        if len(files) >= MAX_MEMBERS:
-            raise BundleError("bundle directory has too many members")
+    candidates: list[Path] = []
+    pending = [path]
+    entries_seen = 0
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                entries_seen += 1
+                if entries_seen > MAX_MEMBERS * 2:
+                    raise BundleError("bundle directory has too many entries")
+                candidate = Path(entry.path)
+                if entry.is_symlink():
+                    raise BundleError("bundle directory contains a symbolic link")
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(candidate)
+                elif entry.is_file(follow_symlinks=False):
+                    if len(candidates) >= MAX_MEMBERS:
+                        raise BundleError("bundle directory has too many members")
+                    candidates.append(candidate)
+
+    for candidate in sorted(candidates, key=lambda item: item.relative_to(path).as_posix()):
         relative = candidate.relative_to(path).as_posix()
         _normalize_member_path(relative)
         size = candidate.stat().st_size
