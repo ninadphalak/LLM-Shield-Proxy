@@ -5,7 +5,6 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 
 from .adapters.base import Diagnostic, ProductAdapter, Profile, RunContext
@@ -18,18 +17,12 @@ from .resources import (
     collect_resource_snapshot,
     validate_resource_admission,
 )
+from .results import ExperimentHealth
 from .retry import AcquisitionRetryExhausted, RetryAttempt, RetryPolicy, run_acquisition_with_retry
 from .sanitizer import SensitiveValue, build_sanitizer
 
 MAX_DIAGNOSTICS = 64
 MAX_DIAGNOSTIC_CHARS = 2048
-
-
-class ExperimentHealth(str, Enum):
-    COMPLETE = "complete"
-    NOT_MEASURED = "not-measured"
-    INFRASTRUCTURE_ERROR = "infrastructure-error"
-    RESOURCE_INSUFFICIENT = "resource-insufficient"
 
 
 class EndpointOwnershipError(RuntimeError):

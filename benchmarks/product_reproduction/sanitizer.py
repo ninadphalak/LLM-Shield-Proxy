@@ -34,6 +34,9 @@ class Sanitizer:
             sanitized = sanitized.replace(rendering, replacement)
         return sanitized
 
+    def contains_sensitive(self, text: str) -> bool:
+        return any(rendering in text for rendering, _ in self._replacements)
+
 
 def _renderings(value: str) -> set[str]:
     encoded = value.encode("utf-8")

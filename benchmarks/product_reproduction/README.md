@@ -23,6 +23,21 @@ Adapters receive a monotonic readiness deadline and must apply it to every readi
 The orchestrator rejects a readiness result returned after that deadline. Commands remain argument
 vectors and are never reconstructed as shell text.
 
+The evidence foundation builds deterministic, text-only ZIP artifacts with canonical JSON and line
+endings. `bundle-manifest.json` hashes every payload member. `SHA256SUMS` hashes those payload files
+plus the manifest and excludes only itself. Verification rejects unsafe or duplicate paths,
+symbolic links, missing reports, hash or size drift, noncanonical content, raw target logs, and any
+configured fixture or credential rendering.
+
+Baseline comparison is recursive and publishes every unexpected JSON pointer. An exact match and a
+primary-outcome match remain distinct. Product outcome, experiment health, and reproduction status
+are also separate, so a measured leak can be a complete experiment and a matched reproduction.
+
+The embedded `submission/submission.json` is a pre-upload template. It deliberately omits the final
+manifest digest because including that digest in a file hashed by the manifest would create a
+cycle. The later submission step computes the manifest digest after verification and adds it only
+to the out-of-band submission metadata.
+
 `catalog.json` is intentionally empty until a product adapter, configuration, release source, and
 accepted baseline have been reviewed together. Catalog data cannot supply commands, runner labels,
 credentials, or arbitrary adapter imports.
@@ -37,6 +52,6 @@ Run the contract tests from the repository root:
 python -m pytest tests/product_reproduction -q
 ```
 
-The bundle builder and first released-product adapter are added in later bounded changes. Until
-then, this package validates the lifecycle with a test-only adapter but does not claim to reproduce
-a product result.
+The first released-product adapter is added in a later bounded change. Until then, this package
+validates the full lifecycle and bundle path with a test-only adapter but does not claim to
+reproduce a product result.

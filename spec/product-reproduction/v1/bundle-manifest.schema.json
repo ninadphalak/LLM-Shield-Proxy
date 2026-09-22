@@ -131,7 +131,8 @@
   "allOf": [
     {
       "if": {"properties": {"mode": {"const": "reproduce"}}},
-      "then": {"required": ["baseline"]}
+      "then": {"required": ["baseline"]},
+      "else": {"not": {"required": ["baseline"]}}
     },
     {
       "if": {"properties": {"experiment_health": {"const": "complete"}}},

@@ -125,12 +125,24 @@ def valid_documents() -> dict[str, dict[str, Any]]:
             "schema": "pii-leak-benchmark/product-comparison/v1",
             "policy": "product-reproduction/v1",
             "target_id": "test-gateway-default",
+            "mode": "reproduce",
             "baseline_id": "test-gateway-1.2.3-default",
             "artifact_identity_match": True,
             "configuration_match": True,
             "profiles": {
-                "operator": {"status": "not-compared", "level": "none", "differences": []},
-                "response-midpoint": {"status": "matched", "level": "primary", "differences": []},
+                "operator": {
+                    "status": "not-compared",
+                    "level": "none",
+                    "current_sha256": digest,
+                    "differences": [],
+                },
+                "response-midpoint": {
+                    "status": "matched",
+                    "level": "primary",
+                    "current_sha256": digest,
+                    "baseline_sha256": digest,
+                    "differences": [],
+                },
             },
         },
         "submission.schema.json": {
@@ -195,6 +207,71 @@ def test_reproduction_bundle_and_submission_require_baseline(
         assert errors, schema_name
 
 
+def test_measure_bundle_and_submission_forbid_baseline(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    for schema_name in ("bundle-manifest.schema.json", "submission.schema.json"):
+        document = copy.deepcopy(valid_documents[schema_name])
+        document["mode"] = "measure"
+
+        errors = list(_validator(schema_name).iter_errors(document))
+
+        assert errors, schema_name
+
+
+def test_measure_bundle_and_submission_validate_without_baseline(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    for schema_name in ("bundle-manifest.schema.json", "submission.schema.json"):
+        document = copy.deepcopy(valid_documents[schema_name])
+        document["mode"] = "measure"
+        document.pop("baseline")
+
+        _validator(schema_name).validate(document)
+
+
+def test_reproduction_comparison_requires_baseline_identity_fields(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    for field in ("baseline_id", "artifact_identity_match", "configuration_match"):
+        document = copy.deepcopy(valid_documents["comparison.schema.json"])
+        document.pop(field)
+
+        errors = list(_validator("comparison.schema.json").iter_errors(document))
+
+        assert errors, field
+
+
+def test_measure_comparison_requires_not_compared_profiles(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    document = copy.deepcopy(valid_documents["comparison.schema.json"])
+    document["mode"] = "measure"
+    document.pop("baseline_id")
+    document.pop("artifact_identity_match")
+    document.pop("configuration_match")
+    for profile in document["profiles"].values():
+        profile["status"] = "not-compared"
+        profile["level"] = "none"
+        profile.pop("baseline_sha256", None)
+
+    _validator("comparison.schema.json").validate(document)
+
+    document["profiles"]["response-midpoint"]["status"] = "matched"
+    errors = list(_validator("comparison.schema.json").iter_errors(document))
+
+    assert errors
+
+
+def test_embedded_submission_template_does_not_require_circular_manifest_hash(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    document = copy.deepcopy(valid_documents["submission.schema.json"])
+    document.pop("bundle_manifest_sha256")
+
+    _validator("submission.schema.json").validate(document)
+
+
 @pytest.mark.parametrize("value", ["not-a-date", "2026-99-99T12:00:00Z"])
 def test_bundle_rejects_malformed_date_time(
     value: str, valid_documents: dict[str, dict[str, Any]]
@@ -226,5 +303,16 @@ def test_published_metadata_rejects_url_credentials(
         document[field] = "https://user:secret@example.test/gateway"
 
     errors = list(_validator(schema_name).iter_errors(document))
+
+    assert errors
+
+
+def test_matched_comparison_requires_both_report_hashes(
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    document = copy.deepcopy(valid_documents["comparison.schema.json"])
+    document["profiles"]["response-midpoint"].pop("baseline_sha256")
+
+    errors = list(_validator("comparison.schema.json").iter_errors(document))
 
     assert errors
