@@ -18,6 +18,8 @@ class RunContext:
     output_dir: Path
     working_dir: Path
     environment: Mapping[str, str] = field(default_factory=dict)
+    profile: Profile | None = None
+    readiness_deadline_monotonic: float = 0.0
 
 
 @dataclass(frozen=True)
