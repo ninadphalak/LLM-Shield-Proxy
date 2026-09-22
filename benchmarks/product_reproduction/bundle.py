@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import os
 import re
 import stat
+import struct
 import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -328,14 +330,21 @@ def _checksum_bytes(files: Mapping[str, bytes]) -> bytes:
     return "".join(f"{_sha256(files[path])}  {path}\n" for path in sorted(files)).encode("utf-8")
 
 
-def _write_deterministic_zip(archive_path: Path, files: Mapping[str, bytes]) -> None:
-    with zipfile.ZipFile(archive_path, "x", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
+def _canonical_zip_bytes(files: Mapping[str, bytes]) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
         for path in sorted(files):
             info = zipfile.ZipInfo(path, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_STORED
             info.create_system = 3
             info.external_attr = 0o100644 << 16
             archive.writestr(info, files[path])
+    return output.getvalue()
+
+
+def _write_deterministic_zip(archive_path: Path, files: Mapping[str, bytes]) -> None:
+    with archive_path.open("xb") as archive:
+        archive.write(_canonical_zip_bytes(files))
 
 
 def build_bundle(
@@ -420,13 +429,63 @@ def build_bundle(
     )
 
 
+def _preflight_zip(raw: bytes) -> None:
+    eocd_size = 22
+    central_header_size = 46
+    if len(raw) < eocd_size:
+        raise BundleError("bundle archive is not a canonical ZIP structure")
+    (
+        signature,
+        disk_number,
+        central_disk,
+        entries_on_disk,
+        declared_entries,
+        central_size,
+        central_offset,
+        comment_size,
+    ) = struct.unpack_from("<4s4H2IH", raw, len(raw) - eocd_size)
+    if (
+        signature != b"PK\x05\x06"
+        or disk_number != 0
+        or central_disk != 0
+        or entries_on_disk != declared_entries
+        or declared_entries == 0xFFFF
+        or central_size == 0xFFFFFFFF
+        or central_offset == 0xFFFFFFFF
+        or comment_size != 0
+        or central_offset + central_size != len(raw) - eocd_size
+    ):
+        raise BundleError("bundle archive is not a canonical ZIP structure")
+    if declared_entries > MAX_MEMBERS:
+        raise BundleError("bundle archive has too many members")
+
+    cursor = central_offset
+    central_end = central_offset + central_size
+    observed_entries = 0
+    while cursor < central_end:
+        if central_end - cursor < central_header_size or raw[cursor : cursor + 4] != b"PK\x01\x02":
+            raise BundleError("bundle archive is not a canonical ZIP structure")
+        name_size, extra_size, member_comment_size = struct.unpack_from("<HHH", raw, cursor + 28)
+        cursor += central_header_size + name_size + extra_size + member_comment_size
+        if cursor > central_end:
+            raise BundleError("bundle archive is not a canonical ZIP structure")
+        observed_entries += 1
+        if observed_entries > MAX_MEMBERS:
+            raise BundleError("bundle archive has too many members")
+    if cursor != central_end or observed_entries != declared_entries:
+        raise BundleError("bundle archive is not a canonical ZIP structure")
+
+
 def _read_zip(path: Path) -> dict[str, bytes]:
-    if path.stat().st_size > MAX_ARTIFACT_BYTES:
+    with path.open("rb") as source:
+        raw = source.read(MAX_ARTIFACT_BYTES + 1)
+    if len(raw) > MAX_ARTIFACT_BYTES:
         raise BundleError("bundle archive exceeds size limit")
+    _preflight_zip(raw)
     files: dict[str, bytes] = {}
     total = 0
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             infos = archive.infolist()
             if len(infos) > MAX_MEMBERS:
                 raise BundleError("bundle archive has too many members")
@@ -460,6 +519,8 @@ def _read_zip(path: Path) -> dict[str, bytes]:
                 files[name] = archive.read(info)
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
         raise BundleError("bundle archive cannot be read") from exc
+    if raw != _canonical_zip_bytes(files):
+        raise BundleError("bundle archive is not a canonical ZIP structure")
     return files
 
 

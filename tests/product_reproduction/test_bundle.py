@@ -452,6 +452,37 @@ def test_zip_path_traversal_is_rejected_before_extraction(tmp_path: Path) -> Non
         verify_bundle(path, sensitive_values=SENSITIVE)
 
 
+@pytest.mark.parametrize("position", ["leading", "trailing"])
+def test_zip_rejects_bytes_outside_the_canonical_structure(tmp_path: Path, position: str) -> None:
+    result = _build(tmp_path / "source")
+    archive = result.archive_path.read_bytes()
+    hidden = b"alice.fixture@example.test"
+    tampered = hidden + archive if position == "leading" else archive + hidden
+    path = tmp_path / f"{position}.zip"
+    path.write_bytes(tampered)
+
+    with pytest.raises(BundleError, match="canonical ZIP structure"):
+        verify_bundle(path, sensitive_values=SENSITIVE)
+
+
+def test_zip_member_limit_is_checked_before_opening_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "too-many.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        for index in range(4):
+            archive.writestr(f"member-{index}.txt", "value")
+    monkeypatch.setattr(bundle_module, "MAX_MEMBERS", 3)
+
+    def unexpected_zip_open(*args, **kwargs):
+        raise AssertionError("ZIP opened before the central-directory member cap was checked")
+
+    monkeypatch.setattr(bundle_module.zipfile, "ZipFile", unexpected_zip_open)
+
+    with pytest.raises(BundleError, match="too many members"):
+        verify_bundle(path, sensitive_values=SENSITIVE)
+
+
 def test_directory_member_size_is_rejected_before_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
