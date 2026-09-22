@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class CommandContractError(ValueError):
@@ -12,7 +12,7 @@ class CommandContractError(ValueError):
 class CommandSpec:
     """A subprocess argument vector that is never reconstructed as shell source."""
 
-    argv: tuple[str, ...]
+    argv: tuple[str, ...] = field(repr=False)
 
     @classmethod
     def from_argv(cls, argv: Sequence[str]) -> CommandSpec:

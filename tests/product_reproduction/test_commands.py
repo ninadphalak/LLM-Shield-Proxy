@@ -20,6 +20,13 @@ def test_windows_path_and_shell_metacharacters_remain_literal_arguments() -> Non
     assert command.argv[3] == "literal;$(not-a-shell)|value"
 
 
+def test_command_repr_never_exposes_arguments() -> None:
+    command = CommandSpec.from_argv(["gateway", "--api-key", "synthetic-secret-value"])
+
+    assert "synthetic-secret-value" not in repr(command)
+    assert "--api-key" not in repr(command)
+
+
 @pytest.mark.parametrize("argv", [[], [""], ["gateway", "bad\0value"], ["gateway", "bad\nvalue"]])
 def test_argument_vector_rejects_empty_or_control_byte_arguments(argv: list[str]) -> None:
     with pytest.raises(CommandContractError):
