@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmshieldproxy.com/spec/product-reproduction/v1/bundle-manifest.schema.json",
+  "title": "Released product evidence bundle manifest",
+  "type": "object",
+  "required": [
+    "schema",
+    "schema_version",
+    "target_id",
+    "mode",
+    "suite",
+    "started_at",
+    "ended_at",
+    "experiment_health",
+    "product_results",
+    "reproduction_status",
+    "workflow",
+    "harness",
+    "product",
+    "profiles",
+    "resources",
+    "members",
+    "reports",
+    "sanitization",
+    "limitations"
+  ],
+  "properties": {
+    "schema": {"const": "pii-leak-benchmark/product-bundle/v1"},
+    "schema_version": {"const": "1.0.0"},
+    "target_id": {"$ref": "#/$defs/safeId"},
+    "mode": {"enum": ["measure", "reproduce"]},
+    "suite": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"const": "operator"}},
+        {"contains": {"const": "response-midpoint"}}
+      ],
+      "items": {"enum": ["operator", "response-midpoint"]}
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "ended_at": {"type": "string", "format": "date-time"},
+    "experiment_health": {
+      "enum": ["complete", "partial", "not-measured", "infrastructure-error", "resource-insufficient"]
+    },
+    "product_results": {
+      "type": "object",
+      "required": ["operator", "response_midpoint"],
+      "properties": {
+        "operator": {"enum": ["CLEAN", "LEAK", "CHECK FAILED", "NOT MEASURED"]},
+        "response_midpoint": {"enum": ["CLEAN", "LEAK", "CHECK FAILED", "NOT MEASURED"]}
+      },
+      "additionalProperties": false
+    },
+    "reproduction_status": {
+      "type": "object",
+      "required": ["operator", "response_midpoint"],
+      "properties": {
+        "operator": {"enum": ["matched", "drifted", "not-compared", "invalid"]},
+        "response_midpoint": {"enum": ["matched", "drifted", "not-compared", "invalid"]}
+      },
+      "additionalProperties": false
+    },
+    "workflow": {"$ref": "#/$defs/workflow"},
+    "harness": {"$ref": "#/$defs/harness"},
+    "product": {"$ref": "#/$defs/product"},
+    "profiles": {
+      "type": "object",
+      "required": ["seed", "oracle", "iterations"],
+      "properties": {
+        "seed": {"type": "string", "pattern": "^[a-f0-9]{16}$"},
+        "oracle": {"const": "midpoint"},
+        "iterations": {"const": 1}
+      },
+      "additionalProperties": false
+    },
+    "resources": {"$ref": "#/$defs/resources"},
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/member"}
+    },
+    "reports": {
+      "type": "object",
+      "required": ["control", "operator", "operator_raw", "response_midpoint", "comparison"],
+      "properties": {
+        "control": {"$ref": "#/$defs/memberPath"},
+        "operator": {"$ref": "#/$defs/memberPath"},
+        "operator_raw": {"$ref": "#/$defs/memberPath"},
+        "response_midpoint": {"$ref": "#/$defs/memberPath"},
+        "comparison": {"$ref": "#/$defs/memberPath"}
+      },
+      "additionalProperties": false
+    },
+    "baseline": {
+      "type": "object",
+      "required": ["id", "acceptance_status", "comparison_policy", "reports"],
+      "properties": {
+        "id": {"$ref": "#/$defs/safeId"},
+        "acceptance_status": {"const": "accepted"},
+        "comparison_policy": {"const": "product-reproduction/v1"},
+        "reports": {
+          "type": "object",
+          "required": ["operator", "response_midpoint"],
+          "properties": {
+            "operator": {"oneOf": [{"$ref": "#/$defs/baselineReport"}, {"type": "null"}]},
+            "response_midpoint": {"$ref": "#/$defs/baselineReport"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "sanitization": {
+      "type": "object",
+      "required": ["policy", "verified"],
+      "properties": {
+        "policy": {"const": "product-reproduction/v1"},
+        "verified": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "limitations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "reproduce"}}},
+      "then": {"required": ["baseline"]}
+    },
+    {
+      "if": {"properties": {"experiment_health": {"const": "complete"}}},
+      "then": {
+        "properties": {
+          "product_results": {
+            "properties": {
+              "operator": {"not": {"const": "NOT MEASURED"}},
+              "response_midpoint": {"not": {"const": "NOT MEASURED"}}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "safeId": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 100},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "gitRevision": {"type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"},
+    "httpsUrl": {"type": "string", "format": "uri", "pattern": "^https://[^?#]+$", "maxLength": 500},
+    "memberPath": {
+      "type": "string",
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+      "maxLength": 500
+    },
+    "member": {
+      "type": "object",
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": {"$ref": "#/$defs/memberPath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "baselineReport": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/memberPath"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "workflow": {
+      "type": "object",
+      "required": ["repository", "workflow_ref", "run_id", "run_attempt", "actor", "commit_sha", "branch", "runner_image", "runner_os"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "workflow_ref": {"type": "string", "minLength": 1, "maxLength": 500},
+        "run_id": {"type": "string", "pattern": "^[0-9]+$"},
+        "run_attempt": {"type": "integer", "minimum": 1},
+        "actor": {"type": "string", "pattern": "^[A-Za-z0-9-]+$", "maxLength": 100},
+        "commit_sha": {"$ref": "#/$defs/gitRevision"},
+        "branch": {"type": "string", "minLength": 1, "maxLength": 255},
+        "runner_image": {"type": "string", "minLength": 1, "maxLength": 100},
+        "runner_os": {"enum": ["Linux", "Windows", "macOS"]}
+      },
+      "additionalProperties": false
+    },
+    "harness": {
+      "type": "object",
+      "required": ["version", "source_revision", "instrument_digest", "install_artifact_sha256"],
+      "properties": {
+        "version": {"type": "string", "minLength": 1, "maxLength": 100},
+        "source_revision": {"$ref": "#/$defs/gitRevision"},
+        "instrument_digest": {"$ref": "#/$defs/sha256"},
+        "install_artifact_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "product": {
+      "type": "object",
+      "required": ["project", "project_url", "license", "requested_release_selector", "release_source", "released_version", "release_state", "artifact_reference", "artifact_identity", "release_url", "configuration_id", "configuration_sha256"],
+      "properties": {
+        "project": {"type": "string", "minLength": 1, "maxLength": 160},
+        "project_url": {"$ref": "#/$defs/httpsUrl"},
+        "license": {"type": "string", "pattern": "^[A-Za-z0-9.+()-]+$", "maxLength": 100},
+        "requested_release_selector": {"$ref": "#/$defs/safeId"},
+        "release_source": {"$ref": "#/$defs/safeId"},
+        "released_version": {"type": "string", "minLength": 1, "maxLength": 100},
+        "release_state": {"enum": ["stable", "prerelease", "yanked"]},
+        "artifact_reference": {"type": "string", "minLength": 1, "maxLength": 500},
+        "artifact_identity": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "release_url": {"$ref": "#/$defs/httpsUrl"},
+        "configuration_id": {"$ref": "#/$defs/safeId"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "components": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["name", "version", "artifact_reference", "artifact_identity"],
+            "properties": {
+              "name": {"$ref": "#/$defs/safeId"},
+              "version": {"type": "string", "minLength": 1, "maxLength": 100},
+              "artifact_reference": {"type": "string", "minLength": 1, "maxLength": 500},
+              "artifact_identity": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "required": ["declared", "observed"],
+      "properties": {
+        "declared": {
+          "type": "object",
+          "required": ["runner_class", "minimum_memory_mib", "minimum_disk_mib", "service_limits"],
+          "properties": {
+            "runner_class": {"enum": ["standard-ubuntu", "high-memory-ubuntu"]},
+            "minimum_memory_mib": {"type": "integer", "minimum": 1},
+            "minimum_disk_mib": {"type": "integer", "minimum": 1},
+            "service_limits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["service", "memory_mib"],
+                "properties": {
+                  "service": {"$ref": "#/$defs/safeId"},
+                  "memory_mib": {"type": "integer", "minimum": 1}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "observed": {
+          "type": "object",
+          "required": ["available_memory_mib", "available_disk_mib"],
+          "properties": {
+            "available_memory_mib": {"type": "integer", "minimum": 0},
+            "available_disk_mib": {"type": "integer", "minimum": 0},
+            "peak_memory_mib": {"type": ["integer", "null"], "minimum": 0},
+            "service_peaks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["service", "peak_memory_mib"],
+                "properties": {
+                  "service": {"$ref": "#/$defs/safeId"},
+                  "peak_memory_mib": {"type": "integer", "minimum": 0}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmshieldproxy.com/spec/product-reproduction/v1/comparison.schema.json",
+  "title": "Released product baseline comparison",
+  "type": "object",
+  "required": ["schema", "policy", "target_id", "baseline_id", "artifact_identity_match", "configuration_match", "profiles"],
+  "properties": {
+    "schema": {"const": "pii-leak-benchmark/product-comparison/v1"},
+    "policy": {"const": "product-reproduction/v1"},
+    "target_id": {"$ref": "#/$defs/safeId"},
+    "baseline_id": {"$ref": "#/$defs/safeId"},
+    "artifact_identity_match": {"type": "boolean"},
+    "configuration_match": {"type": "boolean"},
+    "profiles": {
+      "type": "object",
+      "required": ["operator", "response-midpoint"],
+      "properties": {
+        "operator": {"$ref": "#/$defs/profileComparison"},
+        "response-midpoint": {"$ref": "#/$defs/profileComparison"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "safeId": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 100},
+    "profileComparison": {
+      "type": "object",
+      "required": ["status", "level", "differences"],
+      "properties": {
+        "status": {"enum": ["matched", "drifted", "not-compared", "invalid"]},
+        "level": {"enum": ["exact", "primary", "none"]},
+        "current_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "baseline_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "differences": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^/(?:[^~/]|~0|~1)+(?:/(?:[^~/]|~0|~1)+)*$", "maxLength": 300}
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
