@@ -37,9 +37,10 @@ class EndpointOwnershipError(RuntimeError):
 
 
 class TargetExited(RuntimeError):
-    def __init__(self, exit_code: int) -> None:
+    def __init__(self, exit_code: int, *, oom_killed: bool = False) -> None:
         super().__init__(f"target exited with code {exit_code}")
         self.exit_code = exit_code
+        self.oom_killed = oom_killed
 
 
 @dataclass(frozen=True)
@@ -215,10 +216,11 @@ class ProductLifecycleRunner:
                     health = ExperimentHealth.NOT_MEASURED
                     break
                 except TargetExited as exc:
-                    diagnostics.append(f"target exited with code {exc.exit_code}")
+                    suffix = " with confirmed OOM" if exc.oom_killed else ""
+                    diagnostics.append(f"target exited with code {exc.exit_code}{suffix}")
                     health = (
                         ExperimentHealth.RESOURCE_INSUFFICIENT
-                        if exc.exit_code == 137
+                        if exc.oom_killed
                         else ExperimentHealth.INFRASTRUCTURE_ERROR
                     )
                     break

@@ -164,7 +164,7 @@ def test_exit_two_is_not_measured_but_exit_one_is_complete(tmp_path: Path) -> No
 def test_oom_exit_is_resource_insufficient_and_diagnostics_are_sanitized(tmp_path: Path) -> None:
     fixture = "alice.fixture@example.test"
     behavior = FakeBehavior(
-        start_error=TargetExited(137),
+        start_error=TargetExited(137, oom_killed=True),
         diagnostic_message=f"target echoed {fixture}",
     )
 
@@ -175,6 +175,13 @@ def test_oom_exit_is_resource_insufficient_and_diagnostics_are_sanitized(tmp_pat
     assert "<FIXTURE_EMAIL>" in " ".join(result.diagnostics)
     assert any(event[0] == "diagnostics" for event in state.events)
     assert any(event[0] == "stop" for event in state.events)
+
+
+def test_exit_137_without_oom_evidence_is_an_infrastructure_error(tmp_path: Path) -> None:
+    result, _, _ = _run(tmp_path, behavior=FakeBehavior(start_error=TargetExited(137)))
+
+    assert result.health is ExperimentHealth.INFRASTRUCTURE_ERROR
+    assert "confirmed OOM" not in " ".join(result.diagnostics)
 
 
 def test_identity_mismatch_does_not_stop_unrelated_listener(tmp_path: Path) -> None:
