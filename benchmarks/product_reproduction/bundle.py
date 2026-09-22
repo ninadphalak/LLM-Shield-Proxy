@@ -26,6 +26,17 @@ CHECKSUMS_PATH = "SHA256SUMS"
 CONTROL_PATHS = frozenset({MANIFEST_PATH, CHECKSUMS_PATH})
 MEMBER_PATTERN = re.compile(r"^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9._/-]+$")
 REQUIRED_REPORT_KEYS = frozenset({"control", "operator", "operator_raw", "response_midpoint", "comparison"})
+EXPECTED_REPORT_PATHS = {
+    "control": "reports/control.raw.json",
+    "operator": "reports/operator.current.json",
+    "operator_raw": "reports/operator.current.raw.json",
+    "response_midpoint": "reports/response-midpoint.json",
+    "comparison": "reports/comparison.json",
+}
+OPTIONAL_STATIC_MEMBERS = frozenset({"logs/target.sanitized.log"})
+RENDERED_CONFIG_PATTERN = re.compile(
+    r"^configuration/rendered-config\.[A-Za-z0-9][A-Za-z0-9._-]*$"
+)
 REQUIRED_STATIC_MEMBERS = frozenset(
     {
         "README.md",
@@ -157,21 +168,24 @@ def _required_member_paths(manifest: Mapping[str, Any]) -> set[str]:
     reports = manifest.get("reports")
     if not isinstance(reports, dict) or set(reports) != REQUIRED_REPORT_KEYS:
         raise IncompleteEvidenceError("bundle does not declare the complete required report set")
-    paths = set(REQUIRED_STATIC_MEMBERS)
-    for key in sorted(REQUIRED_REPORT_KEYS):
-        value = reports[key]
-        if not isinstance(value, str):
-            raise IncompleteEvidenceError(f"required report path is invalid: {key}")
-        paths.add(_normalize_member_path(value))
-    return paths
+    if reports != EXPECTED_REPORT_PATHS:
+        raise IncompleteEvidenceError("bundle report paths do not use the canonical layout")
+    return set(REQUIRED_STATIC_MEMBERS) | set(EXPECTED_REPORT_PATHS.values())
 
 
 def _validate_semantic_members(manifest: Mapping[str, Any], payload_paths: set[str]) -> None:
     missing = sorted(_required_member_paths(manifest) - payload_paths)
-    if not any(path.startswith("configuration/rendered-config.") for path in payload_paths):
+    rendered_configs = {path for path in payload_paths if RENDERED_CONFIG_PATTERN.fullmatch(path)}
+    if not rendered_configs:
         missing.append("configuration/rendered-config.<extension>")
     if missing:
         raise IncompleteEvidenceError("bundle is missing required evidence: " + ", ".join(missing))
+    if len(rendered_configs) != 1:
+        raise BundleError("bundle must contain exactly one canonical rendered configuration")
+    allowed = _required_member_paths(manifest) | OPTIONAL_STATIC_MEMBERS | rendered_configs
+    unexpected = sorted(payload_paths - allowed)
+    if unexpected:
+        raise BundleError("bundle contains undeclared evidence roles: " + ", ".join(unexpected))
 
 
 def _strict_json_loads(data: bytes, *, path: str) -> Any:
@@ -245,6 +259,25 @@ def _validate_cross_document_consistency(
         raise BundleError("comparison target disagrees with manifest")
     if comparison.get("mode") != manifest["mode"]:
         raise BundleError("comparison mode disagrees with manifest")
+
+    operator_report = _strict_json_loads(files[manifest_reports["operator"]], path=manifest_reports["operator"])
+    response_report = _strict_json_loads(
+        files[manifest_reports["response_midpoint"]],
+        path=manifest_reports["response_midpoint"],
+    )
+    if not isinstance(operator_report, dict) or not isinstance(response_report, dict):
+        raise BundleError("product reports must be JSON objects")
+    operator_result = operator_report.get("verdict")
+    response_result = {
+        "pass": "CLEAN",
+        "fail": "LEAK",
+        "no-leak-profile-not-met": "CHECK FAILED",
+    }.get(response_report.get("outcome"), "NOT MEASURED")
+    expected_results = manifest["product_results"]
+    if operator_result != expected_results["operator"]:
+        raise BundleError("operator product result disagrees with its report")
+    if response_result != expected_results["response_midpoint"]:
+        raise BundleError("response product result disagrees with its report")
 
     baseline = manifest.get("baseline")
     if manifest["mode"] == "reproduce":

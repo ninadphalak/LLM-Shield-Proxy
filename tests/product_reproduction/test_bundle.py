@@ -28,7 +28,7 @@ SENSITIVE = (SensitiveValue(label="FIXTURE_EMAIL", value="alice.fixture@example.
 CONTROL_REPORT = {"control": "observed"}
 OPERATOR_REPORT = {"verdict": "LEAK"}
 OPERATOR_RAW_REPORT = {"result": "measured"}
-RESPONSE_REPORT = {"cases_inconclusive": 0}
+RESPONSE_REPORT = {"outcome": "pass", "cases_inconclusive": 0}
 
 
 def _comparison() -> dict:
@@ -332,7 +332,13 @@ def test_fixture_or_encoded_specimen_never_enters_artifact(tmp_path: Path, leaki
 
 
 def test_raw_logs_and_sanitizer_dictionary_are_rejected(tmp_path: Path) -> None:
-    for path in ("logs/target.raw.log", "provenance/sanitizer-fixture-dictionary.json"):
+    for path in (
+        "logs/target.raw.log",
+        "logs/target.log",
+        "logs/gateway.log",
+        "provenance/sanitizer-fixture-dictionary.json",
+        "provenance/sanitizer-data.json",
+    ):
         with pytest.raises(BundleError):
             _build(tmp_path / path.replace("/", "-"), members=_members() + [BundleContent.text(path, "hidden")])
 
@@ -397,6 +403,29 @@ def test_submission_run_url_must_match_manifest_workflow(tmp_path: Path) -> None
     ]
 
     with pytest.raises(BundleError, match="submission metadata disagrees with manifest: run_url"):
+        _build(tmp_path, members=members)
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement", "message"),
+    [
+        ("reports/operator.current.json", {"verdict": "CLEAN"}, "operator product result"),
+        (
+            "reports/response-midpoint.json",
+            {"outcome": "fail", "cases_inconclusive": 0},
+            "response product result",
+        ),
+    ],
+)
+def test_manifest_product_result_must_match_embedded_report(
+    tmp_path: Path, path: str, replacement: dict, message: str
+) -> None:
+    members = [
+        BundleContent.json(item.path, replacement) if item.path == path else item
+        for item in _members()
+    ]
+
+    with pytest.raises(BundleError, match=message):
         _build(tmp_path, members=members)
 
 
