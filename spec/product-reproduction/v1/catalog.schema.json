@@ -25,7 +25,7 @@
     "httpsUrl": {
       "type": "string",
       "format": "uri",
-      "pattern": "^https://[^?#]+$",
+      "pattern": "^https://[^@/?#\\s]+(?:/[^?#\\s]*)?$",
       "maxLength": 500
     },
     "repoPath": {

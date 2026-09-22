@@ -73,7 +73,6 @@ def test_checked_in_catalog_is_valid_and_has_no_unreviewed_targets() -> None:
             ),
             "duplicate runner service id",
         ),
-        (lambda d: d["targets"][0]["accepted_baselines"][0].update(artifact_reference="latest"), "mutable"),
         (lambda d: d["targets"][0]["accepted_baselines"][0].update(artifact_identity="sha256:nope"), "artifact_identity"),
         (lambda d: d["targets"][0]["accepted_baselines"][0].update(primary_outcomes=[]), "primary_outcomes"),
         (lambda d: d["targets"][0]["accepted_baselines"][0].update(accepted_by_pr="https://example.test/7"), "accepted_by_pr"),
@@ -92,6 +91,24 @@ def test_rejects_invalid_catalog_entries(
     _write_catalog(catalog_file, document)
 
     with pytest.raises(CatalogError, match=message):
+        _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["latest", "ghcr.io/example/gateway:latest", "test-gateway-latest.whl", "latest==1.2.3"],
+)
+def test_rejects_every_mutable_latest_reference(
+    reference: str,
+    catalog_file: Path,
+    product_tree: dict[str, Path],
+    valid_catalog: dict[str, Any],
+) -> None:
+    document = copy.deepcopy(valid_catalog)
+    document["targets"][0]["accepted_baselines"][0]["artifact_reference"] = reference
+    _write_catalog(catalog_file, document)
+
+    with pytest.raises(CatalogError, match="mutable"):
         _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
 
 

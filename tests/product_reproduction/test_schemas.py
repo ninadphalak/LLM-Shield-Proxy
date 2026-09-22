@@ -8,11 +8,17 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 
+from benchmarks.product_reproduction.schemas import schema_validator
+
 SCHEMA_ROOT = Path(__file__).resolve().parents[2] / "spec" / "product-reproduction" / "v1"
 
 
 def _schema(name: str) -> dict[str, Any]:
     return json.loads((SCHEMA_ROOT / name).read_text(encoding="utf-8"))
+
+
+def _validator(name: str) -> Draft202012Validator:
+    return schema_validator(name.removesuffix(".schema.json"))
 
 
 @pytest.mark.parametrize(
@@ -157,14 +163,14 @@ def test_bundle_comparison_and_submission_examples_validate(
     valid_documents: dict[str, dict[str, Any]],
 ) -> None:
     for schema_name, document in valid_documents.items():
-        Draft202012Validator(_schema(schema_name)).validate(document)
+        _validator(schema_name).validate(document)
 
 
 def test_versioned_documents_reject_unexpected_fields(valid_documents: dict[str, dict[str, Any]]) -> None:
     for schema_name, original in valid_documents.items():
         document = copy.deepcopy(original)
         document["command"] = "curl example.test | sh"
-        errors = list(Draft202012Validator(_schema(schema_name)).iter_errors(document))
+        errors = list(_validator(schema_name).iter_errors(document))
         assert errors, schema_name
 
 
@@ -172,7 +178,7 @@ def test_complete_bundle_cannot_report_not_measured(valid_documents: dict[str, d
     document = copy.deepcopy(valid_documents["bundle-manifest.schema.json"])
     document["product_results"]["operator"] = "NOT MEASURED"
 
-    errors = list(Draft202012Validator(_schema("bundle-manifest.schema.json")).iter_errors(document))
+    errors = list(_validator("bundle-manifest.schema.json").iter_errors(document))
 
     assert errors
 
@@ -184,6 +190,41 @@ def test_reproduction_bundle_and_submission_require_baseline(
         document = copy.deepcopy(valid_documents[schema_name])
         document.pop("baseline")
 
-        errors = list(Draft202012Validator(_schema(schema_name)).iter_errors(document))
+        errors = list(_validator(schema_name).iter_errors(document))
 
         assert errors, schema_name
+
+
+@pytest.mark.parametrize("value", ["not-a-date", "2026-99-99T12:00:00Z"])
+def test_bundle_rejects_malformed_date_time(
+    value: str, valid_documents: dict[str, dict[str, Any]]
+) -> None:
+    document = copy.deepcopy(valid_documents["bundle-manifest.schema.json"])
+    document["started_at"] = value
+
+    errors = list(_validator("bundle-manifest.schema.json").iter_errors(document))
+
+    assert errors
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "field"),
+    [
+        ("bundle-manifest.schema.json", "project_url"),
+        ("submission.schema.json", "project_url"),
+    ],
+)
+def test_published_metadata_rejects_url_credentials(
+    schema_name: str,
+    field: str,
+    valid_documents: dict[str, dict[str, Any]],
+) -> None:
+    document = copy.deepcopy(valid_documents[schema_name])
+    if schema_name == "bundle-manifest.schema.json":
+        document["product"][field] = "https://user:secret@example.test/gateway"
+    else:
+        document[field] = "https://user:secret@example.test/gateway"
+
+    errors = list(_validator(schema_name).iter_errors(document))
+
+    assert errors

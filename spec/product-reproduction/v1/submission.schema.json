@@ -65,7 +65,7 @@
   "additionalProperties": false,
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-    "httpsUrl": {"type": "string", "format": "uri", "pattern": "^https://[^?#]+$", "maxLength": 500},
+    "httpsUrl": {"type": "string", "format": "uri", "pattern": "^https://[^@/?#\\s]+(?:/[^?#\\s]*)?$", "maxLength": 500},
     "memberPath": {
       "type": "string",
       "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",

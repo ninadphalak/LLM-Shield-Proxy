@@ -8,16 +8,14 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from jsonschema import Draft202012Validator
+from .schemas import SchemaContractError, schema_validator
 
-CATALOG_SCHEMA_ID = "pii-leak-benchmark/product-catalog/v1"
 PRODUCT_ROOT = Path("benchmarks/product_reproduction")
-CATALOG_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "spec" / "product-reproduction" / "v1" / "catalog.schema.json"
 ALLOWED_RELEASE_HOSTS = {
     "github-releases": "api.github.com",
     "pypi-json": "pypi.org",
 }
-MUTABLE_REFERENCE = re.compile(r"(?:^|[/:@_-])(?:latest|main-latest)(?:$|[/:@_-])", re.IGNORECASE)
+MUTABLE_REFERENCE = re.compile(r"(?<![A-Za-z0-9])(?:main-latest|latest)(?![A-Za-z0-9])", re.IGNORECASE)
 NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
 
 
@@ -134,15 +132,11 @@ class ProductCatalog:
         raise CatalogError(f"unknown target id: {target_id}")
 
 
-def _schema() -> dict[str, Any]:
-    try:
-        return json.loads(CATALOG_SCHEMA_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CatalogError(f"cannot load catalog schema: {exc}") from exc
-
-
 def _schema_error(document: Mapping[str, Any]) -> None:
-    validator = Draft202012Validator(_schema())
+    try:
+        validator = schema_validator("catalog")
+    except SchemaContractError as exc:
+        raise CatalogError(str(exc)) from exc
     errors = sorted(validator.iter_errors(document), key=lambda error: list(error.absolute_path))
     if not errors:
         return
