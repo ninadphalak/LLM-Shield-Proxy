@@ -133,7 +133,7 @@ jobs:
           cache: "pip"
 
       - name: Install contract-test dependencies
-        run: python -m pip install pytest jsonschema psutil
+        run: python -m pip install pytest jsonschema psutil httpx
 
       - name: Run cross-platform product contract tests
         run: python -m pytest --confcutdir=tests/product_reproduction tests/product_reproduction -q
