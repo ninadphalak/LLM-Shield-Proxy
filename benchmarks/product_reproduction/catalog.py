@@ -17,6 +17,52 @@ ALLOWED_RELEASE_HOSTS = {
 }
 MUTABLE_REFERENCE = re.compile(r"(?<![A-Za-z0-9])(?:main-latest|latest)(?![A-Za-z0-9])", re.IGNORECASE)
 NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
+CONFIG_PLACEHOLDER = re.compile(r"^\{\{[A-Z][A-Z0-9_]*\}\}$")
+REVIEWED_LITERAL_VALUES = {
+    ("environment", "ALLOW_CLIENT_UPSTREAM_OVERRIDE"): "false",
+    ("environment", "ENABLE_DEEP_PAYLOAD_REDACTION"): "true",
+    ("environment", "ENABLE_OPEN_BYOK_PASSTHROUGH"): "false",
+    ("environment", "ENABLE_RESPONSE_PII_REDACTION"): "true",
+    ("environment", "ENABLE_RETRY_FAILOVER"): "false",
+    ("environment", "ENABLE_TIER3_ONNX_NER"): "false",
+    ("environment", "MAX_RETRIES"): "0",
+    ("environment", "SHIELD_DEFAULT_MASKING_MODE"): "SYNTHETIC",
+    ("environment", "SHIELD_FAILURE_MODE"): "FAIL_CLOSED",
+    ("functional_identity", "model"): "capture",
+    ("functional_identity", "virtual_key_auth"): "allowlist",
+}
+REVIEWED_SCALAR_VALUES = {
+    ("container_port",): 8000,
+    ("functional_identity", "fallback_configured"): False,
+    ("functional_identity", "retry_failover"): False,
+    ("functional_identity", "request_path_deep_redaction"): True,
+    ("functional_identity", "response_pii_redaction"): True,
+    ("functional_identity", "tier3_onnx_ner"): False,
+}
+REVIEWED_SUBSTITUTIONS = frozenset(
+    {"CAPTURE_BASE_URL", "SYNTHETIC_UPSTREAM_KEY", "SYNTHETIC_VIRTUAL_KEY"}
+)
+REVIEWED_PLACEHOLDERS = {
+    ("environment", "OPENAI_API_KEY"): "SYNTHETIC_UPSTREAM_KEY",
+    ("environment", "UPSTREAM_API_KEY"): "SYNTHETIC_UPSTREAM_KEY",
+    ("environment", "UPSTREAM_BASE_URL"): "CAPTURE_BASE_URL",
+    ("environment", "VALID_VIRTUAL_KEYS"): "SYNTHETIC_VIRTUAL_KEY",
+}
+RELEASED_CONFIGURATION_ID = "response-redaction-on-v1"
+RELEASED_ROOT_FIELDS = frozenset({
+    "schema", "configuration_id", "container_port", "environment",
+    "functional_identity", "required_substitutions",
+})
+RELEASED_ENVIRONMENT_FIELDS = frozenset(
+    path[1] for path in (*REVIEWED_LITERAL_VALUES, *REVIEWED_PLACEHOLDERS)
+    if path[0] == "environment"
+)
+RELEASED_FUNCTIONAL_FIELDS = frozenset(
+    path[1] for path in (*REVIEWED_LITERAL_VALUES, *REVIEWED_SCALAR_VALUES)
+    if path[0] == "functional_identity"
+)
+MAX_CONFIG_BYTES = 262_144
+MAX_CONFIG_DEPTH = 64
 
 
 class CatalogError(ValueError):
@@ -191,6 +237,102 @@ def _validate_safe_pattern(value: str, *, field: str) -> None:
         raise CatalogError(f"{field} is invalid: {exc}") from exc
 
 
+def _is_reviewed_literal_path(path: tuple[str, ...], value: str) -> bool:
+    if path in (("schema",), ("configuration_id",)):
+        return True
+    if path == ("required_substitutions",):
+        return value in REVIEWED_SUBSTITUTIONS
+    return REVIEWED_LITERAL_VALUES.get(path) == value
+
+
+def _reject_duplicate_config_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise CatalogError("configuration_path contains duplicate object keys")
+        result[key] = value
+    return result
+
+
+def _validate_configuration(path: Path, *, configuration_id: str) -> None:
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_CONFIG_BYTES + 1)
+    except OSError as exc:
+        raise CatalogError(f"cannot read configuration_path: {exc}") from exc
+    if len(raw) > MAX_CONFIG_BYTES:
+        raise CatalogError("configuration_path exceeds maximum size")
+    try:
+        document = json.loads(raw, object_pairs_hook=_reject_duplicate_config_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise CatalogError("configuration_path must contain bounded valid JSON") from exc
+    if not isinstance(document, dict):
+        raise CatalogError("configuration_path root must be an object")
+    if document.get("schema") != "pii-leak-benchmark/product-configuration/v1":
+        raise CatalogError("configuration_path has unknown schema")
+    if document.get("configuration_id") != configuration_id:
+        raise CatalogError("configuration_path configuration_id does not match target")
+    environment = document.get("environment")
+    if environment is not None and not isinstance(environment, dict):
+        raise CatalogError("configuration_path environment must be an object")
+    if configuration_id == RELEASED_CONFIGURATION_ID:
+        functional_identity = document.get("functional_identity")
+        if (
+            set(document) != RELEASED_ROOT_FIELDS
+            or not isinstance(environment, dict)
+            or set(environment) != RELEASED_ENVIRONMENT_FIELDS
+            or not isinstance(functional_identity, dict)
+            or set(functional_identity) != RELEASED_FUNCTIONAL_FIELDS
+        ):
+            raise CatalogError("configuration_path does not match required reviewed fields")
+    required_substitutions = document.get("required_substitutions", [])
+    if not isinstance(required_substitutions, list) or any(
+        not isinstance(item, str) for item in required_substitutions
+    ):
+        raise CatalogError("configuration_path required_substitutions must be a list of identifiers")
+    if any(item not in REVIEWED_SUBSTITUTIONS for item in required_substitutions):
+        raise CatalogError("configuration_path contains an unreviewed substitution")
+    if len(set(required_substitutions)) != len(required_substitutions):
+        raise CatalogError("configuration_path required_substitutions contains duplicates")
+
+    seen_substitutions: set[str] = set()
+    pending: list[tuple[object, int, tuple[str, ...]]] = [(document, 1, ())]
+    while pending:
+        value, depth, path = pending.pop()
+        if depth > MAX_CONFIG_DEPTH:
+            raise CatalogError("configuration_path exceeds maximum JSON depth")
+        if isinstance(value, dict):
+            if configuration_id == RELEASED_CONFIGURATION_ID and (path, depth) not in {
+                ((), 1), (("environment",), 2), (("functional_identity",), 2)
+            }:
+                raise CatalogError("configuration_path contains an unexpected object")
+            pending.extend((item, depth + 1, path + (str(item_key),)) for item_key, item in value.items())
+        elif isinstance(value, list):
+            if configuration_id == RELEASED_CONFIGURATION_ID and (path, depth) != (
+                ("required_substitutions",), 2
+            ):
+                raise CatalogError("configuration_path contains an unexpected list")
+            pending.extend((item, depth + 1, path) for item in value)
+        elif isinstance(value, str):
+            if Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
+                raise CatalogError("configuration_path contains a local absolute path")
+            if CONFIG_PLACEHOLDER.fullmatch(value):
+                identifier = value[2:-2]
+                if REVIEWED_PLACEHOLDERS.get(path) != identifier:
+                    raise CatalogError("configuration_path contains an unreviewed substitution")
+                seen_substitutions.add(identifier)
+            elif not _is_reviewed_literal_path(path, value):
+                raise CatalogError("configuration_path contains a literal credential value")
+        elif value is None:
+            raise CatalogError("configuration_path must not contain null")
+        else:
+            expected = REVIEWED_SCALAR_VALUES.get(path)
+            if type(value) is not type(expected) or value != expected:
+                raise CatalogError("configuration_path contains a literal credential value")
+    if seen_substitutions != set(required_substitutions):
+        raise CatalogError("configuration_path required_substitutions does not match its placeholders")
+
+
 def _validate_semantics(
     document: Mapping[str, Any],
     *,
@@ -240,6 +382,7 @@ def _validate_semantics(
         config_path = _repo_path(target["configuration_path"], field="configuration_path", repo_root=repo_root)
         if not _is_within(config_path, product_root) or not config_path.is_file():
             raise CatalogError("configuration_path must resolve to a checked-in file under product reproduction")
+        _validate_configuration(config_path, configuration_id=target["configuration_id"])
 
         for baseline in target["accepted_baselines"]:
             baseline_ids.append(baseline["id"])

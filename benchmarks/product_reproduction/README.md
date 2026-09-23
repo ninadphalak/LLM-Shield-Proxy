@@ -38,9 +38,11 @@ manifest digest because including that digest in a file hashed by the manifest w
 cycle. The later submission step computes the manifest digest after verification and adds it only
 to the out-of-band submission metadata.
 
-`catalog.json` is intentionally empty until a product adapter, configuration, release source, and
-accepted baseline have been reviewed together. Catalog data cannot supply commands, runner labels,
-credentials, or arbitrary adapter imports.
+`catalog.json` contains the reviewed LLM-Shield-Proxy response-scanning configuration and its
+official PyPI release source. The default selector resolves the current stable release as a fresh
+measurement. The accepted 1.6.6 selector pins the released wheel SHA-256 and the retained midpoint
+report. Catalog data cannot supply commands, runner labels, credentials, or arbitrary adapter
+imports.
 
 Generated evidence must use a new directory outside the repository. Product baselines are read-only
 inputs beneath an explicitly allowed baseline root. Nothing in this package writes to
@@ -52,6 +54,6 @@ Run the contract tests from the repository root:
 python -m pytest tests/product_reproduction -q
 ```
 
-The first released-product adapter is added in a later bounded change. Until then, this package
-validates the full lifecycle and bundle path with a test-only adapter but does not claim to
-reproduce a product result.
+The release resolver treats package-index metadata as untrusted bounded JSON, accepts exactly one
+reviewed wheel shape, and records its immutable SHA-256. The Docker adapter and one-button workflow
+are added in the next bounded change; this layer alone does not claim that a product run completed.

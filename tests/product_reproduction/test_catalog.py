@@ -45,14 +45,31 @@ def test_accepts_minimal_reviewed_target(
     assert source.maximum_response_bytes == 1048576
 
 
-def test_checked_in_catalog_is_valid_and_has_no_unreviewed_targets() -> None:
+def test_checked_in_catalog_contains_reviewed_llm_shield_target() -> None:
     root = Path(__file__).resolve().parents[2]
     path = root / "benchmarks" / "product_reproduction" / "catalog.json"
 
-    catalog = load_catalog(path, repo_root=root, adapter_names=set(), allowed_baseline_roots=())
+    catalog = load_catalog(
+        path,
+        repo_root=root,
+        adapter_names={"llm-shield-proxy"},
+        allowed_baseline_roots=(root / "benchmarks/results/v2-response-split",),
+    )
 
     assert catalog.schema == "pii-leak-benchmark/product-catalog/v1"
-    assert catalog.targets == ()
+    assert catalog.dispatchable_ids == ("llm-shield-proxy-response-on",)
+    target = catalog.target("llm-shield-proxy-response-on")
+    baseline = target.baseline("llm-shield-proxy-1.6.6-response-on")
+    assert baseline is not None
+    assert baseline.artifact_identity == (
+        "sha256:9201a192568f74b0353ef432acd663b27b07f3b1e1a5730e82ef6e10a5894469"
+    )
+    configuration = json.loads(
+        (root / target.configuration_path).read_text(encoding="utf-8")
+    )
+    assert configuration["environment"]["ENABLE_RETRY_FAILOVER"] == "false"
+    assert configuration["environment"]["MAX_RETRIES"] == "0"
+    assert configuration["functional_identity"]["retry_failover"] is False
 
 
 @pytest.mark.parametrize(
@@ -150,6 +167,241 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
     _write_catalog(catalog_file, document)
     with pytest.raises(CatalogError, match="baseline report"):
         _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
+
+
+@pytest.mark.parametrize(
+    ("configuration", "message"),
+    [
+        (
+            {"schema": "wrong", "configuration_id": "test-v1"},
+            "unknown schema",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": "literal-secret",
+            },
+            "environment must be an object",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "other",
+            },
+            "configuration_id",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"API_TOKEN": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"API_TOKEN": {"nested": ["real-secret-value"]}},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "OPENAI_API_KEY": "real-secret-value",
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "provider": {"credentials": {"accessToken": "real-secret-value"}},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"APITOKEN": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "headers": {"Authorization": "Bearer real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"AWS_ACCESS_KEY_ID": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"DB_PASS": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"MYSQL_PWD": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "provider": {"PASSWD": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"UNREVIEWED_FIELD": "possibly-private-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "functional_identity": {"virtual_key_auth": "sk-accidental-literal"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "functional_identity": {"model": "sk-accidental-literal"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"SHIELD_FAILURE_MODE": "sk-accidental-literal"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"OPENAI_API_KEY": "{{OPERATOR_SECRET}}"},
+                "required_substitutions": ["OPERATOR_SECRET"],
+            },
+            "unreviewed substitution",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"UNREVIEWED_FIELD": "{{SYNTHETIC_UPSTREAM_KEY}}"},
+                "required_substitutions": ["SYNTHETIC_UPSTREAM_KEY"],
+            },
+            "unreviewed substitution",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}"},
+                "required_substitutions": ["CAPTURE_BASE_URL"],
+            },
+            "required_substitutions",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"API_TOKEN": 123456},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "model_path": "C:\\private\\model.onnx",
+            },
+            "absolute path",
+        ),
+    ],
+)
+def test_rejects_unsafe_checked_in_configuration(
+    configuration: dict[str, Any],
+    message: str,
+    catalog_file: Path,
+    product_tree: dict[str, Path],
+) -> None:
+    config_path = product_tree["config_root"] / "test-v1.json"
+    config_path.write_text(json.dumps(configuration), encoding="utf-8")
+
+    with pytest.raises(CatalogError, match=message):
+        _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda document: document["environment"].pop("ENABLE_RESPONSE_PII_REDACTION"),
+        lambda document: document["environment"].update({"SHIELD_FAILURE_MODE": ""}),
+        lambda document: document.pop("functional_identity"),
+        lambda document: document["environment"].update({"ENABLE_RESPONSE_PII_REDACTION": None}),
+        lambda document: document["environment"].update({"SHIELD_FAILURE_MODE": {}}),
+        lambda document: document.update({"container_port": []}),
+    ],
+)
+def test_released_configuration_requires_complete_reviewed_fields(
+    tmp_path: Path, change: Any
+) -> None:
+    from benchmarks.product_reproduction.catalog import _validate_configuration
+
+    source = Path("benchmarks/product_reproduction/configs/llm-shield-proxy-response-on-v1.json")
+    document = json.loads(source.read_text(encoding="utf-8"))
+    change(document)
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="configuration_path"):
+        _validate_configuration(candidate, configuration_id="response-redaction-on-v1")
+
+
+def test_released_configuration_rejects_shadowed_duplicate_keys(tmp_path: Path) -> None:
+    from benchmarks.product_reproduction.catalog import _validate_configuration
+
+    source = Path("benchmarks/product_reproduction/configs/llm-shield-proxy-response-on-v1.json")
+    raw = source.read_text(encoding="utf-8")
+    raw = raw.replace(
+        '"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}",',
+        '"OPENAI_API_KEY": "hidden-real-secret",\n    '
+        '"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}",',
+    )
+    candidate = tmp_path / "duplicate.json"
+    candidate.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="duplicate"):
+        _validate_configuration(candidate, configuration_id="response-redaction-on-v1")
 
 
 def test_rejects_symlink_alias_outside_reviewed_baseline_root(

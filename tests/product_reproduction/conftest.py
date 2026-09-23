@@ -15,7 +15,18 @@ def product_tree(tmp_path: Path) -> dict[str, Path]:
     baseline_root = product_root / "baselines"
     config_root.mkdir(parents=True)
     baseline_root.mkdir()
-    (config_root / "test-v1.json").write_text("{}\n", encoding="utf-8")
+    (config_root / "test-v1.json").write_text(
+        json.dumps(
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}"},
+                "required_substitutions": ["SYNTHETIC_UPSTREAM_KEY"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (baseline_root / "response.json").write_text("{}\n", encoding="utf-8")
     return {
         "root": root,
