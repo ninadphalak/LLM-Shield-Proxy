@@ -16,23 +16,21 @@ from benchmarks.product_reproduction.release import (
 )
 
 
-class _Response:
-    def __init__(self, payload: bytes, *, url: str, content_length: str | None = None) -> None:
-        self._payload = payload
-        self._url = url
-        self.headers = {} if content_length is None else {"Content-Length": content_length}
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args) -> None:
-        return None
-
-    def geturl(self) -> str:
-        return self._url
-
-    def read(self, maximum: int) -> bytes:
-        return self._payload[:maximum]
+def _response(
+    payload: bytes,
+    *,
+    status_code: int = 200,
+    content_length: str | None = None,
+    location: str | None = None,
+):
+    headers = {} if content_length is None else {"Content-Length": content_length}
+    if location is not None:
+        headers["Location"] = location
+    return release_module.ReleaseHttpResponse(
+        status_code=status_code,
+        headers=headers,
+        payload=payload,
+    )
 
 
 def _pypi_document(*, version: str = "1.6.7", digest: str = "a" * 64) -> dict[str, Any]:
@@ -191,15 +189,68 @@ def test_rejects_untrusted_or_ineligible_pypi_metadata(reviewed_catalog, mutatio
         )
 
 
+def test_rejects_wheel_filename_for_a_different_resolved_version(reviewed_catalog) -> None:
+    document = _pypi_document(version="1.6.7")
+    wheel = document["urls"][0]
+    wheel["filename"] = "llm_shield_proxy-1.6.8-py3-none-any.whl"
+    wheel["url"] = "https://files.pythonhosted.org/packages/aa/llm_shield_proxy-1.6.8-py3-none-any.whl"
+
+    with pytest.raises(ReleaseResolutionError, match="filename.*version"):
+        resolve_release(
+            reviewed_catalog.release_sources[0],
+            version=None,
+            fetch_json=lambda _url, _limit: document,
+        )
+
+
+def test_fetch_rejects_explicit_port_before_network_access(monkeypatch) -> None:
+    called = False
+
+    def unexpected_network(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("network should not be reached")
+
+    monkeypatch.setattr(release_module, "_resolve_public_addresses", unexpected_network)
+
+    with pytest.raises(ReleaseResolutionError, match="allowlisted"):
+        fetch_release_json("https://pypi.org:444/pypi/llm-shield-proxy/json", 1_048_576)
+
+    assert called is False
+
+
+def test_rejects_artifact_url_with_explicit_port(reviewed_catalog) -> None:
+    document = _pypi_document()
+    document["urls"][0]["url"] = (
+        "https://files.pythonhosted.org:444/packages/aa/llm_shield_proxy-1.6.7-py3-none-any.whl"
+    )
+
+    with pytest.raises(ReleaseResolutionError, match="artifact URL"):
+        resolve_release(
+            reviewed_catalog.release_sources[0],
+            version=None,
+            fetch_json=lambda _url, _limit: document,
+        )
+
+
 def test_fetch_rejects_redirect_outside_allowlisted_origin(monkeypatch) -> None:
     payload = json.dumps(_pypi_document()).encode()
     monkeypatch.setattr(
         release_module,
-        "urlopen",
-        lambda *_args, **_kwargs: _Response(payload, url="https://example.test/metadata"),
+        "_resolve_public_addresses",
+        lambda _host, _port: ("93.184.216.34",),
+    )
+    monkeypatch.setattr(
+        release_module,
+        "_pinned_https_get",
+        lambda *_args, **_kwargs: _response(
+            payload,
+            status_code=302,
+            location="https://example.test/metadata",
+        ),
     )
 
-    with pytest.raises(ReleaseResolutionError, match="allowlisted"):
+    with pytest.raises(ReleaseResolutionError, match="HTTP 302"):
         fetch_release_json("https://pypi.org/pypi/llm-shield-proxy/json", 1_048_576)
 
 
@@ -208,10 +259,14 @@ def test_fetch_rejects_invalid_or_oversized_declared_length(monkeypatch, content
     payload = json.dumps(_pypi_document()).encode()
     monkeypatch.setattr(
         release_module,
-        "urlopen",
-        lambda *_args, **_kwargs: _Response(
+        "_resolve_public_addresses",
+        lambda _host, _port: ("93.184.216.34",),
+    )
+    monkeypatch.setattr(
+        release_module,
+        "_pinned_https_get",
+        lambda *_args, **_kwargs: _response(
             payload,
-            url="https://pypi.org/pypi/llm-shield-proxy/json",
             content_length=content_length,
         ),
     )
@@ -223,13 +278,74 @@ def test_fetch_rejects_invalid_or_oversized_declared_length(monkeypatch, content
 def test_fetch_rejects_body_larger_than_cap_and_nonfinite_json(monkeypatch) -> None:
     responses = iter(
         [
-            _Response(b"x" * 1001, url="https://pypi.org/pypi/llm-shield-proxy/json"),
-            _Response(b'{"value":NaN}', url="https://pypi.org/pypi/llm-shield-proxy/json"),
+            _response(b"x" * 1001),
+            _response(b'{"value":NaN}'),
         ]
     )
-    monkeypatch.setattr(release_module, "urlopen", lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setattr(
+        release_module,
+        "_resolve_public_addresses",
+        lambda _host, _port: ("93.184.216.34",),
+    )
+    monkeypatch.setattr(release_module, "_pinned_https_get", lambda *_args, **_kwargs: next(responses))
 
     with pytest.raises(ReleaseResolutionError, match="response size"):
         fetch_release_json("https://pypi.org/pypi/llm-shield-proxy/json", 1000)
     with pytest.raises(ReleaseResolutionError, match="valid JSON"):
         fetch_release_json("https://pypi.org/pypi/llm-shield-proxy/json", 1000)
+
+
+def test_fetch_pins_the_validated_address_and_never_resolves_twice(monkeypatch) -> None:
+    calls: list[tuple[str, int]] = []
+    captured = []
+
+    def rebinding_resolver(host: str, port: int) -> tuple[str, ...]:
+        calls.append((host, port))
+        return ("93.184.216.34",) if len(calls) == 1 else ("169.254.169.254",)
+
+    def send(target, _maximum_bytes: int):
+        captured.append(target)
+        return _response(json.dumps(_pypi_document()).encode())
+
+    monkeypatch.setattr(release_module, "_resolve_public_addresses", rebinding_resolver)
+    monkeypatch.setattr(release_module, "_pinned_https_get", send)
+
+    fetch_release_json("https://pypi.org/pypi/llm-shield-proxy/json", 1_048_576)
+
+    assert calls == [("pypi.org", 443)]
+    assert captured[0].url == "https://93.184.216.34/pypi/llm-shield-proxy/json"
+    assert captured[0].headers["Host"] == "pypi.org"
+    assert captured[0].extensions == {"sni_hostname": "pypi.org"}
+
+
+def test_fetch_rejects_non_public_dns_answer_before_http(monkeypatch) -> None:
+    monkeypatch.setattr(
+        release_module,
+        "_resolve_public_addresses",
+        lambda _host, _port: ("169.254.169.254",),
+    )
+
+    with pytest.raises(ReleaseResolutionError, match="non-public"):
+        fetch_release_json("https://pypi.org/pypi/llm-shield-proxy/json", 1_048_576)
+
+
+def test_fetch_classifies_retryable_http_with_retry_after(monkeypatch) -> None:
+    monkeypatch.setattr(
+        release_module,
+        "_resolve_public_addresses",
+        lambda _host, _port: ("93.184.216.34",),
+    )
+    monkeypatch.setattr(
+        release_module,
+        "_pinned_https_get",
+        lambda *_args, **_kwargs: release_module.ReleaseHttpResponse(
+            status_code=429,
+            headers={"Retry-After": "3"},
+            payload=b"",
+        ),
+    )
+
+    with pytest.raises(release_module.RetryableAcquisitionError) as exc_info:
+        fetch_release_json("https://pypi.org/pypi/llm-shield-proxy/json", 1_048_576)
+
+    assert exc_info.value.retry_after_seconds == 3.0

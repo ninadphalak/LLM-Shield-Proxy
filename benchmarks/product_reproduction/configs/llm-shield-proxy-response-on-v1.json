@@ -7,7 +7,9 @@
     "ENABLE_DEEP_PAYLOAD_REDACTION": "true",
     "ENABLE_OPEN_BYOK_PASSTHROUGH": "false",
     "ENABLE_RESPONSE_PII_REDACTION": "true",
+    "ENABLE_RETRY_FAILOVER": "false",
     "ENABLE_TIER3_ONNX_NER": "false",
+    "MAX_RETRIES": "0",
     "OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}",
     "SHIELD_DEFAULT_MASKING_MODE": "SYNTHETIC",
     "SHIELD_FAILURE_MODE": "FAIL_CLOSED",
@@ -18,7 +20,7 @@
   "functional_identity": {
     "model": "capture",
     "fallback_configured": false,
-    "retry_failover": true,
+    "retry_failover": false,
     "request_path_deep_redaction": true,
     "response_pii_redaction": true,
     "tier3_onnx_ner": false,

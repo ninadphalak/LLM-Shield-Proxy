@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import PurePosixPath
 from typing import Any, Literal
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlsplit, urlunsplit
+
+import httpx
 
 from .catalog import AcceptedBaseline, ProductCatalog, ProductTarget, ReleaseSource
 from .retry import RetryableAcquisitionError
@@ -50,6 +52,20 @@ class ResolvedRelease:
     artifact_identity: str
     artifact_size: int
     media_type: str
+
+
+@dataclass(frozen=True)
+class PinnedReleaseTarget:
+    url: str
+    headers: Mapping[str, str]
+    extensions: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class ReleaseHttpResponse:
+    status_code: int
+    headers: Mapping[str, str]
+    payload: bytes
 
 
 def _source(catalog: ProductCatalog, source_id: str) -> ReleaseSource:
@@ -120,6 +136,7 @@ def _metadata_url(value: str) -> None:
     if (
         parsed.scheme != "https"
         or parsed.hostname != "pypi.org"
+        or parsed.netloc != "pypi.org"
         or parsed.username
         or parsed.password
         or parsed.query
@@ -142,44 +159,121 @@ def _retry_after_seconds(value: str | None) -> float | None:
     return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
 
 
+def _resolve_public_addresses(host: str, port: int) -> tuple[str, ...]:
+    try:
+        answers = socket.getaddrinfo(
+            host,
+            port,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+            proto=socket.IPPROTO_TCP,
+        )
+    except OSError as exc:
+        raise RetryableAcquisitionError(
+            "release metadata DNS resolution failed",
+            category="release-metadata-dns",
+        ) from exc
+
+    addresses: list[str] = []
+    for answer in answers:
+        candidate = answer[4][0]
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError as exc:
+            raise ReleaseResolutionError("release metadata DNS returned an invalid address") from exc
+        if not address.is_global:
+            raise ReleaseResolutionError("release metadata DNS returned a non-public address")
+        normalized = str(address)
+        if normalized not in addresses:
+            addresses.append(normalized)
+    if not addresses:
+        raise RetryableAcquisitionError(
+            "release metadata DNS returned no addresses",
+            category="release-metadata-dns",
+        )
+    return tuple(addresses)
+
+
+def _pin_release_url(url: str) -> PinnedReleaseTarget:
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    if host is None:
+        raise ReleaseResolutionError("release metadata URL has no host")
+    addresses = _resolve_public_addresses(host, 443)
+    address = ipaddress.ip_address(addresses[0])
+    if not address.is_global:
+        raise ReleaseResolutionError("release metadata DNS returned a non-public address")
+    pinned_host = f"[{address}]" if address.version == 6 else str(address)
+    pinned_url = urlunsplit((parsed.scheme, pinned_host, parsed.path, parsed.query, parsed.fragment))
+    return PinnedReleaseTarget(
+        url=pinned_url,
+        headers={"Host": host},
+        extensions={"sni_hostname": host},
+    )
+
+
+def _pinned_https_get(target: PinnedReleaseTarget, maximum_bytes: int) -> ReleaseHttpResponse:
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "identity",
+        "User-Agent": "pii-leak-benchmark-product-reproduction/1",
+        **target.headers,
+    }
+    try:
+        with httpx.Client(follow_redirects=False, trust_env=False, timeout=20.0) as client:
+            request = client.build_request(
+                "GET",
+                target.url,
+                headers=headers,
+                extensions=dict(target.extensions),
+            )
+            response = client.send(request, stream=True)
+            try:
+                payload = bytearray()
+                for chunk in response.iter_bytes():
+                    remaining = maximum_bytes + 1 - len(payload)
+                    if remaining <= 0:
+                        break
+                    payload.extend(chunk[:remaining])
+                    if len(payload) > maximum_bytes:
+                        break
+                return ReleaseHttpResponse(
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    payload=bytes(payload),
+                )
+            finally:
+                response.close()
+    except httpx.TransportError as exc:
+        raise RetryableAcquisitionError(
+            "release metadata request failed",
+            category="release-metadata-network",
+        ) from exc
+
+
 def fetch_release_json(url: str, maximum_bytes: int) -> Mapping[str, Any]:
     _metadata_url(url)
-    request = Request(
-        url,
-        headers={
-            "Accept": "application/json",
-            "Accept-Encoding": "identity",
-            "User-Agent": "pii-leak-benchmark-product-reproduction/1",
-        },
-        method="GET",
-    )
-    try:
-        # The URL is assembled from the reviewed PyPI source and rechecked after redirects.
-        with urlopen(request, timeout=20.0) as response:  # nosec B310
-            _metadata_url(response.geturl())
-            declared = response.headers.get("Content-Length")
-            if declared is not None:
-                try:
-                    declared_size = int(declared)
-                except ValueError as exc:
-                    raise ReleaseResolutionError("release metadata has invalid Content-Length") from exc
-                if declared_size < 0 or declared_size > maximum_bytes:
-                    raise ReleaseResolutionError("release metadata exceeds maximum response size")
-            payload = response.read(maximum_bytes + 1)
-    except HTTPError as exc:
-        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+    target = _pin_release_url(url)
+    response = _pinned_https_get(target, maximum_bytes)
+    if response.status_code != 200:
+        retry_after = response.headers.get("Retry-After") or response.headers.get("retry-after")
         delay = _retry_after_seconds(retry_after)
-        if exc.code == 429 or 500 <= exc.code < 600:
+        if response.status_code == 429 or 500 <= response.status_code < 600:
             raise RetryableAcquisitionError(
                 "release metadata request failed",
                 category="release-metadata-http",
                 retry_after_seconds=delay,
-            ) from exc
-        raise ReleaseResolutionError(f"release metadata request returned HTTP {exc.code}") from exc
-    except (TimeoutError, URLError) as exc:
-        raise RetryableAcquisitionError(
-            "release metadata request failed", category="release-metadata-network"
-        ) from exc
+            )
+        raise ReleaseResolutionError(f"release metadata request returned HTTP {response.status_code}")
+    declared = response.headers.get("Content-Length") or response.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_size = int(declared)
+        except ValueError as exc:
+            raise ReleaseResolutionError("release metadata has invalid Content-Length") from exc
+        if declared_size < 0 or declared_size > maximum_bytes:
+            raise ReleaseResolutionError("release metadata exceeds maximum response size")
+    payload = response.payload
     if len(payload) > maximum_bytes:
         raise ReleaseResolutionError("release metadata exceeds maximum response size")
     try:
@@ -226,6 +320,7 @@ def _artifact_url(value: object) -> str:
     if (
         parsed.scheme != "https"
         or parsed.hostname != PYPI_ARTIFACT_HOST
+        or parsed.netloc != PYPI_ARTIFACT_HOST
         or parsed.username
         or parsed.password
         or parsed.query
@@ -277,6 +372,9 @@ def resolve_release(
     size = wheel.get("size")
     if not isinstance(filename, str) or not isinstance(size, int) or isinstance(size, bool) or size <= 0:
         raise ReleaseResolutionError("eligible wheel metadata is incomplete")
+    filename_parts = filename.split("-")
+    if len(filename_parts) < 5 or filename_parts[1] != resolved_version:
+        raise ReleaseResolutionError("artifact filename version does not match resolved release version")
     if expected_reference is not None and filename != expected_reference:
         raise ReleaseResolutionError("resolved artifact reference does not match accepted baseline")
     if "application/zip" not in source.assets.media_types:

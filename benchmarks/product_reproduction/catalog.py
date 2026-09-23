@@ -18,7 +18,7 @@ ALLOWED_RELEASE_HOSTS = {
 MUTABLE_REFERENCE = re.compile(r"(?<![A-Za-z0-9])(?:main-latest|latest)(?![A-Za-z0-9])", re.IGNORECASE)
 NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
 CONFIG_PLACEHOLDER = re.compile(r"^\{\{[A-Z][A-Z0-9_]*\}\}$")
-SENSITIVE_CONFIG_KEY = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE)
+SENSITIVE_CONFIG_TERMS = frozenset({"credential", "credentials", "password", "secret", "token"})
 MAX_CONFIG_BYTES = 262_144
 MAX_CONFIG_DEPTH = 64
 
@@ -195,6 +195,14 @@ def _validate_safe_pattern(value: str, *, field: str) -> None:
         raise CatalogError(f"{field} is invalid: {exc}") from exc
 
 
+def _is_sensitive_config_key(value: object) -> bool:
+    key = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(value))
+    parts = [part.casefold() for part in re.split(r"[^A-Za-z0-9]+", key) if part]
+    if any(part in SENSITIVE_CONFIG_TERMS for part in parts):
+        return True
+    return bool(parts and parts[-1] == "key" and "public" not in parts)
+
+
 def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     try:
         with path.open("rb") as handle:
@@ -228,12 +236,7 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
                     item,
                     depth + 1,
                     path + (str(item_key),),
-                    sensitive_value
-                    or bool(
-                        path
-                        and path[-1] == "environment"
-                        and SENSITIVE_CONFIG_KEY.search(str(item_key))
-                    ),
+                    sensitive_value or _is_sensitive_config_key(item_key),
                 )
                 for item_key, item in value.items()
             )
@@ -248,6 +251,8 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
                 and not CONFIG_PLACEHOLDER.fullmatch(value)
             ):
                 raise CatalogError("configuration_path contains a literal credential value")
+        elif sensitive_value and value is not None:
+            raise CatalogError("configuration_path contains a literal credential value")
 
 
 def _validate_semantics(

@@ -64,6 +64,12 @@ def test_checked_in_catalog_contains_reviewed_llm_shield_target() -> None:
     assert baseline.artifact_identity == (
         "sha256:9201a192568f74b0353ef432acd663b27b07f3b1e1a5730e82ef6e10a5894469"
     )
+    configuration = json.loads(
+        (root / target.configuration_path).read_text(encoding="utf-8")
+    )
+    assert configuration["environment"]["ENABLE_RETRY_FAILOVER"] == "false"
+    assert configuration["environment"]["MAX_RETRIES"] == "0"
+    assert configuration["functional_identity"]["retry_failover"] is False
 
 
 @pytest.mark.parametrize(
@@ -198,6 +204,30 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
                 "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "test-v1",
                 "environment": {"API_TOKEN": {"nested": ["real-secret-value"]}},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "OPENAI_API_KEY": "real-secret-value",
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "provider": {"credentials": {"accessToken": "real-secret-value"}},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"API_TOKEN": 123456},
             },
             "literal credential",
         ),
