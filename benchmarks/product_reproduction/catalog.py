@@ -245,6 +245,15 @@ def _is_reviewed_literal_path(path: tuple[str, ...], value: str) -> bool:
     return REVIEWED_LITERAL_VALUES.get(path) == value
 
 
+def _reject_duplicate_config_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise CatalogError("configuration_path contains duplicate object keys")
+        result[key] = value
+    return result
+
+
 def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     try:
         with path.open("rb") as handle:
@@ -254,7 +263,7 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     if len(raw) > MAX_CONFIG_BYTES:
         raise CatalogError("configuration_path exceeds maximum size")
     try:
-        document = json.loads(raw)
+        document = json.loads(raw, object_pairs_hook=_reject_duplicate_config_keys)
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise CatalogError("configuration_path must contain bounded valid JSON") from exc
     if not isinstance(document, dict):

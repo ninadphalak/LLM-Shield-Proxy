@@ -387,6 +387,23 @@ def test_released_configuration_requires_complete_reviewed_fields(
         _validate_configuration(candidate, configuration_id="response-redaction-on-v1")
 
 
+def test_released_configuration_rejects_shadowed_duplicate_keys(tmp_path: Path) -> None:
+    from benchmarks.product_reproduction.catalog import _validate_configuration
+
+    source = Path("benchmarks/product_reproduction/configs/llm-shield-proxy-response-on-v1.json")
+    raw = source.read_text(encoding="utf-8")
+    raw = raw.replace(
+        '"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}",',
+        '"OPENAI_API_KEY": "hidden-real-secret",\n    '
+        '"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}",',
+    )
+    candidate = tmp_path / "duplicate.json"
+    candidate.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="duplicate"):
+        _validate_configuration(candidate, configuration_id="response-redaction-on-v1")
+
+
 def test_rejects_symlink_alias_outside_reviewed_baseline_root(
     catalog_file: Path,
     product_tree: dict[str, Path],
