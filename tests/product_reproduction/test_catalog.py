@@ -227,6 +227,30 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
             {
                 "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "test-v1",
+                "environment": {"APITOKEN": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "headers": {"Authorization": "Bearer real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"AWS_ACCESS_KEY_ID": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
                 "environment": {"API_TOKEN": 123456},
             },
             "literal credential",

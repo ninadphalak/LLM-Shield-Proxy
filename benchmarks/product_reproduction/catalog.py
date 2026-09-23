@@ -18,7 +18,20 @@ ALLOWED_RELEASE_HOSTS = {
 MUTABLE_REFERENCE = re.compile(r"(?<![A-Za-z0-9])(?:main-latest|latest)(?![A-Za-z0-9])", re.IGNORECASE)
 NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
 CONFIG_PLACEHOLDER = re.compile(r"^\{\{[A-Z][A-Z0-9_]*\}\}$")
-SENSITIVE_CONFIG_TERMS = frozenset({"credential", "credentials", "password", "secret", "token"})
+SENSITIVE_CONFIG_TERMS = frozenset(
+    {
+        "authorization",
+        "bearer",
+        "credential",
+        "credentials",
+        "password",
+        "passwords",
+        "secret",
+        "secrets",
+        "token",
+        "tokens",
+    }
+)
 MAX_CONFIG_BYTES = 262_144
 MAX_CONFIG_DEPTH = 64
 
@@ -200,7 +213,15 @@ def _is_sensitive_config_key(value: object) -> bool:
     parts = [part.casefold() for part in re.split(r"[^A-Za-z0-9]+", key) if part]
     if any(part in SENSITIVE_CONFIG_TERMS for part in parts):
         return True
-    return bool(parts and parts[-1] == "key" and "public" not in parts)
+    compact_key = "".join(parts)
+    if any(compact_key.endswith(term) for term in SENSITIVE_CONFIG_TERMS):
+        return True
+    key_qualifiers = {"access", "api", "encryption", "private", "secret", "signing"}
+    return bool(
+        "key" in parts
+        and "public" not in parts
+        and (parts[-1] == "key" or key_qualifiers.intersection(parts))
+    )
 
 
 def _validate_configuration(path: Path, *, configuration_id: str) -> None:
