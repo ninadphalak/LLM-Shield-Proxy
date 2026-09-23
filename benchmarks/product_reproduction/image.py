@@ -15,6 +15,9 @@ from .paths import validate_fresh_output_path
 
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
 RUN_SUFFIX = re.compile(r"^[a-f0-9]{16,32}$")
+WHEEL_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]*\.whl$")
+REQUIREMENT_PART = re.compile(r"^[A-Za-z0-9_.!+]+$")
+MAX_WHEELHOUSE_BYTES = 512 * 1024 * 1024
 BASE_IMAGE = (
     "python:3.12.11-slim-bookworm@"
     "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
@@ -22,11 +25,21 @@ BASE_IMAGE = (
 DOCKERFILE = Path(__file__).parent / "docker" / "llm-shield-proxy-released.Dockerfile"
 OWNER_LABEL = "org.pii-leak-benchmark.run-suffix"
 WHEEL_LABEL = "org.pii-leak-benchmark.wheel-sha256"
+LOCK_LABEL = "org.pii-leak-benchmark.dependency-lock-sha256"
 DockerCommand = Callable[[list[str], float], subprocess.CompletedProcess[str]]
 
 
 class DockerImageError(ValueError):
     """The run cannot prove that its Docker image came from the verified wheel."""
+
+
+@dataclass(frozen=True)
+class DependencyWheel:
+    filename: str
+    name: str
+    version: str
+    sha256: str
+    size: int
 
 
 @dataclass(frozen=True)
@@ -37,6 +50,8 @@ class BuiltImage:
     wheel_sha256: str
     base_image: str
     distributions: tuple[tuple[str, str], ...]
+    dependency_lock_sha256: str
+    dependency_wheels: tuple[DependencyWheel, ...]
 
 
 def _run_docker(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -89,13 +104,69 @@ def _inspect(docker: DockerCommand, reference: str) -> dict[str, Any]:
     return document
 
 
-def _assert_owned(document: dict[str, Any], image_id: str, run_suffix: str, wheel_sha256: str) -> None:
+def _assert_owned(
+    document: dict[str, Any], image_id: str, run_suffix: str,
+    wheel_sha256: str, dependency_lock_sha256: str,
+) -> None:
     config = document.get("Config")
     labels = config.get("Labels") if isinstance(config, dict) else None
     if document.get("Id") != image_id or not isinstance(labels, dict):
         raise DockerImageError("Docker image identity does not match the build result")
-    if labels.get(OWNER_LABEL) != run_suffix or labels.get(WHEEL_LABEL) != wheel_sha256:
+    if (
+        labels.get(OWNER_LABEL) != run_suffix
+        or labels.get(WHEEL_LABEL) != wheel_sha256
+        or labels.get(LOCK_LABEL) != dependency_lock_sha256
+    ):
         raise DockerImageError("Docker image owner labels do not match this run")
+
+
+def _dependency_wheels(wheelhouse: Path) -> tuple[DependencyWheel, ...]:
+    found: list[DependencyWheel] = []
+    names: set[str] = set()
+    total_size = 0
+    for path in sorted(wheelhouse.iterdir()):
+        if not path.is_file() or path.is_symlink() or not WHEEL_NAME.fullmatch(path.name):
+            raise DockerImageError("wheelhouse contains a non-wheel or unsafe entry")
+        parts = path.name[:-4].split("-")
+        if len(parts) not in (5, 6) or not REQUIREMENT_PART.fullmatch(parts[1]):
+            raise DockerImageError("wheelhouse contains an invalid wheel filename")
+        name = re.sub(r"[-_.]+", "-", parts[0]).lower()
+        version = parts[1]
+        if name in names:
+            raise DockerImageError("wheelhouse contains duplicate distributions")
+        names.add(name)
+        digest, size = _hash_file(path)
+        total_size += size
+        if not size or total_size > MAX_WHEELHOUSE_BYTES or len(found) >= 512:
+            raise DockerImageError("wheelhouse exceeds size or member limit")
+        found.append(DependencyWheel(path.name, name, version, digest, size))
+    if not found:
+        raise DockerImageError("wheelhouse is empty")
+    return tuple(sorted(found, key=lambda item: item.name))
+
+
+def _resolve_wheelhouse(
+    docker: DockerCommand, context: Path, copied_wheel: Path,
+) -> tuple[str, tuple[DependencyWheel, ...]]:
+    wheelhouse = copied_wheel.parent
+    _require_completed(
+        docker,
+        [
+            "docker", "run", "--rm", "--mount", f"type=bind,source={context},target=/work",
+            BASE_IMAGE, "python", "-m", "pip", "download", "--disable-pip-version-check",
+            "--only-binary=:all:", "--dest", "/work/wheelhouse",
+            f"/work/wheelhouse/{copied_wheel.name}",
+        ],
+        600,
+        operation="dependency wheel resolution",
+    )
+    wheels = _dependency_wheels(wheelhouse)
+    locked = "".join(
+        f"{item.name}=={item.version} --hash={item.sha256}\n" for item in wheels
+    )
+    (context / "requirements.lock").write_text(locked, encoding="utf-8", newline="\n")
+    lock_hash = f"sha256:{hashlib.sha256(locked.encode('utf-8')).hexdigest()}"
+    return lock_hash, wheels
 
 
 def _inventory(docker: DockerCommand, image_id: str) -> tuple[tuple[str, str], ...]:
@@ -123,7 +194,7 @@ def _inventory(docker: DockerCommand, image_id: str) -> tuple[tuple[str, str], .
         name, version = item["name"], item["version"]
         if not name or not version or len(name) > 128 or len(version) > 128:
             raise DockerImageError("Docker distribution inventory contains an invalid entry")
-        distributions.append((name, version))
+        distributions.append((re.sub(r"[-_.]+", "-", name).lower(), version))
     return tuple(sorted(distributions, key=lambda item: item[0].casefold()))
 
 
@@ -156,19 +227,25 @@ def build_release_image(
     destination.mkdir(parents=True, mode=0o700)
     context = destination / "context"
     context.mkdir()
-    copied_wheel = context / wheel.path.name
+    wheelhouse = context / "wheelhouse"
+    wheelhouse.mkdir()
+    copied_wheel = wheelhouse / wheel.path.name
     shutil.copyfile(wheel.path, copied_wheel)
     copied_hash, copied_size = _hash_file(copied_wheel)
     if copied_hash != wheel.sha256 or copied_size != wheel.size:
         raise DockerImageError("wheel digest or size changed while copying build context")
+    lock_hash, dependency_wheels = _resolve_wheelhouse(docker, context, copied_wheel)
+    if not any(item.sha256 == wheel.sha256 and item.filename == wheel.path.name for item in dependency_wheels):
+        raise DockerImageError("wheelhouse no longer contains the verified released wheel")
     iidfile = destination / "image-id.txt"
     _require_completed(
         docker,
         [
-            "docker", "build", "--pull", "--no-cache", "--iidfile", str(iidfile),
+            "docker", "build", "--pull", "--no-cache", "--network", "none", "--iidfile", str(iidfile),
             "--file", str(DOCKERFILE), "--tag", tag,
             "--label", f"{OWNER_LABEL}={run_suffix}",
             "--label", f"{WHEEL_LABEL}={wheel.sha256}",
+            "--label", f"{LOCK_LABEL}={lock_hash}",
             str(context),
         ],
         900,
@@ -180,11 +257,13 @@ def build_release_image(
         raise DockerImageError("Docker did not record a built image ID") from exc
     if not IMAGE_ID.fullmatch(image_id):
         raise DockerImageError("Docker returned an invalid image ID")
-    _assert_owned(_inspect(docker, image_id), image_id, run_suffix, wheel.sha256)
+    _assert_owned(_inspect(docker, image_id), image_id, run_suffix, wheel.sha256, lock_hash)
     distributions = _inventory(docker, image_id)
     expected_version = wheel.path.name.split("-")[1]
     if ("llm-shield-proxy", expected_version) not in distributions:
         raise DockerImageError("installed distribution does not match the released wheel")
+    if not {(item.name, item.version) for item in dependency_wheels}.issubset(distributions):
+        raise DockerImageError("installed distributions do not match the dependency lock")
     return BuiltImage(
         image_id=image_id,
         tag=tag,
@@ -192,6 +271,8 @@ def build_release_image(
         wheel_sha256=wheel.sha256,
         base_image=BASE_IMAGE,
         distributions=distributions,
+        dependency_lock_sha256=lock_hash,
+        dependency_wheels=dependency_wheels,
     )
 
 
@@ -202,6 +283,7 @@ def remove_release_image(image: BuiltImage, *, docker: DockerCommand = _run_dock
         image.image_id,
         image.run_suffix,
         image.wheel_sha256,
+        image.dependency_lock_sha256,
     )
     _require_completed(
         docker, ["docker", "image", "rm", image.image_id], 120, operation="image removal"

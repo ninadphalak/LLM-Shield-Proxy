@@ -9,6 +9,7 @@ import pytest
 
 from benchmarks.product_reproduction.acquisition import VerifiedWheel
 from benchmarks.product_reproduction.image import (
+    DOCKERFILE,
     DockerImageError,
     build_release_image,
     remove_release_image,
@@ -30,9 +31,10 @@ def _wheel(tmp_path: Path) -> VerifiedWheel:
 
 
 class FakeDocker:
-    def __init__(self, *, mismatched_owner: bool = False) -> None:
+    def __init__(self, *, mismatched_owner: bool = False, unsafe_dependency: bool = False) -> None:
         self.commands: list[list[str]] = []
         self.mismatched_owner = mismatched_owner
+        self.unsafe_dependency = unsafe_dependency
         self.labels: dict[str, str] = {}
 
     def __call__(self, args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -58,10 +60,21 @@ class FakeDocker:
                     Path(args[index + 1]).write_text(IMAGE_ID + "\n", encoding="ascii")
             return subprocess.CompletedProcess(args, 0, "build complete", "")
         if args[1] == "run":
+            if "download" in args:
+                mount = args[args.index("--mount") + 1]
+                source = mount.split("source=", 1)[1].split(",target=", 1)[0]
+                extension = "tar.gz" if self.unsafe_dependency else "whl"
+                (Path(source) / "wheelhouse" / f"dependency-1.0-py3-none-any.{extension}").write_bytes(
+                    b"downloaded dependency bytes"
+                )
+                return subprocess.CompletedProcess(args, 0, "download complete", "")
             return subprocess.CompletedProcess(
                 args,
                 0,
-                json.dumps([{"name": "llm-shield-proxy", "version": "1.6.6"}]),
+                json.dumps([
+                    {"name": "llm_shield_proxy", "version": "1.6.6"},
+                    {"name": "Dependency", "version": "1.0"},
+                ]),
                 "",
             )
         if args[1:3] == ["image", "rm"]:
@@ -85,11 +98,20 @@ def test_build_uses_verified_wheel_and_immutable_image_id(tmp_path: Path) -> Non
 
     assert image.image_id == IMAGE_ID
     assert image.wheel_sha256 == wheel.sha256
-    assert image.distributions == (("llm-shield-proxy", "1.6.6"),)
+    assert image.distributions == (("dependency", "1.0"), ("llm-shield-proxy", "1.6.6"))
+    assert len(image.dependency_wheels) == 2
+    assert image.dependency_lock_sha256.startswith("sha256:")
     build = next(command for command in docker.commands if command[1] == "build")
     assert "--pull" in build and "--no-cache" in build
-    assert wheel.path.name in [path.name for path in Path(build[-1]).iterdir()]
-    inventory = next(command for command in docker.commands if command[1] == "run")
+    assert build[build.index("--network") + 1] == "none"
+    assert wheel.path.name in [path.name for path in (Path(build[-1]) / "wheelhouse").iterdir()]
+    lock = (Path(build[-1]) / "requirements.lock").read_text(encoding="utf-8")
+    assert "llm-shield-proxy==1.6.6 --hash=sha256:" in lock
+    assert "dependency==1.0 --hash=sha256:" in lock
+    assert "--require-hashes" in DOCKERFILE.read_text(encoding="utf-8")
+    resolver = next(command for command in docker.commands if command[1] == "run" and "download" in command)
+    assert "--only-binary=:all:" in resolver
+    inventory = next(command for command in docker.commands if command[1] == "run" and "list" in command)
     assert inventory[inventory.index("--network") + 1] == "none"
     assert IMAGE_ID in inventory
     remove_release_image(image, docker=docker)
@@ -129,5 +151,22 @@ def test_image_identity_mismatch_blocks_inventory_and_cleanup(tmp_path: Path) ->
             docker=docker,
         )
 
-    assert not any(command[1] == "run" for command in docker.commands)
+    assert not any(command[1] == "run" and "list" in command for command in docker.commands)
     assert not any(command[1:3] == ["image", "rm"] for command in docker.commands)
+
+
+def test_non_wheel_dependency_blocks_image_build(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docker = FakeDocker(unsafe_dependency=True)
+
+    with pytest.raises(DockerImageError, match="wheelhouse"):
+        build_release_image(
+            _wheel(tmp_path),
+            tmp_path / "outside" / "build",
+            repo_root=repo,
+            run_suffix="0123456789abcdef",
+            docker=docker,
+        )
+
+    assert not any(command[1] == "build" for command in docker.commands)
