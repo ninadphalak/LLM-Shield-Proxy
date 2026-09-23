@@ -153,7 +153,8 @@ def _resolve_wheelhouse(
         docker,
         [
             "docker", "run", "--rm", "--mount", f"type=bind,source={context},target=/work",
-            BASE_IMAGE, "python", "-m", "pip", "download", "--disable-pip-version-check",
+            BASE_IMAGE, "python", "-m", "pip", "--isolated", "download",
+            "--index-url", "https://pypi.org/simple", "--disable-pip-version-check",
             "--only-binary=:all:", "--dest", "/work/wheelhouse",
             f"/work/wheelhouse/{copied_wheel.name}",
         ],

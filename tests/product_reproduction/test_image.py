@@ -110,6 +110,8 @@ def test_build_uses_verified_wheel_and_immutable_image_id(tmp_path: Path) -> Non
     assert "dependency==1.0 --hash=sha256:" in lock
     assert "--require-hashes" in DOCKERFILE.read_text(encoding="utf-8")
     resolver = next(command for command in docker.commands if command[1] == "run" and "download" in command)
+    assert "--isolated" in resolver
+    assert "https://pypi.org/simple" in resolver
     assert "--only-binary=:all:" in resolver
     inventory = next(command for command in docker.commands if command[1] == "run" and "list" in command)
     assert inventory[inventory.index("--network") + 1] == "none"
