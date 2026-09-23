@@ -368,6 +368,8 @@ def test_rejects_unsafe_checked_in_configuration(
         lambda document: document["environment"].update({"SHIELD_FAILURE_MODE": ""}),
         lambda document: document.pop("functional_identity"),
         lambda document: document["environment"].update({"ENABLE_RESPONSE_PII_REDACTION": None}),
+        lambda document: document["environment"].update({"SHIELD_FAILURE_MODE": {}}),
+        lambda document: document.update({"container_port": []}),
     ],
 )
 def test_released_configuration_requires_complete_reviewed_fields(

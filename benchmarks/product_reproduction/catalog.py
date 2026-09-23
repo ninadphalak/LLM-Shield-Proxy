@@ -293,8 +293,16 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
         if depth > MAX_CONFIG_DEPTH:
             raise CatalogError("configuration_path exceeds maximum JSON depth")
         if isinstance(value, dict):
+            if configuration_id == RELEASED_CONFIGURATION_ID and (path, depth) not in {
+                ((), 1), (("environment",), 2), (("functional_identity",), 2)
+            }:
+                raise CatalogError("configuration_path contains an unexpected object")
             pending.extend((item, depth + 1, path + (str(item_key),)) for item_key, item in value.items())
         elif isinstance(value, list):
+            if configuration_id == RELEASED_CONFIGURATION_ID and (path, depth) != (
+                ("required_substitutions",), 2
+            ):
+                raise CatalogError("configuration_path contains an unexpected list")
             pending.extend((item, depth + 1, path) for item in value)
         elif isinstance(value, str):
             if Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
