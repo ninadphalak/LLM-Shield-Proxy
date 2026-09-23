@@ -361,6 +361,30 @@ def test_rejects_unsafe_checked_in_configuration(
         _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda document: document["environment"].pop("ENABLE_RESPONSE_PII_REDACTION"),
+        lambda document: document["environment"].update({"SHIELD_FAILURE_MODE": ""}),
+        lambda document: document.pop("functional_identity"),
+        lambda document: document["environment"].update({"ENABLE_RESPONSE_PII_REDACTION": None}),
+    ],
+)
+def test_released_configuration_requires_complete_reviewed_fields(
+    tmp_path: Path, change: Any
+) -> None:
+    from benchmarks.product_reproduction.catalog import _validate_configuration
+
+    source = Path("benchmarks/product_reproduction/configs/llm-shield-proxy-response-on-v1.json")
+    document = json.loads(source.read_text(encoding="utf-8"))
+    change(document)
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="configuration_path"):
+        _validate_configuration(candidate, configuration_id="response-redaction-on-v1")
+
+
 def test_rejects_symlink_alias_outside_reviewed_baseline_root(
     catalog_file: Path,
     product_tree: dict[str, Path],

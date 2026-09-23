@@ -48,6 +48,19 @@ REVIEWED_PLACEHOLDERS = {
     ("environment", "UPSTREAM_BASE_URL"): "CAPTURE_BASE_URL",
     ("environment", "VALID_VIRTUAL_KEYS"): "SYNTHETIC_VIRTUAL_KEY",
 }
+RELEASED_CONFIGURATION_ID = "response-redaction-on-v1"
+RELEASED_ROOT_FIELDS = frozenset({
+    "schema", "configuration_id", "container_port", "environment",
+    "functional_identity", "required_substitutions",
+})
+RELEASED_ENVIRONMENT_FIELDS = frozenset(
+    path[1] for path in (*REVIEWED_LITERAL_VALUES, *REVIEWED_PLACEHOLDERS)
+    if path[0] == "environment"
+)
+RELEASED_FUNCTIONAL_FIELDS = frozenset(
+    path[1] for path in (*REVIEWED_LITERAL_VALUES, *REVIEWED_SCALAR_VALUES)
+    if path[0] == "functional_identity"
+)
 MAX_CONFIG_BYTES = 262_144
 MAX_CONFIG_DEPTH = 64
 
@@ -253,6 +266,16 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     environment = document.get("environment")
     if environment is not None and not isinstance(environment, dict):
         raise CatalogError("configuration_path environment must be an object")
+    if configuration_id == RELEASED_CONFIGURATION_ID:
+        functional_identity = document.get("functional_identity")
+        if (
+            set(document) != RELEASED_ROOT_FIELDS
+            or not isinstance(environment, dict)
+            or set(environment) != RELEASED_ENVIRONMENT_FIELDS
+            or not isinstance(functional_identity, dict)
+            or set(functional_identity) != RELEASED_FUNCTIONAL_FIELDS
+        ):
+            raise CatalogError("configuration_path does not match required reviewed fields")
     required_substitutions = document.get("required_substitutions", [])
     if not isinstance(required_substitutions, list) or any(
         not isinstance(item, str) for item in required_substitutions
@@ -281,9 +304,11 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
                 if REVIEWED_PLACEHOLDERS.get(path) != identifier:
                     raise CatalogError("configuration_path contains an unreviewed substitution")
                 seen_substitutions.add(identifier)
-            elif value and not _is_reviewed_literal_path(path, value):
+            elif not _is_reviewed_literal_path(path, value):
                 raise CatalogError("configuration_path contains a literal credential value")
-        elif value is not None:
+        elif value is None:
+            raise CatalogError("configuration_path must not contain null")
+        else:
             expected = REVIEWED_SCALAR_VALUES.get(path)
             if type(value) is not type(expected) or value != expected:
                 raise CatalogError("configuration_path contains a literal credential value")
