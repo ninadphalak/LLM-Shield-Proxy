@@ -189,6 +189,14 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
             {
                 "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "test-v1",
+                "environment": {"API_TOKEN": {"nested": ["real-secret-value"]}},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
                 "model_path": "C:\\private\\model.onnx",
             },
             "absolute path",

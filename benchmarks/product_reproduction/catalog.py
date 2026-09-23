@@ -214,24 +214,33 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     if document.get("configuration_id") != configuration_id:
         raise CatalogError("configuration_path configuration_id does not match target")
 
-    pending: list[tuple[object, int, tuple[str, ...]]] = [(document, 1, ())]
+    pending: list[tuple[object, int, tuple[str, ...], bool]] = [(document, 1, (), False)]
     while pending:
-        value, depth, path = pending.pop()
+        value, depth, path, sensitive_value = pending.pop()
         if depth > MAX_CONFIG_DEPTH:
             raise CatalogError("configuration_path exceeds maximum JSON depth")
         if isinstance(value, dict):
             pending.extend(
-                (item, depth + 1, path + (str(item_key),)) for item_key, item in value.items()
+                (
+                    item,
+                    depth + 1,
+                    path + (str(item_key),),
+                    sensitive_value
+                    or bool(
+                        path
+                        and path[-1] == "environment"
+                        and SENSITIVE_CONFIG_KEY.search(str(item_key))
+                    ),
+                )
+                for item_key, item in value.items()
             )
         elif isinstance(value, list):
-            pending.extend((item, depth + 1, path) for item in value)
+            pending.extend((item, depth + 1, path, sensitive_value) for item in value)
         elif isinstance(value, str):
             if Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
                 raise CatalogError("configuration_path contains a local absolute path")
             if (
-                len(path) >= 2
-                and path[-2] == "environment"
-                and SENSITIVE_CONFIG_KEY.search(path[-1])
+                sensitive_value
                 and value
                 and not CONFIG_PLACEHOLDER.fullmatch(value)
             ):
