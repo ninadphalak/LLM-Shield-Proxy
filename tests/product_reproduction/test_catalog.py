@@ -173,6 +173,14 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
         (
             {
                 "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": "literal-secret",
+            },
+            "environment must be an object",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "other",
             },
             "configuration_id",

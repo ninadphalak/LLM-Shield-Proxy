@@ -213,6 +213,9 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
         raise CatalogError("configuration_path has unknown schema")
     if document.get("configuration_id") != configuration_id:
         raise CatalogError("configuration_path configuration_id does not match target")
+    environment = document.get("environment")
+    if environment is not None and not isinstance(environment, dict):
+        raise CatalogError("configuration_path environment must be an object")
 
     pending: list[tuple[object, int, tuple[str, ...], bool]] = [(document, 1, (), False)]
     while pending:
