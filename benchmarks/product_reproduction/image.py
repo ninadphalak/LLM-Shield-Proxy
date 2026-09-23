@@ -40,6 +40,11 @@ class BuiltImage:
 
 
 def _run_docker(args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    if len(args) > 1 and args[1] == "build":
+        return subprocess.run(
+            args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False, timeout=timeout,
+        )
     return subprocess.run(
         args, capture_output=True, text=True, encoding="utf-8", errors="replace",
         check=False, timeout=timeout,

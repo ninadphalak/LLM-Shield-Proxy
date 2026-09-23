@@ -82,12 +82,15 @@ def acquire_release_wheel(
     digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
     if digest != release.artifact_identity:
         raise WheelAcquisitionError("release artifact SHA-256 does not match metadata")
+    created = False
     try:
         with destination.open("xb") as handle:
+            created = True
             handle.write(payload)
     except FileExistsError as exc:
         raise WheelAcquisitionError("wheel destination already exists") from exc
     except OSError:
-        destination.unlink(missing_ok=True)
+        if created:
+            destination.unlink(missing_ok=True)
         raise
     return VerifiedWheel(path=destination, sha256=digest, size=len(payload), source_url=release.artifact_url)
