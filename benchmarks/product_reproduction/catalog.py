@@ -18,41 +18,29 @@ ALLOWED_RELEASE_HOSTS = {
 MUTABLE_REFERENCE = re.compile(r"(?<![A-Za-z0-9])(?:main-latest|latest)(?![A-Za-z0-9])", re.IGNORECASE)
 NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
 CONFIG_PLACEHOLDER = re.compile(r"^\{\{[A-Z][A-Z0-9_]*\}\}$")
-CONFIG_IDENTIFIER = re.compile(r"^[A-Z][A-Z0-9_]*$")
-REVIEWED_LITERAL_ENV_KEYS = frozenset(
-    {
-        "ALLOW_CLIENT_UPSTREAM_OVERRIDE",
-        "ENABLE_DEEP_PAYLOAD_REDACTION",
-        "ENABLE_OPEN_BYOK_PASSTHROUGH",
-        "ENABLE_RESPONSE_PII_REDACTION",
-        "ENABLE_RETRY_FAILOVER",
-        "ENABLE_TIER3_ONNX_NER",
-        "MAX_RETRIES",
-        "SHIELD_DEFAULT_MASKING_MODE",
-        "SHIELD_FAILURE_MODE",
-    }
-)
-REVIEWED_LITERAL_PATHS = frozenset(
-    {
-        ("schema",),
-        ("configuration_id",),
-        ("functional_identity", "model"),
-        ("functional_identity", "virtual_key_auth"),
-    }
-)
-SENSITIVE_CONFIG_TERMS = frozenset(
-    {
-        "authorization",
-        "bearer",
-        "credential",
-        "credentials",
-        "password",
-        "passwords",
-        "secret",
-        "secrets",
-        "token",
-        "tokens",
-    }
+REVIEWED_LITERAL_VALUES = {
+    ("environment", "ALLOW_CLIENT_UPSTREAM_OVERRIDE"): "false",
+    ("environment", "ENABLE_DEEP_PAYLOAD_REDACTION"): "true",
+    ("environment", "ENABLE_OPEN_BYOK_PASSTHROUGH"): "false",
+    ("environment", "ENABLE_RESPONSE_PII_REDACTION"): "true",
+    ("environment", "ENABLE_RETRY_FAILOVER"): "false",
+    ("environment", "ENABLE_TIER3_ONNX_NER"): "false",
+    ("environment", "MAX_RETRIES"): "0",
+    ("environment", "SHIELD_DEFAULT_MASKING_MODE"): "SYNTHETIC",
+    ("environment", "SHIELD_FAILURE_MODE"): "FAIL_CLOSED",
+    ("functional_identity", "model"): "capture",
+    ("functional_identity", "virtual_key_auth"): "allowlist",
+}
+REVIEWED_SCALAR_VALUES = {
+    ("container_port",): 8000,
+    ("functional_identity", "fallback_configured"): False,
+    ("functional_identity", "retry_failover"): False,
+    ("functional_identity", "request_path_deep_redaction"): True,
+    ("functional_identity", "response_pii_redaction"): True,
+    ("functional_identity", "tier3_onnx_ner"): False,
+}
+REVIEWED_SUBSTITUTIONS = frozenset(
+    {"CAPTURE_BASE_URL", "SYNTHETIC_UPSTREAM_KEY", "SYNTHETIC_VIRTUAL_KEY"}
 )
 MAX_CONFIG_BYTES = 262_144
 MAX_CONFIG_DEPTH = 64
@@ -230,28 +218,12 @@ def _validate_safe_pattern(value: str, *, field: str) -> None:
         raise CatalogError(f"{field} is invalid: {exc}") from exc
 
 
-def _is_sensitive_config_key(value: object) -> bool:
-    key = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(value))
-    parts = [part.casefold() for part in re.split(r"[^A-Za-z0-9]+", key) if part]
-    if any(part in SENSITIVE_CONFIG_TERMS for part in parts):
-        return True
-    compact_key = "".join(parts)
-    if any(compact_key.endswith(term) for term in SENSITIVE_CONFIG_TERMS):
-        return True
-    key_qualifiers = {"access", "api", "encryption", "private", "secret", "signing"}
-    return bool(
-        "key" in parts
-        and "public" not in parts
-        and (parts[-1] == "key" or key_qualifiers.intersection(parts))
-    )
-
-
 def _is_reviewed_literal_path(path: tuple[str, ...], value: str) -> bool:
-    if path in REVIEWED_LITERAL_PATHS:
+    if path in (("schema",), ("configuration_id",)):
         return True
-    if len(path) == 2 and path[0] == "environment" and path[1] in REVIEWED_LITERAL_ENV_KEYS:
-        return True
-    return path == ("required_substitutions",) and bool(CONFIG_IDENTIFIER.fullmatch(value))
+    if path == ("required_substitutions",):
+        return value in REVIEWED_SUBSTITUTIONS
+    return REVIEWED_LITERAL_VALUES.get(path) == value
 
 
 def _validate_configuration(path: Path, *, configuration_id: str) -> None:
@@ -276,34 +248,28 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     if environment is not None and not isinstance(environment, dict):
         raise CatalogError("configuration_path environment must be an object")
 
-    pending: list[tuple[object, int, tuple[str, ...], bool]] = [(document, 1, (), False)]
+    pending: list[tuple[object, int, tuple[str, ...]]] = [(document, 1, ())]
     while pending:
-        value, depth, path, sensitive_value = pending.pop()
+        value, depth, path = pending.pop()
         if depth > MAX_CONFIG_DEPTH:
             raise CatalogError("configuration_path exceeds maximum JSON depth")
         if isinstance(value, dict):
-            pending.extend(
-                (
-                    item,
-                    depth + 1,
-                    path + (str(item_key),),
-                    sensitive_value or _is_sensitive_config_key(item_key),
-                )
-                for item_key, item in value.items()
-            )
+            pending.extend((item, depth + 1, path + (str(item_key),)) for item_key, item in value.items())
         elif isinstance(value, list):
-            pending.extend((item, depth + 1, path, sensitive_value) for item in value)
+            pending.extend((item, depth + 1, path) for item in value)
         elif isinstance(value, str):
             if Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
                 raise CatalogError("configuration_path contains a local absolute path")
             if (
-                (sensitive_value or not _is_reviewed_literal_path(path, value))
+                not _is_reviewed_literal_path(path, value)
                 and value
                 and not CONFIG_PLACEHOLDER.fullmatch(value)
             ):
                 raise CatalogError("configuration_path contains a literal credential value")
-        elif sensitive_value and value is not None:
-            raise CatalogError("configuration_path contains a literal credential value")
+        elif value is not None:
+            expected = REVIEWED_SCALAR_VALUES.get(path)
+            if type(value) is not type(expected) or value != expected:
+                raise CatalogError("configuration_path contains a literal credential value")
 
 
 def _validate_semantics(
