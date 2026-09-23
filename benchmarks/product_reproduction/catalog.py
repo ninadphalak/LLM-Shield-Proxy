@@ -42,6 +42,12 @@ REVIEWED_SCALAR_VALUES = {
 REVIEWED_SUBSTITUTIONS = frozenset(
     {"CAPTURE_BASE_URL", "SYNTHETIC_UPSTREAM_KEY", "SYNTHETIC_VIRTUAL_KEY"}
 )
+REVIEWED_PLACEHOLDERS = {
+    ("environment", "OPENAI_API_KEY"): "SYNTHETIC_UPSTREAM_KEY",
+    ("environment", "UPSTREAM_API_KEY"): "SYNTHETIC_UPSTREAM_KEY",
+    ("environment", "UPSTREAM_BASE_URL"): "CAPTURE_BASE_URL",
+    ("environment", "VALID_VIRTUAL_KEYS"): "SYNTHETIC_VIRTUAL_KEY",
+}
 MAX_CONFIG_BYTES = 262_144
 MAX_CONFIG_DEPTH = 64
 
@@ -247,7 +253,17 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     environment = document.get("environment")
     if environment is not None and not isinstance(environment, dict):
         raise CatalogError("configuration_path environment must be an object")
+    required_substitutions = document.get("required_substitutions", [])
+    if not isinstance(required_substitutions, list) or any(
+        not isinstance(item, str) for item in required_substitutions
+    ):
+        raise CatalogError("configuration_path required_substitutions must be a list of identifiers")
+    if any(item not in REVIEWED_SUBSTITUTIONS for item in required_substitutions):
+        raise CatalogError("configuration_path contains an unreviewed substitution")
+    if len(set(required_substitutions)) != len(required_substitutions):
+        raise CatalogError("configuration_path required_substitutions contains duplicates")
 
+    seen_substitutions: set[str] = set()
     pending: list[tuple[object, int, tuple[str, ...]]] = [(document, 1, ())]
     while pending:
         value, depth, path = pending.pop()
@@ -260,16 +276,19 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
         elif isinstance(value, str):
             if Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
                 raise CatalogError("configuration_path contains a local absolute path")
-            if (
-                not _is_reviewed_literal_path(path, value)
-                and value
-                and not CONFIG_PLACEHOLDER.fullmatch(value)
-            ):
+            if CONFIG_PLACEHOLDER.fullmatch(value):
+                identifier = value[2:-2]
+                if REVIEWED_PLACEHOLDERS.get(path) != identifier:
+                    raise CatalogError("configuration_path contains an unreviewed substitution")
+                seen_substitutions.add(identifier)
+            elif value and not _is_reviewed_literal_path(path, value):
                 raise CatalogError("configuration_path contains a literal credential value")
         elif value is not None:
             expected = REVIEWED_SCALAR_VALUES.get(path)
             if type(value) is not type(expected) or value != expected:
                 raise CatalogError("configuration_path contains a literal credential value")
+    if seen_substitutions != set(required_substitutions):
+        raise CatalogError("configuration_path required_substitutions does not match its placeholders")
 
 
 def _validate_semantics(

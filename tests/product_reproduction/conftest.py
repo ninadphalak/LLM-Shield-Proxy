@@ -20,7 +20,8 @@ def product_tree(tmp_path: Path) -> dict[str, Path]:
             {
                 "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "test-v1",
-                "environment": {"API_KEY": "{{SYNTHETIC_KEY}}"},
+                "environment": {"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}"},
+                "required_substitutions": ["SYNTHETIC_UPSTREAM_KEY"],
             }
         )
         + "\n",

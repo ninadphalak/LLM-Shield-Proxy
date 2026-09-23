@@ -307,6 +307,33 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
             {
                 "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "test-v1",
+                "environment": {"OPENAI_API_KEY": "{{OPERATOR_SECRET}}"},
+                "required_substitutions": ["OPERATOR_SECRET"],
+            },
+            "unreviewed substitution",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"UNREVIEWED_FIELD": "{{SYNTHETIC_UPSTREAM_KEY}}"},
+                "required_substitutions": ["SYNTHETIC_UPSTREAM_KEY"],
+            },
+            "unreviewed substitution",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"OPENAI_API_KEY": "{{SYNTHETIC_UPSTREAM_KEY}}"},
+                "required_substitutions": ["CAPTURE_BASE_URL"],
+            },
+            "required_substitutions",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
                 "environment": {"API_TOKEN": 123456},
             },
             "literal credential",
