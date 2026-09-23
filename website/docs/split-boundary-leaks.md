@@ -127,7 +127,9 @@ The first assertion tells you the implementation is wrong. The second tells you 
 
 ## Citing this page
 
-Cite as: Ninad Phalak, "Split-Boundary Leaks in Streaming Guardrails", 2026-09-22, https://llmshieldproxy.com/docs/split-boundary-leaks
+Cite the DOI, not this URL. The DOI resolves permanently and survives any change to this site.
+
+Phalak, N. (2026). *Split-Boundary Leaks in Streaming Guardrails*. Zenodo. [10.5281/zenodo.22909585](https://doi.org/10.5281/zenodo.22909585)
 
 ## Sources
 
