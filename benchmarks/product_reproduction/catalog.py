@@ -18,6 +18,28 @@ ALLOWED_RELEASE_HOSTS = {
 MUTABLE_REFERENCE = re.compile(r"(?<![A-Za-z0-9])(?:main-latest|latest)(?![A-Za-z0-9])", re.IGNORECASE)
 NESTED_QUANTIFIER = re.compile(r"\([^)]*[+*][^)]*\)[+*{]")
 CONFIG_PLACEHOLDER = re.compile(r"^\{\{[A-Z][A-Z0-9_]*\}\}$")
+CONFIG_IDENTIFIER = re.compile(r"^[A-Z][A-Z0-9_]*$")
+REVIEWED_LITERAL_ENV_KEYS = frozenset(
+    {
+        "ALLOW_CLIENT_UPSTREAM_OVERRIDE",
+        "ENABLE_DEEP_PAYLOAD_REDACTION",
+        "ENABLE_OPEN_BYOK_PASSTHROUGH",
+        "ENABLE_RESPONSE_PII_REDACTION",
+        "ENABLE_RETRY_FAILOVER",
+        "ENABLE_TIER3_ONNX_NER",
+        "MAX_RETRIES",
+        "SHIELD_DEFAULT_MASKING_MODE",
+        "SHIELD_FAILURE_MODE",
+    }
+)
+REVIEWED_LITERAL_PATHS = frozenset(
+    {
+        ("schema",),
+        ("configuration_id",),
+        ("functional_identity", "model"),
+        ("functional_identity", "virtual_key_auth"),
+    }
+)
 SENSITIVE_CONFIG_TERMS = frozenset(
     {
         "authorization",
@@ -224,6 +246,14 @@ def _is_sensitive_config_key(value: object) -> bool:
     )
 
 
+def _is_reviewed_literal_path(path: tuple[str, ...], value: str) -> bool:
+    if path in REVIEWED_LITERAL_PATHS:
+        return True
+    if len(path) == 2 and path[0] == "environment" and path[1] in REVIEWED_LITERAL_ENV_KEYS:
+        return True
+    return path == ("required_substitutions",) and bool(CONFIG_IDENTIFIER.fullmatch(value))
+
+
 def _validate_configuration(path: Path, *, configuration_id: str) -> None:
     try:
         with path.open("rb") as handle:
@@ -267,7 +297,7 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
             if Path(value).is_absolute() or PureWindowsPath(value).is_absolute():
                 raise CatalogError("configuration_path contains a local absolute path")
             if (
-                sensitive_value
+                (sensitive_value or not _is_reviewed_literal_path(path, value))
                 and value
                 and not CONFIG_PLACEHOLDER.fullmatch(value)
             ):

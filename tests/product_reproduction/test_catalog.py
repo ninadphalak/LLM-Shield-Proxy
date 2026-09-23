@@ -251,6 +251,38 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
             {
                 "schema": "pii-leak-benchmark/product-configuration/v1",
                 "configuration_id": "test-v1",
+                "environment": {"DB_PASS": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"MYSQL_PWD": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "provider": {"PASSWD": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"UNREVIEWED_FIELD": "possibly-private-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
                 "environment": {"API_TOKEN": 123456},
             },
             "literal credential",
