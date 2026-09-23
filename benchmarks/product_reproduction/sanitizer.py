@@ -28,11 +28,18 @@ class Sanitizer:
     def __repr__(self) -> str:
         return "<Sanitizer configured>"
 
+    @property
+    def configured(self) -> bool:
+        return bool(self._replacements)
+
     def sanitize(self, text: str) -> str:
         sanitized = text
         for rendering, replacement in self._replacements:
             sanitized = sanitized.replace(rendering, replacement)
         return sanitized
+
+    def contains_sensitive(self, text: str) -> bool:
+        return any(rendering in text for rendering, _ in self._replacements)
 
 
 def _renderings(value: str) -> set[str]:

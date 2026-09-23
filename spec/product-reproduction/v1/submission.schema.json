@@ -17,7 +17,6 @@
     "architecture",
     "license",
     "mode",
-    "bundle_manifest_sha256",
     "report_paths"
   ],
   "properties": {
@@ -59,7 +58,8 @@
   "allOf": [
     {
       "if": {"properties": {"mode": {"const": "reproduce"}}},
-      "then": {"required": ["baseline"]}
+      "then": {"required": ["baseline"]},
+      "else": {"not": {"required": ["baseline"]}}
     }
   ],
   "additionalProperties": false,
