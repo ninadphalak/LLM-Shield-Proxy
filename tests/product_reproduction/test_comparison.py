@@ -58,6 +58,31 @@ def test_non_primary_difference_is_result_reproduced_with_published_path(tmp_pat
     assert result.differences == ("/added", "/metadata/runner")
 
 
+@pytest.mark.parametrize(
+    ("baseline_number", "current_number"),
+    [("0.10000000000000001", "0.1"), ("1e-400", "0.0")],
+)
+def test_distinct_json_decimals_cannot_collapse_into_an_exact_match(
+    tmp_path: Path, baseline_number: str, current_number: str
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    current_path = tmp_path / "current.json"
+    baseline_path.write_text('{"score":' + baseline_number + "}", encoding="utf-8")
+    current_path.write_text('{"score":' + current_number + "}", encoding="utf-8")
+
+    result = compare_profile(
+        ReportSnapshot.read(current_path),
+        ReportSnapshot.read(baseline_path),
+        policy=ComparisonPolicy(frozenset(), frozenset({"/score"})),
+        identity_matches=True,
+        configuration_matches=True,
+    )
+
+    assert result.status == "drifted"
+    assert result.level == "primary"
+    assert result.differences == ("/score",)
+
+
 def test_primary_or_subject_difference_is_drift(tmp_path: Path) -> None:
     baseline = _report(tmp_path / "baseline.json", {"summary": {"leaks": 0}, "inventory": ["a", "b"]})
     current = _report(tmp_path / "current.json", {"summary": {"leaks": 1}, "inventory": ["a"]})

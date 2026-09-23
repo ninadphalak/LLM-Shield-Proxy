@@ -6,12 +6,13 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
 from .schemas import schema_validator
 
-JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
+JSONValue = None | bool | int | float | Decimal | str | list["JSONValue"] | dict[str, "JSONValue"]
 ComparisonLevel = Literal["exact", "primary", "none"]
 ComparisonStatus = Literal["matched", "drifted", "not-compared", "invalid"]
 POINTER_PATTERN = re.compile(r"^/(?:[^~/]|~0|~1)+(?:/(?:[^~/]|~0|~1)+)*$")
@@ -42,6 +43,17 @@ def parse_finite_json_float(value: str) -> float:
     return parsed
 
 
+def _parse_exact_json_decimal(value: str) -> Decimal:
+    try:
+        parsed = Decimal(value)
+        representable = float(value)
+    except (InvalidOperation, OverflowError) as exc:
+        raise ValueError("JSON numbers must be valid decimals") from exc
+    if not parsed.is_finite() or not math.isfinite(representable):
+        raise ValueError("JSON numbers must be finite")
+    return parsed
+
+
 def canonical_json_bytes(document: JSONValue | Mapping[str, Any]) -> bytes:
     return (
         json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -68,7 +80,7 @@ def _load_json_object(data: bytes, *, label: str) -> dict[str, JSONValue]:
         document = json.loads(
             data.decode("utf-8"),
             parse_constant=_reject_json_constant,
-            parse_float=parse_finite_json_float,
+            parse_float=_parse_exact_json_decimal,
         )
         validate_json_nesting(document)
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
