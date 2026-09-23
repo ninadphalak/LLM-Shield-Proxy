@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import shutil
@@ -12,6 +13,7 @@ from typing import Any
 
 from .acquisition import VerifiedWheel
 from .paths import validate_fresh_output_path
+from .release import _resolve_public_addresses
 
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
 RUN_SUFFIX = re.compile(r"^[a-f0-9]{16,32}$")
@@ -27,6 +29,7 @@ OWNER_LABEL = "org.pii-leak-benchmark.run-suffix"
 WHEEL_LABEL = "org.pii-leak-benchmark.wheel-sha256"
 LOCK_LABEL = "org.pii-leak-benchmark.dependency-lock-sha256"
 DockerCommand = Callable[[list[str], float], subprocess.CompletedProcess[str]]
+PYPI_HOSTS = ("pypi.org", "files.pythonhosted.org")
 
 
 class DockerImageError(ValueError):
@@ -149,10 +152,23 @@ def _resolve_wheelhouse(
     docker: DockerCommand, context: Path, copied_wheel: Path,
 ) -> tuple[str, tuple[DependencyWheel, ...]]:
     wheelhouse = copied_wheel.parent
+    pinned_hosts: list[str] = []
+    for host in PYPI_HOSTS:
+        addresses = _resolve_public_addresses(host, 443)
+        ipv4 = next(
+            (str(ipaddress.ip_address(value)) for value in addresses
+             if ipaddress.ip_address(value).version == 4
+             and ipaddress.ip_address(value).is_global),
+            None,
+        )
+        if ipv4 is None:
+            raise DockerImageError(f"official package host has no public IPv4 address: {host}")
+        pinned_hosts.extend(("--add-host", f"{host}:{ipv4}"))
     _require_completed(
         docker,
         [
             "docker", "run", "--rm", "--mount", f"type=bind,source={context},target=/work",
+            *pinned_hosts,
             BASE_IMAGE, "python", "-m", "pip", "--isolated", "download",
             "--index-url", "https://pypi.org/simple", "--disable-pip-version-check",
             "--only-binary=:all:", "--dest", "/work/wheelhouse",

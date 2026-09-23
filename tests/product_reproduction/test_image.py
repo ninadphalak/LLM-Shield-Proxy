@@ -18,6 +18,15 @@ from benchmarks.product_reproduction.image import (
 IMAGE_ID = "sha256:" + "c" * 64
 
 
+@pytest.fixture(autouse=True)
+def pinned_release_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "benchmarks.product_reproduction.image._resolve_public_addresses",
+        lambda host, port: ("151.101.0.223",),
+        raising=False,
+    )
+
+
 def _wheel(tmp_path: Path) -> VerifiedWheel:
     path = tmp_path / "llm_shield_proxy-1.6.6-py3-none-any.whl"
     payload = b"verified wheel bytes"
@@ -112,6 +121,9 @@ def test_build_uses_verified_wheel_and_immutable_image_id(tmp_path: Path) -> Non
     resolver = next(command for command in docker.commands if command[1] == "run" and "download" in command)
     assert "--isolated" in resolver
     assert "https://pypi.org/simple" in resolver
+    assert resolver.count("--add-host") == 2
+    assert "pypi.org:151.101.0.223" in resolver
+    assert "files.pythonhosted.org:151.101.0.223" in resolver
     assert "--only-binary=:all:" in resolver
     inventory = next(command for command in docker.commands if command[1] == "run" and "list" in command)
     assert inventory[inventory.index("--network") + 1] == "none"
@@ -172,3 +184,26 @@ def test_non_wheel_dependency_blocks_image_build(tmp_path: Path) -> None:
         )
 
     assert not any(command[1] == "build" for command in docker.commands)
+
+
+def test_dependency_resolution_rejects_nonpublic_pinned_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "benchmarks.product_reproduction.image._resolve_public_addresses",
+        lambda host, port: ("127.0.0.1",),
+    )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docker = FakeDocker()
+
+    with pytest.raises(DockerImageError, match="no public IPv4"):
+        build_release_image(
+            _wheel(tmp_path),
+            tmp_path / "outside" / "build",
+            repo_root=repo,
+            run_suffix="0123456789abcdef",
+            docker=docker,
+        )
+
+    assert not any(command[1] == "run" for command in docker.commands)
