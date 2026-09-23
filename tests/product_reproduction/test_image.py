@@ -40,17 +40,23 @@ def _wheel(tmp_path: Path) -> VerifiedWheel:
 
 
 class FakeDocker:
-    def __init__(self, *, mismatched_owner: bool = False, unsafe_dependency: bool = False) -> None:
+    def __init__(
+        self, *, mismatched_owner: bool = False, unsafe_dependency: bool = False,
+        inspect_failure: bool = False,
+    ) -> None:
         self.commands: list[list[str]] = []
         self.mismatched_owner = mismatched_owner
         self.unsafe_dependency = unsafe_dependency
+        self.inspect_failure = inspect_failure
         self.labels: dict[str, str] = {}
 
     def __call__(self, args: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
         self.commands.append(args)
         if args[1:3] == ["image", "inspect"]:
+            if self.inspect_failure:
+                return subprocess.CompletedProcess(args, 1, "", "permission denied")
             if args[-1].startswith("pii-reproduction-") and not self.labels:
-                return subprocess.CompletedProcess(args, 1, "", "not found")
+                return subprocess.CompletedProcess(args, 1, "", "No such image")
             labels = dict(self.labels)
             if self.mismatched_owner:
                 labels["org.pii-leak-benchmark.run-suffix"] = "different"
@@ -207,3 +213,60 @@ def test_dependency_resolution_rejects_nonpublic_pinned_address(
         )
 
     assert not any(command[1] == "run" for command in docker.commands)
+
+
+def test_image_tag_preflight_rejects_daemon_failure(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docker = FakeDocker(inspect_failure=True)
+
+    with pytest.raises(DockerImageError, match="could not determine"):
+        build_release_image(
+            _wheel(tmp_path),
+            tmp_path / "outside" / "build",
+            repo_root=repo,
+            run_suffix="0123456789abcdef",
+            docker=docker,
+        )
+
+    assert not any(command[1] == "run" for command in docker.commands)
+
+
+def test_image_build_rejects_unreviewed_dockerfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    unreviewed = tmp_path / "Dockerfile"
+    unreviewed.write_text(
+        DOCKERFILE.read_text(encoding="utf-8") + "\nRUN echo unexpected\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("benchmarks.product_reproduction.image.DOCKERFILE", unreviewed)
+    docker = FakeDocker()
+
+    with pytest.raises(DockerImageError, match="Dockerfile"):
+        build_release_image(
+            _wheel(tmp_path),
+            tmp_path / "outside" / "build",
+            repo_root=repo,
+            run_suffix="0123456789abcdef",
+            docker=docker,
+        )
+
+    assert docker.commands == []
+
+
+def test_oversized_wheelhouse_entry_is_rejected_before_hashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from benchmarks.product_reproduction import image as image_module
+
+    (tmp_path / "dependency-1.0-py3-none-any.whl").write_bytes(b"oversized")
+    monkeypatch.setattr(image_module, "MAX_WHEELHOUSE_BYTES", 2)
+    monkeypatch.setattr(
+        image_module, "_hash_file", lambda path: pytest.fail("oversized entry was hashed")
+    )
+
+    with pytest.raises(DockerImageError, match="size"):
+        image_module._dependency_wheels(tmp_path)

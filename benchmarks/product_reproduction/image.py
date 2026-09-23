@@ -25,6 +25,7 @@ BASE_IMAGE = (
     "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
 )
 DOCKERFILE = Path(__file__).parent / "docker" / "llm-shield-proxy-released.Dockerfile"
+EXPECTED_DOCKERFILE_SHA256 = "4187d888fdd6dd740a29a1d7304bb984e7c220212ab5bb3f7faaacab98360f31"
 OWNER_LABEL = "org.pii-leak-benchmark.run-suffix"
 WHEEL_LABEL = "org.pii-leak-benchmark.wheel-sha256"
 LOCK_LABEL = "org.pii-leak-benchmark.dependency-lock-sha256"
@@ -138,6 +139,12 @@ def _dependency_wheels(wheelhouse: Path) -> tuple[DependencyWheel, ...]:
         if name in names:
             raise DockerImageError("wheelhouse contains duplicate distributions")
         names.add(name)
+        try:
+            entry_size = path.stat().st_size
+        except OSError as exc:
+            raise DockerImageError("wheelhouse entry cannot be inspected") from exc
+        if not entry_size or entry_size > MAX_WHEELHOUSE_BYTES - total_size:
+            raise DockerImageError("wheelhouse exceeds size limit")
         digest, size = _hash_file(path)
         total_size += size
         if not size or total_size > MAX_WHEELHOUSE_BYTES or len(found) >= 512:
@@ -231,8 +238,12 @@ def build_release_image(
     observed_hash, observed_size = _hash_file(wheel.path)
     if observed_hash != wheel.sha256 or observed_size != wheel.size:
         raise DockerImageError("wheel digest or size changed before image build")
-    if not DOCKERFILE.is_file() or DOCKERFILE.read_text(encoding="utf-8").splitlines()[0] != f"FROM {BASE_IMAGE}":
-        raise DockerImageError("reviewed Dockerfile base image identity changed")
+    try:
+        dockerfile_bytes = DOCKERFILE.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8")
+    except OSError as exc:
+        raise DockerImageError("reviewed Dockerfile is unavailable") from exc
+    if hashlib.sha256(dockerfile_bytes).hexdigest() != EXPECTED_DOCKERFILE_SHA256:
+        raise DockerImageError("reviewed Dockerfile content changed")
     destination = validate_fresh_output_path(output_dir, repo_root=repo_root)
     tag = f"pii-reproduction-{run_suffix}:released"
     try:
@@ -241,6 +252,8 @@ def build_release_image(
         raise DockerImageError("Docker could not check the run-specific image tag") from exc
     if existing.returncode == 0:
         raise DockerImageError("run-specific Docker image tag already exists")
+    if "no such image" not in (existing.stderr or "").lower():
+        raise DockerImageError("Docker could not determine whether the run-specific image tag exists")
     destination.mkdir(parents=True, mode=0o700)
     context = destination / "context"
     context.mkdir()
