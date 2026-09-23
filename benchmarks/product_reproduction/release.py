@@ -212,9 +212,11 @@ def _pin_release_url(url: str) -> PinnedReleaseTarget:
     )
 
 
-def _pinned_https_get(target: PinnedReleaseTarget, maximum_bytes: int) -> ReleaseHttpResponse:
+def _pinned_https_get(
+    target: PinnedReleaseTarget, maximum_bytes: int, *, accept: str = "application/json"
+) -> ReleaseHttpResponse:
     headers = {
-        "Accept": "application/json",
+        "Accept": accept,
         "Accept-Encoding": "identity",
         "User-Agent": "pii-leak-benchmark-product-reproduction/1",
         **target.headers,
@@ -328,6 +330,13 @@ def _artifact_url(value: object) -> str:
     ):
         raise ReleaseResolutionError("artifact URL is not an allowlisted credential-free PyPI URL")
     return value
+
+
+def fetch_release_artifact(url: str, maximum_bytes: int) -> ReleaseHttpResponse:
+    """Fetch an allowlisted PyPI artifact through a validated, pinned public address."""
+    validated_url = _artifact_url(url)
+    target = _pin_release_url(validated_url)
+    return _pinned_https_get(target, maximum_bytes, accept="application/octet-stream")
 
 
 def _select_wheel(document: Mapping[str, Any], source: ReleaseSource) -> Mapping[str, Any]:
