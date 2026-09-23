@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from jsonschema import ValidationError
 
+from benchmarks.product_reproduction import comparison as comparison_module
 from benchmarks.product_reproduction.comparison import (
     BaselineChangedError,
     ComparisonError,
@@ -114,6 +115,36 @@ def test_report_snapshot_rejects_nonfinite_json_numbers(tmp_path: Path, number: 
 
     with pytest.raises(ComparisonError, match="valid UTF-8 JSON"):
         ReportSnapshot.read(path)
+
+
+def test_report_snapshot_rejects_excessive_nesting_as_a_comparison_error(tmp_path: Path) -> None:
+    path = tmp_path / "report.json"
+    path.write_text('{"value":' * 2000 + "0" + "}" * 2000, encoding="utf-8")
+
+    with pytest.raises(ComparisonError, match="valid UTF-8 JSON"):
+        ReportSnapshot.read(path)
+
+
+def test_report_snapshot_read_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "report.json"
+    path.write_text('{"outcome":300}', encoding="utf-8")
+    monkeypatch.setattr(comparison_module, "MAX_REPORT_BYTES", 4, raising=False)
+
+    with pytest.raises(ComparisonError, match="size limit"):
+        ReportSnapshot.read(path)
+
+
+def test_recursive_difference_walk_is_iterative() -> None:
+    current: dict = {"leaf": 0}
+    baseline: dict = {"leaf": 1}
+    for _ in range(1500):
+        current = {"node": current}
+        baseline = {"node": baseline}
+
+    differences = comparison_module._recursive_differences(current, baseline)
+
+    assert len(differences) == 1
+    assert next(iter(differences)).endswith("/leaf")
 
 
 def test_snapshot_detects_symlink_retargeting(tmp_path: Path) -> None:

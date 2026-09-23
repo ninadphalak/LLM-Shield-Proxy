@@ -28,6 +28,10 @@ class Sanitizer:
     def __repr__(self) -> str:
         return "<Sanitizer configured>"
 
+    @property
+    def configured(self) -> bool:
+        return bool(self._replacements)
+
     def sanitize(self, text: str) -> str:
         sanitized = text
         for rendering, replacement in self._replacements:

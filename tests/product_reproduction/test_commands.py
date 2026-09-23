@@ -44,6 +44,19 @@ def test_command_log_separates_display_text_from_sanitized_argv() -> None:
     assert '"literal;not-shell"' in rendered
 
 
+def test_command_log_rejects_an_empty_sanitizer() -> None:
+    with pytest.raises(CommandContractError, match="sensitive-value registry"):
+        render_command_log(
+            displayed={"gateway": "gateway --api-key synthetic-secret-value"},
+            executed={
+                "gateway": CommandSpec.from_argv(
+                    ["gateway", "--api-key", "synthetic-secret-value"]
+                )
+            },
+            sanitizer=build_sanitizer([]),
+        )
+
+
 def test_command_log_rejects_multiline_display_injection() -> None:
     sanitizer = build_sanitizer([])
 

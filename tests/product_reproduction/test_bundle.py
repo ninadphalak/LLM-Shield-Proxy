@@ -373,6 +373,23 @@ def test_json_source_rejects_nonfinite_numeric_values(tmp_path: Path, number: st
         BundleContent.from_path("provenance/source.json", source)
 
 
+def test_json_source_rejects_excessive_nesting_as_a_bundle_error(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    source.write_text('{"value":' * 2000 + "0" + "}" * 2000, encoding="utf-8")
+
+    with pytest.raises(BundleError, match="JSON member is invalid"):
+        BundleContent.from_path("provenance/source.json", source)
+
+
+def test_bundle_source_read_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "source.txt"
+    source.write_bytes(b"12345")
+    monkeypatch.setattr(bundle_module, "MAX_MEMBER_BYTES", 4)
+
+    with pytest.raises(BundleError, match="source exceeds size limit"):
+        BundleContent.from_path("provenance/source.txt", source)
+
+
 def test_direct_text_member_cannot_bypass_line_ending_canonicalization(tmp_path: Path) -> None:
     members = [
         BundleContent(path=item.path, data=b"unsafe\r\n", kind="text")

@@ -15,6 +15,8 @@ JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSO
 ComparisonLevel = Literal["exact", "primary", "none"]
 ComparisonStatus = Literal["matched", "drifted", "not-compared", "invalid"]
 POINTER_PATTERN = re.compile(r"^/(?:[^~/]|~0|~1)+(?:/(?:[^~/]|~0|~1)+)*$")
+MAX_JSON_DEPTH = 128
+MAX_REPORT_BYTES = 16 * 1024 * 1024
 
 
 class ComparisonError(ValueError):
@@ -47,6 +49,20 @@ def canonical_json_bytes(document: JSONValue | Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def validate_json_nesting(document: Any) -> None:
+    pending = [(document, 0)]
+    while pending:
+        value, depth = pending.pop()
+        if isinstance(value, dict):
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError("JSON nesting exceeds the supported depth")
+            pending.extend((child, depth + 1) for child in value.values())
+        elif isinstance(value, list):
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError("JSON nesting exceeds the supported depth")
+            pending.extend((child, depth + 1) for child in value)
+
+
 def _load_json_object(data: bytes, *, label: str) -> dict[str, JSONValue]:
     try:
         document = json.loads(
@@ -54,7 +70,8 @@ def _load_json_object(data: bytes, *, label: str) -> dict[str, JSONValue]:
             parse_constant=_reject_json_constant,
             parse_float=parse_finite_json_float,
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        validate_json_nesting(document)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise ComparisonError(f"{label} is not valid UTF-8 JSON") from exc
     if not isinstance(document, dict):
         raise ComparisonError(f"{label} must be a JSON object")
@@ -70,7 +87,10 @@ class ReportSnapshot:
     @classmethod
     def read(cls, path: Path, *, expected_sha256: str | None = None) -> ReportSnapshot:
         source = path.absolute()
-        raw = source.read_bytes()
+        with source.open("rb") as report:
+            raw = report.read(MAX_REPORT_BYTES + 1)
+        if len(raw) > MAX_REPORT_BYTES:
+            raise ComparisonError("report exceeds size limit")
         digest = sha256_bytes(raw)
         if expected_sha256 is not None and digest != expected_sha256:
             raise ComparisonError("report hash does not match the declared SHA-256")
@@ -79,9 +99,13 @@ class ReportSnapshot:
 
     def assert_source_unchanged(self) -> None:
         try:
-            current_digest = sha256_bytes(self.source.read_bytes())
+            with self.source.open("rb") as report:
+                current = report.read(MAX_REPORT_BYTES + 1)
         except OSError as exc:
             raise BaselineChangedError("snapshotted baseline is no longer readable") from exc
+        if len(current) > MAX_REPORT_BYTES:
+            raise BaselineChangedError("snapshotted baseline changed during the run")
+        current_digest = sha256_bytes(current)
         if current_digest != self.sha256:
             raise BaselineChangedError("snapshotted baseline changed during the run")
 
@@ -138,33 +162,33 @@ def _join_pointer(parent: str, child: str) -> str:
 
 
 def _recursive_differences(current: JSONValue, baseline: JSONValue, pointer: str = "") -> set[str]:
-    if type(current) is not type(baseline):
-        if not pointer:
-            raise ComparisonError("report roots must have the same object type")
-        return {pointer}
-    if isinstance(current, dict) and isinstance(baseline, dict):
-        differences: set[str] = set()
-        for key in sorted(set(current) | set(baseline)):
-            child = _join_pointer(pointer, key)
-            if key not in current or key not in baseline:
-                differences.add(child)
-            else:
-                differences.update(_recursive_differences(current[key], baseline[key], child))
-        return differences
-    if isinstance(current, list) and isinstance(baseline, list):
-        differences = set()
-        for index in range(max(len(current), len(baseline))):
-            child = _join_pointer(pointer, str(index))
-            if index >= len(current) or index >= len(baseline):
-                differences.add(child)
-            else:
-                differences.update(_recursive_differences(current[index], baseline[index], child))
-        return differences
-    if current != baseline:
-        if not pointer:
-            raise ComparisonError("report roots must be JSON objects")
-        return {pointer}
-    return set()
+    differences: set[str] = set()
+    pending = [(current, baseline, pointer)]
+    while pending:
+        current_value, baseline_value, current_pointer = pending.pop()
+        if type(current_value) is not type(baseline_value):
+            if not current_pointer:
+                raise ComparisonError("report roots must have the same object type")
+            differences.add(current_pointer)
+        elif isinstance(current_value, dict) and isinstance(baseline_value, dict):
+            for key in sorted(set(current_value) | set(baseline_value), reverse=True):
+                child = _join_pointer(current_pointer, key)
+                if key not in current_value or key not in baseline_value:
+                    differences.add(child)
+                else:
+                    pending.append((current_value[key], baseline_value[key], child))
+        elif isinstance(current_value, list) and isinstance(baseline_value, list):
+            for index in range(max(len(current_value), len(baseline_value)) - 1, -1, -1):
+                child = _join_pointer(current_pointer, str(index))
+                if index >= len(current_value) or index >= len(baseline_value):
+                    differences.add(child)
+                else:
+                    pending.append((current_value[index], baseline_value[index], child))
+        elif current_value != baseline_value:
+            if not current_pointer:
+                raise ComparisonError("report roots must be JSON objects")
+            differences.add(current_pointer)
+    return differences
 
 
 def _at_or_below(pointer: str, ancestor: str) -> bool:

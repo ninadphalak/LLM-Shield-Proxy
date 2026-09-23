@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal
 
-from .comparison import canonical_json_bytes, parse_finite_json_float, sha256_bytes
+from .comparison import canonical_json_bytes, parse_finite_json_float, sha256_bytes, validate_json_nesting
 from .paths import validate_fresh_output_path
 from .results import ExperimentHealth
 from .sanitizer import SensitiveValue, build_sanitizer
@@ -91,7 +91,10 @@ class BundleContent:
 
     @classmethod
     def from_path(cls, path: str, source: Path) -> BundleContent:
-        raw = source.read_bytes()
+        with source.open("rb") as input_file:
+            raw = input_file.read(MAX_MEMBER_BYTES + 1)
+        if len(raw) > MAX_MEMBER_BYTES:
+            raise BundleError(f"bundle source exceeds size limit: {path}")
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -198,12 +201,14 @@ def _validate_semantic_members(manifest: Mapping[str, Any], payload_paths: set[s
 
 def _strict_json_loads(data: bytes, *, path: str) -> Any:
     try:
-        return json.loads(
+        document = json.loads(
             data.decode("utf-8"),
             parse_constant=_reject_json_constant,
             parse_float=parse_finite_json_float,
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        validate_json_nesting(document)
+        return document
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise BundleError(f"bundle JSON member is invalid: {path}") from exc
 
 

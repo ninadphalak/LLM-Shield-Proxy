@@ -47,6 +47,8 @@ def render_command_log(
         raise CommandContractError("command labels must be lowercase safe identifiers")
     if any("\0" in command or "\r" in command or "\n" in command for command in displayed.values()):
         raise CommandContractError("displayed commands cannot contain control bytes")
+    if not sanitizer.configured:
+        raise CommandContractError("command log requires a nonempty sensitive-value registry")
     lines = ["DISPLAYED REPRODUCTION COMMANDS"]
     for label in sorted(displayed):
         lines.append(f"{label}: {sanitizer.sanitize(displayed[label])}")
