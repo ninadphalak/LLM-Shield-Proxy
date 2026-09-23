@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import re
 import shutil
@@ -12,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from .acquisition import VerifiedWheel
+from .package_mirror import MAX_WHEEL_BYTES, PackageMirror, validate_wheel_metadata
 from .paths import validate_fresh_output_path
-from .release import _resolve_public_addresses
 
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
 RUN_SUFFIX = re.compile(r"^[a-f0-9]{16,32}$")
@@ -30,7 +29,6 @@ OWNER_LABEL = "org.pii-leak-benchmark.run-suffix"
 WHEEL_LABEL = "org.pii-leak-benchmark.wheel-sha256"
 LOCK_LABEL = "org.pii-leak-benchmark.dependency-lock-sha256"
 DockerCommand = Callable[[list[str], float], subprocess.CompletedProcess[str]]
-PYPI_HOSTS = ("pypi.org", "files.pythonhosted.org")
 
 
 class DockerImageError(ValueError):
@@ -145,6 +143,9 @@ def _dependency_wheels(wheelhouse: Path) -> tuple[DependencyWheel, ...]:
             raise DockerImageError("wheelhouse entry cannot be inspected") from exc
         if not entry_size or entry_size > MAX_WHEELHOUSE_BYTES - total_size:
             raise DockerImageError("wheelhouse exceeds size limit")
+        if entry_size > MAX_WHEEL_BYTES:
+            raise DockerImageError("wheelhouse entry exceeds package size limit")
+        validate_wheel_metadata(path.read_bytes())
         digest, size = _hash_file(path)
         total_size += size
         if not size or total_size > MAX_WHEELHOUSE_BYTES or len(found) >= 512:
@@ -159,31 +160,28 @@ def _resolve_wheelhouse(
     docker: DockerCommand, context: Path, copied_wheel: Path,
 ) -> tuple[str, tuple[DependencyWheel, ...]]:
     wheelhouse = copied_wheel.parent
-    pinned_hosts: list[str] = []
-    for host in PYPI_HOSTS:
-        addresses = _resolve_public_addresses(host, 443)
-        ipv4 = next(
-            (str(ipaddress.ip_address(value)) for value in addresses
-             if ipaddress.ip_address(value).version == 4
-             and ipaddress.ip_address(value).is_global),
-            None,
-        )
-        if ipv4 is None:
-            raise DockerImageError(f"official package host has no public IPv4 address: {host}")
-        pinned_hosts.extend(("--add-host", f"{host}:{ipv4}"))
-    _require_completed(
-        docker,
-        [
-            "docker", "run", "--rm", "--mount", f"type=bind,source={context},target=/work",
-            *pinned_hosts,
-            BASE_IMAGE, "python", "-m", "pip", "--isolated", "download",
-            "--index-url", "https://pypi.org/simple", "--disable-pip-version-check",
-            "--only-binary=:all:", "--dest", "/work/wheelhouse",
-            f"/work/wheelhouse/{copied_wheel.name}",
-        ],
-        600,
-        operation="dependency wheel resolution",
-    )
+    with PackageMirror() as mirror:
+        try:
+            _require_completed(
+                docker,
+                [
+                    "docker", "run", "--rm", "--mount", f"type=bind,source={context},target=/work",
+                    "--add-host", "host.docker.internal:host-gateway",
+                    BASE_IMAGE, "python", "-m", "pip", "--isolated", "download",
+                    "--index-url", mirror.index_url, "--trusted-host", "host.docker.internal",
+                    "--disable-pip-version-check", "--only-binary=:all:",
+                    "--dest", "/work/wheelhouse",
+                    f"/work/wheelhouse/{copied_wheel.name}",
+                ],
+                600,
+                operation="dependency wheel resolution",
+            )
+        except DockerImageError as exc:
+            if mirror.errors:
+                raise DockerImageError(
+                    f"official package mirror rejected dependency acquisition: {mirror.errors[0]}"
+                ) from exc
+            raise
     wheels = _dependency_wheels(wheelhouse)
     locked = "".join(
         f"{item.name}=={item.version} --hash={item.sha256}\n" for item in wheels
@@ -238,6 +236,9 @@ def build_release_image(
     observed_hash, observed_size = _hash_file(wheel.path)
     if observed_hash != wheel.sha256 or observed_size != wheel.size:
         raise DockerImageError("wheel digest or size changed before image build")
+    if observed_size > MAX_WHEEL_BYTES:
+        raise DockerImageError("released wheel exceeds package size limit")
+    validate_wheel_metadata(wheel.path.read_bytes())
     try:
         dockerfile_bytes = DOCKERFILE.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8")
     except OSError as exc:
@@ -257,6 +258,9 @@ def build_release_image(
     destination.mkdir(parents=True, mode=0o700)
     context = destination / "context"
     context.mkdir()
+    verified_dockerfile = context / "Dockerfile"
+    with verified_dockerfile.open("xb") as handle:
+        handle.write(dockerfile_bytes)
     wheelhouse = context / "wheelhouse"
     wheelhouse.mkdir()
     copied_wheel = wheelhouse / wheel.path.name
@@ -272,7 +276,7 @@ def build_release_image(
         docker,
         [
             "docker", "build", "--pull", "--no-cache", "--network", "none", "--iidfile", str(iidfile),
-            "--file", str(DOCKERFILE), "--tag", tag,
+            "--file", str(verified_dockerfile), "--tag", tag,
             "--label", f"{OWNER_LABEL}={run_suffix}",
             "--label", f"{WHEEL_LABEL}={wheel.sha256}",
             "--label", f"{LOCK_LABEL}={lock_hash}",

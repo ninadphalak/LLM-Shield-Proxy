@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -18,19 +19,15 @@ from benchmarks.product_reproduction.image import (
 IMAGE_ID = "sha256:" + "c" * 64
 
 
-@pytest.fixture(autouse=True)
-def pinned_release_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "benchmarks.product_reproduction.image._resolve_public_addresses",
-        lambda host, port: ("151.101.0.223",),
-        raising=False,
-    )
-
-
-def _wheel(tmp_path: Path) -> VerifiedWheel:
+def _wheel(tmp_path: Path, *, direct_url: bool = False) -> VerifiedWheel:
     path = tmp_path / "llm_shield_proxy-1.6.6-py3-none-any.whl"
-    payload = b"verified wheel bytes"
-    path.write_bytes(payload)
+    requirement = "Requires-Dist: dependency @ https://unreviewed.example/dep.whl\n" if direct_url else ""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "llm_shield_proxy-1.6.6.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: llm-shield-proxy\nVersion: 1.6.6\n" + requirement,
+        )
+    payload = path.read_bytes()
     return VerifiedWheel(
         path=path,
         sha256="sha256:" + hashlib.sha256(payload).hexdigest(),
@@ -79,9 +76,15 @@ class FakeDocker:
                 mount = args[args.index("--mount") + 1]
                 source = mount.split("source=", 1)[1].split(",target=", 1)[0]
                 extension = "tar.gz" if self.unsafe_dependency else "whl"
-                (Path(source) / "wheelhouse" / f"dependency-1.0-py3-none-any.{extension}").write_bytes(
-                    b"downloaded dependency bytes"
-                )
+                dependency = Path(source) / "wheelhouse" / f"dependency-1.0-py3-none-any.{extension}"
+                if self.unsafe_dependency:
+                    dependency.write_bytes(b"source archive")
+                else:
+                    with zipfile.ZipFile(dependency, "w") as archive:
+                        archive.writestr(
+                            "dependency-1.0.dist-info/METADATA",
+                            "Metadata-Version: 2.1\nName: dependency\nVersion: 1.0\n",
+                        )
                 return subprocess.CompletedProcess(args, 0, "download complete", "")
             return subprocess.CompletedProcess(
                 args,
@@ -119,6 +122,11 @@ def test_build_uses_verified_wheel_and_immutable_image_id(tmp_path: Path) -> Non
     build = next(command for command in docker.commands if command[1] == "build")
     assert "--pull" in build and "--no-cache" in build
     assert build[build.index("--network") + 1] == "none"
+    build_dockerfile = Path(build[build.index("--file") + 1])
+    assert build_dockerfile.parent == Path(build[-1])
+    assert build_dockerfile.read_bytes().replace(b"\r\n", b"\n") == DOCKERFILE.read_bytes().replace(
+        b"\r\n", b"\n"
+    )
     assert wheel.path.name in [path.name for path in (Path(build[-1]) / "wheelhouse").iterdir()]
     lock = (Path(build[-1]) / "requirements.lock").read_text(encoding="utf-8")
     assert "llm-shield-proxy==1.6.6 --hash=sha256:" in lock
@@ -126,10 +134,10 @@ def test_build_uses_verified_wheel_and_immutable_image_id(tmp_path: Path) -> Non
     assert "--require-hashes" in DOCKERFILE.read_text(encoding="utf-8")
     resolver = next(command for command in docker.commands if command[1] == "run" and "download" in command)
     assert "--isolated" in resolver
-    assert "https://pypi.org/simple" in resolver
-    assert resolver.count("--add-host") == 2
-    assert "pypi.org:151.101.0.223" in resolver
-    assert "files.pythonhosted.org:151.101.0.223" in resolver
+    assert resolver[resolver.index("--index-url") + 1].startswith("http://host.docker.internal:")
+    assert "https://pypi.org/simple" not in resolver
+    assert "host.docker.internal:host-gateway" in resolver
+    assert "--trusted-host" in resolver
     assert "--only-binary=:all:" in resolver
     inventory = next(command for command in docker.commands if command[1] == "run" and "list" in command)
     assert inventory[inventory.index("--network") + 1] == "none"
@@ -192,29 +200,6 @@ def test_non_wheel_dependency_blocks_image_build(tmp_path: Path) -> None:
     assert not any(command[1] == "build" for command in docker.commands)
 
 
-def test_dependency_resolution_rejects_nonpublic_pinned_address(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "benchmarks.product_reproduction.image._resolve_public_addresses",
-        lambda host, port: ("127.0.0.1",),
-    )
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    docker = FakeDocker()
-
-    with pytest.raises(DockerImageError, match="no public IPv4"):
-        build_release_image(
-            _wheel(tmp_path),
-            tmp_path / "outside" / "build",
-            repo_root=repo,
-            run_suffix="0123456789abcdef",
-            docker=docker,
-        )
-
-    assert not any(command[1] == "run" for command in docker.commands)
-
-
 def test_image_tag_preflight_rejects_daemon_failure(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -270,3 +255,22 @@ def test_oversized_wheelhouse_entry_is_rejected_before_hashing(
 
     with pytest.raises(DockerImageError, match="size"):
         image_module._dependency_wheels(tmp_path)
+
+
+def test_product_wheel_with_direct_url_dependency_is_rejected_before_docker(tmp_path: Path) -> None:
+    from benchmarks.product_reproduction.package_mirror import PackageMirrorError
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docker = FakeDocker()
+
+    with pytest.raises(PackageMirrorError, match="direct-URL"):
+        build_release_image(
+            _wheel(tmp_path, direct_url=True),
+            tmp_path / "outside" / "build",
+            repo_root=repo,
+            run_suffix="0123456789abcdef",
+            docker=docker,
+        )
+
+    assert docker.commands == []
