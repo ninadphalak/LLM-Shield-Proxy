@@ -45,14 +45,25 @@ def test_accepts_minimal_reviewed_target(
     assert source.maximum_response_bytes == 1048576
 
 
-def test_checked_in_catalog_is_valid_and_has_no_unreviewed_targets() -> None:
+def test_checked_in_catalog_contains_reviewed_llm_shield_target() -> None:
     root = Path(__file__).resolve().parents[2]
     path = root / "benchmarks" / "product_reproduction" / "catalog.json"
 
-    catalog = load_catalog(path, repo_root=root, adapter_names=set(), allowed_baseline_roots=())
+    catalog = load_catalog(
+        path,
+        repo_root=root,
+        adapter_names={"llm-shield-proxy"},
+        allowed_baseline_roots=(root / "benchmarks/results/v2-response-split",),
+    )
 
     assert catalog.schema == "pii-leak-benchmark/product-catalog/v1"
-    assert catalog.targets == ()
+    assert catalog.dispatchable_ids == ("llm-shield-proxy-response-on",)
+    target = catalog.target("llm-shield-proxy-response-on")
+    baseline = target.baseline("llm-shield-proxy-1.6.6-response-on")
+    assert baseline is not None
+    assert baseline.artifact_identity == (
+        "sha256:9201a192568f74b0353ef432acd663b27b07f3b1e1a5730e82ef6e10a5894469"
+    )
 
 
 @pytest.mark.parametrize(
@@ -149,6 +160,51 @@ def test_rejects_config_and_baseline_paths_outside_reviewed_roots(
     document["targets"][0]["accepted_baselines"][0]["reports"]["response-midpoint"] = "outside.json"
     _write_catalog(catalog_file, document)
     with pytest.raises(CatalogError, match="baseline report"):
+        _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
+
+
+@pytest.mark.parametrize(
+    ("configuration", "message"),
+    [
+        (
+            {"schema": "wrong", "configuration_id": "test-v1"},
+            "unknown schema",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "other",
+            },
+            "configuration_id",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "environment": {"API_TOKEN": "real-secret-value"},
+            },
+            "literal credential",
+        ),
+        (
+            {
+                "schema": "pii-leak-benchmark/product-configuration/v1",
+                "configuration_id": "test-v1",
+                "model_path": "C:\\private\\model.onnx",
+            },
+            "absolute path",
+        ),
+    ],
+)
+def test_rejects_unsafe_checked_in_configuration(
+    configuration: dict[str, Any],
+    message: str,
+    catalog_file: Path,
+    product_tree: dict[str, Path],
+) -> None:
+    config_path = product_tree["config_root"] / "test-v1.json"
+    config_path.write_text(json.dumps(configuration), encoding="utf-8")
+
+    with pytest.raises(CatalogError, match=message):
         _load(catalog_file, product_tree["root"], product_tree["baseline_root"])
 
 

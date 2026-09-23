@@ -1,5 +1,80 @@
 {
   "schema": "pii-leak-benchmark/product-catalog/v1",
-  "release_sources": [],
-  "targets": []
+  "release_sources": [
+    {
+      "id": "llm-shield-proxy-official",
+      "project_id": "llm-shield-proxy",
+      "project_url": "https://github.com/ninadphalak/LLM-Shield-Proxy",
+      "source_type": "pypi-json",
+      "api_base_url": "https://pypi.org",
+      "package": "llm-shield-proxy",
+      "version_pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "exclude": {
+        "prereleases": true,
+        "drafts": true,
+        "yanked": true,
+        "release_candidates": true
+      },
+      "assets": {
+        "name_pattern": "^llm_shield_proxy-\\d+\\.\\d+\\.\\d+-py3-none-any\\.whl$",
+        "media_types": ["application/zip"]
+      },
+      "pagination_limit": 1,
+      "maximum_response_bytes": 1048576,
+      "checksum_policy": "sha256-required",
+      "eligible_adapters": ["llm-shield-proxy"],
+      "eligible_configurations": ["response-redaction-on-v1"]
+    }
+  ],
+  "targets": [
+    {
+      "id": "llm-shield-proxy-response-on",
+      "project": "LLM-Shield-Proxy",
+      "project_url": "https://github.com/ninadphalak/LLM-Shield-Proxy",
+      "license": "Apache-2.0",
+      "artifact_kind": "wheel",
+      "adapter": "llm-shield-proxy",
+      "release_source": "llm-shield-proxy-official",
+      "configuration_id": "response-redaction-on-v1",
+      "configuration_path": "benchmarks/product_reproduction/configs/llm-shield-proxy-response-on-v1.json",
+      "architecture": "held-tail",
+      "duty": "restore",
+      "model": "capture",
+      "profiles": ["operator", "response-midpoint"],
+      "dispatchable": true,
+      "runner": {
+        "class": "standard-ubuntu",
+        "minimum_memory_mib": 4096,
+        "minimum_disk_mib": 4096,
+        "service_limits": [
+          {"service": "llm-shield-proxy", "memory_mib": 1536}
+        ]
+      },
+      "accepted_baselines": [
+        {
+          "id": "llm-shield-proxy-1.6.6-response-on",
+          "released_version": "1.6.6",
+          "artifact_reference": "llm_shield_proxy-1.6.6-py3-none-any.whl",
+          "artifact_identity": "sha256:9201a192568f74b0353ef432acd663b27b07f3b1e1a5730e82ef6e10a5894469",
+          "reports": {
+            "operator": null,
+            "response-midpoint": "benchmarks/results/v2-response-split/llm-shield-proxy-1.6.6-response-on.json"
+          },
+          "primary_outcomes": [
+            "/passed",
+            "/outcome",
+            "/metrics/leak_rate/single_chunk",
+            "/metrics/leak_rate/adversarial",
+            "/metrics/fidelity_rate",
+            "/metrics/cases_scored",
+            "/metrics/cases_inconclusive",
+            "/metrics/partition_oracle/oracle"
+          ],
+          "comparison_policy": "product-reproduction/v1",
+          "accepted_by_pr": "https://github.com/ninadphalak/LLM-Shield-Proxy/pull/63",
+          "canary": {"enabled": true, "interval_days": 7}
+        }
+      ]
+    }
+  ]
 }
