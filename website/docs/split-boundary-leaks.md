@@ -1,22 +1,22 @@
 # Split-Boundary Leaks in Streaming Guardrails
 
-*A defect class found independently in five LLM streaming stacks that share no code.*
+*A defect class found independently in four LLM streaming stacks that share no code, and acknowledged in a fifth.*
 
 Published 2026-09-22.
 
 ## Summary
 
-Five LLM streaming stacks that share no code have each shipped the same defect: a guardrail that inspects a streamed response chunk by chunk, so a sensitive value split across a chunk boundary reaches the client unmasked.
+Four LLM streaming stacks that share no code have each shipped the same defect: a guardrail that inspects a streamed response chunk by chunk, so a sensitive value split across a chunk boundary reaches the client unmasked. A fifth project, the Vercel AI SDK, shipped no such filter at all and left its streaming guardrail example unimplemented, which is the same gap acknowledged rather than encountered.
 
-The instances were found between February and September 2026, in TypeScript and Python, in proxies, agent frameworks and SDK middleware. Two are fixed, two are open, and one vendor resolved it by changing their documentation rather than their code. None of the five cites any of the others.
+The four implementation failures were found between February and September 2026, in TypeScript and Python, in proxies, agent frameworks and SDK middleware. Two are fixed and two are open. None of the four cites any of the others.
 
-That pattern is the point. Five teams independently reached for the same two designs, evaluating each chunk alone, or prepending a fixed number of trailing characters from the previous one, and both are wrong for the same reason. This is not five mistakes. It is a missing shared invariant, and the absence of a name for it is why each team had to rediscover it.
+That pattern is the point. Four teams independently reached for the same two designs, evaluating each chunk alone, or prepending a fixed number of trailing characters from the previous one, and both are wrong for the same reason. This is not four mistakes. It is a missing shared invariant, and the absence of a name for it is why each team had to rediscover it.
 
 The invariant is stated in the next section. It fits in one sentence and it is testable in one assertion.
 
 ## The missing invariant
 
-A streaming filter is correct when its output does not depend on how the input was chunked. For any way of splitting the same input, the concatenated streamed output must be byte-identical to filtering the whole string at once. Nothing weaker is sufficient, and every one of the five failures below violates it.
+A streaming filter is correct when its output does not depend on how the input was chunked. For any way of splitting the same input, the concatenated streamed output must be byte-identical to filtering the whole string at once. Nothing weaker is sufficient, and every one of the four implementation failures below violates it.
 
 The reason weaker properties fail is that **detection is not prevention**. A filter can correctly identify a split value and still have leaked it, because the first fragment was already written to the wire in the previous chunk. Masking it afterwards is a correction the stream has no way to deliver: the client has the bytes, the browser has rendered them, the log has recorded them.
 
@@ -34,7 +34,7 @@ So the operative rule for an implementer is narrower than "buffer enough to matc
 | [Mastra](https://github.com/mastra-ai/mastra/issues/23783) | TypeScript | 128-char carryover detected the match, emitted it anyway | Critical | Fixed in 4 days |
 | [LangChain](https://github.com/langchain-ai/langchain/issues/35011) | Python | Guardrails ran after the model, not in the stream path | Bug | Fixed Jun 2026 |
 | [NVIDIA NeMo Guardrails](https://github.com/NVIDIA-NeMo/Guardrails/issues/2375) | Python | Output masking rail unusable in 0.24.0 | Bug | Open |
-| [Vercel AI SDK](https://ai-sdk.dev/docs/ai-sdk-core/middleware) | TypeScript | `wrapStream` guardrail example left unimplemented | Documented, not fixed | Docs warn |
+| [Vercel AI SDK](https://ai-sdk.dev/docs/ai-sdk-core/middleware) | TypeScript | `wrapStream` guardrail example left unimplemented | Not a shipped filter | Docs updated 2026-09-22 after an external report |
 
 **LiteLLM** has neither a boundary bug nor a fix. It has both branches, selected by a flag. Guardrails on the translated path are evaluated per chunk with no carryover. A guardrail with `apply_to_output=True` takes the native path into `_stream_apply_output_masking`, which accumulates every chunk and returns a single chunk containing the whole response. The safe branch is correct and does not stream; the streaming branch is not safe; most operators will not know the flag decides that. The same function has three paths that emit buffered chunks **unmasked**: a bare `except Exception` fallback, a mixed-chunk-type branch whose own comment says so, and an unknown-event passthrough.
 
@@ -44,7 +44,11 @@ So the operative rule for an implementer is narrower than "buffer enough to matc
 
 **NeMo Guardrails** fails earlier. The masking call raises on an unexpected keyword argument in 0.24.0, so the output rail cannot run at all. Different failure, same consequence: no masking on the output path.
 
-**Vercel** did not ship a bug; they wrote the warning. Their middleware docs now state that an incremental implementation must retain every possible incomplete match, and that a fixed-size buffer alone is not safe for unbounded variable-length patterns. The `wrapStream` guardrail example is deliberately left unimplemented. That is the most honest position of the five, and it is still not a fix any user can install.
+**Vercel** did not ship a bug. Their middleware docs left the `wrapStream` guardrail example unimplemented, which meant anyone following the page had to invent the incremental logic themselves, and the two failing designs above are what people invent.
+
+The provenance of the current text matters, so it is worth stating rather than leaving for a reader to discover. On 2026-09-20 an outside maintainer of a streaming redaction library, [roshcompanylabs](https://github.com/vercel/ai/issues/21209), reported that the middleware examples did not compile and that the streaming guardrail example was left unimplemented. Vercel merged three documentation pull requests in response on 2026-09-22. The docs now state that an incremental implementation must retain every possible incomplete match, and that a fixed-size buffer alone is not safe for unbounded variable-length patterns.
+
+So this entry is not independent corroboration in the way the other four are. It is a vendor accepting the problem when it was put to them, which is a different and weaker kind of evidence. It is included because the accepted text is the clearest public statement of the constraint, not because it is a fifth discovery.
 
 ## Why it keeps being built wrong
 
