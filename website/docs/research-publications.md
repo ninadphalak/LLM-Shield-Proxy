@@ -7,6 +7,7 @@ LLM-Shield-Proxy maintains an open evidence base for streaming privacy gateways,
 - [Reproduction Guide](/docs/conformance/reproducing)
 - [Published Benchmark Results](/docs/conformance/results)
 - [Audit Evidence-Plane Status](/docs/evidence-plane-status)
+- [Split-Boundary Leaks in Streaming Guardrails](/docs/split-boundary-leaks)
 
 ## Citation
 
