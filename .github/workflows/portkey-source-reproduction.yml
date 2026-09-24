@@ -174,6 +174,41 @@ jobs:
               exit 2
             }
 
+      - name: Verify publishable evidence
+        id: verify
+        if: always()
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from pii_leak_benchmark.v2_emitter import build_segments
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'portkey-source-reproduction'
+          names = ('current.json', 'summary.md', 'portkey-source.json', 'source-identity.json')
+          if any(not (root / name).is_file() for name in names):
+              raise SystemExit('Incomplete evidence: a required report is absent.')
+          operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') == 'NOT MEASURED':
+              raise SystemExit('Incomplete evidence: the operator profile was not measured.')
+          content = (root / 'portkey-source.json').read_text(encoding='utf-8')
+          report = json.loads(content)
+          segments = build_segments('a1b2c3d4e5f60001')
+          values = tuple(segments.echo.values()) + tuple(segments.injection.values())
+          if any(value in content for value in values):
+              raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
+          capture = (report.get('checks') or {}).get('configured_upstream_boundary') or {}
+          if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
+                  or (report.get('fixture') or {}).get('values_published') is not False
+                  or (report.get('corpus') or {}).get('values_published') is not False
+                  or (report.get('metrics') or {}).get('cases_scored') != 32
+                  or capture.get('captured_requests') != 32):
+              raise SystemExit('Incomplete evidence: response report contract failed.')
+          (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
+          PY
+
       - name: Upload source-build evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -193,9 +228,10 @@ jobs:
             ${{ runner.temp }}/portkey-source-reproduction/python-version.txt
             ${{ runner.temp }}/portkey-source-reproduction/runner.txt
             ${{ runner.temp }}/portkey-source-reproduction/installed-harness-packages.txt
+            ${{ runner.temp }}/portkey-source-reproduction/verification.txt
           if-no-files-found: warn
           retention-days: 90
 
       - name: Report incomplete or leaking measurement
-        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure')
+        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
         run: exit 1

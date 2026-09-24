@@ -52,4 +52,8 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     paths = artifact["with"]["path"].splitlines()
     assert any(path.endswith("/portkey-source.json") for path in paths)
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
+    assert any(path.endswith("/verification.txt") for path in paths)
+    verify = next(step for step in steps if step.get("id") == "verify")
+    assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
+    assert "capture.get('captured_requests') != 32" in verify["run"]
     assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
