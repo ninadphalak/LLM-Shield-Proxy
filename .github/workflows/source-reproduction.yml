@@ -51,6 +51,29 @@ jobs:
           python --version > "$RUNNER_TEMP/source-reproduction/python-version.txt" 2>&1
           uname -a > "$RUNNER_TEMP/source-reproduction/runner.txt"
 
+      - name: Check proxy startup before fixtures
+        env:
+          ENABLE_RESPONSE_PII_REDACTION: 'true'
+        run: |
+          set -euo pipefail
+          python -m uvicorn llm_shield_proxy.api.main:app \
+            --host 127.0.0.1 --port 8815 --no-access-log \
+            > "$RUNNER_TEMP/startup-preflight.log" 2>&1 &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8815/health > /dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$proxy_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          echo 'Proxy startup failed before any fixtures were generated.'
+          sed -n '1,60p' "$RUNNER_TEMP/startup-preflight.log"
+          exit 2
+
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
