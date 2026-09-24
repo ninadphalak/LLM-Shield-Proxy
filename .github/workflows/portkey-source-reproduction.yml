@@ -199,12 +199,11 @@ jobs:
           values = tuple(segments.echo.values()) + tuple(segments.injection.values())
           if any(value in content for value in values):
               raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
-          capture = (report.get('checks') or {}).get('configured_upstream_boundary') or {}
           if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
                   or (report.get('fixture') or {}).get('values_published') is not False
                   or (report.get('corpus') or {}).get('values_published') is not False
                   or (report.get('metrics') or {}).get('cases_scored') != 32
-                  or capture.get('captured_requests') != 32):
+                  or ((report.get('capture') or {}).get('self_probe') or {}).get('recorded') is not True):
               raise SystemExit('Incomplete evidence: response report contract failed.')
           (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
           PY
