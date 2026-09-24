@@ -25,6 +25,9 @@ def test_portkey_workflow_checks_out_and_builds_the_selected_source():
     assert "source-identity.json" in record["run"]
     assert "guardrail-config.json" in record["run"]
     assert "image-id.txt" in record["run"]
+    instrument = next(step for step in steps if step.get("name") == "Check out the pinned response instrument")
+    assert instrument["with"]["ref"] == "74d744a72adb053ff4f4025bdd676bba0e5be03d"
+    assert instrument["with"]["path"] == "benchmark-instrument"
 
 
 def test_portkey_workflow_preserves_both_profiles_without_report_values():
@@ -35,6 +38,7 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert operator["with"]["duty"] == "anonymize"
     assert "x-portkey-custom-host=http://127.0.0.1:8765/v1" in operator["env"]["CONFORMANCE_TARGET_HEADERS"]
     response = next(step for step in steps if step.get("id") == "response")
+    assert response["working-directory"] == "benchmark-instrument"
     assert "--gateway-url http://127.0.0.1:8787/v1/chat/completions" in response["run"]
     assert "--upstream-port 8799 --model capture" in response["run"]
     assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]

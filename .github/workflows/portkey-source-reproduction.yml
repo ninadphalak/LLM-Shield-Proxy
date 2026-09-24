@@ -87,6 +87,14 @@ jobs:
           )
           PY
 
+      - name: Check out the pinned response instrument
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ninadphalak/LLM-Shield-Proxy
+          ref: 74d744a72adb053ff4f4025bdd676bba0e5be03d # benchmark-v0.2.1
+          path: benchmark-instrument
+          persist-credentials: false
+
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
@@ -124,6 +132,7 @@ jobs:
         id: response
         if: always() && steps.operator.outcome != 'skipped'
         continue-on-error: true
+        working-directory: benchmark-instrument
         run: |
           set -euo pipefail
           name="portkey-response-$GITHUB_RUN_ID"
