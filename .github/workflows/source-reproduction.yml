@@ -31,7 +31,8 @@ jobs:
       - name: Check out selected proxy source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.source_ref || 'v1.6.6' }}
+          # Pull requests exercise their source; manual runs use the selected tag or branch.
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Python

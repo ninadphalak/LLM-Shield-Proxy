@@ -13,7 +13,7 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert workflow["jobs"]["reproduce"]["env"]["ENABLE_EXT_PROC"] == "false"
     steps = workflow["jobs"]["reproduce"]["steps"]
     checkout = next(step for step in steps if step.get("name") == "Check out selected proxy source")
-    assert checkout["with"]["ref"] == "${{ inputs.source_ref || 'v1.6.6' }}"
+    assert checkout["with"]["ref"] == "${{ inputs.source_ref || github.sha }}"
     install = next(step for step in steps if step.get("name") == "Build and install the selected source")
     assert "pip install ." in install["run"]
     assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
