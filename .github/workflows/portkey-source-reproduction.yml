@@ -1,0 +1,173 @@
+name: Reproduce Portkey source build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Proxy tag or commit (empty builds the selected workflow branch)
+        required: false
+        default: ''
+        type: string
+      source_repository:
+        description: Proxy repository (empty uses this repository)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_IMAGE: portkey-source:${{ github.run_id }}
+      CONFORMANCE_TARGET_API_KEY: sk-synthetic-no-model-call
+      V2_GATEWAY_TOKEN: sk-synthetic-no-model-call
+      PORTKEY_GUARDRAIL_CONFIG: '{"output_guardrails":[{"checks":[{"id":"portkey.pii","parameters":{"redact":true}}]}]}'
+    steps:
+      - name: Require a ref for another repository
+        if: inputs.source_repository != '' && inputs.source_ref == ''
+        run: |
+          echo 'Set source_ref when source_repository names another repository.'
+          exit 2
+
+      - name: Check out the proxy source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Build the checked-out proxy
+        run: docker build --file Dockerfile --tag "$SOURCE_IMAGE" .
+
+      - name: Record source and configuration
+        env:
+          SOURCE_SELECTOR: ${{ inputs.source_ref || github.sha }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository || github.repository }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/portkey-source-reproduction"
+          mkdir -p "$out"
+          git rev-parse HEAD > "$out/source-commit.txt"
+          git status --porcelain > "$out/source-status.txt"
+          sha256sum Dockerfile > "$out/dockerfile-sha256.txt"
+          docker image inspect "$SOURCE_IMAGE" --format '{{.Id}}' > "$out/image-id.txt"
+          docker version --format '{{.Server.Version}}' > "$out/docker-version.txt"
+          python --version > "$out/python-version.txt" 2>&1
+          uname -a > "$out/runner.txt"
+          python -m pip install 'pii-leak-benchmark[validate]==0.2.1'
+          python -m pip freeze > "$out/installed-harness-packages.txt"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'portkey-source-reproduction'
+          (root / 'guardrail-config.json').write_text(
+              json.dumps(json.loads(os.environ['PORTKEY_GUARDRAIL_CONFIG']), sort_keys=True, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          (root / 'source-identity.json').write_text(
+              json.dumps({
+                  'schema': 'pii-leak-benchmark/source-build/v1',
+                  'source_repository': os.environ['SOURCE_REPOSITORY'],
+                  'source_selector': os.environ['SOURCE_SELECTOR'],
+                  'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
+              }, sort_keys=True, indent=2) + '\n', encoding='utf-8',
+          )
+          PY
+
+      - name: Measure request-path behavior
+        id: operator
+        continue-on-error: true
+        uses: ninadphalak/LLM-Shield-Proxy@6a1e1b84c185d4bc59ad7a68872c1e99c760c3a0 # benchmark-v0.4.1
+        env:
+          CONFORMANCE_TARGET_HEADERS: |
+            x-portkey-provider=openai
+            x-portkey-custom-host=http://127.0.0.1:8765/v1
+            x-portkey-config=${{ env.PORTKEY_GUARDRAIL_CONFIG }}
+        with:
+          target-base-url: http://127.0.0.1:8787/v1
+          start-command: docker run --rm --network host --name portkey-operator-$GITHUB_RUN_ID $SOURCE_IMAGE
+          target-model: capture
+          target-version: ${{ inputs.source_ref || github.sha }}
+          duty: anonymize
+          artifact-name: portkey-operator
+
+      - name: Stop the operator container
+        if: always()
+        run: docker rm --force "portkey-operator-$GITHUB_RUN_ID" > /dev/null 2>&1 || true
+
+      - name: Stage the operator result
+        if: always() && steps.operator.outputs.report-directory != ''
+        env:
+          OPERATOR_REPORT_DIRECTORY: ${{ steps.operator.outputs.report-directory }}
+        run: |
+          out="$RUNNER_TEMP/portkey-source-reproduction"
+          for name in current.json summary.md; do
+            if [ -f "$OPERATOR_REPORT_DIRECTORY/$name" ]; then
+              cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$out/$name"
+            fi
+          done
+
+      - name: Measure response midpoint profile
+        id: response
+        if: always() && steps.operator.outcome != 'skipped'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          name="portkey-response-$GITHUB_RUN_ID"
+          docker run --detach --rm --network host --name "$name" "$SOURCE_IMAGE"
+          trap 'docker rm --force "$name" > /dev/null 2>&1 || true' EXIT
+          ready=false
+          for _ in {1..60}; do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8787/public/; then
+              ready=true
+              break
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo 'Portkey did not become ready before fixtures were generated.'
+            exit 2
+          fi
+          export V2_GATEWAY_HEADERS="$(python - <<'PY'
+          import json
+          import os
+          print(json.dumps({
+              'x-portkey-provider': 'openai',
+              'x-portkey-custom-host': 'http://127.0.0.1:8799/v1',
+              'x-portkey-config': os.environ['PORTKEY_GUARDRAIL_CONFIG'],
+          }))
+          PY
+          )"
+          python -m pii_leak_benchmark.v2_emitter \
+            --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
+            --only portkey-source \
+            --gateway-url http://127.0.0.1:8787/v1/chat/completions \
+            --upstream-port 8799 --model capture \
+            --out "$RUNNER_TEMP/portkey-source-reproduction"
+
+      - name: Upload source-build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: source-reproduction
+          path: ${{ runner.temp }}/portkey-source-reproduction/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Report incomplete or leaking measurement
+        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure')
+        run: exit 1

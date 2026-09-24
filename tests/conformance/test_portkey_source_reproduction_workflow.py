@@ -1,0 +1,41 @@
+"""The Portkey workflow builds source and retains one response profile."""
+
+from pathlib import Path
+
+import yaml
+
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/portkey-source-reproduction.yml"
+
+
+def test_portkey_workflow_checks_out_and_builds_the_selected_source():
+    workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    steps = workflow["jobs"]["reproduce"]["steps"]
+    checkout = next(step for step in steps if step.get("name") == "Check out the proxy source")
+    assert checkout["with"]["repository"] == "${{ inputs.source_repository || github.repository }}"
+    assert checkout["with"]["ref"] == "${{ inputs.source_ref || github.sha }}"
+    build = next(step for step in steps if step.get("name") == "Build the checked-out proxy")
+    assert "docker build --file Dockerfile" in build["run"]
+    record = next(step for step in steps if step.get("name") == "Record source and configuration")
+    assert "source-identity.json" in record["run"]
+    assert "guardrail-config.json" in record["run"]
+    assert "image-id.txt" in record["run"]
+
+
+def test_portkey_workflow_preserves_both_profiles_without_report_values():
+    workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    steps = workflow["jobs"]["reproduce"]["steps"]
+    operator = next(step for step in steps if step.get("id") == "operator")
+    assert "--network host" in operator["with"]["start-command"]
+    assert operator["with"]["duty"] == "anonymize"
+    assert "x-portkey-custom-host=http://127.0.0.1:8765/v1" in operator["env"]["CONFORMANCE_TARGET_HEADERS"]
+    response = next(step for step in steps if step.get("id") == "response")
+    assert "--gateway-url http://127.0.0.1:8787/v1/chat/completions" in response["run"]
+    assert "--upstream-port 8799 --model capture" in response["run"]
+    assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]
+    assert "'x-portkey-custom-host': 'http://127.0.0.1:8799/v1'" in response["run"]
+    stage = next(step for step in steps if step.get("name") == "Stage the operator result")
+    assert "current.json summary.md" in stage["run"]
+    assert "current.raw.json" not in stage["run"]
+    artifact = next(step for step in steps if step.get("name") == "Upload source-build evidence")
+    assert artifact["with"]["name"] == "source-reproduction"
+    assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
