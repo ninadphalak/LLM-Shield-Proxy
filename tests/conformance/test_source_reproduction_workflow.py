@@ -13,13 +13,15 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert workflow["jobs"]["reproduce"]["env"]["ENABLE_EXT_PROC"] == "false"
     steps = workflow["jobs"]["reproduce"]["steps"]
     checkout = next(step for step in steps if step.get("name") == "Check out selected proxy source")
-    assert checkout["with"]["ref"] == "${{ inputs.source_ref || github.sha }}"
+    assert checkout["with"]["ref"] == "${{ inputs.source_ref || 'v1.6.6' }}"
     install = next(step for step in steps if step.get("name") == "Build and install the selected source")
     assert "pip install ." in install["run"]
     assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
+    staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
+    assert "current.json current.raw.json summary.md" in staged["run"]
 
 
 def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs():
@@ -38,4 +40,5 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "secrets." not in text
     artifact = next(step for step in steps if step.get("name") == "Upload source and response evidence")
     assert artifact["if"] == "always()"
+    assert artifact["with"]["name"] == "source-reproduction"
     assert artifact["with"]["path"] == "${{ runner.temp }}/source-reproduction/"

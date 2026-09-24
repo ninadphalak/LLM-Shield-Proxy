@@ -31,7 +31,7 @@ jobs:
       - name: Check out selected proxy source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
+          ref: ${{ inputs.source_ref || 'v1.6.6' }}
           persist-credentials: false
 
       - name: Set up Python
@@ -89,6 +89,18 @@ jobs:
           target-version: ${{ steps.source.outputs.sha }}
           duty: restore
           artifact-name: operator-profile
+
+      - name: Stage operator reports with the response pair
+        if: always() && steps.operator.outputs.report-directory != ''
+        env:
+          OPERATOR_REPORT_DIRECTORY: ${{ steps.operator.outputs.report-directory }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-reproduction"
+          for name in current.json current.raw.json summary.md; do
+            if [ -f "$OPERATOR_REPORT_DIRECTORY/$name" ]; then
+              cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$RUNNER_TEMP/source-reproduction/$name"
+            fi
+          done
 
       - name: Measure response midpoint pair
         id: response
@@ -172,7 +184,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: source-response-midpoint
+          name: source-reproduction
           path: ${{ runner.temp }}/source-reproduction/
           if-no-files-found: warn
           retention-days: 90
