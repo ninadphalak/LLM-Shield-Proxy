@@ -292,6 +292,7 @@ jobs:
             ${{ runner.temp }}/source-reproduction/summary.md
             ${{ runner.temp }}/source-reproduction/source-response-on.json
             ${{ runner.temp }}/source-reproduction/source-response-off.json
+            ${{ runner.temp }}/source-reproduction/source-identity.json
             ${{ runner.temp }}/source-reproduction/source-commit.txt
             ${{ runner.temp }}/source-reproduction/installed-packages.txt
             ${{ runner.temp }}/source-reproduction/operator-packages.txt

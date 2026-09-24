@@ -22,6 +22,8 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     identity = next(step for step in steps if step.get("id") == "source")
     assert "source-identity.json" in identity["run"]
     assert "source_commit" in identity["run"]
+    upload = next(step for step in steps if step.get("name") == "Upload source and response evidence")
+    assert "/source-identity.json" in upload["with"]["path"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
     assert "@73a433906f4f7a2d071a44c780485b8ce3cca541" in operator["uses"]
