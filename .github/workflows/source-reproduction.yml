@@ -78,7 +78,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1
+        uses: ninadphalak/LLM-Shield-Proxy@6a1e1b84c185d4bc59ad7a68872c1e99c760c3a0 # benchmark-v0.4.1
         env:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
