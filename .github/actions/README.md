@@ -17,11 +17,4 @@ detached-attestation compatibility surface. Existing research workflows may cont
 produce the schema-valid raw report and, when explicitly enabled with the required permissions, a
 detached GitHub attestation.
 
-Its inputs and outputs remain supported for compatibility. It is not the implementation base for
-new product-reproduction automation.
-
-## Product-reproduction automation
-
-The planned product-reproduction workflow will call shared Python orchestration directly. It will
-not wrap or alter either existing Action, so their current contracts remain independent of the new
-workflow.
+Its inputs and outputs remain supported for compatibility.
