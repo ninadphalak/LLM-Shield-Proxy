@@ -49,6 +49,7 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert "current.raw.json" not in stage["run"]
     artifact = next(step for step in steps if step.get("name") == "Upload source-build evidence")
     assert artifact["with"]["name"] == "source-reproduction"
+    assert artifact["if"] == "always() && steps.verify.outcome == 'success'"
     paths = artifact["with"]["path"].splitlines()
     assert any(path.endswith("/portkey-source.json") for path in paths)
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
