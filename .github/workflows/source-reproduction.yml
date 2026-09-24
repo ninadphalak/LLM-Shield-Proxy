@@ -145,7 +145,11 @@ jobs:
               --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
               --only "$label" \
               --gateway-url http://127.0.0.1:8815/v1/chat/completions \
-              --upstream-port 8799 --model capture --out "$out"
+              --upstream-port 8799 --model capture --out "$out" \
+              > "$RUNNER_TEMP/$label-instrument.log" 2>&1 || {
+                echo "The $label instrument exited without a valid report."
+                return 2
+              }
             cleanup
             proxy_pid=''
           }
@@ -186,7 +190,15 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: source-reproduction
-          path: ${{ runner.temp }}/source-reproduction/
+          path: |
+            ${{ runner.temp }}/source-reproduction/current.json
+            ${{ runner.temp }}/source-reproduction/summary.md
+            ${{ runner.temp }}/source-reproduction/source-response-on.json
+            ${{ runner.temp }}/source-reproduction/source-response-off.json
+            ${{ runner.temp }}/source-reproduction/source-commit.txt
+            ${{ runner.temp }}/source-reproduction/installed-packages.txt
+            ${{ runner.temp }}/source-reproduction/python-version.txt
+            ${{ runner.temp }}/source-reproduction/runner.txt
           if-no-files-found: warn
           retention-days: 90
 

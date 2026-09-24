@@ -37,9 +37,14 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "--validate" in response["run"]
     assert "trap cleanup EXIT" in response["run"]
     assert '"$RUNNER_TEMP/$label.log"' in response["run"]
+    assert '"$RUNNER_TEMP/$label-instrument.log"' in response["run"]
     assert "benchmarks/results/" not in text
     assert "secrets." not in text
     artifact = next(step for step in steps if step.get("name") == "Upload source and response evidence")
     assert artifact["if"] == "always()"
     assert artifact["with"]["name"] == "source-reproduction"
-    assert artifact["with"]["path"] == "${{ runner.temp }}/source-reproduction/"
+    paths = artifact["with"]["path"].splitlines()
+    assert len(paths) == 8
+    assert any(path.endswith("/source-response-on.json") for path in paths)
+    assert any(path.endswith("/source-response-off.json") for path in paths)
+    assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
