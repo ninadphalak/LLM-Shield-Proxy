@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -254,7 +255,7 @@ def _reject_duplicate_config_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any
     return result
 
 
-def _validate_configuration(path: Path, *, configuration_id: str) -> None:
+def _validate_configuration(path: Path, *, configuration_id: str) -> tuple[dict[str, Any], str]:
     try:
         with path.open("rb") as handle:
             raw = handle.read(MAX_CONFIG_BYTES + 1)
@@ -331,6 +332,7 @@ def _validate_configuration(path: Path, *, configuration_id: str) -> None:
                 raise CatalogError("configuration_path contains a literal credential value")
     if seen_substitutions != set(required_substitutions):
         raise CatalogError("configuration_path required_substitutions does not match its placeholders")
+    return document, f"sha256:{hashlib.sha256(raw).hexdigest()}"
 
 
 def _validate_semantics(
