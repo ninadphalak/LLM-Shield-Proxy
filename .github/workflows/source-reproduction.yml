@@ -97,7 +97,7 @@ jobs:
           OPERATOR_REPORT_DIRECTORY: ${{ steps.operator.outputs.report-directory }}
         run: |
           mkdir -p "$RUNNER_TEMP/source-reproduction"
-          for name in current.json current.raw.json summary.md; do
+          for name in current.json summary.md; do
             if [ -f "$OPERATOR_REPORT_DIRECTORY/$name" ]; then
               cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$RUNNER_TEMP/source-reproduction/$name"
             fi

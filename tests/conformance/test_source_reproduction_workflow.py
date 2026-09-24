@@ -21,7 +21,8 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
     staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
-    assert "current.json current.raw.json summary.md" in staged["run"]
+    assert "current.json summary.md" in staged["run"]
+    assert "current.raw.json" not in staged["run"]
 
 
 def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs():
