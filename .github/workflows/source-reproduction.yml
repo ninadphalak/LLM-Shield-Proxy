@@ -185,6 +185,42 @@ jobs:
                 'the operator profile only; the response pair is retained in this run artifact.')
           PY
 
+      - name: Verify publishable evidence
+        id: verify
+        if: always()
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ runner.temp }}/source-reproduction
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from pii_leak_benchmark.v2_emitter import build_segments
+
+          root = Path(os.environ['REPORT_DIR'])
+          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json')
+          if any(not (root / name).is_file() for name in names):
+              raise SystemExit('Incomplete evidence: a required report is absent.')
+          operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') == 'NOT MEASURED':
+              raise SystemExit('Incomplete evidence: the operator profile was not measured.')
+          segments = build_segments('a1b2c3d4e5f60001')
+          values = tuple(segments.echo.values()) + tuple(segments.injection.values())
+          for name in ('source-response-on.json', 'source-response-off.json'):
+              content = (root / name).read_text(encoding='utf-8')
+              report = json.loads(content)
+              if any(value in content for value in values):
+                  raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
+              if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
+                      or (report.get('fixture') or {}).get('values_published') is not False
+                      or (report.get('corpus') or {}).get('values_published') is not False
+                      or (report.get('metrics') or {}).get('cases_scored') != 32):
+                  raise SystemExit('Incomplete evidence: response report contract failed.')
+          (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
+          PY
+
       - name: Upload source and response evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -199,9 +235,10 @@ jobs:
             ${{ runner.temp }}/source-reproduction/installed-packages.txt
             ${{ runner.temp }}/source-reproduction/python-version.txt
             ${{ runner.temp }}/source-reproduction/runner.txt
+            ${{ runner.temp }}/source-reproduction/verification.txt
           if-no-files-found: warn
           retention-days: 90
 
       - name: Report incomplete or leaking measurement
-        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure')
+        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
         run: exit 1

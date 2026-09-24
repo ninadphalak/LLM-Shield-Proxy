@@ -44,7 +44,12 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert artifact["if"] == "always()"
     assert artifact["with"]["name"] == "source-reproduction"
     paths = artifact["with"]["path"].splitlines()
-    assert len(paths) == 8
+    assert len(paths) == 9
     assert any(path.endswith("/source-response-on.json") for path in paths)
     assert any(path.endswith("/source-response-off.json") for path in paths)
+    assert any(path.endswith("/verification.txt") for path in paths)
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
+    verify = next(step for step in steps if step.get("id") == "verify")
+    assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
+    assert "a required report is absent" in verify["run"]
+    assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]
