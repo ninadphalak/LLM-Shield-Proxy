@@ -168,14 +168,31 @@ jobs:
             --only portkey-source \
             --gateway-url http://127.0.0.1:8787/v1/chat/completions \
             --upstream-port 8799 --model capture \
-            --out "$RUNNER_TEMP/portkey-source-reproduction"
+            --out "$RUNNER_TEMP/portkey-source-reproduction" \
+            > "$RUNNER_TEMP/portkey-instrument.log" 2>&1 || {
+              echo 'The response instrument exited without a valid report.'
+              exit 2
+            }
 
       - name: Upload source-build evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: source-reproduction
-          path: ${{ runner.temp }}/portkey-source-reproduction/
+          path: |
+            ${{ runner.temp }}/portkey-source-reproduction/current.json
+            ${{ runner.temp }}/portkey-source-reproduction/summary.md
+            ${{ runner.temp }}/portkey-source-reproduction/portkey-source.json
+            ${{ runner.temp }}/portkey-source-reproduction/source-identity.json
+            ${{ runner.temp }}/portkey-source-reproduction/source-commit.txt
+            ${{ runner.temp }}/portkey-source-reproduction/source-status.txt
+            ${{ runner.temp }}/portkey-source-reproduction/guardrail-config.json
+            ${{ runner.temp }}/portkey-source-reproduction/dockerfile-sha256.txt
+            ${{ runner.temp }}/portkey-source-reproduction/image-id.txt
+            ${{ runner.temp }}/portkey-source-reproduction/docker-version.txt
+            ${{ runner.temp }}/portkey-source-reproduction/python-version.txt
+            ${{ runner.temp }}/portkey-source-reproduction/runner.txt
+            ${{ runner.temp }}/portkey-source-reproduction/installed-harness-packages.txt
           if-no-files-found: warn
           retention-days: 90
 

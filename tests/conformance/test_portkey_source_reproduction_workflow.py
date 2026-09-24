@@ -43,9 +43,13 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert "--upstream-port 8799 --model capture" in response["run"]
     assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]
     assert "'x-portkey-custom-host': 'http://127.0.0.1:8799/v1'" in response["run"]
+    assert '"$RUNNER_TEMP/portkey-instrument.log"' in response["run"]
     stage = next(step for step in steps if step.get("name") == "Stage the operator result")
     assert "current.json summary.md" in stage["run"]
     assert "current.raw.json" not in stage["run"]
     artifact = next(step for step in steps if step.get("name") == "Upload source-build evidence")
     assert artifact["with"]["name"] == "source-reproduction"
+    paths = artifact["with"]["path"].splitlines()
+    assert any(path.endswith("/portkey-source.json") for path in paths)
+    assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
     assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
