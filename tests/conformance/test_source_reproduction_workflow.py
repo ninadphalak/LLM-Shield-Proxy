@@ -41,7 +41,7 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "benchmarks/results/" not in text
     assert "secrets." not in text
     artifact = next(step for step in steps if step.get("name") == "Upload source and response evidence")
-    assert artifact["if"] == "always()"
+    assert artifact["if"] == "always() && steps.verify.outcome == 'success'"
     assert artifact["with"]["name"] == "source-reproduction"
     paths = artifact["with"]["path"].splitlines()
     assert len(paths) == 9
