@@ -13,6 +13,9 @@ on:
         required: false
         default: ''
         type: string
+  pull_request:
+    paths:
+      - .github/workflows/portkey-source-reproduction.yml
 
 permissions:
   contents: read
@@ -22,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      SOURCE_REPOSITORY: ${{ inputs.source_repository || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'Portkey-AI/gateway') || github.repository }}
+      SOURCE_SELECTOR: ${{ inputs.source_ref || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'v1.15.2') || github.sha }}
       SOURCE_IMAGE: portkey-source:${{ github.run_id }}
       CONFORMANCE_TARGET_API_KEY: sk-synthetic-no-model-call
       V2_GATEWAY_TOKEN: sk-synthetic-no-model-call
@@ -36,8 +41,8 @@ jobs:
       - name: Check out the proxy source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ inputs.source_repository || github.repository }}
-          ref: ${{ inputs.source_ref || github.sha }}
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ env.SOURCE_SELECTOR }}
           persist-credentials: false
 
       - name: Set up Python
@@ -49,9 +54,6 @@ jobs:
         run: docker build --file Dockerfile --tag "$SOURCE_IMAGE" .
 
       - name: Record source and configuration
-        env:
-          SOURCE_SELECTOR: ${{ inputs.source_ref || github.sha }}
-          SOURCE_REPOSITORY: ${{ inputs.source_repository || github.repository }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/portkey-source-reproduction"
@@ -98,7 +100,7 @@ jobs:
           target-base-url: http://127.0.0.1:8787/v1
           start-command: docker run --rm --network host --name portkey-operator-$GITHUB_RUN_ID $SOURCE_IMAGE
           target-model: capture
-          target-version: ${{ inputs.source_ref || github.sha }}
+          target-version: ${{ env.SOURCE_SELECTOR }}
           duty: anonymize
           artifact-name: portkey-operator
 

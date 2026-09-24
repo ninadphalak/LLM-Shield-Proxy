@@ -9,10 +9,16 @@ WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/portkey-sour
 
 def test_portkey_workflow_checks_out_and_builds_the_selected_source():
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert workflow["on"]["pull_request"]["paths"] == [
+        ".github/workflows/portkey-source-reproduction.yml"
+    ]
+    env = workflow["jobs"]["reproduce"]["env"]
+    assert "github.repository" in env["SOURCE_REPOSITORY"]
+    assert "github.sha" in env["SOURCE_SELECTOR"]
     steps = workflow["jobs"]["reproduce"]["steps"]
     checkout = next(step for step in steps if step.get("name") == "Check out the proxy source")
-    assert checkout["with"]["repository"] == "${{ inputs.source_repository || github.repository }}"
-    assert checkout["with"]["ref"] == "${{ inputs.source_ref || github.sha }}"
+    assert checkout["with"]["repository"] == "${{ env.SOURCE_REPOSITORY }}"
+    assert checkout["with"]["ref"] == "${{ env.SOURCE_SELECTOR }}"
     build = next(step for step in steps if step.get("name") == "Build the checked-out proxy")
     assert "docker build --file Dockerfile" in build["run"]
     record = next(step for step in steps if step.get("name") == "Record source and configuration")
