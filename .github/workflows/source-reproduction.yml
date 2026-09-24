@@ -26,6 +26,7 @@ jobs:
       V2_GATEWAY_TOKEN: sk-shield-source-reproduction
       V2_REQUEST_PATH_REDACTION: configured
       UPSTREAM_BASE_URL: http://127.0.0.1:8799
+      ENABLE_EXT_PROC: 'false'
     steps:
       - name: Check out selected proxy source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -10,6 +10,7 @@ WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/source-repro
 def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument():
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert workflow["on"]["workflow_dispatch"]["inputs"]["source_ref"]["default"] == "v1.6.6"
+    assert workflow["jobs"]["reproduce"]["env"]["ENABLE_EXT_PROC"] == "false"
     steps = workflow["jobs"]["reproduce"]["steps"]
     checkout = next(step for step in steps if step.get("name") == "Check out selected proxy source")
     assert checkout["with"]["ref"] == "${{ inputs.source_ref || github.sha }}"
