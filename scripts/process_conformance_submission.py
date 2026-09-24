@@ -312,13 +312,19 @@ def is_complete_source_pair(on: Any, off: Any) -> bool:
     """Require both response arms to cover the same complete midpoint corpus."""
     if not is_response_split(on) or not is_response_split(off):
         return False
-    for report in (on, off):
+    for arm, report in (("on", on), ("off", off)):
         if report.get("schema") != "llm-shield.streaming-privacy-http-profile/v2.0.0":
+            return False
+        name = (report.get("implementation") or {}).get("name")
+        if not isinstance(name, str) or not name.startswith("external-gateway:") or not name.endswith(f"-response-{arm}"):
+            return False
+        if ((report.get("checks") or {}).get("configured_upstream_boundary") or {}).get("passed") is not True:
             return False
         metrics = report.get("metrics") or {}
         counts = metrics.get("cases_by_condition") or {}
         if (metrics.get("cases_scored") != 32 or metrics.get("cases_inconclusive") != 0
-                or counts.get("single_chunk") != 16 or counts.get("adversarial") != 16):
+                or counts.get("single_chunk") != 16 or counts.get("adversarial") != 16
+                or (metrics.get("partition_oracle") or {}).get("oracle") != "midpoint"):
             return False
     for field in ("cases_digest", "harness_revision"):
         if not on.get(field) or on[field] != off.get(field):

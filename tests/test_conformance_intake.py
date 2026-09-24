@@ -377,14 +377,17 @@ def test_the_leak_columns_come_from_the_response_split_report_as_counts():
 def _source_pair():
     on = _split_report(0.0, 0.0)
     off = _split_report(1.0, 1.0)
-    for report in (on, off):
+    for name, report in (("source-response-on", on), ("source-response-off", off)):
         report["schema"] = "llm-shield.streaming-privacy-http-profile/v2.0.0"
+        report["implementation"] = {"name": f"external-gateway:{name}"}
+        report["checks"] = {"configured_upstream_boundary": {"passed": True}}
         report["harness_revision"] = "0.2.1"
         report["cases_digest"] = "a" * 64
         report["corpus"] = {"seed": "a1b2c3d4e5f60001", "sha256": "a" * 64}
         report["instrument"] = {"inspector_sha256": "94262e29a492ab6a"}
         report["metrics"]["cases_scored"] = 32
         report["metrics"]["cases_inconclusive"] = 0
+        report["metrics"]["partition_oracle"] = {"oracle": "midpoint"}
     return on, off
 
 
@@ -421,6 +424,12 @@ def test_source_pair_needs_both_valid_arms_before_publishing_response_columns():
         {"current.json": _operator_run(), "source-response-on.json": on},
         {"current.json": _operator_run(), "source-response-on.json": on,
          "source-response-off.json": {**off, "cases_digest": "b" * 64}},
+        {"current.json": _operator_run(), "source-response-on.json": on,
+         "source-response-off.json": {**off, "implementation": {"name": "external-gateway:source-response-on"}}},
+        {"current.json": _operator_run(), "source-response-on.json": on,
+         "source-response-off.json": {**off, "checks": {"configured_upstream_boundary": {"passed": False}}}},
+        {"current.json": _operator_run(), "source-response-on.json": on,
+         "source-response-off.json": {**off, "metrics": {**off["metrics"], "partition_oracle": {"oracle": "exhaustive-2-part"}}}},
         {"current.json": _operator_run(), "source-response-on.json": on,
          "source-response-off.json": {**off, "metrics": {**off["metrics"], "cases_inconclusive": 1}}},
     ):
