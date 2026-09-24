@@ -19,6 +19,9 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     install = next(step for step in steps if step.get("name") == "Build and install the selected source")
     assert "pip install ." in install["run"]
     assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
+    identity = next(step for step in steps if step.get("id") == "source")
+    assert "source-identity.json" in identity["run"]
+    assert "source_commit" in identity["run"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
     assert "@73a433906f4f7a2d071a44c780485b8ce3cca541" in operator["uses"]

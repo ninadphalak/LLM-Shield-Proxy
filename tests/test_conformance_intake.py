@@ -270,6 +270,23 @@ def test_the_first_artifact_holding_a_report_is_used():
     assert "pii-leak-benchmark" in evidence
 
 
+def test_combined_source_artifact_precedes_an_operator_only_artifact():
+    def api(url):
+        return {"artifacts": [{"id": 1, "name": "operator-profile", "expired": False},
+                              {"id": 2, "name": "source-reproduction", "expired": False}]}
+
+    def download(owner, repo, artifact_id):
+        if artifact_id == 1:
+            return _zip_of({"current.json": _operator_run()})
+        return _zip_of({"current.json": _operator_run(),
+                        "source-response-on.json": _split_report(0.0, 0.0),
+                        "source-response-off.json": _split_report(1.0, 1.0)})
+
+    reports, evidence = intake.collect_reports("o", "r", "42", api=api, download=download)
+    assert "source-response-on.json" in reports
+    assert "source-reproduction" in evidence
+
+
 @pytest.mark.parametrize(
     "api,download,expected",
     [
@@ -355,6 +372,61 @@ def test_the_leak_columns_come_from_the_response_split_report_as_counts():
     assert derived["leakWhole"] == "2 of 16"
     assert derived["leakWholeN"] == 0.125
     assert derived["leakSplit"] == "16 of 16"
+
+
+def _source_pair():
+    on = _split_report(0.0, 0.0)
+    off = _split_report(1.0, 1.0)
+    for report in (on, off):
+        report["schema"] = "llm-shield.streaming-privacy-http-profile/v2.0.0"
+        report["harness_revision"] = "0.2.1"
+        report["cases_digest"] = "a" * 64
+        report["corpus"] = {"seed": "a1b2c3d4e5f60001", "sha256": "a" * 64}
+        report["instrument"] = {"inspector_sha256": "94262e29a492ab6a"}
+        report["metrics"]["cases_scored"] = 32
+        report["metrics"]["cases_inconclusive"] = 0
+    return on, off
+
+
+def test_source_pair_contract_accepts_the_retained_round_eight_reports():
+    root = REPO_ROOT / "benchmarks/results/v2-response-split"
+    on = json.loads((root / "llm-shield-proxy-1.6.6-response-on.json").read_text(encoding="utf-8"))
+    off = json.loads((root / "llm-shield-proxy-1.6.6-response-off.json").read_text(encoding="utf-8"))
+    assert intake.is_complete_source_pair(on, off)
+
+
+def test_source_pair_scores_the_on_arm_even_when_off_appears_first():
+    on, off = _source_pair()
+    operator = _operator_run({"SLACK_TOKEN": "leak", "EMAIL": "contained"})
+    operator["contract"]["harness_version"] = "0.4.1"
+    derived = intake.derive_measurements({
+        "source-response-off.json": off,
+        "current.json": operator,
+        "source-response-on.json": on,
+        "source-identity.json": {"schema": "pii-leak-benchmark/source-build/v1",
+                                 "source_commit": "a" * 40,
+                                 "source_selector": "v1.6.6"},
+    })
+    assert derived["sent"] == "Slack tokens"
+    assert derived["leakWhole"] == "0 of 16"
+    assert derived["leakSplit"] == "0 of 16"
+    assert "0.4.1" in derived["harness"] and "0.2.1" in derived["harness"]
+    assert "source commit aaaaaaaa" in intake.write_note(derived)
+
+
+def test_source_pair_needs_both_valid_arms_before_publishing_response_columns():
+    on, off = _source_pair()
+    for reports in (
+        {"current.json": _operator_run(), "source-response-off.json": off},
+        {"current.json": _operator_run(), "source-response-on.json": on},
+        {"current.json": _operator_run(), "source-response-on.json": on,
+         "source-response-off.json": {**off, "cases_digest": "b" * 64}},
+        {"current.json": _operator_run(), "source-response-on.json": on,
+         "source-response-off.json": {**off, "metrics": {**off["metrics"], "cases_inconclusive": 1}}},
+    ):
+        derived = intake.derive_measurements(reports)
+        assert "leakWhole" not in derived
+        assert "leakSplit" not in derived
 
 
 def test_nothing_is_derived_from_an_empty_artifact():
