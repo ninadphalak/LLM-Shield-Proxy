@@ -83,10 +83,7 @@ def test_runtime_uses_immutable_image_and_dynamic_loopback_port(tmp_path: Path) 
     assert run[run.index("--publish") + 1] == "127.0.0.1::8000"
     assert "host.docker.internal:host-gateway" in run
     assert "synthetic-upstream-key" not in " ".join(run)
-    assert (tmp_path / "container.env").read_text(encoding="utf-8").splitlines() == [
-        "UPSTREAM_API_KEY=synthetic-upstream-key",
-        "UPSTREAM_BASE_URL=http://host.docker.internal:32788",
-    ]
+    assert not (tmp_path / "container.env").exists()
     assert_released_container_identity(runtime, docker=docker)
     stop_released_container(runtime, docker=docker)
     assert [command[1:3] for command in docker.commands[-2:]] == [
@@ -101,6 +98,7 @@ def test_runtime_rejects_wrong_identity_and_cleans_its_own_container(
     docker = FakeDocker(wrong_image=wrong_image, wrong_port=wrong_port)
     with pytest.raises(ReleasedRuntimeError):
         start_released_container(_image(), environment={}, working_dir=tmp_path, docker=docker)
+    assert not (tmp_path / "container.env").exists()
     assert [command[1:3] for command in docker.commands[-2:]] == [
         ["container", "stop"], ["container", "rm"]
     ]
@@ -114,6 +112,15 @@ def test_runtime_rejects_env_injection_before_start(tmp_path: Path) -> None:
             working_dir=tmp_path, docker=docker,
         )
     assert not docker.commands
+    assert not (tmp_path / "container.env").exists()
+
+
+def test_runtime_does_not_remove_preexisting_environment_file(tmp_path: Path) -> None:
+    path = tmp_path / "container.env"
+    path.write_text("owner=data\n", encoding="utf-8")
+    with pytest.raises(ReleasedRuntimeError):
+        start_released_container(_image(), environment={}, working_dir=tmp_path, docker=FakeDocker())
+    assert path.read_text(encoding="utf-8") == "owner=data\n"
 
 
 def test_runtime_rechecks_identity_before_scoring(tmp_path: Path) -> None:

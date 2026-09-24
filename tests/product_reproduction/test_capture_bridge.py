@@ -84,3 +84,10 @@ def test_bridge_rejects_duplicate_authorization_headers() -> None:
 def test_bridge_rejects_non_ascii_synthetic_key() -> None:
     with pytest.raises(ValueError, match="synthetic upstream key"):
         CaptureBridge(backend_port=1, upstream_key="synthétic-key")
+
+
+def test_bridge_rejects_wildcard_listener() -> None:
+    with pytest.raises(ValueError, match="bind host"):
+        CaptureBridge(backend_port=1, upstream_key="synthetic-upstream-key", bind_host="0.0.0.0")
+    with pytest.raises(ValueError, match="container host"):
+        CaptureBridge(backend_port=1, upstream_key="synthetic-upstream-key", container_host="outside.example")

@@ -5,6 +5,7 @@ import socket
 import socketserver
 import threading
 from dataclasses import dataclass
+from ipaddress import AddressValueError, IPv4Address
 
 MAX_HEADER_BYTES = 16 * 1024
 BUFFER_BYTES = 64 * 1024
@@ -20,15 +21,28 @@ class BridgeSnapshot:
 class CaptureBridge:
     """Expose a loopback-only v2 capture to one Docker gateway across case restarts."""
 
-    def __init__(self, *, backend_port: int, upstream_key: str) -> None:
+    def __init__(
+        self, *, backend_port: int, upstream_key: str,
+        bind_host: str = "127.0.0.1", container_host: str = "host.docker.internal",
+    ) -> None:
         if not 0 < backend_port < 65536:
             raise ValueError("capture backend port must be 1..65535")
+        try:
+            address = IPv4Address(bind_host)
+        except AddressValueError as exc:
+            raise ValueError("capture bind host must be a local IPv4 address") from exc
+        if address.is_unspecified or address.is_multicast or not (address.is_private or address.is_loopback):
+            raise ValueError("capture bind host must be a specific private or loopback address")
+        if container_host not in ("host.docker.internal", bind_host):
+            raise ValueError("capture container host must name the Docker host bridge")
         if (
             not upstream_key or len(upstream_key) > 256 or not upstream_key.isascii()
             or any(character in upstream_key for character in "\r\n\x00")
         ):
             raise ValueError("synthetic upstream key is invalid")
         self.backend_port = backend_port
+        self.bind_host = bind_host
+        self.container_host = container_host
         self._expected_authorization = f"Bearer {upstream_key}".encode("ascii")
         self._server: socketserver.ThreadingTCPServer | None = None
         self._thread: threading.Thread | None = None
@@ -45,11 +59,11 @@ class CaptureBridge:
 
     @property
     def local_url(self) -> str:
-        return f"http://127.0.0.1:{self.host_port}"
+        return f"http://{self.bind_host}:{self.host_port}"
 
     @property
     def container_url(self) -> str:
-        return f"http://host.docker.internal:{self.host_port}"
+        return f"http://{self.container_host}:{self.host_port}"
 
     def snapshot(self) -> BridgeSnapshot:
         with self._lock:
@@ -71,7 +85,7 @@ class CaptureBridge:
             daemon_threads = True
             block_on_close = False
 
-        self._server = Server(("0.0.0.0", 0), Handler)
+        self._server = Server((self.bind_host, 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self

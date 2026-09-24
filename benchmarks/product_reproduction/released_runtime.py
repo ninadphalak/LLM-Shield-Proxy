@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping
@@ -107,10 +108,17 @@ def _write_environment(environment: Mapping[str, str], working_dir: Path) -> Pat
             raise ReleasedRuntimeError("runtime environment contains an invalid value")
         lines.append(f"{key}={value}\n")
     path = working_dir / "container.env"
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if os.name == "nt":
+        flags |= os.O_BINARY
+    descriptor: int | None = None
     try:
-        with path.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.writelines(lines)
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write("".join(lines).encode("utf-8"))
     except OSError as exc:
+        if descriptor is not None:
+            path.unlink(missing_ok=True)
         raise ReleasedRuntimeError("runtime environment file cannot be created") from exc
     return path
 
@@ -136,25 +144,31 @@ def start_released_container(
     env_path = _write_environment(environment, working_dir)
     name = f"pii-reproduction-{image.run_suffix}"
     try:
-        existing = docker(
-            ["docker", "container", "inspect", "--format", "{{json .}}", name], 30,
+        try:
+            existing = docker(
+                ["docker", "container", "inspect", "--format", "{{json .}}", name], 30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleasedRuntimeError("Docker could not check the run-specific container name") from exc
+        if existing.returncode == 0:
+            raise ReleasedRuntimeError("run-specific container name already exists")
+        if "no such container" not in (existing.stderr or "").lower():
+            raise ReleasedRuntimeError("Docker could not determine whether the container name exists")
+        result = _completed(
+            docker,
+            [
+                "docker", "run", "--detach", "--pull=never", "--name", name,
+                "--label", f"{OWNER_LABEL}={image.run_suffix}",
+                "--network", "bridge", "--add-host", "host.docker.internal:host-gateway",
+                "--publish", "127.0.0.1::8000", "--env-file", str(env_path), image.image_id,
+            ],
+            60,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ReleasedRuntimeError("Docker could not check the run-specific container name") from exc
-    if existing.returncode == 0:
-        raise ReleasedRuntimeError("run-specific container name already exists")
-    if "no such container" not in (existing.stderr or "").lower():
-        raise ReleasedRuntimeError("Docker could not determine whether the container name exists")
-    result = _completed(
-        docker,
-        [
-            "docker", "run", "--detach", "--pull=never", "--name", name,
-            "--label", f"{OWNER_LABEL}={image.run_suffix}",
-            "--network", "bridge", "--add-host", "host.docker.internal:host-gateway",
-            "--publish", "127.0.0.1::8000", "--env-file", str(env_path), image.image_id,
-        ],
-        60,
-    )
+    finally:
+        try:
+            env_path.unlink()
+        except OSError as exc:
+            raise ReleasedRuntimeError("runtime environment file could not be removed") from exc
     container_id = (result.stdout or "").strip()
     if not CONTAINER_ID.fullmatch(container_id):
         raise ReleasedRuntimeError("Docker returned an invalid container ID")
