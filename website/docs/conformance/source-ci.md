@@ -26,9 +26,10 @@ the benchmark repository.
    source checkout. For LLM-Shield-Proxy, the manual default is `v1.6.6`; change it to
    the tag, branch, or commit you intend to test.
 3. Open the completed run. Confirm that **Verify publishable evidence** succeeded and
-   download the `source-reproduction` artifact. It contains the source commit, selected
-   configuration, environment and dependency records, request report, and response
-   report. Raw specimen reports and post-fixture proxy logs are not uploaded.
+   download the `source-reproduction` artifact. It contains the source commit,
+   environment and dependency records, a request report, and a response report. The
+   workflow file and run inputs identify the selected configuration. Raw specimen
+   reports and post-fixture proxy logs are not uploaded.
 4. To add the run to the [results wall](./who-has-run-it.mdx), follow the prefilled
    submission link in the job summary. Include the public Actions run URL and identify
    the product and configuration. The intake reads measurements from the run artifact,
