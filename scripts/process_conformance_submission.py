@@ -346,7 +346,10 @@ def _words(entities: list[str]) -> str:
 
 def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     """Derive columns from the reports. Reads provider reach from operator run, and fidelity from raw report."""
-    operator = next((r for r in reports.values() if is_operator_run(r)), None)
+    operator = next(
+        (r for r in reports.values() if is_operator_run(r) and r.get("verdict") != "NOT MEASURED"),
+        None,
+    )
     source_on = reports.get("source-response-on.json")
     source_off = reports.get("source-response-off.json")
     if source_on is not None or source_off is not None:

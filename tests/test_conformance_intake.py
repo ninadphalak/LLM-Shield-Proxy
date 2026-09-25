@@ -442,6 +442,15 @@ def test_nothing_is_derived_from_an_empty_artifact():
     assert intake.derive_measurements({}) == {}
 
 
+def test_not_measured_operator_does_not_become_a_no_leak_wall_claim():
+    operator = _operator_run()
+    operator["verdict"] = "NOT MEASURED"
+    operator["entities"] = {}
+    derived = intake.derive_measurements({"current.json": operator})
+    assert "sent" not in derived
+    assert "restored" not in derived
+
+
 @pytest.mark.parametrize(
     "reports,expected",
     [
