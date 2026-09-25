@@ -204,7 +204,7 @@ def collect_reports(
         return {}, "The run has no artifacts attached, so there was no report to read."
 
     problems = []
-    # The source workflow uploads an operator-only artifact before its combined artifact.
+    # Prefer the combined source artifact when a run also has an operator-only artifact.
     # Prefer the latter without changing selection for other submitters.
     for artifact in sorted(artifacts, key=lambda item: item.get("name") != "source-reproduction"):
         if artifact.get("expired"):
@@ -347,7 +347,7 @@ def _words(entities: list[str]) -> str:
 def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     """Derive columns from the reports. Reads provider reach from operator run, and fidelity from raw report."""
     operator = next(
-        (r for r in reports.values() if is_operator_run(r) and r.get("verdict") != "NOT MEASURED"),
+        (r for r in reports.values() if is_operator_run(r) and r.get("verdict") in ("PASS", "LEAK")),
         None,
     )
     source_on = reports.get("source-response-on.json")
@@ -424,6 +424,9 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
 
     if split:
         metrics = split.get("metrics") or {}
+        inconclusive = metrics.get("cases_inconclusive")
+        if isinstance(inconclusive, int) and not isinstance(inconclusive, bool) and inconclusive > 0:
+            derived["_cases_inconclusive"] = inconclusive
         leak = metrics.get("leak_rate") or {}
         counts = metrics.get("cases_by_condition") or {}
         for key, condition, text, number in (
@@ -458,6 +461,8 @@ def write_note(derived: dict[str, Any]) -> str:
             parts.append("Splitting a value across two chunks leaked more of them.")
         elif derived["leakSplitN"] == derived["leakWholeN"]:
             parts.append("Splitting a value changed nothing.")
+    if derived.get("_cases_inconclusive"):
+        parts.append(f"{derived['_cases_inconclusive']} response cases were inconclusive and excluded from the leak-rate denominators.")
     if derived.get("_source_commit"):
         parts.append(f"Built from source commit {derived['_source_commit'][:12]}.")
     return " ".join(parts) or "Submitted without a report this check could read."

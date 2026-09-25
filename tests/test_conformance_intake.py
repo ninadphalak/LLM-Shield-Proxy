@@ -438,6 +438,16 @@ def test_source_pair_needs_both_valid_arms_before_publishing_response_columns():
         assert "leakSplit" not in derived
 
 
+def test_single_source_report_preserves_inconclusive_denominators():
+    response = _split_report(0.0, 0.0)
+    response["metrics"]["cases_by_condition"] = {"single_chunk": 12, "adversarial": 12}
+    response["metrics"]["cases_inconclusive"] = 8
+    derived = intake.derive_measurements({"nemo-source.json": response})
+    assert derived["leakWhole"] == "0 of 12"
+    assert derived["leakSplit"] == "0 of 12"
+    assert "8 response cases were inconclusive" in intake.write_note(derived)
+
+
 def test_nothing_is_derived_from_an_empty_artifact():
     assert intake.derive_measurements({}) == {}
 
@@ -446,6 +456,14 @@ def test_not_measured_operator_does_not_become_a_no_leak_wall_claim():
     operator = _operator_run()
     operator["verdict"] = "NOT MEASURED"
     operator["entities"] = {}
+    derived = intake.derive_measurements({"current.json": operator})
+    assert "sent" not in derived
+    assert "restored" not in derived
+
+
+def test_unknown_operator_verdict_does_not_become_a_wall_claim():
+    operator = _operator_run()
+    operator["verdict"] = "ERROR"
     derived = intake.derive_measurements({"current.json": operator})
     assert "sent" not in derived
     assert "restored" not in derived
