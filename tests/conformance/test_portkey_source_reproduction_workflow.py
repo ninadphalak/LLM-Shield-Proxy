@@ -37,6 +37,7 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert "--network host" in operator["with"]["start-command"]
     assert operator["with"]["duty"] == "anonymize"
     assert operator["with"]["source"] == "pii-leak-benchmark==0.4.1"
+    assert operator["with"]["artifact-name"] == ""
     assert "x-portkey-custom-host=http://127.0.0.1:8765/v1" in operator["env"]["CONFORMANCE_TARGET_HEADERS"]
     response = next(step for step in steps if step.get("id") == "response")
     assert response["working-directory"] == "benchmark-instrument"

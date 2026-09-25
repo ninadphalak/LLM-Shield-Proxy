@@ -111,7 +111,7 @@ jobs:
           target-model: capture
           target-version: ${{ env.SOURCE_SELECTOR }}
           duty: anonymize
-          artifact-name: portkey-operator
+          artifact-name: ''
 
       - name: Stop the operator container
         if: always()
