@@ -200,7 +200,7 @@ jobs:
           if any(not (root / name).is_file() for name in names):
               raise SystemExit('Incomplete evidence: a required report is absent.')
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
-          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') == 'NOT MEASURED':
+          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') not in ('PASS', 'LEAK'):
               raise SystemExit('Incomplete evidence: the operator profile was not measured.')
           contract = operator.get('contract') or {}
           if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):
@@ -245,6 +245,12 @@ jobs:
                   or (report.get('metrics') or {}).get('cases_scored') != 32
                   or ((report.get('capture') or {}).get('self_probe') or {}).get('recorded') is not True):
               raise SystemExit('Incomplete evidence: response report contract failed.')
+          rates = (report.get('metrics') or {}).get('leak_rate') or {}
+          measured_leak = operator['verdict'] == 'LEAK' or any(
+              rates.get(name, 0) > 0 for name in ('single_chunk', 'adversarial')
+          )
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'measured_leak={str(measured_leak).lower()}\n')
           (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
           PY
 
@@ -273,5 +279,5 @@ jobs:
           retention-days: 90
 
       - name: Report incomplete or leaking measurement
-        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
+        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure' || steps.verify.outputs.measured_leak == 'true')
         run: exit 1
