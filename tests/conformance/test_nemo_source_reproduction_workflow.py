@@ -59,7 +59,7 @@ def test_nemo_retains_refused_cases_and_only_uploads_verified_reports():
     _, steps = _steps()
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["artifact-name"] == ""
-    assert "@73a433906f4f7a2d071a44c780485b8ce3cca541" in operator["uses"]
+    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
     response = next(step for step in steps if step.get("id") == "response")
     assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]
     assert "--upstream-port 8799 --model config" in response["run"]
