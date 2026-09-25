@@ -99,7 +99,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@73a433906f4f7a2d071a44c780485b8ce3cca541 # operator action with deferred upload
+        uses: ninadphalak/LLM-Shield-Proxy@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506 # operator action with deferred upload
         env:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
