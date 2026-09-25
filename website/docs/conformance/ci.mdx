@@ -173,6 +173,11 @@ the quickest way to pick one worth trying.
 
 ## 1. Add the workflow
 
+If you want to build and measure the proxy source in its own fork, start with a
+[copyable source-build recipe](./source-ci.md) for LLM-Shield-Proxy, Portkey, LiteLLM,
+or NeMo Guardrails. The generic Action below assumes you provide the gateway startup
+command.
+
 Save this as `.github/workflows/pii-leak-check.yml`:
 
 ```yaml
