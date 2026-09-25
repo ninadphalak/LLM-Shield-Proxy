@@ -80,8 +80,14 @@ def test_public_action_input_and_output_contracts_are_pinned():
         "report-directory": {
             "description": "Directory with operator reports, raw measurements and summary.md",
             "value": "${{ steps.setup.outputs.out }}",
-        }
+        },
+        "python-path": {
+            "description": "Python interpreter with the pinned operator harness installed",
+            "value": "${{ steps.setup.outputs.python }}",
+        },
     }
+    keep = next(step for step in operator["runs"]["steps"] if step.get("name") == "Keep benchmark reports")
+    assert "inputs.artifact-name != ''" in keep["if"]
     assert research["outputs"] == {
         "outcome": {
             "description": (
