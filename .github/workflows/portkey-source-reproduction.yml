@@ -106,6 +106,7 @@ jobs:
             x-portkey-config=${{ env.PORTKEY_GUARDRAIL_CONFIG }}
         with:
           target-base-url: http://127.0.0.1:8787/v1
+          source: pii-leak-benchmark==0.4.1
           start-command: docker run --rm --network host --name portkey-operator-$GITHUB_RUN_ID $SOURCE_IMAGE
           target-model: capture
           target-version: ${{ env.SOURCE_SELECTOR }}
@@ -184,6 +185,7 @@ jobs:
           import os
           from pathlib import Path
 
+          from pii_leak_benchmark.operator_profile import seeded_fixture
           from pii_leak_benchmark.v2_emitter import build_segments
 
           root = Path(os.environ['RUNNER_TEMP']) / 'portkey-source-reproduction'
@@ -193,6 +195,14 @@ jobs:
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
           if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') == 'NOT MEASURED':
               raise SystemExit('Incomplete evidence: the operator profile was not measured.')
+          contract = operator.get('contract') or {}
+          if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):
+              raise SystemExit('Incomplete evidence: the operator fixture contract is invalid.')
+          fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
+          operator_values = tuple(fixture.values()) + (marker,)
+          for name in ('current.json', 'summary.md'):
+              if any(value in (root / name).read_text(encoding='utf-8') for value in operator_values):
+                  raise SystemExit('Unsafe evidence: an operator fixture value reached a report.')
           content = (root / 'portkey-source.json').read_text(encoding='utf-8')
           report = json.loads(content)
           segments = build_segments('a1b2c3d4e5f60001')

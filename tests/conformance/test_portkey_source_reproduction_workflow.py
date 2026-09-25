@@ -36,6 +36,7 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     operator = next(step for step in steps if step.get("id") == "operator")
     assert "--network host" in operator["with"]["start-command"]
     assert operator["with"]["duty"] == "anonymize"
+    assert operator["with"]["source"] == "pii-leak-benchmark==0.4.1"
     assert "x-portkey-custom-host=http://127.0.0.1:8765/v1" in operator["env"]["CONFORMANCE_TARGET_HEADERS"]
     response = next(step for step in steps if step.get("id") == "response")
     assert response["working-directory"] == "benchmark-instrument"
@@ -56,6 +57,8 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert any(path.endswith("/verification.txt") for path in paths)
     verify = next(step for step in steps if step.get("id") == "verify")
     assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
+    assert "seeded_fixture(contract['seed']" in verify["run"]
+    assert "('current.json', 'summary.md')" in verify["run"]
     assert "get('self_probe')" in verify["run"]
     assert "captured_requests') != 32" not in verify["run"]
     assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
