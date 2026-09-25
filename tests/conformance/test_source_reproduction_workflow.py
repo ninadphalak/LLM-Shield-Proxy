@@ -19,6 +19,7 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
+    assert operator["with"]["source"] == "pii-leak-benchmark==0.4.1"
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
     staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
     assert "current.json summary.md" in staged["run"]
@@ -51,5 +52,7 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
     verify = next(step for step in steps if step.get("id") == "verify")
     assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
+    assert "seeded_fixture(contract['seed']" in verify["run"]
+    assert "('current.json', 'summary.md')" in verify["run"]
     assert "a required report is absent" in verify["run"]
     assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]

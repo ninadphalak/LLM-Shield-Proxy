@@ -84,6 +84,7 @@ jobs:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
           target-base-url: http://127.0.0.1:8815/v1
+          source: pii-leak-benchmark==0.4.1
           start-command: python -m uvicorn llm_shield_proxy.api.main:app --host 127.0.0.1 --port 8815 --no-access-log
           upstream-env: UPSTREAM_BASE_URL
           target-model: capture
@@ -197,6 +198,7 @@ jobs:
           import os
           from pathlib import Path
 
+          from pii_leak_benchmark.operator_profile import seeded_fixture
           from pii_leak_benchmark.v2_emitter import build_segments
 
           root = Path(os.environ['REPORT_DIR'])
@@ -206,6 +208,14 @@ jobs:
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
           if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') == 'NOT MEASURED':
               raise SystemExit('Incomplete evidence: the operator profile was not measured.')
+          contract = operator.get('contract') or {}
+          if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):
+              raise SystemExit('Incomplete evidence: the operator fixture contract is invalid.')
+          fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
+          operator_values = tuple(fixture.values()) + (marker,)
+          for name in ('current.json', 'summary.md'):
+              if any(value in (root / name).read_text(encoding='utf-8') for value in operator_values):
+                  raise SystemExit('Unsafe evidence: an operator fixture value reached a report.')
           segments = build_segments('a1b2c3d4e5f60001')
           values = tuple(segments.echo.values()) + tuple(segments.injection.values())
           for name in ('source-response-on.json', 'source-response-off.json'):
