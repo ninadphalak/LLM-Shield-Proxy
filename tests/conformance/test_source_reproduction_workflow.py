@@ -53,6 +53,6 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     verify = next(step for step in steps if step.get("id") == "verify")
     assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
     assert "seeded_fixture(contract['seed']" in verify["run"]
-    assert "('current.json', 'summary.md')" in verify["run"]
+    assert "for name in names:" in verify["run"]
     assert "a required report is absent" in verify["run"]
     assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]
