@@ -79,12 +79,11 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@6a1e1b84c185d4bc59ad7a68872c1e99c760c3a0 # benchmark-v0.4.1
+        uses: ninadphalak/LLM-Shield-Proxy@73a433906f4f7a2d071a44c780485b8ce3cca541 # operator action with deferred upload
         env:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
           target-base-url: http://127.0.0.1:8815/v1
-          source: pii-leak-benchmark==0.4.1
           start-command: python -m uvicorn llm_shield_proxy.api.main:app --host 127.0.0.1 --port 8815 --no-access-log
           upstream-env: UPSTREAM_BASE_URL
           target-model: capture
@@ -192,8 +191,10 @@ jobs:
         continue-on-error: true
         env:
           REPORT_DIR: ${{ runner.temp }}/source-reproduction
+          BENCHMARK_PYTHON: ${{ steps.operator.outputs.python-path }}
         run: |
-          python - <<'PY'
+          "$BENCHMARK_PYTHON" -m pip freeze > "$REPORT_DIR/operator-packages.txt"
+          "$BENCHMARK_PYTHON" - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -240,6 +241,7 @@ jobs:
             ${{ runner.temp }}/source-reproduction/source-response-off.json
             ${{ runner.temp }}/source-reproduction/source-commit.txt
             ${{ runner.temp }}/source-reproduction/installed-packages.txt
+            ${{ runner.temp }}/source-reproduction/operator-packages.txt
             ${{ runner.temp }}/source-reproduction/python-version.txt
             ${{ runner.temp }}/source-reproduction/runner.txt
             ${{ runner.temp }}/source-reproduction/verification.txt

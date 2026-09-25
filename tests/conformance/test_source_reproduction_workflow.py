@@ -19,7 +19,8 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
-    assert operator["with"]["source"] == "pii-leak-benchmark==0.4.1"
+    assert "@73a433906f4f7a2d071a44c780485b8ce3cca541" in operator["uses"]
+    assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
     staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
@@ -46,12 +47,14 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert artifact["if"] == "always() && steps.verify.outcome == 'success'"
     assert artifact["with"]["name"] == "source-reproduction"
     paths = artifact["with"]["path"].splitlines()
-    assert len(paths) == 9
+    assert len(paths) == 10
+    assert any(path.endswith("/operator-packages.txt") for path in paths)
     assert any(path.endswith("/source-response-on.json") for path in paths)
     assert any(path.endswith("/source-response-off.json") for path in paths)
     assert any(path.endswith("/verification.txt") for path in paths)
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
     verify = next(step for step in steps if step.get("id") == "verify")
+    assert verify["env"]["BENCHMARK_PYTHON"] == "${{ steps.operator.outputs.python-path }}"
     assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
     assert "seeded_fixture(contract['seed']" in verify["run"]
     assert "for name in names:" in verify["run"]
