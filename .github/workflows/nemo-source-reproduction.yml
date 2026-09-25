@@ -235,7 +235,7 @@ jobs:
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
           contract = operator.get('contract') or {}
           if (operator.get('schema') != 'pii-leak-benchmark/operator-run/v1'
-                  or operator.get('verdict') not in ('PASS', 'LEAK')
+                  or operator.get('verdict') not in ('CLEAN', 'LEAK')
                   or contract.get('profile') not in ('pii-v1', 'pii-secrets-v1')
                   or not isinstance(contract.get('seed'), str)):
               raise SystemExit('Incomplete evidence: operator profile was not measured.')
