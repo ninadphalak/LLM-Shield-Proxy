@@ -347,7 +347,7 @@ def _words(entities: list[str]) -> str:
 def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     """Derive columns from the reports. Reads provider reach from operator run, and fidelity from raw report."""
     operator = next(
-        (r for r in reports.values() if is_operator_run(r) and r.get("verdict") in ("PASS", "LEAK")),
+        (r for r in reports.values() if is_operator_run(r) and r.get("verdict") in ("CLEAN", "LEAK")),
         None,
     )
     source_on = reports.get("source-response-on.json")
