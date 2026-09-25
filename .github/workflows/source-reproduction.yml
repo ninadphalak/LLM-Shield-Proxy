@@ -215,7 +215,7 @@ jobs:
           if any(not (root / name).is_file() or not (root / name).stat().st_size for name in names + provenance):
               raise SystemExit('Incomplete evidence: a required report or provenance file is absent.')
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
-          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') == 'NOT MEASURED':
+          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') not in ('PASS', 'LEAK'):
               raise SystemExit('Incomplete evidence: the operator profile was not measured.')
           contract = operator.get('contract') or {}
           if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):

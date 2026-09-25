@@ -64,6 +64,7 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "capture_output=True" in verify["run"]
     assert "source-commit.txt" in verify["run"]
     assert "seeded_fixture(contract['seed']" in verify["run"]
+    assert "not in ('PASS', 'LEAK')" in verify["run"]
     assert "for name in names:" in verify["run"]
     assert "strings(json.loads(content))" in verify["run"]
     assert "quote(value, safe='')" in verify["run"]
