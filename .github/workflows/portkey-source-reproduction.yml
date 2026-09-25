@@ -181,14 +181,16 @@ jobs:
         env:
           BENCHMARK_PYTHON: ${{ steps.operator.outputs.python-path }}
         run: |
+          set -euo pipefail
+          export RESPONSE_PYTHON="$(command -v python)"
           "$BENCHMARK_PYTHON" -m pip freeze > "$RUNNER_TEMP/portkey-source-reproduction/operator-packages.txt"
           "$BENCHMARK_PYTHON" - <<'PY'
           import json
           import os
+          import subprocess
           from pathlib import Path
 
           from pii_leak_benchmark.operator_profile import seeded_fixture
-          from pii_leak_benchmark.v2_emitter import build_segments
 
           root = Path(os.environ['RUNNER_TEMP']) / 'portkey-source-reproduction'
           names = ('current.json', 'summary.md', 'portkey-source.json', 'source-identity.json')
@@ -203,8 +205,14 @@ jobs:
           fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
           content = (root / 'portkey-source.json').read_text(encoding='utf-8')
           report = json.loads(content)
-          segments = build_segments('a1b2c3d4e5f60001')
-          values = tuple(fixture.values()) + (marker,) + tuple(segments.echo.values()) + tuple(segments.injection.values())
+          response = subprocess.run(
+              [os.environ['RESPONSE_PYTHON'], '-c',
+               'import json; from pii_leak_benchmark.v2_emitter import build_segments; '
+               's = build_segments("a1b2c3d4e5f60001"); '
+               'print(json.dumps(list(s.echo.values()) + list(s.injection.values())))'],
+              check=True, capture_output=True, text=True,
+          )
+          values = tuple(fixture.values()) + (marker,) + tuple(json.loads(response.stdout))
 
           def strings(node):
               if isinstance(node, str):
