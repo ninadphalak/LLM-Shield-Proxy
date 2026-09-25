@@ -98,7 +98,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@6a1e1b84c185d4bc59ad7a68872c1e99c760c3a0 # benchmark-v0.4.1
+        uses: ninadphalak/LLM-Shield-Proxy@73a433906f4f7a2d071a44c780485b8ce3cca541 # operator action with deferred upload
         env:
           CONFORMANCE_TARGET_HEADERS: |
             x-portkey-provider=openai
@@ -106,7 +106,6 @@ jobs:
             x-portkey-config=${{ env.PORTKEY_GUARDRAIL_CONFIG }}
         with:
           target-base-url: http://127.0.0.1:8787/v1
-          source: pii-leak-benchmark==0.4.1
           start-command: docker run --rm --network host --name portkey-operator-$GITHUB_RUN_ID $SOURCE_IMAGE
           target-model: capture
           target-version: ${{ env.SOURCE_SELECTOR }}
@@ -179,8 +178,11 @@ jobs:
         id: verify
         if: always()
         continue-on-error: true
+        env:
+          BENCHMARK_PYTHON: ${{ steps.operator.outputs.python-path }}
         run: |
-          python - <<'PY'
+          "$BENCHMARK_PYTHON" -m pip freeze > "$RUNNER_TEMP/portkey-source-reproduction/operator-packages.txt"
+          "$BENCHMARK_PYTHON" - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -234,6 +236,7 @@ jobs:
             ${{ runner.temp }}/portkey-source-reproduction/python-version.txt
             ${{ runner.temp }}/portkey-source-reproduction/runner.txt
             ${{ runner.temp }}/portkey-source-reproduction/installed-harness-packages.txt
+            ${{ runner.temp }}/portkey-source-reproduction/operator-packages.txt
             ${{ runner.temp }}/portkey-source-reproduction/verification.txt
           if-no-files-found: warn
           retention-days: 90

@@ -36,7 +36,8 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     operator = next(step for step in steps if step.get("id") == "operator")
     assert "--network host" in operator["with"]["start-command"]
     assert operator["with"]["duty"] == "anonymize"
-    assert operator["with"]["source"] == "pii-leak-benchmark==0.4.1"
+    assert "@73a433906f4f7a2d071a44c780485b8ce3cca541" in operator["uses"]
+    assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
     assert "x-portkey-custom-host=http://127.0.0.1:8765/v1" in operator["env"]["CONFORMANCE_TARGET_HEADERS"]
     response = next(step for step in steps if step.get("id") == "response")
@@ -56,7 +57,9 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert any(path.endswith("/portkey-source.json") for path in paths)
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
     assert any(path.endswith("/verification.txt") for path in paths)
+    assert any(path.endswith("/operator-packages.txt") for path in paths)
     verify = next(step for step in steps if step.get("id") == "verify")
+    assert verify["env"]["BENCHMARK_PYTHON"] == "${{ steps.operator.outputs.python-path }}"
     assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
     assert "seeded_fixture(contract['seed']" in verify["run"]
     assert "for name in names:" in verify["run"]
