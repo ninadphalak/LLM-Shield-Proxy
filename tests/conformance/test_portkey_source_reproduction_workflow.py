@@ -1,5 +1,7 @@
 """The Portkey workflow builds source and retains one response profile."""
 
+import ast
+import json
 from pathlib import Path
 
 import yaml
@@ -63,6 +65,20 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
     assert "seeded_fixture(contract['seed']" in verify["run"]
     assert "for name in names:" in verify["run"]
+    assert "strings(json.loads(content))" in verify["run"]
     assert "get('self_probe')" in verify["run"]
     assert "captured_requests') != 32" not in verify["run"]
     assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_portkey_verifier_scans_decoded_json_strings():
+    workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    verify = next(step for step in workflow["jobs"]["reproduce"]["steps"] if step.get("id") == "verify")
+    script = verify["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    function = next(node for node in ast.parse(script).body if isinstance(node, ast.FunctionDef) and node.name == "strings")
+    namespace = {}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(WORKFLOW), "exec"), namespace)
+    value = 'Zoë "fixture'
+    serialized = json.dumps({"nested": [value]})
+    assert value not in serialized
+    assert any(value in field for field in namespace["strings"](json.loads(serialized)))
