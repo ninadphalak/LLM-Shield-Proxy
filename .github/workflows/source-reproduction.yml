@@ -215,8 +215,22 @@ jobs:
           fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
           segments = build_segments('a1b2c3d4e5f60001')
           values = tuple(fixture.values()) + (marker,) + tuple(segments.echo.values()) + tuple(segments.injection.values())
+
+          def strings(node):
+              if isinstance(node, str):
+                  yield node
+              elif isinstance(node, dict):
+                  for key, item in node.items():
+                      yield from strings(key)
+                      yield from strings(item)
+              elif isinstance(node, list):
+                  for item in node:
+                      yield from strings(item)
+
           for name in names:
-              if any(value in (root / name).read_text(encoding='utf-8') for value in values):
+              content = (root / name).read_text(encoding='utf-8')
+              fields = (content,) if name.endswith('.md') else strings(json.loads(content))
+              if any(value in field for field in fields for value in values):
                   raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
           for name in ('source-response-on.json', 'source-response-off.json'):
               content = (root / name).read_text(encoding='utf-8')
