@@ -68,6 +68,8 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert "seeded_fixture(contract['seed']" in verify["run"]
     assert "for name in names:" in verify["run"]
     assert "strings(json.loads(content))" in verify["run"]
+    assert "quote(value, safe='')" in verify["run"]
+    assert "b64encode(encoded)" in verify["run"]
     assert "get('self_probe')" in verify["run"]
     assert "captured_requests') != 32" not in verify["run"]
     assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
