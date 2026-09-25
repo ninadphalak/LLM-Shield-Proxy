@@ -139,6 +139,8 @@ jobs:
             if [ "$phase" != 3 ]; then
               echo 'Presidio analyzer is not ready; restarting its pre-fixture container.'
               docker restart "$analyzer" > /dev/null
+              analyzer_port=$(docker port "$analyzer" 3000/tcp | sed 's/.*://')
+              echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
             fi
           done
           echo 'A local dependency did not become ready.'

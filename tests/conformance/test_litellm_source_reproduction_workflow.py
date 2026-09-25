@@ -33,6 +33,7 @@ def test_litellm_workflow_is_copyable_source_recipe_with_pinned_instruments():
     services = next(step for step in steps if step.get("name") == "Start pinned local dependencies")
     assert "docker logs --tail 20" in services["run"]
     assert 'docker restart "$analyzer"' in services["run"]
+    assert 'analyzer_port=$(docker port "$analyzer" 3000/tcp' in services["run"]
 
 
 def test_litellm_configs_route_both_profiles_to_local_capture(tmp_path):
