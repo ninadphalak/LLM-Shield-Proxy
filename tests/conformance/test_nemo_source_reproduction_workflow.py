@@ -31,6 +31,8 @@ def test_nemo_workflow_builds_selected_source_with_pinned_detector():
     assert "presidio-analyzer==2.2.364" in build["run"]
     assert "presidio-anonymizer==2.2.364" in build["run"]
     assert "en_core_web_lg" in build["run"]
+    assert "COPY . /source" in build["run"]
+    assert "cp -a /source/examples" in build["run"]
     assert "pii-leak-benchmark[validate]==0.2.1" in build["run"]
 
 

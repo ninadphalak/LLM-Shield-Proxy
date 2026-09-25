@@ -75,6 +75,7 @@ jobs:
                 "presidio-analyzer==2.2.364" "presidio-anonymizer==2.2.364" "spacy==3.8.16" \
               && python -m spacy download en_core_web_lg \
               && python -c "import importlib.metadata as m; assert m.version('en-core-web-lg') == '3.8.0'"
+          RUN cp -a /source/examples /usr/local/lib/python3.11/site-packages/examples
           WORKDIR /config
           ENTRYPOINT ["nemoguardrails", "server", "--config", "/config"]
           DOCKERFILE
