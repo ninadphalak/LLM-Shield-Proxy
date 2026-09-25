@@ -73,6 +73,7 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     assert "get('self_probe')" in verify["run"]
     assert "captured_requests') != 32" not in verify["run"]
     assert "measured_leak=" in verify["run"]
+    assert "not in ('CLEAN', 'LEAK')" in verify["run"]
     assert "steps.verify.outputs.measured_leak == 'true'" in steps[-1]["if"]
     assert "benchmarks/results/" not in WORKFLOW.read_text(encoding="utf-8")
 
