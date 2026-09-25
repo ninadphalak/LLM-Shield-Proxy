@@ -66,6 +66,8 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "seeded_fixture(contract['seed']" in verify["run"]
     assert "for name in names:" in verify["run"]
     assert "strings(json.loads(content))" in verify["run"]
+    assert "quote(value, safe='')" in verify["run"]
+    assert "b64encode(encoded)" in verify["run"]
     assert "a required report or provenance file is absent" in verify["run"]
     assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]
 
