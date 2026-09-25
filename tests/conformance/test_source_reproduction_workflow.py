@@ -20,6 +20,7 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
     assert operator["with"]["source"] == "pii-leak-benchmark==0.4.1"
+    assert operator["with"]["artifact-name"] == ""
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
     staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
     assert "current.json summary.md" in staged["run"]

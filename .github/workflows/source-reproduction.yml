@@ -90,7 +90,7 @@ jobs:
           target-model: capture
           target-version: ${{ steps.source.outputs.sha }}
           duty: restore
-          artifact-name: operator-profile
+          artifact-name: ''
 
       - name: Stage operator reports with the response pair
         if: always() && steps.operator.outputs.report-directory != ''
