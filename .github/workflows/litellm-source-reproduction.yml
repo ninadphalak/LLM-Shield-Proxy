@@ -258,9 +258,10 @@ jobs:
           provenance = ('source-commit.txt', 'image-id.txt', 'operator-config.yaml',
                         'response-config.yaml', 'response-harness-packages.txt',
                         'operator-packages.txt', 'python-version.txt', 'runner.txt', 'docker-version.txt')
-          if any(not (root / name).is_file() or not (root / name).stat().st_size
-                 for name in reports + provenance):
-              raise SystemExit('Incomplete evidence: required report or environment record absent.')
+          missing = [name for name in reports + provenance
+                     if not (root / name).is_file() or not (root / name).stat().st_size]
+          if missing:
+              raise SystemExit('Incomplete evidence: missing or empty ' + ', '.join(missing))
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
           contract = operator.get('contract') or {}
           if (operator.get('schema') != 'pii-leak-benchmark/operator-run/v1'
