@@ -266,7 +266,10 @@ jobs:
           import json
           import os
           import subprocess
+          from base64 import b64encode, urlsafe_b64encode
+          from html import escape
           from pathlib import Path
+          from urllib.parse import quote, quote_plus
           from pii_leak_benchmark.operator_profile import seeded_fixture
 
           root = Path(os.environ['RUNNER_TEMP']) / 'litellm-source-reproduction'
@@ -281,7 +284,7 @@ jobs:
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
           contract = operator.get('contract') or {}
           if (operator.get('schema') != 'pii-leak-benchmark/operator-run/v1'
-                  or operator.get('verdict') == 'NOT MEASURED'
+                  or operator.get('verdict') not in ('PASS', 'LEAK')
                   or contract.get('profile') not in ('pii-v1', 'pii-secrets-v1')
                   or not isinstance(contract.get('seed'), str)):
               raise SystemExit('Incomplete evidence: operator profile was not measured.')
@@ -294,6 +297,12 @@ jobs:
               capture_output=True, check=True, text=True,
           )
           values = tuple(fixture.values()) + (marker,) + tuple(json.loads(response.stdout))
+          needles = set(values)
+          for value in values:
+              encoded = value.encode('utf-8')
+              needles.update((quote(value, safe=''), quote_plus(value), escape(value, quote=True),
+                              b64encode(encoded).decode(), urlsafe_b64encode(encoded).decode(),
+                              encoded.hex(), encoded.hex().upper()))
 
           def strings(node):
               if isinstance(node, str):
@@ -309,7 +318,7 @@ jobs:
           for name in reports:
               content = (root / name).read_text(encoding='utf-8')
               fields = (content,) if name.endswith('.md') else strings(json.loads(content))
-              if any(value in field for field in fields for value in values):
+              if any(needle in field for field in fields for needle in needles):
                   raise SystemExit('Unsafe evidence: a generated value reached a report.')
           report = json.loads((root / 'litellm-source.json').read_text(encoding='utf-8'))
           if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'

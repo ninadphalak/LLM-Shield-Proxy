@@ -67,8 +67,10 @@ def test_litellm_measures_and_uploads_only_verified_value_free_reports():
     assert '/health"' not in response["run"]
     verify = next(step for step in steps if step.get("id") == "verify")
     assert "strings(json.loads(content))" in verify["run"]
+    assert "b64encode(encoded)" in verify["run"]
     assert "capture_output=True" in verify["run"]
     assert "RESPONSE_PYTHON" in verify["run"]
+    assert "not in ('PASS', 'LEAK')" in verify["run"]
     upload = next(step for step in steps if step.get("name") == "Upload verified source evidence")
     assert upload["if"] == "always() && steps.verify.outcome == 'success'"
     assert upload["with"]["name"] == "source-reproduction"
