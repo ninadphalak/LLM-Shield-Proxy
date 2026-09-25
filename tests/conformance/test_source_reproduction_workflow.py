@@ -28,6 +28,8 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
     assert "current.json summary.md" in staged["run"]
     assert "current.raw.json" not in staged["run"]
+    record = next(step for step in steps if step.get("name") == "Record source and environment")
+    assert "set -euo pipefail" in record["run"]
 
 
 def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs():
@@ -57,11 +59,14 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert not any(path.endswith(".raw.json") or path.endswith(".log") for path in paths)
     verify = next(step for step in steps if step.get("id") == "verify")
     assert verify["env"]["BENCHMARK_PYTHON"] == "${{ steps.operator.outputs.python-path }}"
-    assert "build_segments('a1b2c3d4e5f60001')" in verify["run"]
+    assert 'build_segments("a1b2c3d4e5f60001")' in verify["run"]
+    assert "RESPONSE_PYTHON" in verify["run"]
+    assert "capture_output=True" in verify["run"]
+    assert "source-commit.txt" in verify["run"]
     assert "seeded_fixture(contract['seed']" in verify["run"]
     assert "for name in names:" in verify["run"]
     assert "strings(json.loads(content))" in verify["run"]
-    assert "a required report is absent" in verify["run"]
+    assert "a required report or provenance file is absent" in verify["run"]
     assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]
 
 
