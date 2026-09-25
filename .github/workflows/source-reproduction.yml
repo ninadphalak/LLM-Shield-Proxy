@@ -1,0 +1,287 @@
+name: Reproduce proxy source build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Proxy tag, branch, or commit to build (leave the workflow branch on main)
+        required: true
+        default: v1.6.6
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/source-reproduction.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    env:
+      VALID_VIRTUAL_KEYS: sk-shield-source-reproduction
+      OPENAI_API_KEY: sk-synthetic-no-model-call
+      UPSTREAM_API_KEY: sk-synthetic-no-model-call
+      CONFORMANCE_TARGET_API_KEY: sk-shield-source-reproduction
+      V2_GATEWAY_TOKEN: sk-shield-source-reproduction
+      V2_REQUEST_PATH_REDACTION: configured
+      UPSTREAM_BASE_URL: http://127.0.0.1:8799
+      ENABLE_EXT_PROC: 'false'
+    steps:
+      - name: Check out selected proxy source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Pull requests exercise their source; manual runs use the selected tag or branch.
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Build and install the selected source
+        run: python -m pip install . 'pii-leak-benchmark[validate]==0.2.1'
+
+      - name: Record source and environment
+        id: source
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source-reproduction"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-reproduction/source-commit.txt"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python -m pip freeze > "$RUNNER_TEMP/source-reproduction/installed-packages.txt"
+          python --version > "$RUNNER_TEMP/source-reproduction/python-version.txt" 2>&1
+          uname -a > "$RUNNER_TEMP/source-reproduction/runner.txt"
+
+      - name: Check proxy startup before fixtures
+        env:
+          ENABLE_RESPONSE_PII_REDACTION: 'true'
+        run: |
+          set -euo pipefail
+          python -m uvicorn llm_shield_proxy.api.main:app \
+            --host 127.0.0.1 --port 8815 --no-access-log \
+            > "$RUNNER_TEMP/startup-preflight.log" 2>&1 &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8815/health > /dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$proxy_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          echo 'Proxy startup failed before any fixtures were generated.'
+          sed -n '1,60p' "$RUNNER_TEMP/startup-preflight.log"
+          exit 2
+
+      - name: Measure request-path behavior
+        id: operator
+        continue-on-error: true
+        uses: ninadphalak/LLM-Shield-Proxy@73a433906f4f7a2d071a44c780485b8ce3cca541 # operator action with deferred upload
+        env:
+          ENABLE_RESPONSE_PII_REDACTION: 'true'
+        with:
+          target-base-url: http://127.0.0.1:8815/v1
+          start-command: python -m uvicorn llm_shield_proxy.api.main:app --host 127.0.0.1 --port 8815 --no-access-log
+          upstream-env: UPSTREAM_BASE_URL
+          target-model: capture
+          target-version: ${{ steps.source.outputs.sha }}
+          duty: restore
+          artifact-name: ''
+
+      - name: Stage operator reports with the response pair
+        if: always() && steps.operator.outputs.report-directory != ''
+        env:
+          OPERATOR_REPORT_DIRECTORY: ${{ steps.operator.outputs.report-directory }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-reproduction"
+          for name in current.json summary.md; do
+            if [ -f "$OPERATOR_REPORT_DIRECTORY/$name" ]; then
+              cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$RUNNER_TEMP/source-reproduction/$name"
+            fi
+          done
+
+      - name: Measure response midpoint pair
+        id: response
+        if: always() && steps.source.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/source-reproduction"
+          proxy_pid=''
+          cleanup() {
+            if [ -n "$proxy_pid" ]; then
+              kill "$proxy_pid" 2>/dev/null || true
+              wait "$proxy_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          run_arm() {
+            local enabled="$1"
+            local label="$2"
+            ENABLE_RESPONSE_PII_REDACTION="$enabled" \
+              python -m uvicorn llm_shield_proxy.api.main:app \
+                --host 127.0.0.1 --port 8815 --no-access-log \
+                > "$RUNNER_TEMP/$label.log" 2>&1 &
+            proxy_pid=$!
+            local ready=false
+            for _ in {1..60}; do
+              if curl --fail --silent http://127.0.0.1:8815/health > /dev/null; then
+                ready=true
+                break
+              fi
+              if ! kill -0 "$proxy_pid" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" != true ]; then
+              echo "The $label proxy did not become ready."
+              return 2
+            fi
+            python -m pii_leak_benchmark.v2_emitter \
+              --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
+              --only "$label" \
+              --gateway-url http://127.0.0.1:8815/v1/chat/completions \
+              --upstream-port 8799 --model capture --out "$out" \
+              > "$RUNNER_TEMP/$label-instrument.log" 2>&1 || {
+                echo "The $label instrument exited without a valid report."
+                return 2
+              }
+            cleanup
+            proxy_pid=''
+          }
+          run_arm true source-response-on
+          run_arm false source-response-off
+
+      - name: Summarize the response pair
+        if: always() && steps.response.outcome == 'success'
+        env:
+          REPORT_DIR: ${{ runner.temp }}/source-reproduction
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['REPORT_DIR'])
+          print('## Response midpoint pair')
+          print()
+          print('| Configuration | Fidelity | Single-chunk leak | Midpoint leak | Scored | Inconclusive |')
+          print('| :--- | ---: | ---: | ---: | ---: | ---: |')
+          for name in ('source-response-on', 'source-response-off'):
+              report = json.loads((root / f'{name}.json').read_text(encoding='utf-8'))
+              metrics = report['metrics']
+              leaks = metrics['leak_rate']
+              print(f"| {name} | {metrics['fidelity_rate']:.2f} | "
+                    f"{leaks['single_chunk']:.2f} | {leaks['adversarial']:.2f} | "
+                    f"{metrics['cases_scored']} | {metrics['cases_inconclusive']} |")
+          print()
+          print('Built from the selected source commit. This does not assert that the installed '
+                'files or dependencies match a published wheel.')
+          print('The operator summary has the current wall-submission link. Its wall row covers '
+                'the operator profile only; the response pair is retained in this run artifact.')
+          PY
+
+      - name: Verify publishable evidence
+        id: verify
+        if: always()
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ runner.temp }}/source-reproduction
+          BENCHMARK_PYTHON: ${{ steps.operator.outputs.python-path }}
+        run: |
+          set -euo pipefail
+          export RESPONSE_PYTHON="$(command -v python)"
+          "$BENCHMARK_PYTHON" -m pip freeze > "$REPORT_DIR/operator-packages.txt"
+          "$BENCHMARK_PYTHON" - <<'PY'
+          import json
+          import os
+          import subprocess
+          from base64 import b64encode, urlsafe_b64encode
+          from html import escape
+          from pathlib import Path
+          from urllib.parse import quote, quote_plus
+
+          from pii_leak_benchmark.operator_profile import seeded_fixture
+
+          root = Path(os.environ['REPORT_DIR'])
+          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json')
+          provenance = ('source-commit.txt', 'installed-packages.txt', 'operator-packages.txt',
+                        'python-version.txt', 'runner.txt')
+          if any(not (root / name).is_file() or not (root / name).stat().st_size for name in names + provenance):
+              raise SystemExit('Incomplete evidence: a required report or provenance file is absent.')
+          operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') not in ('CLEAN', 'LEAK'):
+              raise SystemExit('Incomplete evidence: the operator profile was not measured.')
+          contract = operator.get('contract') or {}
+          if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):
+              raise SystemExit('Incomplete evidence: the operator fixture contract is invalid.')
+          fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
+          response = subprocess.run(
+              [os.environ['RESPONSE_PYTHON'], '-c',
+               'import json; from pii_leak_benchmark.v2_emitter import build_segments; '
+               's = build_segments("a1b2c3d4e5f60001"); '
+               'print(json.dumps(list(s.echo.values()) + list(s.injection.values())))'],
+              check=True, capture_output=True, text=True,
+          )
+          values = tuple(fixture.values()) + (marker,) + tuple(json.loads(response.stdout))
+          needles = set(values)
+          for value in values:
+              encoded = value.encode('utf-8')
+              needles.update((quote(value, safe=''), quote_plus(value), escape(value, quote=True),
+                              b64encode(encoded).decode(), urlsafe_b64encode(encoded).decode(),
+                              encoded.hex(), encoded.hex().upper()))
+
+          def strings(node):
+              if isinstance(node, str):
+                  yield node
+              elif isinstance(node, dict):
+                  for key, item in node.items():
+                      yield from strings(key)
+                      yield from strings(item)
+              elif isinstance(node, list):
+                  for item in node:
+                      yield from strings(item)
+
+          for name in names:
+              content = (root / name).read_text(encoding='utf-8')
+              fields = (content,) if name.endswith('.md') else strings(json.loads(content))
+              if any(needle in field for field in fields for needle in needles):
+                  raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
+          for name in ('source-response-on.json', 'source-response-off.json'):
+              content = (root / name).read_text(encoding='utf-8')
+              report = json.loads(content)
+              if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
+                      or (report.get('fixture') or {}).get('values_published') is not False
+                      or (report.get('corpus') or {}).get('values_published') is not False
+                      or (report.get('metrics') or {}).get('cases_scored') != 32):
+                  raise SystemExit('Incomplete evidence: response report contract failed.')
+          (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
+          PY
+
+      - name: Upload source and response evidence
+        if: always() && steps.verify.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: source-reproduction
+          path: |
+            ${{ runner.temp }}/source-reproduction/current.json
+            ${{ runner.temp }}/source-reproduction/summary.md
+            ${{ runner.temp }}/source-reproduction/source-response-on.json
+            ${{ runner.temp }}/source-reproduction/source-response-off.json
+            ${{ runner.temp }}/source-reproduction/source-commit.txt
+            ${{ runner.temp }}/source-reproduction/installed-packages.txt
+            ${{ runner.temp }}/source-reproduction/operator-packages.txt
+            ${{ runner.temp }}/source-reproduction/python-version.txt
+            ${{ runner.temp }}/source-reproduction/runner.txt
+            ${{ runner.temp }}/source-reproduction/verification.txt
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Report incomplete or leaking measurement
+        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
+        run: exit 1
