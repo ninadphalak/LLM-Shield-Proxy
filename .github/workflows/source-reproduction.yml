@@ -228,7 +228,7 @@ jobs:
           from pii_leak_benchmark.operator_profile import seeded_fixture
 
           root = Path(os.environ['REPORT_DIR'])
-          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json')
+          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json', 'source-identity.json')
           provenance = ('source-commit.txt', 'installed-packages.txt', 'operator-packages.txt',
                         'python-version.txt', 'runner.txt')
           if any(not (root / name).is_file() or not (root / name).stat().st_size for name in names + provenance):

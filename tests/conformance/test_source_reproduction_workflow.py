@@ -56,8 +56,9 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert artifact["if"] == "always() && steps.verify.outcome == 'success'"
     assert artifact["with"]["name"] == "source-reproduction"
     paths = artifact["with"]["path"].splitlines()
-    assert len(paths) == 10
+    assert len(paths) == 11
     assert any(path.endswith("/operator-packages.txt") for path in paths)
+    assert any(path.endswith("/source-identity.json") for path in paths)
     assert any(path.endswith("/source-response-on.json") for path in paths)
     assert any(path.endswith("/source-response-off.json") for path in paths)
     assert any(path.endswith("/verification.txt") for path in paths)
