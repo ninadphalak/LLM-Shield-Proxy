@@ -127,13 +127,19 @@ jobs:
           echo "DATABASE_URL=postgresql://litellm:litellm@127.0.0.1:$pg_port/litellm" >> "$GITHUB_ENV"
           echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
           echo "ANONYMIZER_PORT=$anonymizer_port" >> "$GITHUB_ENV"
-          for _ in $(seq 1 180); do
-            if docker exec "$pg" pg_isready -U litellm -d litellm > /dev/null 2>&1 \
-              && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
-              && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
-              exit 0
+          for phase in 1 2 3; do
+            for _ in $(seq 1 60); do
+              if docker exec "$pg" pg_isready -U litellm -d litellm > /dev/null 2>&1 \
+                && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
+                && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
+                exit 0
+              fi
+              sleep 2
+            done
+            if [ "$phase" != 3 ]; then
+              echo 'Presidio analyzer is not ready; restarting its pre-fixture container.'
+              docker restart "$analyzer" > /dev/null
             fi
-            sleep 2
           done
           echo 'A local dependency did not become ready.'
           docker exec "$pg" pg_isready -U litellm -d litellm || true
