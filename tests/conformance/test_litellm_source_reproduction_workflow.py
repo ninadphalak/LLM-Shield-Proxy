@@ -63,6 +63,8 @@ def test_litellm_measures_and_uploads_only_verified_value_free_reports():
     assert "--upstream-port 8799 --model capture" in response["run"]
     assert "--validate" in response["run"]
     assert "benchmark-instrument" == response["working-directory"]
+    assert 'socket.create_connection' in response["run"]
+    assert '/health"' not in response["run"]
     verify = next(step for step in steps if step.get("id") == "verify")
     assert "strings(json.loads(content))" in verify["run"]
     assert "capture_output=True" in verify["run"]

@@ -136,8 +136,15 @@ jobs:
             sleep 2
           done
           echo 'A local dependency did not become ready.'
+          docker exec "$pg" pg_isready -U litellm -d litellm || true
+          for port in "$analyzer_port" "$anonymizer_port"; do
+            curl --max-time 5 --silent --show-error -o /dev/null -w "port=$port status=%{http_code}\n" \
+              "http://127.0.0.1:$port/health" || true
+          done
+          free -h || true
           for id in "$pg" "$analyzer" "$anonymizer"; do
-            docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}}' || true
+            docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
+            docker stats --no-stream --format 'container={{.Name}} memory={{.MemUsage}}' "$id" || true
             docker logs --tail 20 "$id" 2>&1 || true
           done
           exit 2
@@ -224,10 +231,15 @@ jobs:
           docker_pid=$!
           trap 'docker rm -f "$name" > /dev/null 2>&1 || true; wait "$docker_pid" 2>/dev/null || true' EXIT
           for _ in $(seq 1 90); do
-            if curl --max-time 1 --fail --silent "http://127.0.0.1:$LITELLM_PORT/health" > /dev/null; then break; fi
+            if python -c 'import os, socket; socket.create_connection(("127.0.0.1", int(os.environ["LITELLM_PORT"])), 1).close()' 2>/dev/null; then break; fi
             sleep 2
           done
-          curl --max-time 3 --fail --silent "http://127.0.0.1:$LITELLM_PORT/health" > /dev/null
+          if ! python -c 'import os, socket; socket.create_connection(("127.0.0.1", int(os.environ["LITELLM_PORT"])), 3).close()'; then
+            echo 'LiteLLM did not open its local port before fixture generation.'
+            docker inspect "$name" --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
+            sed -n '1,80p' "$RUNNER_TEMP/litellm-source-proxy.log" || true
+            exit 2
+          fi
           python -m pii_leak_benchmark.v2_emitter \
             --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
             --only litellm-presidio \
