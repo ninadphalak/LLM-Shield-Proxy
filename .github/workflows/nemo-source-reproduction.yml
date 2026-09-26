@@ -294,6 +294,7 @@ jobs:
           PY
 
       - name: Upload verified source evidence
+        id: upload
         if: always() && steps.verify.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -325,6 +326,7 @@ jobs:
           REPORT_DIR: ${{ runner.temp }}/nemo-source-reproduction
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           RESPONSE_OUTCOME: ${{ steps.response.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
           STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
@@ -338,9 +340,10 @@ jobs:
               os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
           product = os.environ['WALL_PRODUCT']
           status = 'incomplete'
-          # Leak wins whenever one was measured. Clean needs every non-control response report
-          # to hold at least one applicable case, and the response step itself to have passed:
-          # a run that measured nothing must not read as a run that found nothing.
+          # A verdict needs a complete run: verified and uploaded evidence, a passing response
+          # step, and at least one applicable case in every condition of every non-control
+          # response report. Anything less is incomplete, whatever it did observe, because the
+          # summary calls a measured result complete and offers it to the wall.
           if (os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file()
                   and (root / 'current.json').is_file()):
               operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
@@ -360,7 +363,7 @@ jobs:
                   cells = []
                   for key in ('single_chunk', 'adversarial'):
                       rate, total = rates.get(key), counts.get(key)
-                      known = isinstance(rate, (int, float)) and isinstance(total, int)
+                      known = isinstance(rate, (int, float)) and isinstance(total, int) and total > 0
                       cells.append(f'{round(rate * total)} of {total} leaked' if known else 'not measured')
                       response_leak = response_leak or (known and not control and rate > 0)
                       unmeasured = unmeasured or (not known and not control)
@@ -371,9 +374,10 @@ jobs:
                       unmeasured = unmeasured or applicable <= 0
                   label = path.stem + (' (control, redaction off)' if control else '')
                   table.append(f"| {label} | {cells[0]} | {cells[1]} | {metrics.get('cases_inconclusive', 0)} |")
-              complete = (os.environ['RESPONSE_OUTCOME'] == 'success' and measured_reports > 0
-                          and not unmeasured and operator.get('verdict') in ('CLEAN', 'LEAK'))
-              status = 'leak' if leaked or response_leak else 'clean' if complete else 'incomplete'
+              complete = (os.environ['RESPONSE_OUTCOME'] == 'success' and os.environ['UPLOAD_OUTCOME'] == 'success'
+                          and measured_reports > 0 and not unmeasured
+                          and operator.get('verdict') in ('CLEAN', 'LEAK'))
+              status = 'incomplete' if not complete else 'leak' if leaked or response_leak else 'clean'
 
           if status == 'incomplete':
               print('## Result: INCOMPLETE, do not submit')

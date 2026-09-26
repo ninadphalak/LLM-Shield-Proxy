@@ -63,7 +63,8 @@ def _response(single, split, inconclusive=0):
 
 
 def _run(tmp_path, name, *, verified=True, request_leak=False, response_leak=False,
-         off_arm_leak=True, response_outcome="success", inconclusive=0, reports=None):
+         off_arm_leak=True, response_outcome="success", inconclusive=0, reports=None,
+         upload_outcome="success", empty_condition=False):
     root = tmp_path / "bundle"
     root.mkdir()
     entities = {"EMAIL": "leak" if request_leak else "contained", "SSN": "contained"}
@@ -73,6 +74,9 @@ def _run(tmp_path, name, *, verified=True, request_leak=False, response_leak=Fal
         leaking = off_arm_leak if report.endswith("-off.json") else response_leak
         body = _response(0.5 if leaking else 0.0, 1.0 if leaking else 0.0,
                          0 if report.endswith("-off.json") else inconclusive)
+        if empty_condition and not report.endswith("-off.json"):
+            body["metrics"]["cases_by_condition"]["adversarial"] = 0
+            body["metrics"]["leak_rate"]["adversarial"] = 0.0
         (root / report).write_text(json.dumps(body))
     (root / "source-identity.json").write_text(json.dumps(
         {"schema": "pii-leak-benchmark/source-build/v1", "source_commit": COMMIT, "source_selector": "v9.9.9"}))
@@ -85,6 +89,7 @@ def _run(tmp_path, name, *, verified=True, request_leak=False, response_leak=Fal
                VERIFY_OUTCOME="success" if verified else "failure",
                OPERATOR_OUTCOME="failure" if request_leak else "success",
                RESPONSE_OUTCOME=response_outcome,
+               UPLOAD_OUTCOME=upload_outcome,
                STEP_OUTCOMES="request=success, response=failure, verification=failure",
                GITHUB_SERVER_URL="https://github.com", GITHUB_REPOSITORY="friend/proxy",
                GITHUB_RUN_ID="4242")
@@ -186,9 +191,11 @@ def test_a_missing_response_report_is_not_clean(tmp_path, name):
 
 
 @pytest.mark.parametrize("name", sorted(RECIPES))
-def test_a_measured_leak_stands_even_when_another_part_is_unmeasured(tmp_path, name):
-    status, _ = _run(tmp_path, name, request_leak=True, inconclusive=32)
-    assert status == "leak"
+def test_a_leak_in_an_incomplete_run_is_reported_as_incomplete(tmp_path, name):
+    """The summary calls a measured result complete; a partly unmeasured run is not."""
+    status, summary = _run(tmp_path, name, request_leak=True, inconclusive=32)
+    assert status == "incomplete"
+    assert "MEASURED LEAK" not in summary and "issues/new" not in summary
 
 
 def test_some_inconclusive_cases_still_allow_a_clean_measurement(tmp_path):
@@ -196,3 +203,25 @@ def test_some_inconclusive_cases_still_allow_a_clean_measurement(tmp_path):
     status, summary = _run(tmp_path, "nemo-source-reproduction.yml", inconclusive=8)
     assert status == "clean"
     assert "| 8 |" in summary
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_condition_with_no_applicable_case_is_not_measured(tmp_path, name):
+    status, _ = _run(tmp_path, name, empty_condition=True)
+    assert status == "incomplete"
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_no_submission_is_offered_when_the_evidence_did_not_upload(tmp_path, name):
+    """The intake reads the artifact; a link to a run without one cannot be published."""
+    status, summary = _run(tmp_path, name, request_leak=True, upload_outcome="failure")
+    assert status == "incomplete"
+    assert "issues/new" not in summary and "gh issue create" not in summary
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_the_result_step_reads_the_upload_outcome(name):
+    job = _job(name)
+    upload = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/upload-artifact"))
+    assert upload.get("id") == "upload"
+    assert _result_step(name)["env"]["UPLOAD_OUTCOME"] == "${{ steps.upload.outcome }}"

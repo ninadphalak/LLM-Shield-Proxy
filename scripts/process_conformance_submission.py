@@ -652,6 +652,25 @@ def row_identity(row: dict[str, Any]) -> tuple[str, ...]:
     return ("target", str(row.get("project", "")).casefold(), str(row.get("version", "")).casefold())
 
 
+def is_replacement(row: dict[str, Any], entries: list[Any]) -> bool:
+    """True when `row` replaces an existing entry: the same run, or the same issue.
+
+    An issue edited to link a rerun replaces that issue's row: one issue, one row. The
+    wall's badge endpoint is keyed by issue number and refuses two rows for one issue.
+    The row cap and the write both use this, so a rerun at the cap is not refused.
+    """
+    return any(_same_row(existing, row) for existing in entries)
+
+
+def _same_row(existing: Any, row: dict[str, Any]) -> bool:
+    if not isinstance(existing, dict):
+        return False
+    if row_identity(existing) == row_identity(row):
+        return True
+    issue = (row.get("_submission") or {}).get("issue")
+    return bool(issue) and (existing.get("_submission") or {}).get("issue") == issue
+
+
 def submissions_by(entries: list[Any], submitter: str) -> int:
     return sum(
         1
@@ -666,21 +685,7 @@ def append_row(row: dict[str, Any], path: Path = ROWS_FILE) -> None:
     entries = document.setdefault("entries", [])
     if not isinstance(entries, list):
         raise ValueError("submitted-rows.json: 'entries' is not a list")
-    identity = row_identity(row)
-    # An issue edited to link a rerun replaces that issue's row: one issue, one row. The
-    # wall's badge endpoint is keyed by issue number and refuses two rows for one issue.
-    issue = (row.get("_submission") or {}).get("issue")
-    document["entries"] = [
-        existing
-        for existing in entries
-        if not (
-            isinstance(existing, dict)
-            and (
-                row_identity(existing) == identity
-                or (issue and (existing.get("_submission") or {}).get("issue") == issue)
-            )
-        )
-    ]
+    document["entries"] = [existing for existing in entries if not _same_row(existing, row)]
     document["entries"].append(row)
     # Write with LF to maintain hash identity.
     path.write_text(
@@ -865,9 +870,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Enforce row limit, allowing replacements.
     existing = json.loads(ROWS_FILE.read_text(encoding="utf-8")).get("entries", [])
     submitter = (row.get("_submission") or {}).get("submitter", "")
-    replacing = any(
-        isinstance(entry, dict) and row_identity(entry) == row_identity(row) for entry in existing
-    )
+    replacing = is_replacement(row, existing)
     if not replacing and submissions_by(existing, submitter) >= MAX_ROWS_PER_SUBMITTER:
         comment(
             issue_number,

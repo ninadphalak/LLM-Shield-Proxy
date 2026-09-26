@@ -1090,3 +1090,23 @@ def intake_body(*, gateway="Portkey OSS Gateway", version="v1", license="MIT", r
         "### CI run link", run_url, "### How it reads the stream", "not stated",
         "### License", license,
     ]) + "\n"
+
+
+def test_a_rerun_from_the_same_issue_is_not_refused_by_the_row_cap(tmp_path, monkeypatch):
+    """At the cap, editing an issue to link a rerun replaces that issue's row."""
+    rows = tmp_path / "submitted-rows.json"
+    entries = []
+    for issue in range(1, intake.MAX_ROWS_PER_SUBMITTER + 1):
+        row = _row()
+        row["runUrl"] = f"https://github.com/o/r/actions/runs/{issue}"
+        row["_submission"]["issue"] = issue
+        entries.append(row)
+    rows.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+    rerun = _row()
+    rerun["runUrl"] = "https://github.com/o/r/actions/runs/999"
+    rerun["_submission"]["issue"] = 3
+    assert intake.is_replacement(rerun, entries)
+    fresh = _row()
+    fresh["runUrl"] = "https://github.com/o/r/actions/runs/1000"
+    fresh["_submission"]["issue"] = 500
+    assert not intake.is_replacement(fresh, entries)
