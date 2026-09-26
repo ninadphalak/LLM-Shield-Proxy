@@ -1162,11 +1162,34 @@ def test_a_failed_site_build_still_answers_the_submitter(monkeypatch, tmp_path):
 
 def test_a_row_waits_for_earlier_row_prs_before_it_is_written():
     """Both rows append to the same list; the second must start from a main holding the first."""
-    listings = iter([["intake/issue-107", "intake/issue-108"], ["intake/issue-108"]])
+    listings = iter([["intake/issue-107"], ["intake/issue-107"], []])
     slept = []
     intake.wait_for_earlier_rows(108, list_open=lambda: next(listings), sleep=slept.append,
                                  timeout_seconds=600)
+    assert len(slept) == 2
+
+
+def test_an_issue_waits_for_its_own_earlier_row_too():
+    """Edited while its first row PR is open: pushing to the same branch would be rejected."""
+    listings = iter([["intake/issue-9"], []])
+    slept = []
+    intake.wait_for_earlier_rows(9, list_open=lambda: next(listings), sleep=slept.append)
     assert len(slept) == 1
+
+
+def test_open_row_branches_reads_every_page(monkeypatch):
+    seen = {}
+
+    class Listed:
+        stdout = "main-feature\nintake/issue-3\nintake/issue-250\n"
+
+    def run(command, **kwargs):
+        seen["command"] = command
+        return Listed()
+
+    monkeypatch.setattr(intake.subprocess, "run", run)
+    assert intake.open_row_branches() == ["intake/issue-250", "intake/issue-3"]
+    assert "--paginate" in seen["command"]
 
 
 def test_waiting_for_earlier_rows_gives_up_with_an_error():

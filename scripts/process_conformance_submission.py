@@ -739,15 +739,13 @@ def build_site() -> None:
 
 def open_row_branches() -> list[str]:
     """Branches of results-wall row pull requests that are still open."""
+    # Paginated, so an old row pull request past the first page is still seen.
     listed = subprocess.run(  # nosec B603 B607 - fixed argument list
-        ["gh", "pr", "list", "--state", "open", "--limit", "100", "--json", "headRefName"],
+        ["gh", "api", "--paginate", "repos/{owner}/{repo}/pulls?state=open&per_page=100",
+         "--jq", ".[].head.ref"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout
-    return sorted(
-        str(pr.get("headRefName") or "")
-        for pr in json.loads(listed or "[]")
-        if str(pr.get("headRefName") or "").startswith("intake/issue-")
-    )
+    return sorted(line.strip() for line in listed.splitlines() if line.strip().startswith("intake/issue-"))
 
 
 def wait_for_earlier_rows(
@@ -767,10 +765,11 @@ def wait_for_earlier_rows(
     been told it was published. Waiting here, then catching up with main, puts each row on
     top of the one before it.
     """
-    own = f"intake/issue-{issue_number}"
+    # This issue's own earlier row counts too: an issue edited while its first row pull
+    # request is open must wait for it, or its push to the same branch is rejected.
     waited = 0
     while True:
-        others = [branch for branch in list_open() if branch != own]
+        others = list_open()
         if not others:
             return
         if waited >= timeout_seconds:
