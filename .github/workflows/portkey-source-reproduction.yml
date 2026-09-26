@@ -1,0 +1,415 @@
+name: Reproduce Portkey source build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Proxy tag or commit (empty builds the selected workflow branch)
+        required: false
+        default: ''
+        type: string
+      source_repository:
+        description: Proxy repository (empty uses this repository)
+        required: false
+        default: ''
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/portkey-source-reproduction.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Names this run on the results wall. Change them if your fork measures something else.
+      WALL_PRODUCT: Portkey OSS Gateway
+      WALL_CONFIGURATION: OSS output guardrail, unauthenticated call-out
+      WALL_LICENSE: MIT
+      WALL_PROJECT_URL: https://github.com/Portkey-AI/gateway
+      SOURCE_REPOSITORY: ${{ inputs.source_repository || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'Portkey-AI/gateway') || github.repository }}
+      SOURCE_SELECTOR: ${{ inputs.source_ref || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'v1.15.2') || github.sha }}
+      SOURCE_IMAGE: portkey-source:${{ github.run_id }}
+      CONFORMANCE_TARGET_API_KEY: sk-synthetic-no-model-call
+      V2_GATEWAY_TOKEN: sk-synthetic-no-model-call
+      PORTKEY_GUARDRAIL_CONFIG: '{"output_guardrails":[{"checks":[{"id":"portkey.pii","parameters":{"redact":true}}]}]}'
+    steps:
+      - name: Require a ref for another repository
+        if: inputs.source_repository != '' && inputs.source_ref == ''
+        run: |
+          echo 'Set source_ref when source_repository names another repository.'
+          exit 2
+
+      - name: Check out the proxy source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ env.SOURCE_SELECTOR }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Build the checked-out proxy
+        run: docker build --file Dockerfile --tag "$SOURCE_IMAGE" .
+
+      - name: Record source and configuration
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/portkey-source-reproduction"
+          mkdir -p "$out"
+          git rev-parse HEAD > "$out/source-commit.txt"
+          git status --porcelain > "$out/source-status.txt"
+          sha256sum Dockerfile > "$out/dockerfile-sha256.txt"
+          docker image inspect "$SOURCE_IMAGE" --format '{{.Id}}' > "$out/image-id.txt"
+          docker version --format '{{.Server.Version}}' > "$out/docker-version.txt"
+          python --version > "$out/python-version.txt" 2>&1
+          uname -a > "$out/runner.txt"
+          python -m pip install 'pii-leak-benchmark[validate]==0.2.1'
+          python -m pip freeze > "$out/installed-harness-packages.txt"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'portkey-source-reproduction'
+          (root / 'guardrail-config.json').write_text(
+              json.dumps(json.loads(os.environ['PORTKEY_GUARDRAIL_CONFIG']), sort_keys=True, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          (root / 'source-identity.json').write_text(
+              json.dumps({
+                  'schema': 'pii-leak-benchmark/source-build/v1',
+                  'source_repository': os.environ['SOURCE_REPOSITORY'],
+                  'source_selector': os.environ['SOURCE_SELECTOR'],
+                  'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
+                  'product': os.environ['WALL_PRODUCT'],
+                  'configuration': os.environ['WALL_CONFIGURATION'],
+                  'license': os.environ['WALL_LICENSE'],
+                  'project_url': os.environ['WALL_PROJECT_URL'],
+              }, sort_keys=True, indent=2) + '\n', encoding='utf-8',
+          )
+          PY
+
+      - name: Check out the pinned response instrument
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ninadphalak/LLM-Shield-Proxy
+          ref: 74d744a72adb053ff4f4025bdd676bba0e5be03d # benchmark-v0.2.1
+          path: benchmark-instrument
+          persist-credentials: false
+
+      - name: Measure request-path behavior
+        id: operator
+        continue-on-error: true
+        uses: ninadphalak/LLM-Shield-Proxy@29a9932b085e5b063b8c366c3e6bfca2c4af4b06 # operator action; the recipe writes the submission
+        env:
+          CONFORMANCE_TARGET_HEADERS: |
+            x-portkey-provider=openai
+            x-portkey-custom-host=http://127.0.0.1:8765/v1
+            x-portkey-config=${{ env.PORTKEY_GUARDRAIL_CONFIG }}
+        with:
+          target-base-url: http://127.0.0.1:8787/v1
+          start-command: docker run --rm --network host --name portkey-operator-$GITHUB_RUN_ID $SOURCE_IMAGE
+          target-model: capture
+          target-version: ${{ env.SOURCE_SELECTOR }}
+          duty: anonymize
+          artifact-name: ''
+          submission-section: 'false'
+
+      - name: Stop the operator container
+        if: always()
+        run: docker rm --force "portkey-operator-$GITHUB_RUN_ID" > /dev/null 2>&1 || true
+
+      - name: Stage the operator result
+        if: always() && steps.operator.outputs.report-directory != ''
+        env:
+          OPERATOR_REPORT_DIRECTORY: ${{ steps.operator.outputs.report-directory }}
+        run: |
+          out="$RUNNER_TEMP/portkey-source-reproduction"
+          for name in current.json summary.md; do
+            if [ -f "$OPERATOR_REPORT_DIRECTORY/$name" ]; then
+              cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$out/$name"
+            fi
+          done
+
+      - name: Measure response midpoint profile
+        id: response
+        if: always() && steps.operator.outcome != 'skipped'
+        continue-on-error: true
+        working-directory: benchmark-instrument
+        run: |
+          set -euo pipefail
+          name="portkey-response-$GITHUB_RUN_ID"
+          docker run --detach --rm --network host --name "$name" "$SOURCE_IMAGE"
+          trap 'docker rm --force "$name" > /dev/null 2>&1 || true' EXIT
+          ready=false
+          for _ in {1..60}; do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8787/public/; then
+              ready=true
+              break
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)" != true ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo 'Portkey did not become ready before fixtures were generated.'
+            exit 2
+          fi
+          export V2_GATEWAY_HEADERS="$(python - <<'PY'
+          import json
+          import os
+          print(json.dumps({
+              'x-portkey-provider': 'openai',
+              'x-portkey-custom-host': 'http://127.0.0.1:8799/v1',
+              'x-portkey-config': os.environ['PORTKEY_GUARDRAIL_CONFIG'],
+          }))
+          PY
+          )"
+          python -m pii_leak_benchmark.v2_emitter \
+            --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
+            --only portkey-source \
+            --gateway-url http://127.0.0.1:8787/v1/chat/completions \
+            --upstream-port 8799 --model capture \
+            --out "$RUNNER_TEMP/portkey-source-reproduction" \
+            > "$RUNNER_TEMP/portkey-instrument.log" 2>&1 || {
+              echo 'The response instrument exited without a valid report.'
+              exit 2
+            }
+
+      - name: Verify publishable evidence
+        id: verify
+        if: always()
+        continue-on-error: true
+        env:
+          BENCHMARK_PYTHON: ${{ steps.operator.outputs.python-path }}
+        run: |
+          set -euo pipefail
+          export RESPONSE_PYTHON="$(command -v python)"
+          "$BENCHMARK_PYTHON" -m pip freeze > "$RUNNER_TEMP/portkey-source-reproduction/operator-packages.txt"
+          "$BENCHMARK_PYTHON" - <<'PY'
+          import json
+          import os
+          import subprocess
+          from base64 import b64encode, urlsafe_b64encode
+          from html import escape
+          from pathlib import Path
+          from urllib.parse import quote, quote_plus
+
+          from pii_leak_benchmark.operator_profile import seeded_fixture
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'portkey-source-reproduction'
+          names = ('current.json', 'summary.md', 'portkey-source.json', 'source-identity.json')
+          if any(not (root / name).is_file() for name in names):
+              raise SystemExit('Incomplete evidence: a required report is absent.')
+          operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+          if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') not in ('CLEAN', 'LEAK'):
+              raise SystemExit('Incomplete evidence: the operator profile was not measured.')
+          contract = operator.get('contract') or {}
+          if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):
+              raise SystemExit('Incomplete evidence: the operator fixture contract is invalid.')
+          fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
+          content = (root / 'portkey-source.json').read_text(encoding='utf-8')
+          report = json.loads(content)
+          response = subprocess.run(
+              [os.environ['RESPONSE_PYTHON'], '-c',
+               'import json; from pii_leak_benchmark.v2_emitter import build_segments; '
+               's = build_segments("a1b2c3d4e5f60001"); '
+               'print(json.dumps(list(s.echo.values()) + list(s.injection.values())))'],
+              check=True, capture_output=True, text=True,
+          )
+          values = tuple(fixture.values()) + (marker,) + tuple(json.loads(response.stdout))
+          needles = set(values)
+          for value in values:
+              encoded = value.encode('utf-8')
+              needles.update((quote(value, safe=''), quote_plus(value), escape(value, quote=True),
+                              b64encode(encoded).decode(), urlsafe_b64encode(encoded).decode(),
+                              encoded.hex(), encoded.hex().upper()))
+
+          def strings(node):
+              if isinstance(node, str):
+                  yield node
+              elif isinstance(node, dict):
+                  for key, item in node.items():
+                      yield from strings(key)
+                      yield from strings(item)
+              elif isinstance(node, list):
+                  for item in node:
+                      yield from strings(item)
+
+          for name in names:
+              content = (root / name).read_text(encoding='utf-8')
+              fields = (content,) if name.endswith('.md') else strings(json.loads(content))
+              if any(needle in field for field in fields for needle in needles):
+                  raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
+          if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
+                  or (report.get('fixture') or {}).get('values_published') is not False
+                  or (report.get('corpus') or {}).get('values_published') is not False
+                  or (report.get('metrics') or {}).get('cases_scored') != 32
+                  or ((report.get('capture') or {}).get('self_probe') or {}).get('recorded') is not True):
+              raise SystemExit('Incomplete evidence: response report contract failed.')
+          rates = (report.get('metrics') or {}).get('leak_rate') or {}
+          measured_leak = operator['verdict'] == 'LEAK' or any(
+              rates.get(name, 0) > 0 for name in ('single_chunk', 'adversarial')
+          )
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'measured_leak={str(measured_leak).lower()}\n')
+          (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
+          PY
+
+      - name: Upload source-build evidence
+        id: upload
+        if: always() && steps.verify.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: source-reproduction
+          path: |
+            ${{ runner.temp }}/portkey-source-reproduction/current.json
+            ${{ runner.temp }}/portkey-source-reproduction/summary.md
+            ${{ runner.temp }}/portkey-source-reproduction/portkey-source.json
+            ${{ runner.temp }}/portkey-source-reproduction/source-identity.json
+            ${{ runner.temp }}/portkey-source-reproduction/source-commit.txt
+            ${{ runner.temp }}/portkey-source-reproduction/source-status.txt
+            ${{ runner.temp }}/portkey-source-reproduction/guardrail-config.json
+            ${{ runner.temp }}/portkey-source-reproduction/dockerfile-sha256.txt
+            ${{ runner.temp }}/portkey-source-reproduction/image-id.txt
+            ${{ runner.temp }}/portkey-source-reproduction/docker-version.txt
+            ${{ runner.temp }}/portkey-source-reproduction/python-version.txt
+            ${{ runner.temp }}/portkey-source-reproduction/runner.txt
+            ${{ runner.temp }}/portkey-source-reproduction/installed-harness-packages.txt
+            ${{ runner.temp }}/portkey-source-reproduction/operator-packages.txt
+            ${{ runner.temp }}/portkey-source-reproduction/verification.txt
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Report the result and how to submit it
+        id: result
+        if: always()
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ runner.temp }}/portkey-source-reproduction
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          RESPONSE_OUTCOME: ${{ steps.response.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}, upload=${{ steps.upload.outcome }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlencode
+
+          root = Path(os.environ['REPORT_DIR'])
+          run_url = '{}/{}/actions/runs/{}'.format(
+              os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          product = os.environ['WALL_PRODUCT']
+          status = 'incomplete'
+          # A verdict needs a complete run: verified and uploaded evidence, a passing response
+          # step, and at least one applicable case in every condition of every non-control
+          # response report. Anything less is incomplete, whatever it did observe, because the
+          # summary calls a measured result complete and offers it to the wall.
+          if (os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file()
+                  and (root / 'current.json').is_file()):
+              operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+              leaked = sorted(name for name, state in (operator.get('entities') or {}).items() if state == 'leak')
+              table, response_leak, measured_reports, unmeasured = [], False, 0, False
+              for path in sorted(root.glob('*.json')):
+                  try:
+                      metrics = json.loads(path.read_text(encoding='utf-8')).get('metrics') or {}
+                  except (ValueError, AttributeError):
+                      continue
+                  rates = metrics.get('leak_rate') if isinstance(metrics, dict) else None
+                  if not isinstance(rates, dict):
+                      continue
+                  counts = metrics.get('cases_by_condition') or {}
+                  # The Shield recipe's redaction-off arm is a control: it is meant to leak.
+                  control = path.stem.endswith('-off')
+                  cells = []
+                  for key in ('single_chunk', 'adversarial'):
+                      rate, total = rates.get(key), counts.get(key)
+                      known = isinstance(rate, (int, float)) and isinstance(total, int) and total > 0
+                      cells.append(f'{round(rate * total)} of {total} leaked' if known else 'not measured')
+                      response_leak = response_leak or (known and not control and rate > 0)
+                      unmeasured = unmeasured or (not known and not control)
+                  scored, inconclusive = metrics.get('cases_scored'), metrics.get('cases_inconclusive', 0)
+                  applicable = scored - inconclusive if isinstance(scored, int) and isinstance(inconclusive, int) else 0
+                  if not control:
+                      measured_reports += 1
+                      unmeasured = unmeasured or applicable <= 0
+                  label = path.stem + (' (control, redaction off)' if control else '')
+                  table.append(f"| {label} | {cells[0]} | {cells[1]} | {metrics.get('cases_inconclusive', 0)} |")
+              complete = (os.environ['RESPONSE_OUTCOME'] == 'success' and os.environ['UPLOAD_OUTCOME'] == 'success'
+                          and measured_reports > 0 and not unmeasured
+                          and operator.get('verdict') in ('CLEAN', 'LEAK'))
+              status = 'incomplete' if not complete else 'leak' if leaked or response_leak else 'clean'
+
+          if status == 'incomplete':
+              print('## Result: INCOMPLETE, do not submit')
+              print()
+              print('This run did not produce a verified measurement, so nothing was uploaded and the '
+                    'results wall has nothing to read. It says nothing about the gateway.')
+              print()
+              print(f"Step outcomes: {os.environ['STEP_OUTCOMES']}. Open the first failed step for the reason, "
+                    'then rerun the workflow. A failure before measurement is usually the runner, a download '
+                    'or the proxy not starting.')
+          else:
+              print('## Result: MEASURED LEAK' if status == 'leak' else '## Result: MEASURED CLEAN')
+              print()
+              print('This run is a complete, verified measurement. '
+                    + ('The job is red because the gateway leaked, not because the run broke. '
+                       'A leak is a result worth publishing.' if status == 'leak'
+                       else 'No leak in any case this run measured.'))
+              print()
+              print('Request path: ' + ('the provider received raw ' + ', '.join(leaked) + '.' if leaked
+                                        else 'no raw value reached the provider.'))
+              print()
+              print('| Response report | Value in one chunk | Value split across two chunks | Inconclusive |')
+              print('| :--- | :--- | :--- | ---: |')
+              print('\n'.join(table))
+              print()
+              identity = json.loads((root / 'source-identity.json').read_text(encoding='utf-8'))
+              commit, selector = identity['source_commit'], identity['source_selector']
+              where = f'commit {commit[:12]}' if selector in ('', commit) else f'{selector} (commit {commit[:12]})'
+              sections = {
+                  'Gateway': product,
+                  'Version and configuration': f"{where}, {os.environ['WALL_CONFIGURATION']}",
+                  'Project link': os.environ['WALL_PROJECT_URL'],
+                  'CI run link': run_url,
+                  'How it reads the stream': 'not stated',
+                  'License': os.environ['WALL_LICENSE'],
+                  'Outcome': status.upper(),
+              }
+              body = '\n\n'.join(f'### {heading}\n\n{value}' for heading, value in sections.items()) + '\n'
+              query = urlencode({'title': f'Result: {product}', 'labels': 'conformance-result', 'body': body})
+              print('### Put this run on the results wall')
+              print()
+              print(f'**[Submit this run to the results wall](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query})**: '
+                    'opens a prefilled issue. Press **Create**; nothing needs typing.')
+              print()
+              print('Or, from any terminal signed in to the GitHub CLI:')
+              print()
+              print('```')
+              print(f'gh issue create --repo ninadphalak/LLM-Shield-Proxy --title "Result: {product}" --body "{run_url}"')
+              print('```')
+              print()
+              print('Within a few minutes a bot answers on that issue. It either links your published row '
+                    'or says exactly what stopped it. The numbers on the wall are read from this run\'s '
+                    'artifact, not from the issue.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+          PY
+
+      - name: Fail unless the measurement is complete and clean
+        if: always() && steps.result.outputs.status != 'clean'
+        env:
+          RESULT: ${{ steps.result.outputs.status }}
+        run: |
+          echo "Result: ${RESULT:-incomplete}. The job summary explains it and, for a measurement, how to submit it."
+          exit 1

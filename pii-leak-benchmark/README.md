@@ -11,13 +11,13 @@ Standard library plus `httpx`. You should not have to install one gateway to mea
 
 ## A gateway check in your pull request
 
-Use the [GitHub Action and regression guide](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/ci.md).
+Use the [GitHub Action and regression guide](https://llmshieldproxy.com/docs/conformance/ci).
 The Action starts your test gateway when given a startup command, checks the capture with
 a negative control, and writes a job summary with results for each tested data type.
 It saves reports even when the check fails. An optional baseline shows new failures and fixes.
 
 ```yaml
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1
   with:
     target-base-url: http://127.0.0.1:4000/v1
     start-command: ./scripts/start-test-gateway.sh
@@ -37,7 +37,7 @@ pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --out pii-check
 ```
 
 To pin the source rather than the package, install
-`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0#subdirectory=pii-leak-benchmark`.
+`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1#subdirectory=pii-leak-benchmark`.
 
 The local command expects upstream routing to `http://127.0.0.1:8765/v1`. It writes a Markdown
 summary, raw measurements and a versioned operator report. These smoke checks are separate
@@ -108,6 +108,26 @@ fragment on what it looks like it is a weak one: `--exhaustive-splits` cuts at e
 offset and fails the case if any split leaks. Measured against a live Presidio, it moved
 `LeakRate(adversarial)` from 0.50 to 1.00. Use it before quoting a `DeltaFrag` from any
 context-scored or validating detector.
+
+**Partial emission is scored separately, as its own tier.** `LeakRate` counts a case as
+leaked only when the complete injected value can be recovered from the response. A gateway
+that forwards the first fragment of a value and masks the rest once it recognises the join
+(`user@exa`, then `[REDACTED]`) passes that check, although the client already has part of
+the value. `--partial-emission` runs a second pass with the same seed, corpus and partitions
+and writes `<name>.partial-emission.json` beside each report, under its own schema id
+(`llm-shield.partial-emission/v1.0.0`) and its own instrument digest:
+
+- for the in-process reference policies it applies the exact test: the policy's output for
+  the whole stream must be byte-identical to its output chunk by chunk;
+- for a gateway reached with `--gateway-url` it looks for a contiguous run of the injected
+  value, not supplied by the client, of at least `MIN_SPECIFIC_RUN` characters. The
+  threshold and how it was measured are documented in
+  `pii_leak_benchmark/partial_emission.py`, and `benchmarks/partial_emission_threshold.py` in
+  the repository reproduces the measurement.
+
+The tier is `partial-emission`, ranked after `cross-field-join` so it can be discounted on its
+own. It never changes `LeakRate`, `DeltaFrag`, `outcome` or the v2 report's
+`inspector_sha256`, and rows already published were scored without it and are not re-scored.
 
 `spec/v2.0.0` is a **draft** and is amended in place; `spec/v1.0.0` is frozen.
 

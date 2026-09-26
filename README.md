@@ -101,10 +101,16 @@ pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 `selfcheck` needs 0.2.0 or newer.
 
 To fail your own build on a leak, the complete workflow file and the three settings you have
-to change are in the [CI setup guide](website/docs/conformance/ci.md), with a shorter copy in
+to change are in the [CI setup guide](https://llmshieldproxy.com/docs/conformance/ci), with a
+shorter copy in
 [`examples/ci/gateway-pii-check.yml`](examples/ci/gateway-pii-check.yml). That path needs
 0.3.0 or newer, which adds the `ci` subcommand, the GitHub Action, and baseline comparison
 against your previous version.
+
+To build the proxy in its own fork and retain both request and 32-case response reports,
+use the [source-build CI recipes](website/docs/conformance/source-ci.md) for
+LLM-Shield-Proxy, Portkey, LiteLLM, or NeMo Guardrails. The workflow starts its own
+synthetic capture, so no model account is needed.
 
 It reports one row per data type, so you can see what your gateway handled and what it missed:
 
@@ -214,7 +220,7 @@ The maintained component map and deployment diagrams live in the
 
 | Area | What is implemented | Where the evidence stops |
 |---|---|---|
-| Detection | 10 native Tier 1 patterns, Tier 2 Shannon entropy, optional Tier 3 ONNX NER, BYOR rules | [Supported types](website/docs/features/data-protection-pii-redaction/supported-pii-types.md) · no recall guarantee on unlabeled traffic |
+| Detection | 11 native Tier 1 data types, Tier 2 Shannon entropy, optional Tier 3 ONNX NER, BYOR rules | [Supported types](website/docs/features/data-protection-pii-redaction/supported-pii-types.md) · no recall guarantee on unlabeled traffic |
 | Streaming privacy | Sliding-window SSE rehydration, bounded streaming JSON lexer | [Architecture](website/docs/architecture.md) · [conformance method](website/docs/conformance/index.md) |
 | Masking | Synthetic, structural-tag, scrub, operator-keyed stateless crypto | [Masking guide](website/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy.md) · plaintext still exists in process memory |
 | Security controls | SSRF/DNS-rebinding egress checks, request policy, rate and blast-radius limits, canary tripwires | [Security](website/docs/security.md) · not a substitute for network policy |

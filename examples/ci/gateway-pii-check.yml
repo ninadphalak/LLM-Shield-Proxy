@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Build/install your gateway before this step.
-      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.0
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1
         with:
           target-base-url: http://127.0.0.1:4000/v1
           start-command: ./scripts/start-test-gateway.sh

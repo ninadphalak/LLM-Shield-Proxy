@@ -2,7 +2,7 @@
 title: Which gateways leaked, and which did not
 sidebar_label: Results wall
 sidebar_position: 2
-description: Eight LLM gateways measured with pii-leak-benchmark, with the exact version and configuration each result came from.
+description: LLM gateways measured with pii-leak-benchmark, with the exact version and configuration each result came from.
 image: /img/wall-social-card.png
 ---
 
@@ -24,12 +24,32 @@ yours does three things:
 
 Do all three and you pass.
 
-## No gateway here has passed yet
+## Ours did not pass either, at first
 
-**Ours has not either, and we wrote the check.** With its response scan on, 1.6.0 leaked 2 of the
-16 values sent whole and 4 of the 16 sent split, and that row is below. We have since fixed those
-cases, and the passing row goes up when the evidence does, not before. Find a case that trips us
-and we will add it to the corpus and credit you.
+With its response scan on, 1.6.0 leaked 2 of the 16 values sent whole and 4 of the 16 sent
+split. We wrote the check and it caught us.
+
+**1.6.6 passes.** Nothing reaches the provider, every value comes back to the caller, and
+every injected value is caught both whole and split across two chunks. Both rows are below,
+so the change is something you can see rather than take on trust, and the report behind it
+is on the [results page](./results.md).
+
+**On the default settings it still does not pass.** Response scanning is off unless you turn
+it on, because it changes what callers receive, so the out-of-the-box row leaks 16 of 16
+both ways. That row is below too.
+
+A result from the people who built the instrument is the most conflicted row here, which is
+why the "Who ran it" column sorts our own runs alongside the self-reported ones rather than
+above them. That does not change because the number improved.
+
+**No gateway other than ours has passed yet.** The first one that does gets a mark on its
+row in the table below, and keeps it. It goes to any gateway we did not write, whether we
+measured it or its own maintainers did, as long as there is a run behind the numbers to
+open. It is computed from the published rows rather than handed out, which is not the same
+as saying it cannot be gamed: a project that fabricated a report could take it, and would
+be doing so in public under its own name.
+
+Find a case that trips either configuration and we will add it to the corpus and credit you.
 
 ## Try it in one line
 
@@ -40,7 +60,10 @@ pipx run pii-leak-benchmark --target-base-url http://localhost:4000/v1
 ```
 
 It prints what it sent, what came back, and which of the three questions your gateway answered.
-About a minute. To put the result in CI and on your README, see [the CI setup](./ci).
+About a minute. To put the result in CI and on your README, see [the CI setup](./ci.mdx).
+
+Nothing running yet? [Try it from scratch](./try-it-from-scratch.md) starts with an empty machine
+and ends with two results you measured yourself, ours and LiteLLM's, side by side.
 
 ## Everything we have tested
 
@@ -97,17 +120,97 @@ find, and it is invisible to any test that sends values whole.
 
 ## Add your gateway
 
-About ten minutes, and you do not need an account, an API key, or a paid model.
+**No gateway on this page has passed yet.** Ours has not either, and we wrote the check. If
+yours does, you would be the first, and that is worth saying loudly.
 
-**1. Run it.** Copy [the CI setup](./ci) into your repository and change three lines: where your
-gateway listens, the command that starts it, and the environment variable it reads for its
-provider URL.
+About ten minutes. No account, no API key, no paid model.
 
-**2. Make the result checkable.** Run `pii-leak-benchmark cite` on the report. It prints a short
-block naming the version of the check and the test data it used, so someone else can repeat your
-exact run.
+```mermaid
+flowchart LR
+  A["Your CI runs<br/>the check"] --> B["Click the link in<br/>the job summary"]
+  B --> C["Your row is<br/>on this page"]
+  style C fill:#d4f4dd,stroke:#2d7a4a,color:#14532d
+```
 
-**3. Post it.** [Open a prefilled issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?title=Result%3A%20%3Cyour%20gateway%20name%3E&body=Gateway%20and%20version%3A%0ALink%20to%20the%20project%3A%0AHow%20it%20inspects%20streaming%20responses%20%28one%20chunk%20at%20a%20time%2C%20buffered%2C%20other%29%3A%0A%0A%23%23%23%20Citation%20block%0A%0AOutput%20of%20%60pii-leak-benchmark%20cite%60%3A%0A%0A%60%60%60%0Apaste%20here%0A%60%60%60%0A%0A%23%23%23%20The%20result%0A%0A-%20Outcome%20%28CLEAN%20%2F%20LEAK%20%2F%20CHECK%20FAILED%20%2F%20NOT%20MEASURED%29%3A%0A-%20If%20something%20changed%20since%20a%20previous%20run%2C%20what%20and%20in%20which%20version%3A%0A-%20Anything%20that%20looked%20wrong%20or%20that%20you%20think%20the%20check%20got%20wrong%3A%0A&labels=conformance-result) and paste the block in. We add your row.
+**1. Run it in your CI.** Copy [the CI setup](./ci.mdx) and change three lines: where your gateway
+listens, the command that starts it, and the environment variable it reads for its provider URL.
+
+**2. Send the result.** Your job summary ends with a link that opens a prefilled submission.
+Click it, add your gateway's name and licence, and submit. Or from wherever the report is:
+
+```bash
+pii-leak-benchmark submit
+```
+
+**3. Wait about three minutes.** Your row appears here on its own, with no maintainer in the
+loop. The issue you opened closes itself with a link to it.
+
+If the page still looks the same, it is cached rather than missing. Hard refresh:
+`Ctrl` + `Shift` + `R` on Windows and Linux, `Cmd` + `Shift` + `R` on a Mac.
+
+:::tip What actually gets published
+The numbers come out of your CI run's own build artifact, never from anything you type. So
+nothing is retyped, nothing can be mistyped, and nothing can be shaded in your favour or against
+it. The three things no report records, your gateway's name, its licence and how it reads a
+stream, are yours to state and are marked self-reported, like everything else here.
+
+Link a public run or there is nothing to read. A run that has expired often cannot be read
+either; rerun and resubmit, and a second submission replaces your row rather than adding one.
+:::
+
+## Tell people
+
+A result nobody sees changes nothing. Both of these are worth more than a screenshot, because
+they are things a reader can click and check.
+
+**On your README**, a badge that carries the result rather than a green tick:
+
+```markdown
+[![PII leak check](https://img.shields.io/endpoint?url=https://OWNER.github.io/REPO/pii-leak-badge.json)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
+```
+
+It reads `contained`, or `leaked 4 of 16`, rather than merely saying your workflow exited
+cleanly, and it names the version it measured.
+
+**The badge is yours, not ours.** The run writes `pii-leak-badge.json` beside its other
+reports and you publish that file from your own repository. Nothing is hosted here, there is
+nothing to register, and no permission is asked for or given. Deleting the line from your
+README removes it, and deleting the file stops it updating. We never add a badge to anybody's
+project and cannot.
+
+**If you would rather not publish what it found**, there is a quieter one:
+
+```bash
+pii-leak-benchmark badge current.json --style neutral
+```
+
+That badge reads `benchmarked` and nothing else. It is blue rather than green, deliberately,
+because a neutral badge wearing the pass colour would be worse than no badge at all. It says
+the true and much smaller thing: this project runs the check. What the check found stays in
+the run.
+
+Three options, then: publish the result, publish that a check ran, or publish neither.
+
+**Anywhere else**, link this page. It carries a preview card, and any row is fair to point
+at, including one that is not yours. A gateway quietly forwarding data its users assume is
+redacted is worth telling people about, and a row here is checkable in a way a screenshot is
+not: the version, the configuration and the run behind it are all on the page.
+
+- [Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it)
+- [Share on X](https://twitter.com/intent/tweet?url=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it&text=Which%20LLM%20gateways%20send%20your%20users%27%20data%20to%20the%20model%20provider%2C%20measured%20rather%20than%20asserted%3A)
+- [Share on Hacker News](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fllmshieldproxy.com%2Fdocs%2Fconformance%2Fwho-has-run-it)
+
+Posting a leak is worth as much as posting a pass. A row going from `leak` to `contained` in a
+later version says your team found a real bug and fixed it, and the table draws that arrow for
+you.
+
+### If you think a row is wrong
+
+Ours included. [Open a question](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)
+and the count appears next to that row, linking to what you wrote. Nothing is hidden or moved
+down the table while it is open: this page publishes disagreements rather than settling them
+quietly, which is the same reason two runs of the same gateway that disagree both stay up. The
+count clears when the question is closed.
 
 ### Forks and branches are welcome
 
@@ -129,17 +232,6 @@ Send your result whatever it says.
 One thing to leave out: request or response bodies from a real deployment. The block from step 2
 carries no customer data, but a captured payload might.
 
-## Show the result on your README
-
-```markdown
-[![PII leak check](https://img.shields.io/endpoint?url=https://OWNER.github.io/REPO/pii-leak-badge.json)](https://github.com/OWNER/REPO/actions/workflows/pii-leak-check.yml)
-```
-
-The run writes `pii-leak-badge.json` beside its other reports. Publish that file from your own
-repository and the badge reads `contained`, or `leaked 4 of 16`, rather than merely saying your
-workflow exited cleanly. Nothing is hosted here and there is nothing to register. Full setup is
-in [the CI guide](./ci).
-
 ## Credit
 
 <CorpusCredits />
@@ -158,7 +250,7 @@ earlier version on this page. That is revision history rather than a ranking: it
 fixed something, which is the entire behaviour this page exists to encourage.
 
 Full numbers for every run above, including the reference policies we use to calibrate the
-instrument, are on the [published results](./results) page, generated from the report files in
+instrument, are on the [published results](./results.md) page, generated from the report files in
 the repository.
 
 Questions about any of this are welcome in the same issue tracker.

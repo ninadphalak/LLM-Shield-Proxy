@@ -1,0 +1,109 @@
+name: Conformance submission intake
+
+# A benchmark result posted as an issue becomes a row on the results wall, with no manual
+# step in between.
+#
+# WHAT RUNS WHERE, because it matters. The submitter runs the benchmark in THEIR OWN
+# repository's CI. They then open an issue here, which is text and executes nothing. This
+# workflow is this repository's own code, from its own default branch, on its own runner;
+# it READS their public run's artifact over the API, derives the row from it, builds this
+# site, and commits. No code from a submitter ever executes here, and nobody outside opens
+# a pull request against this repository to get a row.
+#
+# HOW THE ROW LANDS. Through a pull request, which `main` requires, opened under
+# RESULTS_WALL_TOKEN and left to auto-merge. It is not opened under GITHUB_TOKEN because
+# such a pull request has its workflow runs created and then held at `action_required` with
+# zero jobs: PR-Agent never reports, the required check never goes green, and auto-merge
+# would wait forever.
+#
+# The gates run BEFORE the commit, inside the script: the public-docs content scan over the
+# row, then a real `npm run build`. A row carrying banned text or breaking the site fails
+# there and never reaches a branch.
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One publish at a time across the whole repository, not one per issue. Two submissions
+  # landing together would otherwise race to push the same file to main.
+  group: conformance-intake
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (contains(github.event.issue.labels.*.name, 'conformance-result') ||
+       startsWith(github.event.issue.title, 'Result:'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      # The row lands through a pull request this job opens and merges, because `main`
+      # requires changes to arrive that way. Satisfying the rule beats being exempted from
+      # it: no bypass list, no deploy key, no stored token, and a reviewable PR per row.
+      pull-requests: write
+      # For reading the artifact of the submitter's run. Whether a token issued for this
+      # repository can read another public repository's artifacts is a question only a
+      # real run answers; the script treats a refusal as "no report", which produces a
+      # comment asking for one rather than a failed job.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # A shallow checkout cannot rebase before pushing, and this job pushes.
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install the content checker
+        run: pip install pytest
+
+      - name: Read the submission, verify the run, publish the row
+        id: publish
+        env:
+          # RESULTS_WALL_TOKEN, falling back to GITHUB_TOKEN, and the fallback only keeps
+          # the job running rather than working properly. `main` requires PR-Agent's
+          # check, and a pull request opened by GITHUB_TOKEN has its workflow runs created
+          # and then held at `action_required` with zero jobs: PR-Agent never reports, the
+          # required check never goes green, and auto-merge waits forever. A PR opened
+          # under a real token triggers the reviewers like any other.
+          #
+          # The token is fine-grained and scoped to this repository, Contents and Pull
+          # requests, write. It is not here to get a review on a one-line JSON row, which
+          # is worth nothing. It is here so the rule that every CODE pull request passes
+          # PR-Agent can be enforced by GitHub rather than by an agent remembering it.
+          GH_TOKEN: ${{ secrets.RESULTS_WALL_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+        # The issue body is read from the event payload file on disk. It is never
+        # interpolated into this script: the body is attacker-controlled text, and
+        # ${{ github.event.issue.body }} on a `run:` line is a shell injection.
+        run: python scripts/process_conformance_submission.py
+
+      # THE SITE IS DEPLOYED FROM HERE, not by deploy-docs.yml, and this is not a
+      # duplication to tidy away. The same rule that stops a GITHUB_TOKEN pull request
+      # from getting checks also stops a GITHUB_TOKEN PUSH from starting a workflow: the
+      # commit above lands on main and deploy-docs.yml never fires. Without this step a
+      # row would be committed and then sit there, invisible, until somebody happened to
+      # push something else.
+      #
+      # `npm run build` already ran inside the script, before the commit, so this only
+      # uploads what was built. The build is the gate; this is the delivery.
+      - name: Deploy the built site
+        if: steps.publish.outcome == 'success'
+        uses: w9jds/firebase-action@d462443a9654f6ed6d84972a0215e273c21107ce # master, pinned 2026-09-12
+        with:
+          args: deploy --only hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_PATH: ./website

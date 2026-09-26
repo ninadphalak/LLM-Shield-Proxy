@@ -9,6 +9,17 @@ on:
   # independent reproducer clones.
   pull_request:
     branches: [main]
+    # A published results-wall row is one line of JSON in a data file, and nothing in this
+    # workflow can be affected by it: this reproduces frozen evidence and recomputes
+    # published rates. Every submission opens a pull request, so without this the whole
+    # reproduction matrix, on four platforms, runs to add a table row.
+    #
+    # NOT applied to ci.yml, deliberately. That one runs `test_public_docs_style.py`,
+    # which is the only automated check on the CONTENT of a submitted row: the em dash and
+    # banned-phrase scan over `website/src/data`. Skipping it would remove the guard
+    # exactly where stranger-supplied text arrives.
+    paths-ignore:
+      - 'website/src/data/submitted-rows.json'
   release:
     types: [published]
   workflow_dispatch: {}

@@ -1,25 +1,15 @@
-"""The benchmark must not carry the gateway -- in its imports, its install, or its name.
+"""The benchmark must not carry the gateway in its imports, its install, or its name.
 
-``pii-leak-benchmark`` is a separate distribution from ``llm-shield-proxy`` so the
-benchmark remains gateway-independent and measuring one gateway does not require
-installing another gateway's full stack.
-
-The dependency direction is one-way and it is the thing these tests defend:
-
+The dependency direction is strictly one-way to ensure the benchmark remains
+gateway-independent:
     llm-shield-proxy  --may-use-->  pii-leak-benchmark
     pii-leak-benchmark  --never-->  llm-shield-proxy
 
-History, because each defect here survived the test that was supposed to catch it:
-the harness's ``__init__`` once imported the local profile eagerly, which dragged in
-OpenTelemetry, redis, cryptography, pydantic, google-re2 and faker; making the import
-lazy was not enough because ``run_http_conformance`` still called ``build_attestation``
-from that module on every run; and the import graph was clean for a whole round while
-``pip install`` still pulled 20 packages and the CLI still pulled 26. Import graph,
-declared dependencies and a real installation are three different claims. All three
-are asserted below.
+Import graph, declared dependencies, and a real installation are three different claims;
+all three are asserted below.
 
-Each subprocess test runs in a SUBPROCESS on purpose. The parent pytest process has
-already imported the proxy, so an in-process assertion would pass vacuously.
+Tests run in subprocesses because the parent pytest process has already imported the proxy,
+making in-process assertions vacuously true.
 """
 
 import json
@@ -34,18 +24,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_DIST = REPO_ROOT / "pii-leak-benchmark"
 BENCHMARK_PACKAGE = BENCHMARK_DIST / "pii_leak_benchmark"
 
-# The floor: httpx's own dependency tree. The profile itself needs nothing beyond it.
-# Listed generously (a venv with httpx[cli] present pulls click/rich/pygments) because
-# the assertion is a subset check -- what matters is that nothing else appears.
-#
-# `attr` is here for the same reason and it is worth spelling out, because it looked at
-# first like the gateway stack leaking in. `httpx/__init__.py` does a guarded
-# `from ._main import main`; `_main` imports click and rich; and `rich/pretty.py` does a
-# bare `import attr as _attr_module` at module scope. So whenever `attrs` happens to be
-# installed for some unrelated reason, `import httpx` reaches it -- through rich, which is
-# already allowed here. The dependency direction this file defends is untouched by that:
-# nothing from llm-shield-proxy appears either way. What the set must never grow is a
-# gateway package.
+# The floor: httpx's dependency tree. The profile itself needs nothing beyond it.
+# Listed generously (including click/rich/pygments/attr from httpx[cli]) because the
+# assertion is a subset check -- what matters is that no gateway package appears.
 HTTPX_TREE = {
     "anyio",
     "attr",
@@ -121,11 +102,7 @@ def test_cli_import_needs_nothing_beyond_httpx():
 
 
 def test_no_module_in_the_benchmark_mentions_the_proxy_package():
-    """Structural, so it fails on the line that introduces it, not on a heavy run.
-
-    A conditional or lazily-imported reference would still make the neutral measurer
-    depend on one of the things it measures.
-    """
+    """Fails structurally on introduction, preventing even lazily-imported references."""
     offenders = []
     for source in sorted(BENCHMARK_PACKAGE.glob("*.py")):
         for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
@@ -190,9 +167,8 @@ def test_build_attestation_is_available_without_the_proxy():
     script = textwrap.dedent(
         """
         import os, sys
-        # GITHUB_SHA wins over the override by design, and it is set on every GitHub
-        # runner -- the same ambient-environment trap that made three other tests in
-        # this repository pass locally and fail in CI.
+        # Clear GITHUB_SHA to prevent the ambient-environment trap (where tests pass
+        # locally but fail in CI) since it overrides the environment variable by design.
         os.environ.pop("GITHUB_SHA", None)
         os.environ["PII_LEAK_BENCHMARK_SOURCE_REVISION"] = "abc123"
         from pii_leak_benchmark.provenance import build_attestation
@@ -244,8 +220,7 @@ def test_the_benchmark_never_depends_on_the_thing_it_measures():
 def test_installing_the_proxy_installs_the_gateway_again():
     """`pip install llm-shield-proxy` must give you the proxy.
 
-    For one unpublished round the base install was the harness and the gateway sat
-    behind a `[proxy]` extra. That is the packaging this split replaced.
+    Ensures we haven't reverted to the old packaging where the base install was just the harness.
     """
     manifest = _manifest(REPO_ROOT / "pyproject.toml")
     base = set(_names(manifest["project"]["dependencies"]))
@@ -301,15 +276,10 @@ def _venv_python(target):
 
 
 def test_benchmark_installs_and_runs_in_a_clean_virtualenv(tmp_path):
-    """Install the benchmark into a fresh venv and RUN it from there.
-
-    Reading pyproject is not verification. The import graph was clean for a whole
-    round while `pip install` still pulled 20 packages, and both facts passed every
-    test in this file at the time.
+    """Installs the benchmark into a fresh venv and runs it to verify isolation.
 
     Opt-in because it builds a wheel and hits the network. Set SHIELD_REQUIRE_VENV=1
-    to turn a missing prerequisite into a failure, following the repo convention that
-    a green build must never mean "nothing ran".
+    to fail if prerequisites are missing (ensuring "green" doesn't mean "nothing ran").
     """
     import os
     import venv

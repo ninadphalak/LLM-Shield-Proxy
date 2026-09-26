@@ -1,7 +1,6 @@
 """LLM-Shield Proxy application gateway.
 
-Transforms configured protected values before the selected upstream boundary and
-rehydrates supported values on the inspected response path.
+Redacts protected values from requests and rehydrates them in responses.
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ from llm_shield_proxy.streaming.streaming import (
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.6.6"
+APP_VERSION = "1.6.7"
 
 
 class AppState:
@@ -88,12 +87,7 @@ class AppState:
     background_tasks: Set[asyncio.Task] = set()
 
     def spawn_background_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
-        """Schedules a fire-and-forget task while retaining a strong reference.
-
-        Per asyncio's own docs, a task with no retained reference can be garbage
-        collected mid-execution; this keeps it alive in `background_tasks` until
-        it completes, then lets the done-callback drop the reference.
-        """
+        """Schedule a fire-and-forget task, keeping a strong reference to prevent garbage collection."""
         task = asyncio.create_task(coro)
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
@@ -112,10 +106,7 @@ def _get_vkid_from_hash(key_hash: str) -> str:
 
 
 def get_virtual_key_id(client_auth: str) -> str:
-    """Computes a fast, cryptographically salted virtual key fingerprint using HMAC-SHA256.
-
-    Uses SHA-256 pre-hash as LRU cache key to avoid storing raw API keys in plaintext memory.
-    """
+    """Compute HMAC-SHA256 key fingerprint, caching via pre-hash to avoid storing plaintext keys."""
     if not client_auth:
         return "anonymous"
     key_hash = hashlib.sha256(client_auth.encode("utf-8")).hexdigest()
@@ -123,16 +114,12 @@ def get_virtual_key_id(client_auth: str) -> str:
 
 
 def _is_safe_ip(ip_str: str) -> bool:
-    """Validates that resolved IP address is strictly public and safe from SSRF.
-
-    Delegates to the egress firewall's baseline denylist so the proxy and the MCP
-    gate cannot drift into two different answers for the same address.
-    """
+    """Check if IP is public using the shared egress denylist to prevent SSRF."""
     return is_public_ip(ip_str)
 
 
 async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[str]]:
-    """Asynchronously resolves A and AAAA DNS records in executor to avoid blocking ASGI loop."""
+    """Async DNS resolution via executor."""
     if not hostname:
         return False, None
     loop = asyncio.get_running_loop()
@@ -156,7 +143,7 @@ async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[
 
 
 async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
-    """Asynchronously resolves DNS records for trusted internal egress gateway."""
+    """Async DNS resolution for trusted internal gateways."""
     if not hostname:
         return None
     loop = asyncio.get_running_loop()
@@ -168,7 +155,7 @@ async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
     if not infos:
         return None
 
-    # Return the first successfully resolved IP without SSRF restriction
+    # Return the first resolved IP without SSRF restriction
     for family, _, _, _, sockaddr in infos:
         ip_candidate = str(sockaddr[0])
         return ip_candidate
@@ -176,7 +163,7 @@ async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
 
 
 class ConfigHandler(FileSystemEventHandler):
-    """File watcher handler triggering dynamic configuration reloading."""
+    """File watcher triggering dynamic config reloads."""
 
     def on_modified(self, event: Any) -> None:
         if event.src_path.endswith("config.yaml") or event.src_path.endswith(".env"):
@@ -184,13 +171,7 @@ class ConfigHandler(FileSystemEventHandler):
 
 
 def build_upstream_client() -> httpx.AsyncClient:
-    """Construct the upstream AsyncClient.
-
-    Single source of truth for the pool's configuration. The lifespan pool and
-    `get_http_client`'s lazy fallback used to build their clients from two
-    copies of this block that had silently diverged on `http2`, so any request
-    served by the fallback dropped to HTTP/1.1 without a signal.
-    """
+    """Construct the shared upstream HTTP client. Centralized to prevent HTTP/2 downgrade bugs."""
     verify: bool | str = True
     if settings.INSECURE_SKIP_VERIFY:
         verify = False
@@ -222,19 +203,13 @@ def build_upstream_client() -> httpx.AsyncClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manages application lifecycle, shared HTTP connection pools, and background observers."""
+    """Manage app lifecycle, HTTP pools, and background watchers."""
     import os
 
     app_state.is_draining = False
     app_state.shutdown_event = asyncio.Event()
 
-    # ONE read of the flag, shared by the conditional import and the startup below.
-    # `settings` is a hot-reloading proxy, so reading it twice can give two different
-    # answers: the import is skipped and the use site then finds the name unbound.
-    #
-    # Snapshotting is what makes them agree. Binding to None alone was not enough --
-    # it turned a NameError into a SILENT SKIP, leaving ext-proc configured as enabled
-    # and never started, which is worse because nothing says so.
+    # Snapshot ENABLE_EXT_PROC to prevent mid-startup race conditions from hot reloads.
     enable_ext_proc = settings.ENABLE_EXT_PROC
     serve_ext_proc = None
     if enable_ext_proc:
@@ -257,12 +232,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from llm_shield_proxy.engines.pii_engine import pii_engine
 
-    # Derived from the loaded session, not from whether a path is configured. The old
-    # form claimed "Active (Production ONNX Model)" whenever ONNX_MODEL_PATH was set,
-    # even when the model had failed to load and no PERSON span could be produced -- and
-    # its other branch still advertised a "Keyword fallback" that no longer exists.
-    # Both wordings contradicted the warning the engine logs. This echoes the status word
-    # from the same coverage snapshot; the actionable prose is the engine's warning.
+    # Derive ONNX status from the loaded engine rather than the config path.
     ner_coverage = pii_engine.describe_ner_coverage()
     if not ner_coverage["tier3_enabled"]:
         tier3_status = "Disabled"
@@ -329,9 +299,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     policy_watch_task = asyncio.create_task(_watch_policies())
 
-    # Moves the vault store's TTL sweep off the per-request hot path (see
-    # VaultStore.get_vault / run_eviction_loop docstrings). Only meaningful for
-    # the in-memory VaultStore -- RedisVaultStore relies on native key TTLs.
+    # Move in-memory vault eviction off the request hot path.
     vault_eviction_task = None
     if isinstance(vault_store, VaultStore) and shutdown_ev is not None:
         vault_eviction_task = asyncio.create_task(
@@ -344,25 +312,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if enable_ext_proc:
         if serve_ext_proc is None:
-            # Unreachable while the snapshot above is the only reader of the flag.
-            # Loud rather than silent: ext-proc being enabled and absent is a
-            # configuration the operator must know about, not one to paper over.
+            # Explode loudly if ext-proc is enabled but fails to import.
             raise RuntimeError(
                 "ENABLE_EXT_PROC is set but the ext-proc service could not be imported"
             )
         if os.name != "nt":
             sock_dir = os.path.dirname(sock_path)
-            # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
-            # Apply the sticky bit (1) alongside 770 permissions
+            # SECURITY: Restrict socket parent dir to proxy/envoy group with sticky bit (1770)
             os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
-            # Security Note: The sticky bit (0o1770) is intentionally applied to the socket directory for IPC security
             os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
 
             if os.path.exists(sock_path):
                 os.unlink(sock_path)
 
-            # SECURITY: Prevent local privilege escalation (TOCTOU) by using umask
-            # before socket creation, rather than chmod after creation.
+            # SECURITY: Use umask to prevent TOCTOU privilege escalation during socket creation.
             old_umask = os.umask(0o117)  # Inverts to 0o660
             try:
                 grpc_server = await serve_ext_proc(sock_path)
@@ -425,8 +388,7 @@ app.include_router(health_router)
 app.include_router(webhook_router)
 app.include_router(audit_router)
 app.include_router(mcp_router)
-# Must precede the /{path:path} passthrough below; FastAPI resolves in
-# registration order and the catch-all would otherwise swallow /v1/guard/*.
+# Must precede the catch-all `/{path:path}` below to avoid swallowing routes.
 app.include_router(guard_router)
 
 
@@ -438,14 +400,7 @@ SECURITY_HEADERS = {
 
 
 def apply_security_headers(response: Response, request_id: Optional[str] = None) -> Response:
-    """Stamp the security headers, and the correlation ID when we have one.
-
-    Both `security_and_tracing_middleware` and `global_exception_handler` call
-    this. The handler needs its own call because Starlette runs it inside
-    `ServerErrorMiddleware`, which sits *outside* the user middleware stack --
-    so a sanitized 500 never passes back through the middleware and used to
-    carry neither the security headers nor an X-Request-ID.
-    """
+    """Stamp security headers and correlation ID. Called by both middleware and exception handlers."""
     for header, value in SECURITY_HEADERS.items():
         response.headers[header] = value
     if request_id:
@@ -455,7 +410,7 @@ def apply_security_headers(response: Response, request_id: Optional[str] = None)
 
 @app.middleware("http")
 async def security_and_tracing_middleware(request: Request, call_next: Any) -> Response:
-    """Attaches correlation request IDs and enterprise HTTP security headers."""
+    """Attach request IDs and enterprise security headers."""
     if app_state.is_draining:
         return JSONResponse(
             status_code=429,
@@ -473,8 +428,7 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         response: Response = await call_next(request)
         return apply_security_headers(response, request_id)
     finally:
-        # Lock wraps both the decrement and the drain-signal check to prevent a TOCTOU
-        # race where active_requests transitions 1â†’0 between the read and set() calls.
+        # Lock prevents TOCTOU race on `active_requests` during drain.
         with app_state.active_requests_lock:
             app_state.active_requests -= 1
             if app_state.is_draining and app_state.active_requests == 0 and app_state.shutdown_event is not None:
@@ -485,21 +439,7 @@ _TRACEBACK_FRAME_LIMIT = 20
 
 
 def _format_sanitized_traceback(exc: BaseException) -> str:
-    """Frame locations only -- ``file:line in function`` -- and nothing else.
-
-    ``exc_info=exc`` hands the logging module the whole exception, and the last line it
-    renders is ``str(exc)`` -- exactly the part that can embed raw request content
-    ("invalid literal for int() with base 10: '<value under inspection>'"). Dropping the
-    traceback altogether is the other extreme: it honours the zero-PII invariant and
-    leaves a 500 with nowhere to look. Locations are the middle: they pin the fault to a
-    line and cannot carry runtime data.
-
-    ``lookup_lines=False`` is load-bearing, not an optimisation. The rendered source line
-    a normal traceback shows is the one place a frame can reproduce a value verbatim --
-    a literal on the raising line -- and it also costs file I/O on an error path. We
-    never read it. Chained causes are not walked either: their messages are the same
-    hazard, and the immediate frames already locate the fault.
-    """
+    """Return `file:line in function` without `str(exc)` or source lines to prevent PII leakage."""
     try:
         summary = traceback.StackSummary.extract(
             traceback.walk_tb(exc.__traceback__),
@@ -515,17 +455,7 @@ def _format_sanitized_traceback(exc: BaseException) -> str:
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Sanitized global exception handler preventing raw PII or stack trace leaks.
-
-    The client only ever sees a flat "Internal Server Error". The operational
-    application logger records the exception's type name and its frame LOCATIONS
-    (``file:line in function``), but never ``str(exc)``: an exception raised
-    mid-redaction can carry a fragment of the unredacted prompt in its message, whereas
-    a location cannot carry runtime data at all. See ``_format_sanitized_traceback``.
-    The *fact* that a request failed unhandled is additionally written to the signed
-    WORM audit chain (see AuditLogger.log_unhandled_exception), which is stricter still
-    and carries only the exception type.
-    """
+    """Sanitized global exception handler preventing raw PII or stack trace leaks."""
     request_id = getattr(request.state, "request_id", None) or "n/a"
     logger.error(
         "Unhandled exception on %s %s (request_id=%s, exception_type=%s)\n%s",
@@ -545,13 +475,12 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         status_code=500,
         content={"error": {"message": "Internal Server Error", "type": "server_error"}},
     )
-    # `request_id` is "n/a" only if the exception beat the middleware to
-    # assigning one; don't echo that placeholder back as a correlation ID.
+    # Don't echo placeholder request ID.
     return apply_security_headers(response, request_id if request_id != "n/a" else None)
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
-    """Retrieves or lazily initializes the shared AsyncClient from app state."""
+    """Retrieve or lazily initialize the shared AsyncClient."""
     client = getattr(request.app.state, "http_client", None)
     if client is None or getattr(client, "is_closed", False):
         client = build_upstream_client()
@@ -560,7 +489,7 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
 
 
 def build_target_url(upstream_base: str, path: str) -> str:
-    """Constructs sanitized upstream target URL, resolving provider-specific pathing."""
+    """Construct sanitized upstream target URL, resolving provider-specific pathing."""
     base = upstream_base.rstrip("/")
     p = path.lstrip("/")
     if p.startswith("v1/"):
@@ -570,7 +499,7 @@ def build_target_url(upstream_base: str, path: str) -> str:
 
 
 async def read_body_with_limit(request: Request, limit: Optional[int] = None) -> bytes:
-    """Reads request body stream enforcing maximum memory payload limits."""
+    """Read request body stream enforcing max memory payload limits."""
     max_limit = limit or settings.MAX_PAYLOAD_SIZE_BYTES
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -613,7 +542,7 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
 
 @app.get("/metrics", tags=["Observability"])
 async def metrics_endpoint(request: Request) -> Response:
-    """Prometheus metrics endpoint with optional Bearer token security."""
+    """Prometheus metrics endpoint with optional token security."""
     if settings.METRICS_BEARER_TOKEN:
         auth_header = request.headers.get("authorization", "")
         token = auth_header.replace("Bearer ", "").strip()
@@ -624,7 +553,7 @@ async def metrics_endpoint(request: Request) -> Response:
 
 
 async def get_policy_resolver(request: Request) -> BasePolicyResolver:
-    """Dependency injection provider for the active Pluggable RBAC Engine."""
+    """Dependency provider for the active Pluggable RBAC Engine."""
     if not hasattr(request.app.state, "rbac_state"):
         request.app.state.rbac_state = {
             "cache": OrderedDict(),
@@ -651,7 +580,7 @@ PROVIDER_KEY_MAP: Dict[str, str] = {
 
 
 def resolve_upstream_key(hostname: str) -> Optional[str]:
-    """Resolves centralized enterprise provider key via dictionary lookup."""
+    """Resolve centralized enterprise provider key."""
     from llm_shield_proxy.security.vault_client import vault_provider
 
     attr_name = PROVIDER_KEY_MAP.get(hostname)
@@ -726,9 +655,7 @@ async def _proxy_catch_all_internal(
         elif origin and origin in allowed_origins:
             allow_origin = origin
         else:
-            # Strict-by-default: an unset/empty CORS_ALLOWED_ORIGINS (or an Origin not on
-            # the explicit allowlist) disables cross-origin access rather than reflecting
-            # the caller's Origin or falling back to "*".
+            # Strict-by-default: invalid origins get `null`.
             allow_origin = "null"
 
         return Response(
@@ -743,11 +670,7 @@ async def _proxy_catch_all_internal(
         )
 
     target_host = None
-    # Set only when upstream_base gets rewritten to an SSRF-validated IP literal below.
-    # Carries the original FQDN through to the outbound httpx call so TLS SNI and
-    # certificate hostname verification happen against the real domain -- pinning the
-    # *socket* to the validated IP without also pinning (and breaking) TLS to it. See
-    # the `extensions={"sni_hostname": ...}` call sites downstream.
+    # Original FQDN for TLS SNI when upstream_base is rewritten to an IP literal.
     sni_hostname: Optional[str] = None
 
     if settings.AIR_GAPPED_MODE and settings.EGRESS_GATEWAY_URL:
@@ -782,11 +705,7 @@ async def _proxy_catch_all_internal(
             port_str = f":{parsed.port}" if parsed.port else ""
             upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
 
-    # The effective upstream hostname for this request, captured before the
-    # SSRF pinning above swaps `upstream_base` for a validated IP literal.
-    # resolve_provider() keys the Anthropic adapter off this rather than off the
-    # model name, so it has to survive both the air-gapped and client-override
-    # rewrites; `sni_hostname` is set precisely when one of them fired.
+    # Effective upstream hostname before SSRF IP pinning.
     upstream_host = sni_hostname or urlparse(upstream_base).hostname
 
     target_url = build_target_url(upstream_base, path)

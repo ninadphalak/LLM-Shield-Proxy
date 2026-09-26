@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pii-leak-benchmark"
-version = "0.3.1"
+version = "0.4.1"
 description = "Measure whether an LLM gateway sends raw personal data to its upstream, and whether it restores it in the response."
 readme = "README.md"
 requires-python = ">=3.9"

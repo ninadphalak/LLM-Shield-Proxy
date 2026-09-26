@@ -139,7 +139,7 @@ identical rates in both arms is what demonstrates the 16-vs-16 pairing is sound;
 pairing would show a spurious gap.
 
 This is how ten instrument defects were caught, each recorded in the
-[revision history](./benchmark-revision-history). A control that should read 1.00 reading
+[revision history](./benchmark-revision-history.md). A control that should read 1.00 reading
 0.33 is how the Portkey socket-reuse bug surfaced.
 
 To run all five rather than the two:
@@ -238,7 +238,7 @@ Use `selfcheck`. It answers one question - *does my deployment leak?* - and it d
 you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1#subdirectory=pii-leak-benchmark"
 
 # Establish the floor FIRST. No gateway at all: this must report LEAK.
 pii-leak-benchmark selfcheck --target-base-url capture://self
@@ -289,7 +289,7 @@ its own exit code rather than being folded into either of the others.
 
 ### Running it in your own CI
 
-The [CI Action](./ci) handles controls, startup, summaries, artifacts and baseline comparisons. A short workflow example is in
+The [CI Action](./ci.mdx) handles controls, startup, summaries, artifacts and baseline comparisons. A short workflow example is in
 [`examples/ci/gateway-pii-check.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/examples/ci/gateway-pii-check.yml):
 it runs the floor first and fails unless every fixture type is detected, then checks your
 gateway and treats exit 2 as a failure rather than a pass.
@@ -336,7 +336,7 @@ For a hosted or production gateway that cannot reach your laptop, bind the captu
 your own tunnel with `--capture-public-url` and `--capture-token`; put credentials in
 `CONFORMANCE_CAPTURE_TOKEN` and `CONFORMANCE_TARGET_API_KEY` rather than argv, which is
 visible in process listings. See the
-[hosted-gateway runbook](./hosted-gateway-runbook).
+[hosted-gateway runbook](./hosted-gateway-runbook.md).
 
 Establish the floor first. The negative control has no gateway at all and **must** report
 `outcome=fail`; if it does not, your capture is not seeing traffic and no other row from
@@ -512,9 +512,9 @@ reporting.
 
 ## Related
 
-- [Reproduce the conformance report](./reproducing) - the v1.0.0 local and HTTP profiles.
-- [Published results](./results)
-- [Submit a run](./submitting)
+- [Reproduce the conformance report](./reproducing.md) - the v1.0.0 local and HTTP profiles.
+- [Published results](./results.md)
+- [Submit a run](./submitting.md)
 
 Use a fresh output directory. The checker rejects existing artifacts and destinations inside
 published evidence. The historical `bounded-retention` name stays for compatibility, but its

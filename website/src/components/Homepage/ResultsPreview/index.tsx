@@ -2,7 +2,7 @@ import type {ReactNode} from 'react';
 import Link from '@docusaurus/Link';
 import Heading from '@theme/Heading';
 import clsx from 'clsx';
-import {ROWS} from '@site/src/data/results-wall';
+import {MEASURED_ROWS} from '@site/src/data/results-wall';
 import styles from './styles.module.css';
 
 /**
@@ -14,11 +14,16 @@ import styles from './styles.module.css';
  * to the real table. Anything more is a wall of numbers before they know what is being
  * counted.
  *
- * It reads `ROWS`, never its own copy of the figures, so it cannot drift from the page it
- * links to.
+ * It reads the row data, never its own copy of the figures, so it cannot drift from the
+ * page it links to.
+ *
+ * MEASURED ROWS ONLY, and the heading says "measured", which is why. The wall also carries
+ * rows other projects submitted about themselves, and folding those into this count would
+ * turn a sentence about what we measured into a tally of what people told us. The full
+ * table, with the column that says which is which, is one click away.
  */
 export default function ResultsPreview(): ReactNode {
-  const leaked = ROWS.filter((row) => row.sentN > 0).length;
+  const leaked = MEASURED_ROWS.filter((row) => row.sentN > 0).length;
 
   return (
     <section className={styles.section}>
@@ -26,7 +31,7 @@ export default function ResultsPreview(): ReactNode {
         <div className={styles.header}>
           <span className={styles.eyebrow}>The results wall</span>
           <Heading as="h2" className={styles.title}>
-            {leaked} of {ROWS.length} measured setups sent data to the provider
+            {leaked} of {MEASURED_ROWS.length} measured setups sent data to the provider
           </Heading>
           <p className={styles.subtitle}>
             Each row is one gateway at one pinned version in one stated configuration,
@@ -37,7 +42,7 @@ export default function ResultsPreview(): ReactNode {
         </div>
 
         <div className={styles.rows}>
-          {ROWS.map((row) => {
+          {MEASURED_ROWS.map((row) => {
             const clean = row.sentN === 0;
             return (
               <div

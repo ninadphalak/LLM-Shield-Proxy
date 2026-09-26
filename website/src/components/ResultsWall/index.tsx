@@ -5,6 +5,7 @@ import {
   ARCHITECTURE,
   PROVENANCE,
   ROWS,
+  firstIndependentPass,
   type ResultRow,
 } from '@site/src/data/results-wall';
 import {safeHref} from '@site/src/utils/safeHref';
@@ -25,19 +26,23 @@ type Col = {
 // or every gateway that buffers, can have that; the site still ships none of those
 // orders as the default. See the page for why that distinction is load-bearing.
 const COLUMNS: Col[] = [
-  {key: 'project', label: 'Gateway', sortOn: (r) => r.project},
-  {key: 'version', label: 'Version', sortOn: (r) => r.version},
+  // Gateway, version and licence share one cell. They are three facts about WHICH row
+  // this is rather than three measurements, they are always read together, and as separate
+  // columns they pushed the four numbers that matter off the side of a narrow screen.
+  {key: 'project', label: 'Gateway', sortOn: (r) => `${r.project} ${r.version}`},
   {key: 'sent', label: "Sent the caller's data to the provider", sortOn: (r) => r.sentN, numeric: true},
   {key: 'restored', label: "Gave back the caller's own data", sortOn: (r) => r.restoredN, numeric: true},
-  {key: 'leakWhole', label: 'Leaked, value sent whole', sortOn: (r) => r.leakWholeN, numeric: true},
-  {key: 'leakSplit', label: 'Leaked, value split in two', sortOn: (r) => r.leakSplitN, numeric: true},
+  // `?? -1` sorts an unmeasured row below every measured one, in both directions, rather
+  // than mixing `undefined` into a numeric compare where it would land arbitrarily. A row
+  // that did not look is not a row that found nothing, and the two must not interleave.
+  {key: 'leakWhole', label: 'Leaked, value sent whole', sortOn: (r) => r.leakWholeN ?? -1, numeric: true},
+  {key: 'leakSplit', label: 'Leaked, value split in two', sortOn: (r) => r.leakSplitN ?? -1, numeric: true},
   {
     key: 'architecture',
     label: 'How it reads the stream',
     sortOn: (r) => ARCHITECTURE[r.architecture].rank,
     numeric: true,
   },
-  {key: 'license', label: 'Licence', sortOn: (r) => r.license},
   {
     key: 'provenance',
     label: 'Who ran it',
@@ -97,7 +102,81 @@ function Trend({
   );
 }
 
+const REPO = 'https://github.com/ninadphalak/LLM-Shield-Proxy';
+
+/**
+ * Open disputes against a row, as a number a reader can click.
+ *
+ * It is next to the gateway's name rather than in a column of its own because it is a
+ * caveat on the whole row, not another measurement of the product. Zero renders nothing:
+ * a column of noughts would read as a score, and this page does not publish one.
+ */
+function Flags({flags}: {flags?: {count: number; issue: number}}): ReactNode {
+  if (!flags || flags.count < 1) return null;
+  // Both halves come out of a JSON file a workflow writes, so neither is trusted here even
+  // though the workflow validates them. The issue number is forced to an integer before it
+  // can shape a path, and the finished URL still goes through the same guard every other
+  // link on this page uses.
+  const issue = Number.parseInt(String(flags.issue), 10);
+  if (!Number.isSafeInteger(issue) || issue < 1) return null;
+  const label = flags.count === 1 ? '1 open question' : `${flags.count} open questions`;
+  return (
+    <a
+      className={styles.flag}
+      href={safeHref(`${REPO}/issues/${issue}`)}
+      target="_blank"
+      rel="noreferrer"
+      title={`${label} about this row. Click to read them.`}>
+      {flags.count} open
+    </a>
+  );
+}
+
+/**
+ * Only `sent` and `restored` are lit, at their unambiguous value. The leak columns are
+ * not: a low count there can mean the gateway caught everything OR returned almost
+ * nothing, so colouring `0 of 16` green asserts the flattering reading of a number with
+ * two. No whole row is lit; that would be the ranking this page does not publish.
+ */
+
+/**
+ * One leak cell, which may have nothing in it.
+ *
+ * The two leak columns come from the response-split profile. The operator check that runs
+ * in a gateway's own CI measures the request side and fidelity and never produces them, so
+ * a row submitted from such a run has no number here. It says so, in words, rather than
+ * showing a blank a reader would read as zero.
+ */
+function Leak({
+  label,
+  now,
+  before,
+}: {
+  label?: string;
+  now?: number;
+  before?: number;
+}): ReactNode {
+  if (label === undefined || now === undefined) {
+    return (
+      <span
+        className={styles.muted}
+        title="This run measured what the gateway sent upstream. The response-split profile, which produces this number, was not part of it.">
+        not measured
+      </span>
+    );
+  }
+  return (
+    <>
+      {label}
+      {before !== undefined && <Trend now={now} before={before} label={label} />}
+    </>
+  );
+}
+
 export default function ResultsWall({rows = ROWS}: Props): ReactNode {
+  // Computed, so the mark is earned by the row rather than granted in a data file. It is
+  // undefined until a gateway this project did not write answers all three questions.
+  const milestone = useMemo(() => firstIndependentPass(rows), [rows]);
   const [key, setKey] = useState<string>('date');
   const [ascending, setAscending] = useState(false);
 
@@ -132,9 +211,10 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
   return (
     <div className={styles.wrap}>
       <p className={styles.hint}>
-        Click any column heading to sort. This changes only your view of the table and
-        nothing is scored or ranked. An arrow next to a leak count compares that gateway
-        with its own earlier version on this page, never with another project.
+        <strong>Click any column heading to sort</strong>, including "Who ran it" and "How
+        it reads the stream". That changes only your view: nothing here is scored or ranked,
+        and the order the page ships in is the date. An arrow next to a leak count compares
+        a gateway with its own earlier version on this page, never with another project.
       </p>
       <div className={styles.scroll}>
         <table className={styles.table}>
@@ -169,41 +249,47 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
               const architecture = ARCHITECTURE[row.architecture];
               return (
                 <tr key={`${row.project}-${row.version}`}>
-                  <td>{row.project}</td>
-                  <td className={styles.muted}>{row.version}</td>
-                  <td>{row.sent}</td>
-                  <td>{row.restored}</td>
                   <td>
-                    {row.leakWhole}
-                    {row.previous && (
-                      <Trend
-                        now={row.leakWholeN}
-                        before={row.previous.leakWholeN}
-                        label={row.leakWhole}
-                      />
+                    {row.project}
+                    {row === milestone && (
+                      <span
+                        className={styles.milestone}
+                        title="The first gateway not written by this project to answer all three questions. Computed from the rows, not awarded.">
+                        first independent pass
+                      </span>
                     )}
+                    <Flags flags={row.flags} />
+                    <span className={styles.sub}>{row.version}</span>
+                    <span className={styles.sub}>
+                      {safeHref(row.pricingUrl) ? (
+                        <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
+                          {row.license}
+                        </a>
+                      ) : (
+                        row.license
+                      )}
+                    </span>
+                  </td>
+                  <td className={row.sentN === 0 ? styles.good : undefined}>{row.sent}</td>
+                  <td className={row.restoredN === 1 ? styles.good : undefined}>
+                    {row.restored}
                   </td>
                   <td>
-                    {row.leakSplit}
-                    {row.previous && (
-                      <Trend
-                        now={row.leakSplitN}
-                        before={row.previous.leakSplitN}
-                        label={row.leakSplit}
-                      />
-                    )}
+                    <Leak
+                      label={row.leakWhole}
+                      now={row.leakWholeN}
+                      before={row.previous?.leakWholeN}
+                    />
+                  </td>
+                  <td>
+                    <Leak
+                      label={row.leakSplit}
+                      now={row.leakSplitN}
+                      before={row.previous?.leakSplitN}
+                    />
                   </td>
                   <td className={styles.muted} title={architecture.hint}>
                     {architecture.label}
-                  </td>
-                  <td className={styles.muted}>
-                    {safeHref(row.pricingUrl) ? (
-                      <a href={safeHref(row.pricingUrl)} target="_blank" rel="noreferrer">
-                        {row.license}
-                      </a>
-                    ) : (
-                      row.license
-                    )}
                   </td>
                   <td>
                     <span className={styles.badge} title={provenance.hint}>
@@ -228,6 +314,13 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
                         className={styles.stale}
                         title="Measured a while ago. The project has probably shipped since.">
                         worth rerunning
+                      </span>
+                    )}
+                    {row.harness && (
+                      <span
+                        className={styles.harness}
+                        title={`Measured with pii-leak-benchmark ${row.harness}. Two rows measured with different harness versions were produced by different code.`}>
+                        harness {row.harness}
                       </span>
                     )}
                   </td>

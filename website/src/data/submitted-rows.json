@@ -1,0 +1,123 @@
+{
+  "comment": [
+    "Rows submitted from outside this project, written here by scripts/process_conformance_submission.py.",
+    "JSON and not TypeScript on purpose: every string in an entry arrived from a stranger issue, and",
+    "in JSON it is data. In a .ts file it would be source that gets bundled into the site.",
+    "A row is written with status published when the intake could read the measured columns out of the",
+    "linked run build artifact, which is the normal case and needs no approval. A submission whose",
+    "artifact could not be read is answered on the issue instead and nothing is written here.",
+    "Status draft is for a row a person is still completing by hand; it renders nowhere.",
+    "See results-wall.ts for the build-time validator, and CONTEXT-DETAIL section Q for why the",
+    "measured columns come from the artifact rather than from anything typed in the issue."
+  ],
+  "entries": [
+    {
+      "status": "published",
+      "date": "2026-09-20",
+      "project": "no-gateway control (intake test)",
+      "version": "capture://self, direct connection with no gateway",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "all",
+      "restoredN": 1.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Handed every value back to the client.",
+      "provenance": "submitted-main",
+      "architecture": "none",
+      "license": "Apache-2.0",
+      "runUrl": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/35490370868",
+      "pricingUrl": "https://github.com/ninadphalak/llm-shield-intake-test",
+      "_submission": {
+        "issue": 56,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/llm-shield-intake-test",
+        "evidence": "Read from the artifact `pii-leak-benchmark` on that run.",
+        "notes": "End-to-end test of the automated results-wall intake. This is the negative control: a direct connection with no gateway in the middle, so every data type is expected to leak. Retriggering intake after switching publication to the pull-request path. Retrigger: Actions may now open pull requests."
+      }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-26",
+      "project": "Portkey OSS Gateway",
+      "version": "fork main dceef23176de, OSS output guardrail, unauthenticated call-out",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "all",
+      "restoredN": 1.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "16 of 16",
+      "leakWholeN": 1.0,
+      "leakSplit": "16 of 16",
+      "leakSplitN": 1.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Handed every value back to the client. Splitting a value changed nothing. Built from source commit dceef23176de.",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "MIT",
+      "runUrl": "https://github.com/ninadphalak/gateway/actions/runs/36206023318",
+      "pricingUrl": "https://github.com/Portkey-AI/gateway",
+      "_submission": {
+        "issue": 101,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/gateway",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": "Public fork source-build reproduction. The CI run is red for a measured leak; the verified combined artifact is retained. Intake retry after content-scan fix."
+      }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-26",
+      "project": "NeMo Guardrails",
+      "version": "commit c37da56a222e, Presidio-backed output detection rail",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "none",
+      "restoredN": 0.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "0 of 12",
+      "leakWholeN": 0.0,
+      "leakSplit": "0 of 12",
+      "leakSplitN": 0.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Did not give the caller their own data back. Splitting a value changed nothing. 8 response cases were inconclusive and excluded from the leak-rate denominators. Built from source co",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "Apache-2.0",
+      "runUrl": "https://github.com/ninadphalak/Guardrails/actions/runs/36223257023",
+      "pricingUrl": "https://github.com/NVIDIA/NeMo-Guardrails",
+      "_submission": {
+        "issue": 107,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/Guardrails",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": ""
+      },
+      "responseInconclusive": 8
+    },
+    {
+      "status": "published",
+      "date": "2026-09-26",
+      "project": "Portkey OSS Gateway",
+      "version": "commit c31e570c9d42, OSS output guardrail, unauthenticated call-out",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "all",
+      "restoredN": 1.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "16 of 16",
+      "leakWholeN": 1.0,
+      "leakSplit": "16 of 16",
+      "leakSplitN": 1.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Handed every value back to the client. Splitting a value changed nothing. Built from source commit c31e570c9d42.",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "MIT",
+      "runUrl": "https://github.com/ninadphalak/gateway/actions/runs/36223272391",
+      "pricingUrl": "https://github.com/Portkey-AI/gateway",
+      "_submission": {
+        "issue": 108,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/gateway",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": ""
+      }
+    }
+  ]
+}

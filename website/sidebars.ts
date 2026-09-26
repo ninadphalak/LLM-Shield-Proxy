@@ -32,6 +32,7 @@ const sidebars: SidebarsConfig = {
         'glossary',
         'limitations',
         'research-publications',
+        'split-boundary-leaks',
         'design-partner-pilot',
         'integrations',
         'policies',

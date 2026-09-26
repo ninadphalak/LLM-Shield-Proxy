@@ -1,0 +1,68 @@
+name: Refresh open question counts
+
+# How many open disputes each published row has, recounted from the issue tracker.
+#
+# ON A SCHEDULE rather than on every issue event, because the number is a caveat and not a
+# measurement: nobody is worse off seeing yesterday's count, and a workflow that fired on
+# every issue edit would push to main all day. A closed dispute stops being counted on the
+# next run without anybody doing anything.
+
+on:
+  schedule:
+    # 04:10 UTC. Off the hour on purpose: the top of the hour is when GitHub's scheduled
+    # runs queue worst.
+    - cron: '10 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: results-wall-write
+  cancel-in-progress: false
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Recount and commit only if something moved
+        id: count
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/count_result_flags.py
+
+      # Same reason as the intake workflow: a push made with GITHUB_TOKEN does not start
+      # deploy-docs.yml, so a changed count would sit in the repository and never reach
+      # the page. Built and deployed here, and only when the count actually moved.
+      - name: Build the site
+        if: steps.count.outputs.changed == 'true'
+        env:
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+        run: |
+          cd website
+          npm ci
+          npm run build
+
+      - name: Deploy the built site
+        if: steps.count.outputs.changed == 'true'
+        uses: w9jds/firebase-action@d462443a9654f6ed6d84972a0215e273c21107ce # master, pinned 2026-09-12
+        with:
+          args: deploy --only hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          PROJECT_PATH: ./website
