@@ -1123,3 +1123,33 @@ def test_an_unpublished_reply_offers_no_badge():
     row = _row(reports={})
     assert row["status"] == "draft"
     assert "conformance-badges" not in intake.render_comment(row, "reason", "evidence", [])
+
+
+@pytest.mark.parametrize("bad", [-0.5, 1.5, float("nan"), True])
+def test_a_leak_rate_outside_zero_to_one_is_not_published(bad):
+    """A rate the wall cannot display would fail the site build after the row was written."""
+    report = _split_report(single=bad, adversarial=0.0)
+    derived = intake.derive_measurements({"x.json": report})
+    assert "leakWholeN" not in derived and "leakWhole" not in derived
+    assert derived["leakSplitN"] == 0.0
+
+
+def test_a_failed_site_build_still_answers_the_submitter(monkeypatch, tmp_path):
+    """The build is a gate; when it refuses a row the submitter hears why, not silence."""
+    rows = tmp_path / "rows.json"
+    rows.write_text('{"entries": []}', encoding="utf-8")
+    monkeypatch.setattr(intake, "ROWS_FILE", rows)
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"issue": {"number": 9, "body": "x", "user": {"login": "s"}}}))
+    monkeypatch.setattr(intake, "process", lambda issue: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "check_row_content", lambda: None)
+
+    def broken_build():
+        raise intake.subprocess.CalledProcessError(1, ["npm", "run", "build"])
+
+    monkeypatch.setattr(intake, "build_site", broken_build)
+    said = []
+    monkeypatch.setattr(intake, "comment", lambda number, text: said.append(text) or True)
+    monkeypatch.setattr(intake, "label", lambda number, name: True)
+    assert intake.main(["--event-path", str(event)]) == 1
+    assert said and "could not be published" in said[0]

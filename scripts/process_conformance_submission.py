@@ -491,7 +491,10 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
         ):
             rate = leak.get(key)
             total = counts.get(condition)
-            if isinstance(rate, (int, float)) and isinstance(total, int) and total > 0:
+            # A rate outside [0, 1] (or NaN, or a bool) is not a measurement the wall can show,
+            # and the badge build refuses it after the row is written. Drop it here instead.
+            if (isinstance(rate, (int, float)) and not isinstance(rate, bool) and 0.0 <= rate <= 1.0
+                    and isinstance(total, int) and total > 0):
                 derived[text] = f"{round(rate * total)} of {total}"
                 derived[number] = float(rate)
     return derived
@@ -907,11 +910,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     append_row(row)
-    # Check row content for style before commit.
-    check_row_content()
-    # Check site build before commit to prevent broken deploys.
-    build_site()
     try:
+        # The content scan and the site build are gates: a row either passes both or is not
+        # committed. Inside this handler so a refusal reaches the submitter as a reply.
+        check_row_content()
+        build_site()
         publish(row, issue_number)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         # Notify submitter on failure.
