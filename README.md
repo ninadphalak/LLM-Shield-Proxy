@@ -107,6 +107,11 @@ shorter copy in
 0.3.0 or newer, which adds the `ci` subcommand, the GitHub Action, and baseline comparison
 against your previous version.
 
+To build the proxy in its own fork and retain both request and 32-case response reports,
+use the [source-build CI recipes](website/docs/conformance/source-ci.md) for
+LLM-Shield-Proxy, Portkey, LiteLLM, or NeMo Guardrails. The workflow starts its own
+synthetic capture, so no model account is needed.
+
 It reports one row per data type, so you can see what your gateway handled and what it missed:
 
 ```
