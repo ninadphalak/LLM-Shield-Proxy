@@ -43,7 +43,7 @@ def test_litellm_workflow_is_copyable_source_recipe_with_pinned_instruments():
     assert 'PORT="$analyzer_port"' in services["run"]
     assert "docker logs --tail 60" in services["run"]
     # gunicorn 25's control-socket thread froze the forked worker; both images must drop it.
-    assert services["run"].count("--no-control-socket") == 2
+    assert services["run"].count("GUNICORN_CMD_ARGS='--no-control-socket --timeout 300'") == 2
     assert "deadline=$((SECONDS + 360))" in services["run"]
 
 
