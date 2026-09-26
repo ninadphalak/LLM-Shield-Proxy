@@ -61,6 +61,34 @@
         "evidence": "Read from the artifact `source-reproduction` on that run.",
         "notes": "Public fork source-build reproduction. The CI run is red for a measured leak; the verified combined artifact is retained. Intake retry after content-scan fix."
       }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-26",
+      "project": "NeMo Guardrails",
+      "version": "commit c37da56a222e, Presidio-backed output detection rail",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "none",
+      "restoredN": 0.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "0 of 12",
+      "leakWholeN": 0.0,
+      "leakSplit": "0 of 12",
+      "leakSplitN": 0.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Did not give the caller their own data back. Splitting a value changed nothing. 8 response cases were inconclusive and excluded from the leak-rate denominators. Built from source co",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "Apache-2.0",
+      "runUrl": "https://github.com/ninadphalak/Guardrails/actions/runs/36223257023",
+      "pricingUrl": "https://github.com/NVIDIA/NeMo-Guardrails",
+      "_submission": {
+        "issue": 107,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/Guardrails",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": ""
+      }
     }
   ]
 }
