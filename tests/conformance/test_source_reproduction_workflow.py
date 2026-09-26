@@ -26,7 +26,8 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert "/source-identity.json" in upload["with"]["path"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
-    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
+    assert "@29a9932b085e5b063b8c366c3e6bfca2c4af4b06" in operator["uses"]
+    assert operator["with"]["submission-section"] == "false"
     assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")

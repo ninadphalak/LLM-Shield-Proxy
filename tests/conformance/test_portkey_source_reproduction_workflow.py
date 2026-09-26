@@ -38,7 +38,8 @@ def test_portkey_workflow_preserves_both_profiles_without_report_values():
     operator = next(step for step in steps if step.get("id") == "operator")
     assert "--network host" in operator["with"]["start-command"]
     assert operator["with"]["duty"] == "anonymize"
-    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
+    assert "@29a9932b085e5b063b8c366c3e6bfca2c4af4b06" in operator["uses"]
+    assert operator["with"]["submission-section"] == "false"
     assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
     assert "x-portkey-custom-host=http://127.0.0.1:8765/v1" in operator["env"]["CONFORMANCE_TARGET_HEADERS"]

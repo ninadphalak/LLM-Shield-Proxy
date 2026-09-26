@@ -155,7 +155,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506 # operator action with deferred upload
+        uses: ninadphalak/LLM-Shield-Proxy@29a9932b085e5b063b8c366c3e6bfca2c4af4b06 # operator action; the recipe writes the submission
         with:
           target-base-url: http://127.0.0.1:${{ env.NEMO_PORT }}/v1
           start-command: >-
@@ -167,6 +167,7 @@ jobs:
           target-version: ${{ env.SOURCE_SELECTOR }}
           duty: anonymize
           artifact-name: ''
+          submission-section: 'false'
 
       - name: Stage the operator result
         if: always() && steps.operator.outputs.report-directory != ''
