@@ -214,3 +214,17 @@ def test_the_operator_run_records_its_own_provenance(monkeypatch):
     assert "Run URL" in citation and "actions/runs/42" in citation
     # Self-reported, and the block has to keep saying so.
     assert attestation["verification"] == "self-reported"
+
+
+def test_a_workflow_with_its_own_bundle_can_omit_the_submission_section():
+    """The source recipes upload a different bundle and write their own submission link."""
+    summary = ci.render_summary(_complete_run(), submission=False)
+    assert "Publish this result" not in summary
+    assert "issues/new?" not in summary
+    assert "**LEAK**" in summary
+
+
+def test_the_action_passes_the_submission_switch_to_the_command():
+    action = (ROOT / "action.yml").read_text(encoding="utf-8")
+    assert "submission-section:" in action
+    assert "BENCHMARK_SUBMISSION_SECTION: ${{ inputs.submission-section }}" in action

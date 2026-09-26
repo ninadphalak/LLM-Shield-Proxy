@@ -115,7 +115,8 @@ def render_submission(run: dict[str, Any]) -> list[str]:
     ]
 
 
-def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) -> str:
+def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None, *,
+                   submission: bool = True) -> str:
     lines = ["# PII Leak Benchmark", "", f"**{run['verdict']}**", "", run["reason"], ""]
     if "contract" not in run:
         lines.extend(["Fix the setup error and rerun. An incomplete check cannot pass CI.", ""])
@@ -164,7 +165,8 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) 
     if fixed:
         lines.append("Credential checks use fixed examples: " + ", ".join(fixed) + ". Passing these examples does not establish general credential detection.")
     lines.extend(["", "A no-regression result can still contain existing leaks. Current failures always fail this job.", ""])
-    lines.extend(render_submission(run))
+    if submission:
+        lines.extend(render_submission(run))
     lines.append("")
     return "\n".join(lines)
 
@@ -346,7 +348,9 @@ def main(argv: list[str] | None = None) -> int:
         run["reason"] = "Setup or comparison failed: " + str(exc)
     try:
         write_json_artifact(out / "current.json", run, indent=2)
-        summary = render_summary(run, baseline)
+        # A workflow that uploads its own bundle writes its own submission section.
+        summary = render_summary(run, baseline,
+                                 submission=os.getenv("BENCHMARK_SUBMISSION_SECTION", "true") != "false")
         (out / "summary.md").write_text(summary, encoding="utf-8")
         if os.getenv("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
