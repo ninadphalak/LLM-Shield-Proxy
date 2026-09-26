@@ -93,7 +93,7 @@ def test_one_value_gets_one_placeholder_across_a_tool_definition(engine):
 
 
 @pytest.mark.parametrize("message_first", [True, False])
-def test_a_value_the_caller_also_sent_as_a_message_stays_restorable(engine, message_first, monkeypatch):
+def test_a_value_the_caller_also_sent_as_a_message_stays_restorable(engine, message_first):
     """If the caller typed the value themselves, restoring it discloses nothing new. It
     must also be one token, not two, whichever field is walked first."""
     payload = _payload([{"role": "user", "content": f"Is {OWNER} on call?"}])
@@ -251,6 +251,39 @@ def test_an_operator_can_still_send_tools_verbatim(engine, monkeypatch):
         request_policy_ctx.reset(token)
     assert LEGACY in json.dumps(redacted["functions"])
     assert OWNER not in json.dumps(redacted["tools"])
+
+
+@pytest.mark.parametrize("deep", [True, False])
+def test_a_tool_description_past_the_blob_ceiling_is_still_redacted(engine, deep, monkeypatch):
+    """The blob ceiling exists so base64 attachments are not scanned. A tool description
+    is prose however long it is: treated as a blob, only its edges were inspected and a
+    value in the middle went out in clear."""
+    monkeypatch.setattr(settings, "ENABLE_DEEP_PAYLOAD_REDACTION", deep)
+    filler = "Routing notes. " * (settings.PAYLOAD_MAX_REDACT_STRING_LENGTH // 15 + 50)
+    description = f"{filler}Escalate to {OWNER}. {filler}"
+    assert len(description) > settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
+
+    vault = Vault(synthetic=False)
+    payload = {"messages": [], "tools": [{"type": "function", "function": {"name": "f", "description": description}}]}
+    redacted = engine.redact_payload(payload, vault)
+    sent = redacted["tools"][0]["function"]["description"]
+
+    assert OWNER not in sent
+    assert sent.startswith(filler)
+    assert OWNER not in vault.rehydrate(sent)
+
+
+@pytest.mark.parametrize("policy", ["skip", "warn"])
+def test_a_tool_description_that_looks_like_a_data_uri_is_still_redacted(engine, policy, monkeypatch):
+    """`data:` marks a media URI elsewhere and is forwarded unscanned. In a tool
+    definition it is only the first word of a sentence."""
+    monkeypatch.setattr(settings, "UNMAPPED_BLOB_POLICY", policy)
+    payload = {
+        "messages": [],
+        "tools": [{"type": "function", "function": {"name": "f", "description": f"data: records owned by {OWNER}"}}],
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    assert OWNER not in json.dumps(redacted)
 
 
 def test_tool_definitions_past_the_depth_bound_are_refused(engine):

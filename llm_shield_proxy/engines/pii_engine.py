@@ -1059,7 +1059,10 @@ class PIIEngine:
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
 
-        # Tool definitions. Their prose is redacted one-way; see _TOOL_PROSE_KEYS.
+        # Tool definitions. Their prose is redacted one-way; see _TOOL_PROSE_KEYS. No blob
+        # handling (None): it exists to skip base64 attachments, and a definition is text.
+        # With it, a description past the ceiling had only its edges scanned, and one that
+        # began "data:" was forwarded unscanned as if it were a media URI.
         for key in _TOOL_DEFINITION_KEYS:
             if key in new_payload and key not in protected:
                 new_payload[key] = self._deep_redact(
@@ -1067,7 +1070,7 @@ class PIIEngine:
                     vault,
                     active_profile,
                     protected,
-                    ceiling,
+                    None,
                     depth + 1,
                     max_depth,
                     key,
@@ -1091,7 +1094,7 @@ class PIIEngine:
         vault: Vault,
         active_profile: Optional[CompiledProfile],
         protected: frozenset[str],
-        max_string_length: int,
+        max_string_length: Optional[int],
         depth: int,
         max_depth: int,
         json_path: str = "",
@@ -1100,6 +1103,9 @@ class PIIEngine:
         restorable: bool = True,
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
+
+        `max_string_length` None means the subtree is text with no blobs in it: every
+        string is scanned in full, whatever its length or prefix.
 
         `keys_are_names` marks a dict whose keys are property names (the value of a
         `_SCHEMA_NAME_MAPS` keyword) rather than keywords, so protected keys do not apply
@@ -1113,7 +1119,7 @@ class PIIEngine:
             raise ValueError("Maximum payload nesting depth exceeded")
 
         if isinstance(node, str):
-            if len(node) > max_string_length or node.startswith("data:"):
+            if max_string_length is not None and (len(node) > max_string_length or node.startswith("data:")):
                 return self._handle_unmapped_blob(node, json_path, active_profile)
             return self.redact_text(node, vault, active_profile, restorable=restorable)
 

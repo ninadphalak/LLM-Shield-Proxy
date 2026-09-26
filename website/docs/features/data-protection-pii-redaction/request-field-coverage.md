@@ -54,7 +54,9 @@ are still walked.
 
 Strings longer than `PAYLOAD_MAX_REDACT_STRING_LENGTH` (default 8192), and any `data:`
 URI, are forwarded without inspection. A base64 image cannot be matched by a text
-detector, and scanning one costs more than the rest of the payload combined.
+detector, and scanning one costs more than the rest of the payload combined. Tool
+definitions are the exception: they are text however long they are, so every string in
+them is scanned in full.
 
 `UNMAPPED_BLOB_POLICY` decides what happens when such a string appears in a field no
 policy claims:
