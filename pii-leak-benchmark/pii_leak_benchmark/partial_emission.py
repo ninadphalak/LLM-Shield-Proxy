@@ -45,7 +45,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import unquote
 
@@ -164,20 +164,32 @@ def benign_texts(segments: Any, case: dict[str, str], model: str = "test") -> li
     return [t for t in texts if t]
 
 
-def _outside_whole_values(text: str) -> list[str]:
-    """`text` cut apart at every complete, well-formed value of any detected entity shape.
+def _outside_whole_values(text: str, needle: str) -> list[str]:
+    """`text` cut apart at every complete, well-formed value that is not a run of `needle`.
 
     A whole value that is not the injected one (the complete injected value is a
     stronger tier and is ruled out before this runs) is a SUBSTITUTE, not a fragment: a
     gateway that replaces a card with another published test PAN emits thirteen
-    consecutive `1`s that the needle may share. A fragment followed by a mask is, by
-    construction, not a well-formed value, so it survives the cut. Splitting rather
-    than blanking keeps a run from bridging the removed span once `_normalize` drops
-    the punctuation around it.
+    consecutive `1`s that the needle may share. Splitting rather than blanking keeps a
+    run from bridging the removed span once `_normalize` drops the punctuation around it.
+
+    A well-formed value that is itself a contiguous run of the needle is NOT cut: it is
+    a fragment. Thirteen to fifteen digits of a sixteen-digit card are card-shaped, so
+    cutting every well-formed value removed exactly the longest partial emissions.
     """
+    target = _normalize(needle)
     pieces = [text]
     for _entity, pattern in _DETECTORS:
-        pieces = [part for piece in pieces for part in pattern.split(piece)]
+        cut: list[str] = []
+        for piece in pieces:
+            start = 0
+            for match in pattern.finditer(piece):
+                if _normalize(match.group(0)) in target:
+                    continue
+                cut.append(piece[start : match.start()])
+                start = match.end()
+            cut.append(piece[start:])
+        pieces = cut
     return pieces
 
 
@@ -190,7 +202,12 @@ def specific_run(needle: str, haystacks: list[str], benign: list[str]) -> int:
     published scorer matches in, and percent-encoded haystacks are also read decoded.
     """
     target = _normalize(needle)
-    hays = [_normalize(piece) for h in haystacks for form in (h, unquote(h)) for piece in _outside_whole_values(form)]
+    hays = [
+        _normalize(piece)
+        for h in haystacks
+        for form in (h, unquote(h))
+        for piece in _outside_whole_values(form, needle)
+    ]
     known = [_normalize(b) for b in benign]
     longest = 0
     length = len(target)
@@ -299,6 +316,18 @@ class PartialEmissionResult:
     # recovered. A length, never a value.
     longest_specific_run: int = 0
     partial_emission: bool = False
+    # Families the partition cap dropped untested. A clean result with any of these is
+    # inconclusive, not clean; a fragment found in the families that ran is still found.
+    partitions_capped: dict[str, bool] = field(default_factory=dict)
+
+
+def _inconclusive(row: PartialEmissionResult) -> bool:
+    """Refused, or clean only because some requested splits were never tried."""
+    if row.transport_error is not None:
+        return True
+    if row.partial_emission:
+        return False
+    return row.partitions_tried == 0 or any(row.partitions_capped.values())
 
 
 def score_case(
@@ -322,7 +351,7 @@ def score_case(
         raise ValueError(f"{policy_name!r} is not an in-process policy; pass gateway_url")
     needle = segments.injection[case["entity"]]
     benign = benign_texts(segments, case, model=model)
-    points, _families, _attempted, _capped = injection_partitions(segments, case, oracle=oracle, cap=partition_cap)
+    points, _families, _attempted, capped = injection_partitions(segments, case, oracle=oracle, cap=partition_cap)
     row = PartialEmissionResult(
         policy=policy_name,
         case=dict(case),
@@ -331,6 +360,7 @@ def score_case(
         needle_length=len(_normalize(needle)),
         invariance_violations=0 if in_process else None,
         threshold_only_partitions=0 if in_process else None,
+        partitions_capped=dict(capped),
     )
     state = UpstreamState(segments=segments, case=case)
     upstream, upstream_url = _serve(_make_upstream(state), port=upstream_port)
@@ -461,8 +491,8 @@ def build_partial_emission_report(
     """The partial-emission artefact. Carries lengths and counts, never a value."""
     in_process = gateway_url is None
     policy = results[0].policy if results else "unknown"
-    scored = [r for r in results if r.transport_error is None]
-    inconclusive = [r for r in results if r.transport_error is not None]
+    scored = [r for r in results if not _inconclusive(r)]
+    inconclusive = [r for r in results if _inconclusive(r)]
     by_frag = {
         arm: [r for r in scored if r.case["fragmentation"] == arm] for arm in ("single_chunk", "adversarial")
     }
