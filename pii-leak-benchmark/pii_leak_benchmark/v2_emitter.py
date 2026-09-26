@@ -1102,7 +1102,21 @@ def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHandler]:
+def _make_gateway(
+    upstream_url: str,
+    policy_name: str,
+    recorder: list[dict[str, Any]] | None = None,
+) -> type[BaseHTTPRequestHandler]:
+    """The in-process reference gateway: mask the request, run a Policy on the response.
+
+    `recorder`, when given, receives one entry per request with every delta fed to the
+    policy, every string it emitted, and the policy's output for the SAME input fed as
+    one delta. That is the chunking-invariance oracle `partial_emission` scores. It is a
+    parameter here rather than a change to `run_case` because `run_case` is inside the
+    published `inspector_sha256`; nothing recorded here reaches the client or the v2
+    report, and with no recorder the handler behaves exactly as before.
+    """
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -1138,6 +1152,13 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                 upstream_sse = response.read().decode("utf-8", "replace")
 
             policy = POLICIES[policy_name](vault)
+            policy_io: list[tuple[str, str]] = []
+
+            def _feed(text: str) -> str:
+                emitted = policy.feed(text)
+                policy_io.append((text, emitted))
+                return emitted
+
             out_events: list[dict[str, Any]] = []
             for line in upstream_sse.splitlines():
                 if not line.startswith("data: "):
@@ -1146,15 +1167,26 @@ def _make_gateway(upstream_url: str, policy_name: str) -> type[BaseHTTPRequestHa
                 if data == "[DONE]":
                     continue
                 delta = json.loads(data)["choices"][0]["delta"]
-                event: dict[str, Any] = {"content": policy.feed(delta.get("content", ""))}
+                event: dict[str, Any] = {"content": _feed(delta.get("content", ""))}
                 # Sibling fields pass through the same policy.
                 for key, value in delta.items():
                     if key != "content" and isinstance(value, str):
-                        event[key] = policy.feed(value)
+                        event[key] = _feed(value)
                 out_events.append(event)
             tail = policy.flush()
             if tail:
                 out_events.append({"content": tail})
+            if recorder is not None:
+                fed = [delta_fed for delta_fed, _ in policy_io]
+                reference_policy = POLICIES[policy_name](dict(vault))
+                reference = reference_policy.feed("".join(fed)) + reference_policy.flush()
+                recorder.append(
+                    {
+                        "fed": fed,
+                        "emitted": [emitted for _, emitted in policy_io] + [tail],
+                        "reference": reference,
+                    }
+                )
 
             body = _sse(out_events)
             self.send_response(200)
@@ -1436,13 +1468,19 @@ def _haystack_groups(sse: str) -> dict[str, list[str]]:
 # Order is weakest-claim-last, and `_leak_tier` returns the first group that matches.
 _HAYSTACK_TIERS = ("single-field", "same-path-join", "cross-field-join")
 
-# Strongest first. A reader should discount `cross-field-join` before anything else: it
-# is the only tier a coincidence can reach.
+# Strongest first. Among the tiers that recover the COMPLETE value, a reader should
+# discount `cross-field-join` first: it is the only one a coincidence can reach.
 _LEAK_TIER_RANK = {
     "literal": 0,
     "single-field": 1,
     "same-path-join": 2,
     "cross-field-join": 3,
+    # Weakest of all, and not a recovery of the value: a fragment of it reached the
+    # client before the rest was masked. `_leak_tier` never returns it, and it is never
+    # counted in `injection_leaked` or any leak rate. Only the separately-versioned
+    # `partial_emission` instrument assigns it. It is ranked here so the whole ladder is
+    # stated in one place and a reader can discount it on its own.
+    "partial-emission": 4,
 }
 
 
@@ -3100,6 +3138,17 @@ def main(argv: list[str] | None = None) -> int:
             "containment."
         ),
     )
+    parser.add_argument(
+        "--partial-emission",
+        action="store_true",
+        help=(
+            "also run the separately-versioned partial-emission pass (a fragment of the "
+            "injected value reached the client before the rest was masked) and write "
+            "<name>.partial-emission.json beside each report. It is a SECOND pass over the "
+            "target with the same seed and oracle, and it never changes the v2 report, its "
+            "leak rates or its instrument digest."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # The alias and the flag must not disagree silently. A recipe that says one thing and
@@ -3164,6 +3213,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         for err in errors[:6]:
             print("      !", err)
+        if args.partial_emission:
+            from pii_leak_benchmark.partial_emission import run_partial_emission
+
+            sidecar = run_partial_emission(
+                name,
+                seed=report["corpus"]["seed"],
+                gateway_url=args.gateway_url,
+                upstream_port=args.upstream_port,
+                model=args.model,
+                oracle=oracle,
+                partition_cap=args.partition_cap,
+            )
+            _write_report(outdir / f"{name}.partial-emission.json", sidecar)
+            metrics = sidecar["metrics"]
+            print(
+                f"{'':20} partial-emission={metrics['partial_emission_rate']['overall']:<6} "
+                f"n={metrics['cases_partial_emission']}/{metrics['cases_applicable']} "
+                f"oracle={sidecar['oracle']['name']} (own tier; not in leak rates)"
+            )
     return 0 if all(not r[3] for r in rows) else 1
 
 
