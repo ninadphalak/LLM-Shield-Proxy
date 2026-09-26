@@ -89,6 +89,34 @@
         "evidence": "Read from the artifact `source-reproduction` on that run.",
         "notes": ""
       }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-26",
+      "project": "Portkey OSS Gateway",
+      "version": "commit c31e570c9d42, OSS output guardrail, unauthenticated call-out",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "all",
+      "restoredN": 1.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "16 of 16",
+      "leakWholeN": 1.0,
+      "leakSplit": "16 of 16",
+      "leakSplitN": 1.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Handed every value back to the client. Splitting a value changed nothing. Built from source commit c31e570c9d42.",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "MIT",
+      "runUrl": "https://github.com/ninadphalak/gateway/actions/runs/36223272391",
+      "pricingUrl": "https://github.com/Portkey-AI/gateway",
+      "_submission": {
+        "issue": 108,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/gateway",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": ""
+      }
     }
   ]
 }
