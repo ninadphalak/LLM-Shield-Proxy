@@ -630,7 +630,7 @@ def _run(*command: str, cwd: Optional[Path] = None) -> None:
 
 def check_row_content() -> None:
     """Run the public-docs style scan before committing to fail fast on banned content."""
-    _run("python", "-m", "pytest", "tests/test_public_docs_style.py", "-q")
+    _run("python", "-m", "pytest", "--noconftest", "tests/test_public_docs_style.py", "-q")
 
 
 def build_site() -> None:
