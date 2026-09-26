@@ -1,0 +1,134 @@
+name: PR Review
+
+# AI review ONCE per pull request -- when it opens, or when a draft is marked ready -- and
+# again whenever someone with write access comments `/review` on the PR.
+#
+# Runs on the repository owner's Claude subscription through `claude setup-token`, stored as
+# the CLAUDE_CODE_OAUTH_TOKEN secret. There is no per-token bill; every run draws on the
+# same usage limits as the owner's interactive sessions, which is why pushes do not review.
+# It replaced a pay-per-token review chain on 2026-09-26.
+
+# `synchronize` is still listened for, and the job below SKIPS it. That is deliberate.
+#
+# Reviewing every push fed a loop: an agent fixed each finding in its own commit, every
+# commit bought a fresh whole-diff review, and every fresh review found something new.
+#
+# Dropping `synchronize` from this list would lock the repository instead: "Review the pull
+# request" is a REQUIRED status check on `main`, required checks are read off the head
+# commit, and a push that starts no run leaves the check "expected" on the new head
+# forever, so no PR could merge after its first fix. A job skipped by its `if:` reports as
+# passing, costs nothing, and keeps the check present on every head. Keep the job NAME too:
+# renaming it strands the required check the same way.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
+# The event action is in the key so a push's skipped run cannot cancel the opening review,
+# and the comment id is in it so nothing cancels a review a person asked for.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || github.event.action }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # Every clause is load-bearing.
+    # - Bots never trigger it: a bot's comment would otherwise start a run, and the
+    #   results-wall intake PRs are data, not code (see standing rule 0).
+    # - Comments only on PRs, and only `/review` at the start: without the first, every
+    #   comment on a plain issue runs a review of nothing; without the second, every
+    #   conversational comment on a PR spends the owner's usage.
+    # - Fork PRs are skipped on open: a fork's `pull_request` run gets no secrets and would
+    #   fail the required check. The owner reviews one by commenting `/review`, which runs
+    #   in this repository's context. The action itself also refuses non-write triggerers.
+    # - Drafts are skipped: open agent work as a draft, push freely, mark ready once.
+    # - Results-wall rows (`intake/issue-N`) are skipped. They are opened under
+    #   RESULTS_WALL_TOKEN, a personal token, so the sender is a User, not a Bot, and the
+    #   bot clause alone let every one-line data row buy a full review. The skip still
+    #   satisfies the required check, so auto-merge proceeds. See conformance-intake.yml.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (
+        (
+          github.event.issue.pull_request &&
+          startsWith(github.event.comment.body, '/review')
+        ) ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.action != 'synchronize' &&
+          !github.event.pull_request.draft &&
+          !startsWith(github.event.pull_request.head.ref, 'intake/') &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    name: Review the pull request
+    runs-on: ubuntu-latest
+    # A review that runs this long is looping; stop it before it eats the usage window.
+    timeout-minutes: 20
+    # Read the tree, write comments, nothing else. The review cannot push a commit, so it
+    # cannot "fix" its own findings into another round. `id-token` is what the action uses
+    # to authenticate itself.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
+      - name: Review
+        # Pinned to a commit SHA with the tag in a comment, matching every other action in
+        # this repository: it receives a repository token and the subscription token.
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The workflow's own token, not the Claude GitHub App: nothing extra to install,
+          # the permissions block above is the whole grant, and comments made with
+          # GITHUB_TOKEN never trigger another workflow run -- no review-of-a-review loop.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Sonnet, not Opus: every run spends the owner's subscription limits, and a
+          # diff review does not need the largest model. Raise it here if reviews miss things.
+          # `--max-turns` bounds one run's usage.
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 30
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+
+            You are reviewing a pull request in a streaming privacy gateway and measurement
+            harness for regulated environments. Read `.github/REVIEW-CONTEXT.md` first: it
+            lists the invariants a change must never break. Get the diff with `gh pr diff`.
+            On a `/review` re-run the checked-out tree is the default branch, so trust the
+            diff, not the working files, for what the PR changes.
+
+            Report only findings in these classes, in this order:
+            1. personal data, secrets or PII that could reach a log, a trace, an upstream
+               provider or a published artifact;
+            2. fail-open behaviour in a security or policy gate, which must deny on error,
+               timeout or missing configuration;
+            3. unbounded memory or blocking calls on the async streaming hot path;
+            4. a published measurement or claim the code does not actually establish;
+            5. any other correctness bug you can point to a concrete failing input for.
+            Do not report formatting, naming, style or "consider" suggestions: ruff, bandit
+            and pyright gate those, and every non-blocking comment costs another fix round.
+
+            If this PR already has an earlier review from you, read it first
+            (`gh pr view --comments`). Say which earlier findings are now fixed, and raise a
+            NEW finding only if it is in classes 1-5. Do not re-litigate a finding the author
+            answered in a comment unless the answer is wrong, and say why.
+
+            Post each finding as an inline comment with
+            `mcp__github_inline_comment__create_inline_comment` (confirmed: true), stating
+            the concrete input or path that triggers it. Then post ONE top-level summary with
+            `gh pr comment` whose last line is exactly one of:
+              Verdict: MERGEABLE
+              Verdict: BLOCKING (<n> findings)
+            Post only GitHub comments; do not answer in messages.
