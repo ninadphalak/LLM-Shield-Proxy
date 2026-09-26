@@ -48,6 +48,15 @@ EMPTY_MARKERS = ("_no response_", "_none_", "n/a", "none", "")
 RUN_URL = re.compile(
     r"^https://github\.com/([A-Za-z0-9._-]{1,100})/([A-Za-z0-9._-]{1,100})/actions/runs/(\d{1,20})"
 )
+# The same link anywhere in a body, for a submission that is nothing but the run link.
+RUN_URL_ANYWHERE = re.compile(
+    r"https://github\.com/[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}/actions/runs/\d{1,20}"
+)
+
+# Fields a source-build bundle can supply when the issue leaves them empty. The recipe that
+# built the proxy knows its name, licence and configuration; a person typing them in is
+# the step that used to reject a submission for a blank field.
+SOURCE_BUILD_SCHEMA = "pii-leak-benchmark/source-build/v1"
 
 # Entity ids as a sentence says them. An id that is not here is printed as-is with
 # underscores opened out, which reads acceptably for anything the corpus adds later.
@@ -100,6 +109,48 @@ def parse_submission(body: str) -> dict[str, str]:
             collected.append(raw_line)
     flush()
     return fields
+
+
+def run_url_from_body(body: str) -> str:
+    """The first Actions run link anywhere in the body, or empty."""
+    match = RUN_URL_ANYWHERE.search(body or "")
+    return match.group(0) if match else ""
+
+
+def source_identity(reports: dict[str, Any]) -> dict[str, Any]:
+    identity = reports.get("source-identity.json")
+    if isinstance(identity, dict) and identity.get("schema") == SOURCE_BUILD_SCHEMA:
+        return identity
+    return {}
+
+
+def bundle_version(identity: dict[str, Any]) -> str:
+    """`v1.99.0 (commit 0123456789ab), configuration`, from the bundle alone."""
+    commit = str(identity.get("source_commit") or "")
+    selector = str(identity.get("source_selector") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return ""
+    where = f"commit {commit[:12]}" if selector in ("", commit) else f"{selector} (commit {commit[:12]})"
+    configuration = str(identity.get("configuration") or "").strip()
+    return f"{where}, {configuration}" if configuration else where
+
+
+def fill_from_bundle(fields: dict[str, str], reports: dict[str, Any]) -> dict[str, str]:
+    """Fill empty issue fields from a source-build bundle. Typed values always win."""
+    identity = source_identity(reports)
+    if not identity:
+        return fields
+    filled = dict(fields)
+    for field, key in (("gateway", "product"), ("license", "license"), ("project_url", "project_url")):
+        value = identity.get(key)
+        if not filled.get(field, "").strip() and isinstance(value, str) and value.strip():
+            filled[field] = value.strip()
+    version = filled.get("version", "").strip()
+    if not version or version in (identity.get("source_commit"), identity.get("source_selector")):
+        filled["version"] = bundle_version(identity) or version
+    if not filled.get("architecture", "").strip():
+        filled["architecture"] = "not-stated"
+    return filled
 
 
 def normalize_architecture(value: str) -> Optional[str]:
@@ -577,6 +628,10 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
             "will fill the row in by itself. Until then the row is parked and nothing about "
             "it is on the page.",
             "",
+            "If the run's summary says **INCOMPLETE**, the run measured nothing and uploaded "
+            "nothing, so there is nothing here to read. Rerun the workflow and submit the new "
+            "run instead. Editing this issue with the new link runs this check again.",
+            "",
         ]
     lines += ["<details><summary><b>The row</b></summary>", "", "```json", body, "```", "", "</details>", ""]
     lines += [
@@ -685,27 +740,79 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
         raise
 
 
-def _try(*command: str) -> bool:
+def _try(*command: str, env: Optional[dict[str, str]] = None) -> bool:
     """Run a courtesy action (comment/label/close). Fails gracefully to avoid failing the CI job."""
-    finished = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)  # nosec B603
+    finished = subprocess.run(  # nosec B603
+        command, cwd=REPO_ROOT, capture_output=True, text=True, check=False, env=env
+    )
     if finished.returncode != 0:
         print(f"Could not {' '.join(command[:3])}: {(finished.stderr or '').strip()[:200]}", file=sys.stderr)
     return finished.returncode == 0
 
 
+def issue_env() -> dict[str, str]:
+    """Replies go out under the job's GITHUB_TOKEN, which holds `issues: write`.
+
+    GH_TOKEN is the results-wall token, scoped to contents and pull requests so that its pull
+    request triggers the required checks. It cannot comment, so every reply sent under it,
+    including the one telling a submitter what was missing, failed without a trace.
+    """
+    env = dict(os.environ)
+    if env.get("GITHUB_TOKEN"):
+        env["GH_TOKEN"] = env["GITHUB_TOKEN"]
+    return env
+
+
 def comment(issue_number: int, text: str) -> bool:
-    return _try("gh", "issue", "comment", str(issue_number), "--body", text)
+    return _try("gh", "issue", "comment", str(issue_number), "--body", text, env=issue_env())
 
 
 def label(issue_number: int, name: str) -> bool:
-    return _try("gh", "issue", "edit", str(issue_number), "--add-label", name)
+    return _try("gh", "issue", "edit", str(issue_number), "--add-label", name, env=issue_env())
 
 
 def close_issue(issue_number: int) -> bool:
-    return _try("gh", "issue", "close", str(issue_number), "--reason", "completed")
+    return _try("gh", "issue", "close", str(issue_number), "--reason", "completed", env=issue_env())
 
 
 # ------------------------------------------------------------------------------ main
+
+
+def process(
+    issue: dict[str, Any],
+    *,
+    classify: Callable[[str], tuple[str, str, Optional[tuple[str, str, str]]]] = classify_provenance,
+    collect: Callable[..., tuple[dict[str, Any], str]] = collect_reports,
+) -> tuple[dict[str, Any], str, str, list[str]]:
+    """Issue in, row out: (row, provenance reason, evidence, problems)."""
+    body = issue.get("body") or ""
+    fields = parse_submission(body)
+    if not fields.get("run_url"):
+        fields["run_url"] = run_url_from_body(body)
+    reports: dict[str, Any] = {}
+    reason = evidence = ""
+    provenance = "submitted-unverified"
+    # The run is read first when it is a well-formed link, so the bundle can supply the
+    # name, licence and configuration the issue left out. A malformed link is reported by
+    # `validate` below and nothing is fetched for it.
+    if RUN_URL.match(fields.get("run_url", "").strip()):
+        provenance, reason, where = classify(fields["run_url"])
+        reports, evidence = collect(*where) if where else ({}, "No run to read a report from.")
+        fields = fill_from_bundle(fields, reports)
+    problems = validate(fields)
+    if problems:
+        return {}, reason, evidence, problems
+    row = build_row(
+        fields,
+        provenance,
+        derive_measurements(reports),
+        issue_number=int(issue.get("number") or 0),
+        submitter=str((issue.get("user") or {}).get("login") or "unknown"),
+        # Use issue creation date rather than processing date.
+        date=(str(issue.get("created_at") or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+        evidence=evidence,
+    )
+    return row, reason, evidence, []
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -726,24 +833,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("Event carries no issue number.", file=sys.stderr)
         return 2
 
-    fields = parse_submission(issue.get("body") or "")
-    problems = validate(fields)
-    row: dict[str, Any] = {}
-    reason = evidence = ""
-    if not problems:
-        provenance, reason, where = classify_provenance(fields.get("run_url", ""))
-        reports, evidence = collect_reports(*where) if where else ({}, "No run to read a report from.")
-        row = build_row(
-            fields,
-            provenance,
-            derive_measurements(reports),
-            issue_number=issue_number,
-            submitter=str((issue.get("user") or {}).get("login") or "unknown"),
-            # Use issue creation date rather than processing date.
-            date=(str(issue.get("created_at") or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")),
-            evidence=evidence,
-        )
-
+    row, reason, evidence, problems = process(issue)
     text = render_comment(row, reason, evidence, problems)
     if args.dry_run:
         print(text)

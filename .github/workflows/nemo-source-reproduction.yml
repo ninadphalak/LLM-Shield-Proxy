@@ -23,6 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      # Names this run on the results wall. Change them if your fork measures something else.
+      WALL_PRODUCT: NeMo Guardrails
+      WALL_CONFIGURATION: Presidio-backed output detection rail
+      WALL_LICENSE: Apache-2.0
+      WALL_PROJECT_URL: https://github.com/NVIDIA/NeMo-Guardrails
       SOURCE_REPOSITORY: ${{ inputs.source_repository || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'NVIDIA/NeMo-Guardrails' || github.repository) }}
       SOURCE_SELECTOR: ${{ inputs.source_ref || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'v0.24.0' || github.sha) }}
       SOURCE_IMAGE: nemo-source-reproduction:${{ github.run_id }}
@@ -91,6 +96,10 @@ jobs:
               'source_repository': os.environ['SOURCE_REPOSITORY'],
               'source_selector': os.environ['SOURCE_SELECTOR'],
               'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
+              'product': os.environ['WALL_PRODUCT'],
+              'configuration': os.environ['WALL_CONFIGURATION'],
+              'license': os.environ['WALL_LICENSE'],
+              'project_url': os.environ['WALL_PROJECT_URL'],
               'base_image': 'python:3.11-slim@sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88740aed1b95ba9',
               'detector': 'in-process Presidio 2.2.364; en_core_web_lg 3.8.0',
           }
@@ -307,6 +316,111 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Report incomplete or leaking measurement
-        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
-        run: exit 1
+      - name: Report the result and how to submit it
+        id: result
+        if: always()
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ runner.temp }}/nemo-source-reproduction
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlencode
+
+          root = Path(os.environ['REPORT_DIR'])
+          run_url = '{}/{}/actions/runs/{}'.format(
+              os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          product = os.environ['WALL_PRODUCT']
+          status = 'incomplete'
+          if os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file():
+              operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+              leaked = sorted(name for name, state in (operator.get('entities') or {}).items() if state == 'leak')
+              table, response_leak = [], False
+              for path in sorted(root.glob('*.json')):
+                  try:
+                      metrics = json.loads(path.read_text(encoding='utf-8')).get('metrics') or {}
+                  except (ValueError, AttributeError):
+                      continue
+                  rates = metrics.get('leak_rate') if isinstance(metrics, dict) else None
+                  if not isinstance(rates, dict):
+                      continue
+                  counts = metrics.get('cases_by_condition') or {}
+                  # The Shield recipe's redaction-off arm is a control: it is meant to leak.
+                  control = path.stem.endswith('-off')
+                  cells = []
+                  for key in ('single_chunk', 'adversarial'):
+                      rate, total = rates.get(key), counts.get(key)
+                      known = isinstance(rate, (int, float)) and isinstance(total, int)
+                      cells.append(f'{round(rate * total)} of {total} leaked' if known else 'not measured')
+                      response_leak = response_leak or (known and not control and rate > 0)
+                  label = path.stem + (' (control, redaction off)' if control else '')
+                  table.append(f"| {label} | {cells[0]} | {cells[1]} | {metrics.get('cases_inconclusive', 0)} |")
+              status = 'leak' if leaked or response_leak else 'clean'
+
+          if status == 'incomplete':
+              print('## Result: INCOMPLETE, do not submit')
+              print()
+              print('This run did not produce a verified measurement, so nothing was uploaded and the '
+                    'results wall has nothing to read. It says nothing about the gateway.')
+              print()
+              print(f"Step outcomes: {os.environ['STEP_OUTCOMES']}. Open the first failed step for the reason, "
+                    'then rerun the workflow. A failure before measurement is usually the runner, a download '
+                    'or the proxy not starting.')
+          else:
+              print('## Result: MEASURED LEAK' if status == 'leak' else '## Result: MEASURED CLEAN')
+              print()
+              print('This run is a complete, verified measurement. '
+                    + ('The job is red because the gateway leaked, not because the run broke. '
+                       'A leak is a result worth publishing.' if status == 'leak'
+                       else 'No leak in any case this run measured.'))
+              print()
+              print('Request path: ' + ('the provider received raw ' + ', '.join(leaked) + '.' if leaked
+                                        else 'no raw value reached the provider.'))
+              print()
+              print('| Response report | Value in one chunk | Value split across two chunks | Inconclusive |')
+              print('| :--- | :--- | :--- | ---: |')
+              print('\n'.join(table))
+              print()
+              identity = json.loads((root / 'source-identity.json').read_text(encoding='utf-8'))
+              commit, selector = identity['source_commit'], identity['source_selector']
+              where = f'commit {commit[:12]}' if selector in ('', commit) else f'{selector} (commit {commit[:12]})'
+              sections = {
+                  'Gateway': product,
+                  'Version and configuration': f"{where}, {os.environ['WALL_CONFIGURATION']}",
+                  'Project link': os.environ['WALL_PROJECT_URL'],
+                  'CI run link': run_url,
+                  'How it reads the stream': 'not stated',
+                  'License': os.environ['WALL_LICENSE'],
+                  'Outcome': status.upper(),
+              }
+              body = '\n\n'.join(f'### {heading}\n\n{value}' for heading, value in sections.items()) + '\n'
+              query = urlencode({'title': f'Result: {product}', 'labels': 'conformance-result', 'body': body})
+              print('### Put this run on the results wall')
+              print()
+              print(f'**[Submit this run to the results wall](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query})**: '
+                    'opens a prefilled issue. Press **Create**; nothing needs typing.')
+              print()
+              print('Or, from any terminal signed in to the GitHub CLI:')
+              print()
+              print('```')
+              print(f'gh issue create --repo ninadphalak/LLM-Shield-Proxy --title "Result: {product}" --body "{run_url}"')
+              print('```')
+              print()
+              print('Within a few minutes a bot answers on that issue. It either links your published row '
+                    'or says exactly what stopped it. The numbers on the wall are read from this run\'s '
+                    'artifact, not from the issue.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+          PY
+
+      - name: Fail unless the measurement is complete and clean
+        if: always() && steps.result.outputs.status != 'clean'
+        env:
+          RESULT: ${{ steps.result.outputs.status }}
+        run: |
+          echo "Result: ${RESULT:-incomplete}. The job summary explains it and, for a measurement, how to submit it."
+          exit 1

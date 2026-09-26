@@ -76,7 +76,7 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "quote(value, safe='')" in verify["run"]
     assert "b64encode(encoded)" in verify["run"]
     assert "a required report or provenance file is absent" in verify["run"]
-    assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]
+    assert steps[-1]["if"] == "always() && steps.result.outputs.status != 'clean'"
 
 
 def test_source_verifier_scans_decoded_json_strings():

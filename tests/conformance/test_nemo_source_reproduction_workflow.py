@@ -76,4 +76,4 @@ def test_nemo_retains_refused_cases_and_only_uploads_verified_reports():
     assert upload["with"]["name"] == "source-reproduction"
     assert ".raw.json" not in upload["with"]["path"]
     assert ".log" not in upload["with"]["path"]
-    assert "steps.operator.outcome == 'failure'" in steps[-1]["if"]
+    assert steps[-1]["if"] == "always() && steps.result.outputs.status != 'clean'"
