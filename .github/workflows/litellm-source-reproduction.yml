@@ -124,6 +124,9 @@ jobs:
           PY
 
       - name: Start pinned local dependencies
+        # Every docker call below is bounded, and so is the step: one run hung silently for
+        # 17 minutes inside a single unbounded call and would otherwise have held the job.
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           for image in "$POSTGRES_IMAGE" "$ANALYZER_IMAGE" "$ANONYMIZER_IMAGE"; do
@@ -145,12 +148,12 @@ jobs:
           print(" ".join(str(sock.getsockname()[1]) for sock in sockets))
           for sock in sockets:
               sock.close()')
-          pg=$(docker run -d --network host \
+          pg=$(timeout 120 docker run -d --network host \
             -e POSTGRES_PASSWORD=litellm -e POSTGRES_USER=litellm -e POSTGRES_DB=litellm \
             "$POSTGRES_IMAGE" -p "$pg_port" -c listen_addresses=127.0.0.1)
-          analyzer=$(docker run -d --network host -e PORT="$analyzer_port" \
+          analyzer=$(timeout 120 docker run -d --network host -e PORT="$analyzer_port" \
             -e GUNICORN_CMD_ARGS='--timeout 300' "$ANALYZER_IMAGE")
-          anonymizer=$(docker run -d --network host -e PORT="$anonymizer_port" \
+          anonymizer=$(timeout 120 docker run -d --network host -e PORT="$anonymizer_port" \
             -e GUNICORN_CMD_ARGS='--timeout 300' "$ANONYMIZER_IMAGE")
           echo "PG_CONTAINER=$pg" >> "$GITHUB_ENV"
           echo "ANALYZER_CONTAINER=$analyzer" >> "$GITHUB_ENV"
@@ -158,24 +161,26 @@ jobs:
           echo "DATABASE_URL=postgresql://litellm:litellm@127.0.0.1:$pg_port/litellm" >> "$GITHUB_ENV"
           echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
           echo "ANONYMIZER_PORT=$anonymizer_port" >> "$GITHUB_ENV"
-          for _ in $(seq 1 150); do
-            if docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm > /dev/null 2>&1 \
+          for attempt in $(seq 1 150); do
+            if timeout 10 docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm > /dev/null 2>&1 \
               && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
               && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
+              echo "Local dependencies ready after $attempt checks."
               exit 0
             fi
+            if [ $((attempt % 15)) = 0 ]; then echo "Still waiting for local dependencies ($attempt checks)."; fi
             sleep 2
           done
           echo 'A local dependency did not become ready within five minutes.'
-          docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm || true
+          timeout 10 docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm || true
           for port in "$analyzer_port" "$anonymizer_port"; do
             curl --max-time 5 --silent --show-error -o /dev/null -w "port=$port status=%{http_code}\n" \
               "http://127.0.0.1:$port/health" || true
           done
           free -h || true
           for id in "$pg" "$analyzer" "$anonymizer"; do
-            docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
-            docker logs --tail 60 "$id" 2>&1 || true
+            timeout 10 docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
+            timeout 10 docker logs --tail 60 "$id" 2>&1 || true
           done
           exit 2
 
