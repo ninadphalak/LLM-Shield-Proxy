@@ -812,6 +812,7 @@ def test_the_row_content_is_checked_before_anything_is_committed(monkeypatch):
     intake.check_row_content()
     flat = " ".join(calls[0])
     assert "pytest" in flat and "test_public_docs_style.py" in flat
+    assert "--noconftest" in calls[0]
 
 
 def test_the_ci_filter_and_the_content_check_agree():
