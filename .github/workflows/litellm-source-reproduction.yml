@@ -136,12 +136,13 @@ jobs:
               sleep $((2 ** attempt))
             done
           done
-          # Host networking, on ports chosen here, with one patient wait. With published ports
-          # and one-second probes, the analyzer's host port intermittently accepted connections
-          # and never answered while its container logged that it was serving (4 of 11 runs),
-          # and restarting the container never recovered it. The cause was not isolated;
-          # benchmark.yml reaches the same image through a published port without a probe
-          # timeout. What is known: this arrangement has not reproduced the stall.
+          # The Presidio images run gunicorn 25, whose master starts a control-socket thread
+          # and then forks the worker. Intermittently the worker froze straight after fork,
+          # before logging "Booting worker", and never answered /health: a lock held by that
+          # thread at fork time. Caught on a hung runner: master logged "Control socket
+          # listening", the worker process existed and never logged a line, and the image's
+          # own in-container health checks piled up unanswered. --no-control-socket removes
+          # the thread. Host networking on job-chosen ports keeps port publishing out of it.
           read -r pg_port analyzer_port anonymizer_port < <(python -c '
           import socket
           sockets = [socket.socket() for _ in range(3)]
@@ -154,16 +155,19 @@ jobs:
             -e POSTGRES_PASSWORD=litellm -e POSTGRES_USER=litellm -e POSTGRES_DB=litellm \
             "$POSTGRES_IMAGE" -p "$pg_port" -c listen_addresses=127.0.0.1)
           analyzer=$(timeout 120 docker run -d --network host -e PORT="$analyzer_port" \
-            -e GUNICORN_CMD_ARGS='--timeout 300' "$ANALYZER_IMAGE")
+            -e GUNICORN_CMD_ARGS='--no-control-socket --timeout 300' "$ANALYZER_IMAGE")
           anonymizer=$(timeout 120 docker run -d --network host -e PORT="$anonymizer_port" \
-            -e GUNICORN_CMD_ARGS='--timeout 300' "$ANONYMIZER_IMAGE")
+            -e GUNICORN_CMD_ARGS='--no-control-socket --timeout 300' "$ANONYMIZER_IMAGE")
           echo "PG_CONTAINER=$pg" >> "$GITHUB_ENV"
           echo "ANALYZER_CONTAINER=$analyzer" >> "$GITHUB_ENV"
           echo "ANONYMIZER_CONTAINER=$anonymizer" >> "$GITHUB_ENV"
           echo "DATABASE_URL=postgresql://litellm:litellm@127.0.0.1:$pg_port/litellm" >> "$GITHUB_ENV"
           echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
           echo "ANONYMIZER_PORT=$anonymizer_port" >> "$GITHUB_ENV"
-          for attempt in $(seq 1 150); do
+          deadline=$((SECONDS + 360))
+          attempt=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            attempt=$((attempt + 1))
             if timeout 10 docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm > /dev/null 2>&1 \
               && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
               && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
@@ -173,7 +177,7 @@ jobs:
             if [ $((attempt % 15)) = 0 ]; then echo "Still waiting for local dependencies ($attempt checks)."; fi
             sleep 2
           done
-          echo 'A local dependency did not become ready within five minutes.'
+          echo 'A local dependency did not become ready within six minutes.'
           timeout 10 docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm || true
           for port in "$analyzer_port" "$anonymizer_port"; do
             curl --max-time 5 --silent --show-error -o /dev/null -w "port=$port status=%{http_code}\n" \
