@@ -737,6 +737,25 @@ def test_enum_values_holding_pii_are_redacted_consistently():
     assert enum[0] in redacted["messages"][0]["content"], "the enum and the prompt must share one token"
 
 
+@pytest.mark.parametrize("keyword", ["enum", "const", "examples", "default"])
+def test_structured_schema_values_are_redacted_under_any_key(keyword):
+    """`enum`, `const`, `examples` and `default` hold JSON data, not schema: a member like
+    `{"type": <email>}` must not have its `type` skipped as if it were a keyword."""
+    engine = PIIEngine()
+
+    member = {"type": "jane.doe@example.com", "format": "bob@example.com"}
+    value = [member] if keyword in ("enum", "examples") else member
+    payload = {
+        "messages": [],
+        "tools": [{"type": "function", "function": {"name": "f", "parameters": {"properties": {"to": {keyword: value}}}}}],
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "jane.doe@example.com" not in serialised
+    assert "bob@example.com" not in serialised
+
+
 def test_non_text_blocks_survive_tool_result_handling():
     """Image parts have no text and must come through untouched."""
     engine = PIIEngine()

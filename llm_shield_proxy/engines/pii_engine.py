@@ -372,6 +372,11 @@ _SCHEMA_NAME_MAPS: frozenset[str] = frozenset(
     {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"}
 )
 
+# JSON Schema keywords whose value is JSON data rather than schema. No key inside that data
+# is structural, so protected keys do not apply there: an enum member `{"type": <email>}`
+# is a value the model may send, and skipping its `type` would forward the email.
+_SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples", "default"})
+
 
 class UnmappedBlobError(ValueError):
     """A blob was found in a field no policy claims, under UNMAPPED_BLOB_POLICY=block.
@@ -1061,7 +1066,7 @@ class PIIEngine:
                         value,
                         vault,
                         active_profile,
-                        protected,
+                        frozenset() if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS else protected,
                         max_string_length,
                         depth + 1,
                         max_depth,
