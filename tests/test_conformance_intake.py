@@ -1110,3 +1110,16 @@ def test_a_rerun_from_the_same_issue_is_not_refused_by_the_row_cap(tmp_path, mon
     fresh["runUrl"] = "https://github.com/o/r/actions/runs/1000"
     fresh["_submission"]["issue"] = 500
     assert not intake.is_replacement(fresh, entries)
+
+
+def test_the_published_reply_carries_the_wall_badge_for_that_issue():
+    row = _row()
+    text = intake.render_comment(row, "reason", "evidence", [])
+    assert "conformance-badges%2Fissue-7.json" in text
+    assert "(https://llmshieldproxy.com/docs/conformance/who-has-run-it)" in text
+
+
+def test_an_unpublished_reply_offers_no_badge():
+    row = _row(reports={})
+    assert row["status"] == "draft"
+    assert "conformance-badges" not in intake.render_comment(row, "reason", "evidence", [])

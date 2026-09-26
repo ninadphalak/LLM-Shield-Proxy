@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -69,6 +70,10 @@ ENTITY_WORDS = {
     "GITHUB_TOKEN": "GitHub tokens",  # nosec B105
     "SLACK_TOKEN": "Slack tokens",  # nosec B105
 }
+
+WALL_URL = "https://llmshieldproxy.com/docs/conformance/who-has-run-it"
+# Written at every site build from the published rows by website/scripts/generate-result-badges.mjs.
+BADGE_ENDPOINT = "https://llmshieldproxy.com/conformance-badges/issue-{issue}.json"
 
 MAX_FIELD_CHARS = 200
 API_TIMEOUT_SECONDS = 20
@@ -586,6 +591,12 @@ def build_row(
     return row
 
 
+def badge_markdown(issue: int) -> str:
+    """README Markdown for the wall-hosted badge of one published row."""
+    endpoint = urllib.parse.quote(BADGE_ENDPOINT.format(issue=issue), safe="")
+    return f"[![PII leak check](https://img.shields.io/endpoint?url={endpoint})]({WALL_URL})"
+
+
 def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: list[str]) -> str:
     """What the workflow posts back on the issue."""
     if problems:
@@ -614,6 +625,18 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
             "can establish that.",
             "",
         ]
+        issue = (row.get("_submission") or {}).get("issue")
+        if isinstance(issue, int) and issue > 0:
+            lines += [
+                "A badge for your README, served by the wall from this row. It says `leaked` "
+                "in red for any measured leak and `benchmarked` in blue otherwise, and it goes "
+                "away if the row is removed:",
+                "",
+                "```md",
+                badge_markdown(issue),
+                "```",
+                "",
+            ]
         if "leakWholeN" not in row:
             lines += [
                 "The two response-split columns say `not measured`, which is accurate: they "
