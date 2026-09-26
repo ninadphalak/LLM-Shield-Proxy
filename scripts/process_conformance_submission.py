@@ -426,7 +426,10 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     )
     derived: dict[str, Any] = {}
 
-    if operator:
+    if operator and any(
+        state != "not measured" for state in (operator.get("entities") or {}).values()
+    ):
+        # A request path with nothing measured is not a clean request path: no columns.
         entities = operator.get("entities") or {}
         leaked = sorted(name for name, state in entities.items() if state == "leak")
         measured = sorted(name for name, state in entities.items() if state != "not measured")
@@ -487,6 +490,8 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
         inconclusive = metrics.get("cases_inconclusive")
         if isinstance(inconclusive, int) and not isinstance(inconclusive, bool) and inconclusive > 0:
             derived["_cases_inconclusive"] = inconclusive
+            # Published too: the badge must not count a response check with unjudged cases.
+            derived["responseInconclusive"] = inconclusive
         leak = metrics.get("leak_rate") or {}
         counts = metrics.get("cases_by_condition") or {}
         for key, condition, text, number in (

@@ -12,8 +12,8 @@ const CHECKS = 3;
 /**
  * How many of the three checks a row passed: request path, response with the value whole,
  * response with the value split across two chunks. A check passes only when it was measured
- * and nothing leaked; an unmeasured check is not a pass, so no row reaches 3 of 3 without
- * the response measurement.
+ * in full and nothing leaked. An unmeasured check, or a response check with inconclusive
+ * cases, is not a pass, so no row reaches 3 of 3 on less than the whole measurement.
  */
 export function checksPassed(row) {
   const values = [row.sentN, row.leakWholeN, row.leakSplitN];
@@ -26,7 +26,13 @@ export function checksPassed(row) {
   if (!values.some((value) => typeof value === 'number')) {
     throw new Error(`published row ${row._submission?.issue} has invalid measured counts`);
   }
-  return values.filter((value) => value === 0).length;
+  const inconclusive = row.responseInconclusive ?? 0;
+  if (!Number.isSafeInteger(inconclusive) || inconclusive < 0) {
+    throw new Error(`published row ${row._submission?.issue} has invalid measured counts`);
+  }
+  // A response check with unjudged cases was not shown clean, whatever its leak rate.
+  const counted = inconclusive > 0 ? [values[0]] : values;
+  return counted.filter((value) => value === 0).length;
 }
 
 // Verdana 11px advance widths, rounded, for the only characters a badge ever carries.

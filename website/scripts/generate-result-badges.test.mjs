@@ -80,3 +80,10 @@ test('invalid and repeated issue numbers, and invalid counts, fail the build', (
     rmSync(root, {recursive: true, force: true});
   }
 });
+
+test('a check passes only when all of it was measured', () => {
+  // Inconclusive response cases were never judged, so neither response check can pass.
+  assert.equal(checksPassed(row(5, {sentN: 0, leakWholeN: 0, leakSplitN: 0, responseInconclusive: 8})), 1);
+  assert.equal(checksPassed(row(6, {sentN: 0, leakWholeN: 0, leakSplitN: 0, responseInconclusive: 0})), 3);
+  assert.throws(() => checksPassed(row(7, {sentN: 0, responseInconclusive: -1})), /invalid measured counts/);
+});

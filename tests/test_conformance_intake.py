@@ -1231,3 +1231,20 @@ def test_a_resubmission_that_changes_nothing_opens_no_pull_request(monkeypatch):
     assert intake.publish(_row(), 7) is False
     assert not any(command[:2] == ("git", "commit") for command in calls)
     assert not any(command[:3] == ("gh", "pr", "create") for command in calls)
+
+
+def test_an_unmeasured_request_path_writes_no_request_columns():
+    """All entities 'not measured' is not a clean request path; the row must not say 'none'."""
+    operator = _operator_run(entities={"EMAIL": "not measured", "SSN": "not measured"})
+    operator["verdict"] = "CLEAN"
+    derived = intake.derive_measurements({"current.json": operator})
+    assert "sentN" not in derived and "sent" not in derived
+
+
+def test_inconclusive_response_cases_are_published_as_a_field():
+    response = _split_report(0.0, 0.0)
+    response["metrics"]["cases_inconclusive"] = 8
+    row = intake.build_row(_good_fields(), "submitted-main",
+                           intake.derive_measurements({"current.json": _operator_run(), "x.json": response}),
+                           issue_number=7, submitter="s", date="2026-09-26", evidence="e")
+    assert row["responseInconclusive"] == 8
