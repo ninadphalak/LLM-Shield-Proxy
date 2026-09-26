@@ -225,3 +225,5 @@ def test_the_result_step_reads_the_upload_outcome(name):
     upload = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/upload-artifact"))
     assert upload.get("id") == "upload"
     assert _result_step(name)["env"]["UPLOAD_OUTCOME"] == "${{ steps.upload.outcome }}"
+    # An upload failure must be visible in the incomplete message, not only in the status.
+    assert "upload=${{ steps.upload.outcome }}" in _result_step(name)["env"]["STEP_OUTCOMES"]

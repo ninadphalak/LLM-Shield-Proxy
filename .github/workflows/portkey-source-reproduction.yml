@@ -298,7 +298,7 @@ jobs:
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           RESPONSE_OUTCOME: ${{ steps.response.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
-          STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}
+          STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}, upload=${{ steps.upload.outcome }}
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
