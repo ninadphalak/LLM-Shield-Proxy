@@ -114,37 +114,41 @@ jobs:
               sleep $((2 ** attempt))
             done
           done
-          pg=$(docker run -d -p 127.0.0.1::5432 \
-            -e POSTGRES_PASSWORD=litellm -e POSTGRES_USER=litellm -e POSTGRES_DB=litellm "$POSTGRES_IMAGE")
-          analyzer=$(docker run -d -p 127.0.0.1::3000 "$ANALYZER_IMAGE")
-          anonymizer=$(docker run -d -p 127.0.0.1::3000 "$ANONYMIZER_IMAGE")
+          # Host networking, on ports chosen here. Published ports (-p 127.0.0.1::3000) went
+          # through Docker's port proxy, and on hosted runners one of those ports intermittently
+          # accepted connections and never answered while the container itself was serving.
+          # Restarting the container could not fix that, which is why earlier retries never did.
+          read -r pg_port analyzer_port anonymizer_port < <(python -c '
+          import socket
+          sockets = [socket.socket() for _ in range(3)]
+          for sock in sockets:
+              sock.bind(("127.0.0.1", 0))
+          print(" ".join(str(sock.getsockname()[1]) for sock in sockets))
+          for sock in sockets:
+              sock.close()')
+          pg=$(docker run -d --network host \
+            -e POSTGRES_PASSWORD=litellm -e POSTGRES_USER=litellm -e POSTGRES_DB=litellm \
+            "$POSTGRES_IMAGE" -p "$pg_port" -c listen_addresses=127.0.0.1)
+          analyzer=$(docker run -d --network host -e PORT="$analyzer_port" \
+            -e GUNICORN_CMD_ARGS='--timeout 300' "$ANALYZER_IMAGE")
+          anonymizer=$(docker run -d --network host -e PORT="$anonymizer_port" \
+            -e GUNICORN_CMD_ARGS='--timeout 300' "$ANONYMIZER_IMAGE")
           echo "PG_CONTAINER=$pg" >> "$GITHUB_ENV"
           echo "ANALYZER_CONTAINER=$analyzer" >> "$GITHUB_ENV"
           echo "ANONYMIZER_CONTAINER=$anonymizer" >> "$GITHUB_ENV"
-          pg_port=$(docker port "$pg" 5432/tcp | sed 's/.*://')
-          analyzer_port=$(docker port "$analyzer" 3000/tcp | sed 's/.*://')
-          anonymizer_port=$(docker port "$anonymizer" 3000/tcp | sed 's/.*://')
           echo "DATABASE_URL=postgresql://litellm:litellm@127.0.0.1:$pg_port/litellm" >> "$GITHUB_ENV"
           echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
           echo "ANONYMIZER_PORT=$anonymizer_port" >> "$GITHUB_ENV"
-          for phase in 1 2 3; do
-            for _ in $(seq 1 60); do
-              if docker exec "$pg" pg_isready -U litellm -d litellm > /dev/null 2>&1 \
-                && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
-                && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
-                exit 0
-              fi
-              sleep 2
-            done
-            if [ "$phase" != 3 ]; then
-              echo 'Presidio analyzer is not ready; restarting its pre-fixture container.'
-              docker restart "$analyzer" > /dev/null
-              analyzer_port=$(docker port "$analyzer" 3000/tcp | sed 's/.*://')
-              echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
+          for _ in $(seq 1 150); do
+            if docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm > /dev/null 2>&1 \
+              && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
+              && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
+              exit 0
             fi
+            sleep 2
           done
-          echo 'A local dependency did not become ready.'
-          docker exec "$pg" pg_isready -U litellm -d litellm || true
+          echo 'A local dependency did not become ready within five minutes.'
+          docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm || true
           for port in "$analyzer_port" "$anonymizer_port"; do
             curl --max-time 5 --silent --show-error -o /dev/null -w "port=$port status=%{http_code}\n" \
               "http://127.0.0.1:$port/health" || true
@@ -152,8 +156,7 @@ jobs:
           free -h || true
           for id in "$pg" "$analyzer" "$anonymizer"; do
             docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
-            docker stats --no-stream --format 'container={{.Name}} memory={{.MemUsage}}' "$id" || true
-            docker logs --tail 20 "$id" 2>&1 || true
+            docker logs --tail 60 "$id" 2>&1 || true
           done
           exit 2
 
