@@ -14,9 +14,26 @@ Two groups are handled differently:
   participant `name`, `tool_calls` and legacy `function_call` arguments), `prompt`,
   `system` (string or content blocks), `input` (string, string array, or Responses
   API items including `function_call` arguments and `function_call_output` output),
-  and `instructions`.
-- **Everything else**, walked generically: `metadata`, `user`, `tools`,
-  `response_format`, and any provider-specific or unrecognised field.
+  `instructions`, and the tool definitions in `tools` and legacy `functions`.
+- **Everything else**, walked generically: `metadata`, `user`, `response_format`,
+  and any provider-specific or unrecognised field.
+
+## Tool Definitions
+
+A tool's `description`, and the `description` and `title` of every schema inside it,
+are text the caller wrote once and sends with every request. Callers do put names and
+addresses in them. They are redacted on every request, whatever
+`ENABLE_DEEP_PAYLOAD_REDACTION` says.
+
+Values redacted out of that text are **not restored** into the reply. If the model
+repeats the placeholder, the client receives the placeholder. The exception is a value
+the caller also sent on a restorable path, such as their own message: restoring it
+discloses nothing the caller did not send, and it keeps a single placeholder for a
+single value.
+
+Values the model can send back as tool arguments stay restorable: `enum`, `const`,
+`default` and `examples`. Tool arguments are rehydrated, so the application still
+receives a value its schema allows.
 
 ## What Is Never Rewritten
 
@@ -24,8 +41,9 @@ Some values carry structure rather than prose. Rewriting one does not protect an
 and can break the request: a tool stops routing, a schema stops validating, a model
 name stops resolving.
 
-Built-in protected keys: `model`, `type`, `role`, `enum`, `format`, `object`, `index`,
-`finish_reason`, `$ref`, `$schema`, `mime_type`, `encoding_format`.
+Built-in protected keys: `model`, `type`, `role`, `format`, `object`, `index`,
+`finish_reason`, `$ref`, `$schema`, `mime_type`, `encoding_format`. Inside `enum`,
+`const`, `default` and `examples` these are only field names, so they are walked there.
 
 Add your own with `PAYLOAD_PROTECTED_KEYS` globally, or `payload_skip_keys` per role
 in [`policies.yaml`](/docs/policies). JSON is schemaless, so a deployment's own field
@@ -82,3 +100,4 @@ settings against each other rather than as an end-to-end latency figure.
 - `llm_shield_proxy/engines/pii_engine.py` (`redact_payload`, `_deep_redact`)
 - `benchmarks/payload_walk_latency.py`
 - `tests/test_pii_engine.py`
+- `tests/test_tool_definition_redaction.py`

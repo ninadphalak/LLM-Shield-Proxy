@@ -142,9 +142,9 @@ class Settings(BaseSettings):
     ENABLE_DEEP_PAYLOAD_REDACTION: bool = Field(
         default=True,
         description=(
-            "Redact strings in request fields outside the known chat shapes: metadata, user, "
-            "tools, response_format, and any provider-specific or unrecognised field. Turning "
-            "this off lets those fields reach the provider unredacted."
+            "Redact strings in request fields outside the known request shapes: metadata, user, "
+            "response_format, and any provider-specific or unrecognised field. Turning this off "
+            "lets those fields reach the provider unredacted. Tool definitions are redacted either way."
         ),
     )
     PAYLOAD_PROTECTED_KEYS: str = Field(
