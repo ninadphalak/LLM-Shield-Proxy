@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -69,6 +70,10 @@ ENTITY_WORDS = {
     "GITHUB_TOKEN": "GitHub tokens",  # nosec B105
     "SLACK_TOKEN": "Slack tokens",  # nosec B105
 }
+
+WALL_URL = "https://llmshieldproxy.com/docs/conformance/who-has-run-it"
+# Written at every site build from the published rows by website/scripts/generate-result-badges.mjs.
+BADGE_ENDPOINT = "https://llmshieldproxy.com/conformance-badges/issue-{issue}.json"
 
 MAX_FIELD_CHARS = 200
 API_TIMEOUT_SECONDS = 20
@@ -486,7 +491,10 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
         ):
             rate = leak.get(key)
             total = counts.get(condition)
-            if isinstance(rate, (int, float)) and isinstance(total, int) and total > 0:
+            # A rate outside [0, 1] (or NaN, or a bool) is not a measurement the wall can show,
+            # and the badge build refuses it after the row is written. Drop it here instead.
+            if (isinstance(rate, (int, float)) and not isinstance(rate, bool) and 0.0 <= rate <= 1.0
+                    and isinstance(total, int) and total > 0):
                 derived[text] = f"{round(rate * total)} of {total}"
                 derived[number] = float(rate)
     return derived
@@ -586,6 +594,12 @@ def build_row(
     return row
 
 
+def badge_markdown(issue: int) -> str:
+    """README Markdown for the wall-hosted badge of one published row."""
+    endpoint = urllib.parse.quote(BADGE_ENDPOINT.format(issue=issue), safe="")
+    return f"[![PII leak check](https://img.shields.io/endpoint?url={endpoint})]({WALL_URL})"
+
+
 def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: list[str]) -> str:
     """What the workflow posts back on the issue."""
     if problems:
@@ -614,6 +628,18 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
             "can establish that.",
             "",
         ]
+        issue = (row.get("_submission") or {}).get("issue")
+        if isinstance(issue, int) and issue > 0:
+            lines += [
+                "A badge for your README, served by the wall from this row. It says `leaked` "
+                "in red for any measured leak and `benchmarked` in blue otherwise, and it goes "
+                "away if the row is removed:",
+                "",
+                "```md",
+                badge_markdown(issue),
+                "```",
+                "",
+            ]
         if "leakWholeN" not in row:
             lines += [
                 "The two response-split columns say `not measured`, which is accurate: they "
@@ -884,11 +910,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     append_row(row)
-    # Check row content for style before commit.
-    check_row_content()
-    # Check site build before commit to prevent broken deploys.
-    build_site()
     try:
+        # The content scan and the site build are gates: a row either passes both or is not
+        # committed. Inside this handler so a refusal reaches the submitter as a reply.
+        check_row_content()
+        build_site()
         publish(row, issue_number)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         # Notify submitter on failure.

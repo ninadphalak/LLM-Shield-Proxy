@@ -58,6 +58,8 @@ The summary of a measured run ends with two ways to submit. Use either one:
 A bot answers on that issue within a few minutes. It either links your row on the
 [results wall](./who-has-run-it.mdx), or says exactly what stopped it and what to do.
 Editing the issue, for example to paste the link of a rerun, runs the check again.
+When your row is published, that reply also gives you a README badge, served by the wall
+from your row: `leaked` in red for any measured leak, `benchmarked` in blue otherwise.
 
 The wall reads every number from your run's uploaded evidence, not from anything typed in
 the issue. The workflow already names the proxy, its licence and the configuration it
