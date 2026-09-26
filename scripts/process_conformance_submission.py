@@ -11,6 +11,7 @@ import re
 import subprocess  # nosec B404 - git, gh and npm with fixed argument lists
 import sys
 import tempfile
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -705,8 +706,10 @@ def submissions_by(entries: list[Any], submitter: str) -> int:
     )
 
 
-def append_row(row: dict[str, Any], path: Path = ROWS_FILE) -> None:
+def append_row(row: dict[str, Any], path: Optional[Path] = None) -> None:
     """Safely replace or append to the rows file."""
+    # Resolved at call time, so a test that points ROWS_FILE elsewhere never writes the real file.
+    path = path or ROWS_FILE
     document = json.loads(path.read_text(encoding="utf-8"))
     entries = document.setdefault("entries", [])
     if not isinstance(entries, list):
@@ -734,8 +737,49 @@ def build_site() -> None:
     _run("npm", "run", "build", cwd=WEBSITE)
 
 
-def publish(row: dict[str, Any], issue_number: int) -> None:
-    """Land the row via an auto-merging pull request."""
+def open_row_branches() -> list[str]:
+    """Branches of results-wall row pull requests that are still open."""
+    # Paginated, so an old row pull request past the first page is still seen.
+    listed = subprocess.run(  # nosec B603 B607 - fixed argument list
+        ["gh", "api", "--paginate", "repos/{owner}/{repo}/pulls?state=open&per_page=100",
+         "--jq", ".[].head.ref"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout
+    return sorted(line.strip() for line in listed.splitlines() if line.strip().startswith("intake/issue-"))
+
+
+def wait_for_earlier_rows(
+    issue_number: int,
+    *,
+    list_open: Callable[[], list[str]] = open_row_branches,
+    sleep: Callable[[float], None] = time.sleep,
+    timeout_seconds: int = 1200,
+    poll_seconds: int = 20,
+) -> None:
+    """Wait until no other row pull request is open.
+
+    Every row appends to the same list in one file. The job concurrency group runs one
+    intake at a time, but a job ends when its pull request is OPENED, not merged. Two
+    submissions minutes apart (#107 and #108) both branched from a main holding neither
+    row, and the second pull request conflicted and never merged, after its submitter had
+    been told it was published. Waiting here, then catching up with main, puts each row on
+    top of the one before it.
+    """
+    # This issue's own earlier row counts too: an issue edited while its first row pull
+    # request is open must wait for it, or its push to the same branch is rejected.
+    waited = 0
+    while True:
+        others = list_open()
+        if not others:
+            return
+        if waited >= timeout_seconds:
+            raise RuntimeError(f"earlier results-wall pull requests are still open: {others}")
+        sleep(poll_seconds)
+        waited += poll_seconds
+
+
+def publish(row: dict[str, Any], issue_number: int) -> bool:
+    """Land the row via an auto-merging pull request. False when the wall already has it."""
     _run("git", "config", "user.name", "github-actions[bot]")
     _run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
     _run("git", "add", str(ROWS_FILE.relative_to(REPO_ROOT)))
@@ -751,6 +795,9 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
             "refusing to publish: this job may only change "
             f"{sorted(allowed)}, and it staged {sorted(staged)}"
         )
+    if not staged:
+        # The same run resubmitted, byte for byte: the row is already on main.
+        return False
 
     title = f"feat(results-wall): add {row['project']} {row['version']} (#{issue_number})"
     _run("git", "commit", "-m", title)
@@ -778,6 +825,7 @@ def publish(row: dict[str, Any], issue_number: int) -> None:
         # Prevent stale branches.
         _try("git", "push", "origin", "--delete", branch)
         raise
+    return True
 
 
 def _try(*command: str, env: Optional[dict[str, str]] = None) -> bool:
@@ -893,7 +941,23 @@ def main(argv: Optional[list[str]] = None) -> int:
         label(issue_number, "needs-info")
         return 1
 
-    # Enforce row limit, allowing replacements.
+    # One row pull request at a time, and each built on a main holding the rows before it.
+    try:
+        wait_for_earlier_rows(issue_number)
+        _run("git", "pull", "--ff-only", "origin", "main")
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
+        comment(
+            issue_number,
+            "This result was read and verified, but another submission was still being "
+            f"published and this one could not wait any longer ({type(exc).__name__}). Nothing "
+            "is wrong with your submission. Edit this issue in a few minutes, for example by "
+            "adding a space, and the check runs again.",
+        )
+        label(issue_number, "needs-info")
+        print(f"Could not start from an up-to-date main: {exc}", file=sys.stderr)
+        return 1
+
+    # Enforce row limit, allowing replacements. Read after catching up, not before.
     existing = json.loads(ROWS_FILE.read_text(encoding="utf-8")).get("entries", [])
     submitter = (row.get("_submission") or {}).get("submitter", "")
     replacing = is_replacement(row, existing)
