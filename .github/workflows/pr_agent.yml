@@ -1,6 +1,7 @@
 name: PR Agent
 
-# AI review on every pull request, and on `/review`-style comments.
+# AI review ONCE per pull request -- when it opens, or when a draft is marked ready -- and
+# again only when a person asks with a `/review` or `/improve` comment.
 #
 # The model ids are repository VARIABLES, not literals in this file, because this
 # repository is public and the choice of provider is not something it publishes. Set them
@@ -16,39 +17,57 @@ name: PR Agent
 #
 # GITHUB_TOKEN is required: without it PR-Agent cannot read the PR or post its review.
 
+# `synchronize` is still listened for, and the job below SKIPS it. That is deliberate.
+#
+# Reviewing every push fed a loop: an agent fixed each finding in its own commit, every
+# commit bought a fresh whole-diff review, and every fresh review found something new to
+# fix. The tokens went on re-reviewing the agent's own fixes, not on the change.
+#
+# Dropping `synchronize` from this list would be the obvious fix and it would lock the
+# repository: "Review the pull request" is a REQUIRED status check on `main`, required
+# checks are read off the head commit, and a push that starts no run leaves the check
+# "expected" on the new head forever, so no PR could merge after its first fix. A job
+# skipped by its `if:` reports as passing, costs no runner minutes and no tokens, and
+# keeps the check present on every head.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]
 
-# One review per PR at a time, for PUSHES only.
-#
-# Each run sends the whole diff to the model, so pushing three commits in a minute
-# without this starts three runs that each pay for the whole diff -- and the first two
-# describe code the third has already replaced. Grouping them means run 3 cancels runs
-# 1 and 2, and you pay once, for the state that actually exists.
+# The event ACTION is in the key, not a shared 'push' group. Pushes no longer review, so
+# a push arriving while the opening review runs must not cancel it -- in one shared group
+# the push's skipped run would kill the only review the PR gets and replace it with
+# nothing.
 #
 # The comment id is in the key on purpose. A `/review` or `/improve` comment is an
-# explicit request from a person, and if comment runs shared the push group, typing
-# `/improve` during an auto-review would kill one of the two: either the review the push
-# asked for, or the command the human asked for, silently and with no output either way.
-# Every comment gets its own group, so nothing cancels a typed command.
+# explicit request from a person, and if comment runs shared a group with anything,
+# typing `/improve` during an auto-review would kill one of the two, silently and with no
+# output either way. Every comment gets its own group, so nothing cancels a typed command.
 concurrency:
-  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || 'push' }}
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || github.event.action }}
   cancel-in-progress: true
 
 permissions: {}
 
 jobs:
   pr_agent_job:
-    # Both halves are load-bearing. Without the sender check, PR-Agent's own review
+    # Every clause is load-bearing. Without the sender check, PR-Agent's own review
     # comment is an `issue_comment` that triggers another run -- a paid loop. Without the
-    # pull_request check, every comment on every plain ISSUE in this repo starts a review
-    # of nothing.
+    # `issue.pull_request` check, every comment on every plain ISSUE in this repo starts a
+    # review of nothing. `synchronize` is skipped for the reason at the top of `on:`. A
+    # draft is skipped because it is about to change: open agent work as a draft, push
+    # freely, and the review happens once, on `ready_for_review`.
     if: >-
       github.event.sender.type != 'Bot' &&
-      (github.event_name == 'pull_request' || github.event.issue.pull_request)
+      (
+        github.event.issue.pull_request ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.action != 'synchronize' &&
+          !github.event.pull_request.draft
+        )
+      )
     runs-on: ubuntu-latest
     # Least privilege, and deliberately narrower than upstream's example, which asks for
     # `contents: write` and `checks: write`. Review, describe and improve only read the
@@ -128,18 +147,21 @@ jobs:
           # later. Measured: a run logged "total tokens under limit: 200000", so the
           # configured models resolve to at least that.
           CONFIG.MAX_MODEL_TOKENS: "200000"
-          # MUST match the `pull_request` types above. PR-Agent's own default is
-          # ['opened', 'reopened', 'ready_for_review', 'review_requested'] -- WITHOUT
-          # `synchronize` -- so a workflow that triggers on a push to an open PR builds
-          # the Docker image, starts the agent, logs "Skipping action: synchronize" and
-          # exits green having reviewed nothing. A listened-for event that is then
-          # discarded is worse than not listening: it bills a runner and reports success.
-          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review", "synchronize"]'
-          # Review and suggestions, yes. `auto_describe` rewrites the PR body, and the
-          # bodies in this repository carry the measurements and the reasoning behind a
-          # change; a generated summary would overwrite the evidence.
+          # MUST match the `pull_request` events that get PAST the job's `if:` -- the
+          # types above minus `synchronize`, which the job skips. If an event reaches this
+          # step and is not in this list, PR-Agent builds the Docker image, starts, logs
+          # "Skipping action: <event>" and exits green having reviewed nothing. That
+          # happened with `synchronize` before it was listed: it billed a runner and
+          # reported success. Add an event here and to the `if:` together, or not at all.
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review"]'
+          # Review yes, automatic suggestions no. `/improve` wraps more scaffolding around
+          # the same diff than `/review`, so it is the larger bill, and its output is
+          # code-change suggestions -- the least severe findings and the ones an agent
+          # turns into one commit each. Type `/improve` on the PR when you want them.
+          # `auto_describe` stays off: it rewrites the PR body, and the bodies in this
+          # repository carry the measurements and the reasoning behind a change.
           GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
-          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
           GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
           # Where the standing project context comes from. PR-Agent reads these from the
           # DEFAULT BRANCH, so it can only ever see committed files -- `.llm/CONTEXT.md`

@@ -2,8 +2,8 @@
   "_comment_gate": "Greptile reviews ONLY pull requests carrying the 'deep-review' label. The free tier is 50 credits per month, and the standing rule reserves them for changes to security/, streaming/, engines/, or anything that alters a published claim or measurement. Before this file, that rule was a convention nobody enforced: Greptile reviewed every PR and spent a credit on each, so the month's budget was gone on config and docs churn. 'labels' makes the rule mechanical. Add the label with: gh pr edit <n> --add-label deep-review",
   "labels": ["deep-review"],
 
-  "_comment_autoReview": "On a labelled PR, review when it opens and on later pushes, but not on a rebase: a force-push that only rewrites history is usually a rebase onto main or a reworded commit, and paying a second credit for the same content is how a 50-credit budget disappears. A rebase that genuinely changes the diff can be reviewed by hand with @greptileai.",
-  "autoReview": ["open", "push"],
+  "_comment_autoReview": "On a labelled PR, review once, when it opens. Not on pushes: reviewing every push fed a loop in which an agent fixed each finding in its own commit, each commit bought a new review, and each review found something new, so the credits went on re-reviewing fixes. Batch the fixes into one push, then ask for ONE re-review by commenting @greptileai -- that is also how to refresh the score the merge bar reads.",
+  "autoReview": ["open"],
 
   "_comment_strictness": "3 of 3. These credits are deliberately spent on the highest-risk changes in the repository, so the review should be the strict one. Nitpicks are filtered by commentTypes below rather than by lowering severity.",
   "strictness": 3,
