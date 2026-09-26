@@ -776,6 +776,28 @@ def test_operator_protected_keys_still_hold_inside_schema_data(keyword, monkeypa
     assert "bob@example.com" not in serialised, "the built-in `type` is only a field name here"
 
 
+def test_a_role_skip_key_that_is_also_built_in_still_holds_inside_schema_data():
+    """A role listing `type` in payload_skip_keys wants it through unchanged, even where
+    the built-in meaning of `type` does not apply."""
+    engine = PIIEngine()
+    payload = {
+        "messages": [],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "f", "parameters": {"properties": {"to": {"enum": [{"type": "jane.doe@example.com"}]}}}},
+            }
+        ],
+    }
+    token = request_policy_ctx.set({"payload_skip_keys": ["type"]})
+    try:
+        redacted = engine.redact_payload(payload, Vault())
+    finally:
+        request_policy_ctx.reset(token)
+
+    assert "jane.doe@example.com" in json.dumps(redacted)
+
+
 def test_non_text_blocks_survive_tool_result_handling():
     """Image parts have no text and must come through untouched."""
     engine = PIIEngine()

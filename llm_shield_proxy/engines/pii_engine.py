@@ -381,9 +381,13 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 
 
 def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
-    """`protected` minus the built-in structural keys an operator did not also list."""
-    structural_only = DEFAULT_PROTECTED_PAYLOAD_KEYS - settings.payload_operator_protected_keys_set
-    return protected - structural_only
+    """`protected` minus the built-in structural keys nobody also listed explicitly.
+
+    A built-in key an operator put in PAYLOAD_PROTECTED_KEYS, or a role put in its
+    `payload_skip_keys`, is an explicit promise and still holds.
+    """
+    explicit = settings.payload_operator_protected_keys_set | _policy_skip_keys()
+    return protected - (DEFAULT_PROTECTED_PAYLOAD_KEYS - explicit)
 
 
 class UnmappedBlobError(ValueError):
