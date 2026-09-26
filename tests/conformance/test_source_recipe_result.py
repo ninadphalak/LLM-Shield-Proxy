@@ -59,19 +59,21 @@ def _script(name):
 def _response(single, split, inconclusive=0):
     return {"metrics": {"leak_rate": {"single_chunk": single, "adversarial": split},
                         "cases_by_condition": {"single_chunk": 16, "adversarial": 16},
-                        "cases_inconclusive": inconclusive}}
+                        "cases_scored": 32, "cases_inconclusive": inconclusive}}
 
 
 def _run(tmp_path, name, *, verified=True, request_leak=False, response_leak=False,
-         off_arm_leak=True):
+         off_arm_leak=True, response_outcome="success", inconclusive=0, reports=None):
     root = tmp_path / "bundle"
     root.mkdir()
     entities = {"EMAIL": "leak" if request_leak else "contained", "SSN": "contained"}
     (root / "current.json").write_text(json.dumps({"verdict": "LEAK" if request_leak else "CLEAN",
                                                    "entities": entities}))
-    for report in RECIPES[name]:
+    for report in (RECIPES[name] if reports is None else reports):
         leaking = off_arm_leak if report.endswith("-off.json") else response_leak
-        (root / report).write_text(json.dumps(_response(0.5 if leaking else 0.0, 1.0 if leaking else 0.0)))
+        body = _response(0.5 if leaking else 0.0, 1.0 if leaking else 0.0,
+                         0 if report.endswith("-off.json") else inconclusive)
+        (root / report).write_text(json.dumps(body))
     (root / "source-identity.json").write_text(json.dumps(
         {"schema": "pii-leak-benchmark/source-build/v1", "source_commit": COMMIT, "source_selector": "v9.9.9"}))
     if verified:
@@ -81,6 +83,8 @@ def _run(tmp_path, name, *, verified=True, request_leak=False, response_leak=Fal
     job_env = {key: value for key, value in _job(name)["env"].items() if key.startswith("WALL_")}
     env = dict(os.environ, **job_env, REPORT_DIR=str(root), GITHUB_OUTPUT=str(output),
                VERIFY_OUTCOME="success" if verified else "failure",
+               OPERATOR_OUTCOME="failure" if request_leak else "success",
+               RESPONSE_OUTCOME=response_outcome,
                STEP_OUTCOMES="request=success, response=failure, verification=failure",
                GITHUB_SERVER_URL="https://github.com", GITHUB_REPOSITORY="friend/proxy",
                GITHUB_RUN_ID="4242")
@@ -159,3 +163,36 @@ def test_the_four_result_steps_are_one_step():
     bodies = {name: yaml.safe_dump({k: v for k, v in _result_step(name).items() if k != "env"})
               for name in RECIPES}
     assert len(set(bodies.values())) == 1
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_an_all_inconclusive_response_is_not_a_clean_measurement(tmp_path, name):
+    """No applicable case means nothing was shown clean: the job must not go green."""
+    status, summary = _run(tmp_path, name, inconclusive=32)
+    assert status == "incomplete"
+    assert "MEASURED CLEAN" not in summary
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_failed_response_step_is_not_clean_even_with_a_report(tmp_path, name):
+    status, _ = _run(tmp_path, name, response_outcome="failure")
+    assert status == "incomplete"
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_missing_response_report_is_not_clean(tmp_path, name):
+    status, _ = _run(tmp_path, name, reports=[r for r in RECIPES[name] if r.endswith("-off.json")])
+    assert status == "incomplete"
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_measured_leak_stands_even_when_another_part_is_unmeasured(tmp_path, name):
+    status, _ = _run(tmp_path, name, request_leak=True, inconclusive=32)
+    assert status == "leak"
+
+
+def test_some_inconclusive_cases_still_allow_a_clean_measurement(tmp_path):
+    """NeMo refuses some cases by design; the applicable ones are still a measurement."""
+    status, summary = _run(tmp_path, "nemo-source-reproduction.yml", inconclusive=8)
+    assert status == "clean"
+    assert "| 8 |" in summary

@@ -408,6 +408,7 @@ jobs:
         env:
           REPORT_DIR: ${{ runner.temp }}/litellm-source-reproduction
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          RESPONSE_OUTCOME: ${{ steps.response.outcome }}
           STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
@@ -421,10 +422,14 @@ jobs:
               os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
           product = os.environ['WALL_PRODUCT']
           status = 'incomplete'
-          if os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file():
+          # Leak wins whenever one was measured. Clean needs every non-control response report
+          # to hold at least one applicable case, and the response step itself to have passed:
+          # a run that measured nothing must not read as a run that found nothing.
+          if (os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file()
+                  and (root / 'current.json').is_file()):
               operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
               leaked = sorted(name for name, state in (operator.get('entities') or {}).items() if state == 'leak')
-              table, response_leak = [], False
+              table, response_leak, measured_reports, unmeasured = [], False, 0, False
               for path in sorted(root.glob('*.json')):
                   try:
                       metrics = json.loads(path.read_text(encoding='utf-8')).get('metrics') or {}
@@ -442,9 +447,17 @@ jobs:
                       known = isinstance(rate, (int, float)) and isinstance(total, int)
                       cells.append(f'{round(rate * total)} of {total} leaked' if known else 'not measured')
                       response_leak = response_leak or (known and not control and rate > 0)
+                      unmeasured = unmeasured or (not known and not control)
+                  scored, inconclusive = metrics.get('cases_scored'), metrics.get('cases_inconclusive', 0)
+                  applicable = scored - inconclusive if isinstance(scored, int) and isinstance(inconclusive, int) else 0
+                  if not control:
+                      measured_reports += 1
+                      unmeasured = unmeasured or applicable <= 0
                   label = path.stem + (' (control, redaction off)' if control else '')
                   table.append(f"| {label} | {cells[0]} | {cells[1]} | {metrics.get('cases_inconclusive', 0)} |")
-              status = 'leak' if leaked or response_leak else 'clean'
+              complete = (os.environ['RESPONSE_OUTCOME'] == 'success' and measured_reports > 0
+                          and not unmeasured and operator.get('verdict') in ('CLEAN', 'LEAK'))
+              status = 'leak' if leaked or response_leak else 'clean' if complete else 'incomplete'
 
           if status == 'incomplete':
               print('## Result: INCOMPLETE, do not submit')
