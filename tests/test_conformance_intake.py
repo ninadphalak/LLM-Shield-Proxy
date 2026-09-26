@@ -1142,6 +1142,8 @@ def test_a_failed_site_build_still_answers_the_submitter(monkeypatch, tmp_path):
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"issue": {"number": 9, "body": "x", "user": {"login": "s"}}}))
     monkeypatch.setattr(intake, "process", lambda issue: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "wait_for_earlier_rows", lambda number: None)
+    monkeypatch.setattr(intake, "_run", lambda *command, cwd=None: None)
     monkeypatch.setattr(intake, "check_row_content", lambda: None)
 
     def broken_build():
@@ -1153,3 +1155,55 @@ def test_a_failed_site_build_still_answers_the_submitter(monkeypatch, tmp_path):
     monkeypatch.setattr(intake, "label", lambda number, name: True)
     assert intake.main(["--event-path", str(event)]) == 1
     assert said and "could not be published" in said[0]
+
+
+# ------------------------------------------- two submissions arriving together (#107, #108)
+
+
+def test_a_row_waits_for_earlier_row_prs_before_it_is_written():
+    """Both rows append to the same list; the second must start from a main holding the first."""
+    listings = iter([["intake/issue-107", "intake/issue-108"], ["intake/issue-108"]])
+    slept = []
+    intake.wait_for_earlier_rows(108, list_open=lambda: next(listings), sleep=slept.append,
+                                 timeout_seconds=600)
+    assert len(slept) == 1
+
+
+def test_waiting_for_earlier_rows_gives_up_with_an_error():
+    with pytest.raises(RuntimeError, match="still open"):
+        intake.wait_for_earlier_rows(9, list_open=lambda: ["intake/issue-3"], sleep=lambda s: None,
+                                     timeout_seconds=60, poll_seconds=20)
+
+
+def test_main_waits_and_catches_up_with_main_before_touching_the_rows(monkeypatch, tmp_path):
+    rows = tmp_path / "rows.json"
+    rows.write_text('{"entries": []}', encoding="utf-8")
+    monkeypatch.setattr(intake, "ROWS_FILE", rows)
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"issue": {"number": 9, "body": "x", "user": {"login": "s"}}}))
+    monkeypatch.setattr(intake, "process", lambda issue: (_row(), "r", "e", []))
+    order = []
+    monkeypatch.setattr(intake, "wait_for_earlier_rows", lambda number: order.append("wait"))
+    monkeypatch.setattr(intake, "_run", lambda *command, cwd=None: order.append(" ".join(command[:3])))
+    real_append = intake.append_row
+    monkeypatch.setattr(intake, "append_row", lambda row: order.append("append") or real_append(row, rows))
+    for name in ("check_row_content", "build_site"):
+        monkeypatch.setattr(intake, name, lambda: None)
+    monkeypatch.setattr(intake, "publish", lambda row, number: order.append("publish"))
+    monkeypatch.setattr(intake, "comment", lambda number, text: True)
+    monkeypatch.setattr(intake, "close_issue", lambda number: True)
+    assert intake.main(["--event-path", str(event)]) == 0
+    assert order[:3] == ["wait", "git pull --ff-only", "append"]
+
+
+def test_a_resubmission_that_changes_nothing_opens_no_pull_request(monkeypatch):
+    calls = []
+    monkeypatch.setattr(intake, "_run", lambda *command, cwd=None: calls.append(command))
+
+    class Nothing:
+        stdout = ""
+
+    monkeypatch.setattr(intake.subprocess, "run", lambda *a, **k: Nothing())
+    assert intake.publish(_row(), 7) is False
+    assert not any(command[:2] == ("git", "commit") for command in calls)
+    assert not any(command[:3] == ("gh", "pr", "create") for command in calls)
