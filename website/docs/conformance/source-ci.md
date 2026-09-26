@@ -8,6 +8,9 @@ You can measure a privacy proxy yourself, from a fork, and put the result on the
 clicking; the run itself takes 15 to 40 minutes. No model provider account, API key or
 local install is needed, and you do not fork this benchmark repository.
 
+Running the workflow publishes nothing. Run it as often as you like, on any branch; a result
+reaches the wall only when you choose to submit it.
+
 ## Pick a proxy
 
 | Proxy repository to fork | Workflow file to add | What it measures |
@@ -58,8 +61,10 @@ The summary of a measured run ends with two ways to submit. Use either one:
 A bot answers on that issue within a few minutes. It either links your row on the
 [results wall](./who-has-run-it.mdx), or says exactly what stopped it and what to do.
 Editing the issue, for example to paste the link of a rerun, runs the check again.
-When your row is published, that reply also gives you a README badge, served by the wall
-from your row: `leaked` in red for any measured leak, `benchmarked` in blue otherwise.
+When your row is published, that reply also gives you a README badge. It shows how many of
+the three checks passed (the request path, a value whole in the response, and a value split
+across two chunks), and 3 of 3 turns gold. Fix something, rerun, and edit the same issue
+with the new run link: the badge in your README updates by itself.
 
 The wall reads every number from your run's uploaded evidence, not from anything typed in
 the issue. The workflow already names the proxy, its licence and the configuration it

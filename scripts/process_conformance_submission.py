@@ -14,7 +14,6 @@ import tempfile
 import time
 import unicodedata
 import urllib.error
-import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -72,9 +71,13 @@ ENTITY_WORDS = {
     "SLACK_TOKEN": "Slack tokens",  # nosec B105
 }
 
-WALL_URL = "https://llmshieldproxy.com/docs/conformance/who-has-run-it"
+# The one place the wall's address lives. Badge links go into other projects' READMEs and
+# cannot be edited from here, so a new domain must keep this one redirecting, at least for
+# /conformance-badges/ and the wall page.
+SITE = "https://llmshieldproxy.com"
+WALL_URL = f"{SITE}/docs/conformance/who-has-run-it"
 # Written at every site build from the published rows by website/scripts/generate-result-badges.mjs.
-BADGE_ENDPOINT = "https://llmshieldproxy.com/conformance-badges/issue-{issue}.json"
+BADGE_SVG = SITE + "/conformance-badges/issue-{issue}.svg"
 
 MAX_FIELD_CHARS = 200
 API_TIMEOUT_SECONDS = 20
@@ -597,8 +600,7 @@ def build_row(
 
 def badge_markdown(issue: int) -> str:
     """README Markdown for the wall-hosted badge of one published row."""
-    endpoint = urllib.parse.quote(BADGE_ENDPOINT.format(issue=issue), safe="")
-    return f"[![PII leak check](https://img.shields.io/endpoint?url={endpoint})]({WALL_URL})"
+    return f"[![pii-leak-benchmark result]({BADGE_SVG.format(issue=issue)})]({WALL_URL})"
 
 
 def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: list[str]) -> str:
@@ -612,7 +614,7 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
     published = row.get("status") == "published"
     body = json.dumps(row, indent=2, ensure_ascii=False)
     lines = [
-        "**Published.** Your row is on the [results wall](https://llmshieldproxy.com/docs/conformance/who-has-run-it)."
+        f"**Published.** Your row is on the [results wall]({WALL_URL})."
         if published
         else "**Not published yet.** The submission parsed, but no report could be read from the run.",
         "",
@@ -632,9 +634,11 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
         issue = (row.get("_submission") or {}).get("issue")
         if isinstance(issue, int) and issue > 0:
             lines += [
-                "A badge for your README, served by the wall from this row. It says `leaked` "
-                "in red for any measured leak and `benchmarked` in blue otherwise, and it goes "
-                "away if the row is removed:",
+                "A badge for your README, served from this row. It shows how many of the three "
+                "checks passed: the request path, a value whole in the response, and a value "
+                "split across two chunks. 3 of 3 turns gold. Fix something, rerun, and edit this "
+                "issue with the new run link: the same badge updates, so your README never needs "
+                "changing.",
                 "",
                 "```md",
                 badge_markdown(issue),

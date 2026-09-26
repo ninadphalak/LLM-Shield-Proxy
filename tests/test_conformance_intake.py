@@ -1115,7 +1115,8 @@ def test_a_rerun_from_the_same_issue_is_not_refused_by_the_row_cap(tmp_path, mon
 def test_the_published_reply_carries_the_wall_badge_for_that_issue():
     row = _row()
     text = intake.render_comment(row, "reason", "evidence", [])
-    assert "conformance-badges%2Fissue-7.json" in text
+    assert "(https://llmshieldproxy.com/conformance-badges/issue-7.svg)" in text
+    assert "pii-leak-benchmark" in text and "leaked" not in text.split("```md")[1]
     assert "(https://llmshieldproxy.com/docs/conformance/who-has-run-it)" in text
 
 
