@@ -362,7 +362,19 @@ def calculate_shannon_entropy(text: str) -> float:
 # Keys whose subtrees redact_payload already walks by shape. Deep redaction skips
 # them so a value is never redacted twice; redacting a synthetic placeholder would
 # mint a second token and rehydration would restore the placeholder, not the original.
-_TARGETED_PAYLOAD_KEYS: frozenset[str] = frozenset({"messages", "prompt", "system", "input", "instructions"})
+_TARGETED_PAYLOAD_KEYS: frozenset[str] = frozenset(
+    {"messages", "prompt", "system", "input", "instructions", "tools", "functions"}
+)
+
+# Tool definitions: redacted whatever ENABLE_DEEP_PAYLOAD_REDACTION says, because they are
+# a known request shape, not an unrecognised field.
+_TOOL_DEFINITION_KEYS: tuple[str, ...] = ("tools", "functions")
+
+# Inside a tool definition, the keywords that hold caller-authored prose. Values redacted
+# out of them are one-way: the reply never gets them back. Everything else in a definition
+# stays restorable, because `enum`, `const`, `default` and `examples` hold values the model
+# sends back as tool arguments, and those are rehydrated.
+_TOOL_PROSE_KEYS: frozenset[str] = frozenset({"description", "title"})
 
 # JSON Schema keywords whose value maps names to subschemas. The keys of that map are
 # property names, not keywords, so protected keys must not match them: a tool property
@@ -841,7 +853,13 @@ class PIIEngine:
 
         return completed
 
-    def redact_text(self, text: str, vault: Vault, active_profile: Optional[CompiledProfile] = None) -> str:
+    def redact_text(
+        self,
+        text: str,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> str:
         """Redacts PII spans in text and registers deterministic mappings in the Vault.
 
         Time Complexity: O(N + K) where N is text length and K is number of matches.
@@ -851,6 +869,9 @@ class PIIEngine:
             text: Input string to redact.
             vault: Session-scoped Vault to store mappings.
             active_profile: The compiled policy profile for the current tenant.
+            restorable: False for text whose values the reply must never get back. The
+                vault then mints a token no rehydration path restores. A vault that
+                cannot do that gets a fixed marker rather than a restorable token.
 
         Returns:
             Redacted text containing placeholders or synthetic replacements.
@@ -865,10 +886,15 @@ class PIIEngine:
         if not spans:
             return working_text
 
+        if restorable:
+            mint = vault.get_or_create_token
+        else:
+            mint = getattr(vault, "get_or_create_one_way_token", None) or (lambda _value, _type: "[REDACTED]")
+
         # Replace spans from right to left to preserve preceding string indices
         result = list(working_text)
         for start, end, entity_type, matched_text in reversed(spans):
-            token = vault.get_or_create_token(matched_text, entity_type)
+            token = mint(matched_text, entity_type)
             result[start:end] = list(token)
 
         return "".join(result)
@@ -1030,10 +1056,29 @@ class PIIEngine:
                     for item in new_payload["input"]
                 ]
 
+        protected = settings.payload_protected_keys_set | _policy_skip_keys()
+        ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
+
+        # Tool definitions. Their prose is redacted one-way; see _TOOL_PROSE_KEYS. No blob
+        # handling (None): it exists to skip base64 attachments, and a definition is text.
+        # With it, a description past the ceiling had only its edges scanned, and one that
+        # began "data:" was forwarded unscanned as if it were a media URI.
+        for key in _TOOL_DEFINITION_KEYS:
+            if key in new_payload and key not in protected:
+                new_payload[key] = self._deep_redact(
+                    new_payload[key],
+                    vault,
+                    active_profile,
+                    protected,
+                    None,
+                    depth + 1,
+                    max_depth,
+                    key,
+                    one_way_keys=_TOOL_PROSE_KEYS,
+                )
+
         # Everything else still reaches the provider verbatim. Walk those too.
         if settings.ENABLE_DEEP_PAYLOAD_REDACTION:
-            protected = settings.payload_protected_keys_set | _policy_skip_keys()
-            ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
             for key in list(new_payload):
                 if key in _TARGETED_PAYLOAD_KEYS or key in protected:
                     continue
@@ -1049,25 +1094,34 @@ class PIIEngine:
         vault: Vault,
         active_profile: Optional[CompiledProfile],
         protected: frozenset[str],
-        max_string_length: int,
+        max_string_length: Optional[int],
         depth: int,
         max_depth: int,
         json_path: str = "",
         keys_are_names: bool = False,
+        one_way_keys: frozenset[str] = frozenset(),
+        restorable: bool = True,
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
+
+        `max_string_length` None means the subtree is text with no blobs in it: every
+        string is scanned in full, whatever its length or prefix.
 
         `keys_are_names` marks a dict whose keys are property names (the value of a
         `_SCHEMA_NAME_MAPS` keyword) rather than keywords, so protected keys do not apply
         to them.
+
+        Strings under a keyword in `one_way_keys` are redacted one-way (`restorable` is
+        False below it). Inside schema data (`_SCHEMA_VALUE_KEYWORDS`) no key is a
+        keyword, so none is one-way there.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
 
         if isinstance(node, str):
-            if len(node) > max_string_length or node.startswith("data:"):
+            if max_string_length is not None and (len(node) > max_string_length or node.startswith("data:")):
                 return self._handle_unmapped_blob(node, json_path, active_profile)
-            return self.redact_text(node, vault, active_profile)
+            return self.redact_text(node, vault, active_profile, restorable=restorable)
 
         if isinstance(node, dict):
             return {
@@ -1088,6 +1142,12 @@ class PIIEngine:
                         max_depth,
                         f"{json_path}.{key}" if json_path else key,
                         keys_are_names=not keys_are_names and key in _SCHEMA_NAME_MAPS,
+                        one_way_keys=(
+                            frozenset()
+                            if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS
+                            else one_way_keys
+                        ),
+                        restorable=restorable and (keys_are_names or key not in one_way_keys),
                     )
                 )
                 for key, value in node.items()
@@ -1104,6 +1164,8 @@ class PIIEngine:
                     depth + 1,
                     max_depth,
                     f"{json_path}[{index}]",
+                    one_way_keys=one_way_keys,
+                    restorable=restorable,
                 )
                 for index, item in enumerate(node)
             ]
