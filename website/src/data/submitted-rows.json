@@ -33,6 +33,34 @@
         "evidence": "Read from the artifact `pii-leak-benchmark` on that run.",
         "notes": "End-to-end test of the automated results-wall intake. This is the negative control: a direct connection with no gateway in the middle, so every data type is expected to leak. Retriggering intake after switching publication to the pull-request path. Retrigger: Actions may now open pull requests."
       }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-26",
+      "project": "Portkey OSS Gateway",
+      "version": "fork main dceef23176de, OSS output guardrail, unauthenticated call-out",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "all",
+      "restoredN": 1.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "16 of 16",
+      "leakWholeN": 1.0,
+      "leakSplit": "16 of 16",
+      "leakSplitN": 1.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Handed every value back to the client. Splitting a value changed nothing. Built from source commit dceef23176de.",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "MIT",
+      "runUrl": "https://github.com/ninadphalak/gateway/actions/runs/36206023318",
+      "pricingUrl": "https://github.com/Portkey-AI/gateway",
+      "_submission": {
+        "issue": 101,
+        "submitter": "ninadphalak",
+        "ranIn": "ninadphalak/gateway",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": "Public fork source-build reproduction. The CI run is red for a measured leak; the verified combined artifact is retained. Intake retry after content-scan fix."
+      }
     }
   ]
 }
