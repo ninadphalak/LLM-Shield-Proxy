@@ -274,6 +274,10 @@ The summary ends with everything needed to say something checkable about the run
   outcome and a link back to this exact run. You add the gateway name and the licence, which a
   run cannot know, and your row is published automatically from there.
 
+A workflow that uploads its own evidence bundle, such as the
+[proxy source-build recipes](./source-ci.md), sets `submission-section: 'false'` and writes a
+submission link that points at that bundle instead.
+
 Nothing leaves your repository unless you click that link. The link carries the citation, never
 the report: a report can hold your gateway's base URL and your capture hostname.
 

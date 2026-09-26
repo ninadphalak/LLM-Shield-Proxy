@@ -30,6 +30,7 @@ ROOT_ACTION_INPUTS = {
     "baseline-version": (False, "baseline"),
     "baseline-report": (False, ""),
     "artifact-name": (False, "pii-leak-benchmark"),
+    "submission-section": (False, "true"),
 }
 
 RESEARCH_ACTION_INPUTS = {
