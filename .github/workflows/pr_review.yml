@@ -94,9 +94,12 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Sonnet, not Opus: every run spends the owner's subscription limits, and a
           # diff review does not need the largest model. Raise it here if reviews miss things.
-          # `--max-turns` bounds one run's usage.
+          # Effort `high`, stated rather than inherited so a default change cannot lower it:
+          # reviews are rare now (once per PR plus requests), and a missed fail-open gate
+          # costs more than the extra thinking. `--max-turns` bounds one run's usage.
           claude_args: |
             --model claude-sonnet-5
+            --effort high
             --max-turns 30
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
           prompt: |
