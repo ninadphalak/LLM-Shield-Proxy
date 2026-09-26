@@ -22,7 +22,7 @@ from urllib.parse import unquote
 
 import yaml
 
-from llm_shield_proxy.core.config import request_policy_ctx, settings
+from llm_shield_proxy.core.config import DEFAULT_PROTECTED_PAYLOAD_KEYS, request_policy_ctx, settings
 from llm_shield_proxy.core.config_schema import CustomRegexConfig
 from llm_shield_proxy.engines.confusables import CONFUSABLE_TO_ASCII
 from llm_shield_proxy.engines.vault import Vault
@@ -373,9 +373,17 @@ _SCHEMA_NAME_MAPS: frozenset[str] = frozenset(
 )
 
 # JSON Schema keywords whose value is JSON data rather than schema. No key inside that data
-# is structural, so protected keys do not apply there: an enum member `{"type": <email>}`
-# is a value the model may send, and skipping its `type` would forward the email.
+# is structural, so the BUILT-IN protected keys do not apply there: an enum member
+# `{"type": <email>}` is a value the model may send, and skipping its `type` would forward
+# the email. Keys an operator protected, and policy skip keys, still hold -- those are an
+# explicit promise that the value goes out unchanged, wherever it sits.
 _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples", "default"})
+
+
+def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
+    """`protected` minus the built-in structural keys an operator did not also list."""
+    structural_only = DEFAULT_PROTECTED_PAYLOAD_KEYS - settings.payload_operator_protected_keys_set
+    return protected - structural_only
 
 
 class UnmappedBlobError(ValueError):
@@ -1066,7 +1074,11 @@ class PIIEngine:
                         value,
                         vault,
                         active_profile,
-                        frozenset() if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS else protected,
+                        (
+                            _protected_inside_schema_data(protected)
+                            if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS
+                            else protected
+                        ),
                         max_string_length,
                         depth + 1,
                         max_depth,

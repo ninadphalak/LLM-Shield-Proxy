@@ -756,6 +756,26 @@ def test_structured_schema_values_are_redacted_under_any_key(keyword):
     assert "bob@example.com" not in serialised
 
 
+@pytest.mark.parametrize("keyword", ["enum", "const", "examples", "default"])
+def test_operator_protected_keys_still_hold_inside_schema_data(keyword, monkeypatch):
+    """Only the built-in structural keys are dropped inside schema data. A key the operator
+    protected is a promise that its value goes out unchanged, wherever it sits."""
+    monkeypatch.setattr(settings, "PAYLOAD_PROTECTED_KEYS", "name")
+    engine = PIIEngine()
+
+    member = {"name": "jane.doe@example.com", "type": "bob@example.com"}
+    value = [member] if keyword in ("enum", "examples") else member
+    payload = {
+        "messages": [],
+        "tools": [{"type": "function", "function": {"name": "f", "parameters": {"properties": {"to": {keyword: value}}}}}],
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "jane.doe@example.com" in serialised, "the operator-protected `name` must go out unchanged"
+    assert "bob@example.com" not in serialised, "the built-in `type` is only a field name here"
+
+
 def test_non_text_blocks_survive_tool_result_handling():
     """Image parts have no text and must come through untouched."""
     engine = PIIEngine()

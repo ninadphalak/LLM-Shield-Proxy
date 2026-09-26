@@ -465,10 +465,19 @@ class Settings(BaseSettings):
     @property
     def payload_protected_keys_set(self) -> frozenset[str]:
         """Structural keys plus operator additions, never rewritten by deep redaction."""
+        return DEFAULT_PROTECTED_PAYLOAD_KEYS | self.payload_operator_protected_keys_set
+
+    @property
+    def payload_operator_protected_keys_set(self) -> frozenset[str]:
+        """Only the keys an operator added through PAYLOAD_PROTECTED_KEYS.
+
+        Kept apart from the built-in structural keys because the two mean different
+        things inside schema data (`enum`, `const`, ...): a built-in key there is just a
+        field name, while an operator's key is a promise that the value goes out unchanged.
+        """
         if not self.PAYLOAD_PROTECTED_KEYS:
-            return DEFAULT_PROTECTED_PAYLOAD_KEYS
-        extra = {key.strip() for key in self.PAYLOAD_PROTECTED_KEYS.split(",") if key.strip()}
-        return DEFAULT_PROTECTED_PAYLOAD_KEYS | frozenset(extra)
+            return frozenset()
+        return frozenset(key.strip() for key in self.PAYLOAD_PROTECTED_KEYS.split(",") if key.strip())
 
     @property
     def valid_virtual_keys_set(self) -> frozenset[str]:
