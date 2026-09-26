@@ -38,12 +38,16 @@ DEFAULT_BYOK_KEY_PREFIXES: tuple[str, ...] = (
 # protect anybody and can break the request: a tool stops routing, a schema stops
 # validating, a model name stops resolving. Operators extend this with
 # PAYLOAD_PROTECTED_KEYS rather than editing it here.
+#
+# `enum` is deliberately NOT here. An enum value can be an email, and skipping it sent
+# that to the provider in clear. Tokenising it keeps the schema consistent (the same
+# value always gets the same token within a vault), and the model's tool arguments are
+# rehydrated on every path, so the application still receives a value its enum allows.
 DEFAULT_PROTECTED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     {
         "model",
         "type",
         "role",
-        "enum",
         "format",
         "object",
         "index",

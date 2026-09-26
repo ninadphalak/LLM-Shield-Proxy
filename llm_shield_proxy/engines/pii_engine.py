@@ -364,6 +364,14 @@ def calculate_shannon_entropy(text: str) -> float:
 # mint a second token and rehydration would restore the placeholder, not the original.
 _TARGETED_PAYLOAD_KEYS: frozenset[str] = frozenset({"messages", "prompt", "system", "input", "instructions"})
 
+# JSON Schema keywords whose value maps names to subschemas. The keys of that map are
+# property names, not keywords, so protected keys must not match them: a tool property
+# called `type` or `format` is a subschema whose description is caller text like any
+# other, and matching it by name skipped it wholesale.
+_SCHEMA_NAME_MAPS: frozenset[str] = frozenset(
+    {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"}
+)
+
 
 class UnmappedBlobError(ValueError):
     """A blob was found in a field no policy claims, under UNMAPPED_BLOB_POLICY=block.
@@ -911,6 +919,12 @@ class PIIEngine:
                                             "[SYSTEM_OVERRIDE_BLOCKED]", text_val
                                         )
                                     block_copy["text"] = self.redact_text(text_val, vault, active_profile)
+                                # A replayed Anthropic tool call carries its arguments as a
+                                # JSON object in `input`, not as a string.
+                                if block_copy.get("type") == "tool_use" and "input" in block_copy:
+                                    block_copy["input"] = self._redact_tool_input(
+                                        block_copy["input"], vault, active_profile
+                                    )
                                 # An Anthropic tool_result nests its own content, as a
                                 # string or as further blocks.
                                 if "content" in block_copy:
@@ -1022,8 +1036,14 @@ class PIIEngine:
         depth: int,
         max_depth: int,
         json_path: str = "",
+        keys_are_names: bool = False,
     ) -> Any:
-        """Redacts every string beneath `node`, skipping structure and opaque blobs."""
+        """Redacts every string beneath `node`, skipping structure and opaque blobs.
+
+        `keys_are_names` marks a dict whose keys are property names (the value of a
+        `_SCHEMA_NAME_MAPS` keyword) rather than keywords, so protected keys do not apply
+        to them.
+        """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
 
@@ -1036,7 +1056,7 @@ class PIIEngine:
             return {
                 key: (
                     value
-                    if key in protected
+                    if key in protected and not keys_are_names
                     else self._deep_redact(
                         value,
                         vault,
@@ -1046,6 +1066,7 @@ class PIIEngine:
                         depth + 1,
                         max_depth,
                         f"{json_path}.{key}" if json_path else key,
+                        keys_are_names=not keys_are_names and key in _SCHEMA_NAME_MAPS,
                     )
                 )
                 for key, value in node.items()
@@ -1127,7 +1148,12 @@ class PIIEngine:
         active_profile: Optional[CompiledProfile] = None,
         max_depth: int = 8,
     ) -> Any:
-        """Redacts a tool_result's own content, a string or further blocks."""
+        """Redacts a tool_result's own content, a string or further blocks.
+
+        Nesting past `max_depth` raises rather than stopping: the blocks below the bound
+        would otherwise reach the provider unredacted. The error is the same one the
+        payload walk raises, which the API turns into a 400.
+        """
         if isinstance(content, str):
             return self.redact_text(content, vault, active_profile)
         if not isinstance(content, list):
@@ -1144,10 +1170,14 @@ class PIIEngine:
                     continue
                 if isinstance(block.get("text"), str):
                     block["text"] = self.redact_text(block["text"], vault, active_profile)
+                if block.get("type") == "tool_use" and "input" in block:
+                    block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
                 nested = block.get("content")
                 if isinstance(nested, str):
                     block["content"] = self.redact_text(nested, vault, active_profile)
-                elif isinstance(nested, list) and depth + 1 < max_depth:
+                elif isinstance(nested, list) and nested:
+                    if depth + 1 >= max_depth:
+                        raise ValueError("Maximum payload nesting depth exceeded")
                     copied = [item.copy() if isinstance(item, dict) else item for item in nested]
                     block["content"] = copied
                     pending.append((copied, depth + 1))
@@ -1188,11 +1218,41 @@ class PIIEngine:
         elif isinstance(content, list):
             item_copy["content"] = self._redact_text_blocks(content, vault, active_profile)
 
-        for tool_field in ("arguments", "output"):
+        # A replayed reasoning item quotes the conversation in its summary parts.
+        summary = item_copy.get("summary")
+        if isinstance(summary, list):
+            item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile)
+
+        # function_call / mcp_call hold `arguments`, their outputs `output`, and a
+        # custom_tool_call holds its free-form `input`.
+        for tool_field in ("arguments", "output", "input"):
             if isinstance(item_copy.get(tool_field), str):
                 item_copy[tool_field] = self.redact_text(item_copy[tool_field], vault, active_profile)
 
         return item_copy
+
+    def _redact_tool_input(
+        self,
+        tool_input: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        max_depth: int = 20,
+    ) -> Any:
+        """Redacts every string in a tool call's JSON `input`, whatever its keys are called.
+
+        No keys are protected here. They are the tool's own argument names, so a key that
+        happens to be called `type` or `format` still holds a caller value.
+        """
+        return self._deep_redact(
+            tool_input,
+            vault,
+            active_profile,
+            frozenset(),
+            settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
+            0,
+            max_depth,
+            "tool_use.input",
+        )
 
 
 pii_engine = PIIEngine()
