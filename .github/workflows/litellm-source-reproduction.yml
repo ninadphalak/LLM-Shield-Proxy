@@ -136,10 +136,12 @@ jobs:
               sleep $((2 ** attempt))
             done
           done
-          # Host networking, on ports chosen here. Published ports (-p 127.0.0.1::3000) went
-          # through Docker's port proxy, and on hosted runners one of those ports intermittently
-          # accepted connections and never answered while the container itself was serving.
-          # Restarting the container could not fix that, which is why earlier retries never did.
+          # Host networking, on ports chosen here, with one patient wait. With published ports
+          # and one-second probes, the analyzer's host port intermittently accepted connections
+          # and never answered while its container logged that it was serving (4 of 11 runs),
+          # and restarting the container never recovered it. The cause was not isolated;
+          # benchmark.yml reaches the same image through a published port without a probe
+          # timeout. What is known: this arrangement has not reproduced the stall.
           read -r pg_port analyzer_port anonymizer_port < <(python -c '
           import socket
           sockets = [socket.socket() for _ in range(3)]
