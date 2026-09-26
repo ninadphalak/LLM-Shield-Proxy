@@ -617,6 +617,21 @@ def test_a_resubmission_replaces_its_own_row_rather_than_adding_a_second(tmp_pat
     assert entries[0]["version"] == "1.2.4"
 
 
+def test_a_rerun_linked_from_the_same_issue_replaces_that_issues_row(tmp_path):
+    """Editing an issue to point at a rerun must not leave two rows for one issue."""
+    path = tmp_path / "submitted-rows.json"
+    path.write_text('{"entries": []}', encoding="utf-8")
+    first = _row()
+    first["runUrl"] = "https://github.com/o/r/actions/runs/1"
+    intake.append_row(first, path=path)
+    rerun = _row()
+    rerun["runUrl"] = "https://github.com/o/r/actions/runs/2"
+    assert first["_submission"]["issue"] == rerun["_submission"]["issue"]
+    intake.append_row(rerun, path=path)
+    entries = json.loads(path.read_text(encoding="utf-8"))["entries"]
+    assert [entry["runUrl"] for entry in entries] == ["https://github.com/o/r/actions/runs/2"]
+
+
 def test_the_rows_file_in_the_tree_is_valid():
     document = json.loads(
         (REPO_ROOT / "website" / "src" / "data" / "submitted-rows.json").read_text(encoding="utf-8")
@@ -795,9 +810,10 @@ def test_the_same_run_posted_from_many_issues_is_one_row(tmp_path):
 def test_two_genuinely_different_runs_both_get_a_row(tmp_path):
     path = tmp_path / "rows.json"
     path.write_text('{"entries": []}', encoding="utf-8")
-    for run in ("42", "43"):
+    for issue, run in ((8, "42"), (9, "43")):
         row = _row()
         row["runUrl"] = f"https://github.com/o/r/actions/runs/{run}"
+        row["_submission"]["issue"] = issue
         intake.append_row(row, path=path)
     assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 2
 

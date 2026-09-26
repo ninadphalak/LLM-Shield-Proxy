@@ -667,10 +667,19 @@ def append_row(row: dict[str, Any], path: Path = ROWS_FILE) -> None:
     if not isinstance(entries, list):
         raise ValueError("submitted-rows.json: 'entries' is not a list")
     identity = row_identity(row)
+    # An issue edited to link a rerun replaces that issue's row: one issue, one row. The
+    # wall's badge endpoint is keyed by issue number and refuses two rows for one issue.
+    issue = (row.get("_submission") or {}).get("issue")
     document["entries"] = [
         existing
         for existing in entries
-        if not (isinstance(existing, dict) and row_identity(existing) == identity)
+        if not (
+            isinstance(existing, dict)
+            and (
+                row_identity(existing) == identity
+                or (issue and (existing.get("_submission") or {}).get("issue") == issue)
+            )
+        )
     ]
     document["entries"].append(row)
     # Write with LF to maintain hash identity.
