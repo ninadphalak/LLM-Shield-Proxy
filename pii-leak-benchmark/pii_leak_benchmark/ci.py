@@ -349,8 +349,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         write_json_artifact(out / "current.json", run, indent=2)
         # A workflow that uploads its own bundle writes its own submission section.
-        summary = render_summary(run, baseline,
-                                 submission=os.getenv("BENCHMARK_SUBMISSION_SECTION", "true") != "false")
+        submission = os.getenv("BENCHMARK_SUBMISSION_SECTION", "true").strip().lower() != "false"
+        summary = render_summary(run, baseline, submission=submission)
         (out / "summary.md").write_text(summary, encoding="utf-8")
         if os.getenv("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
