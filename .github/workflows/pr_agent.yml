@@ -128,6 +128,16 @@ jobs:
           # later. Measured: a run logged "total tokens under limit: 200000", so the
           # configured models resolve to at least that.
           CONFIG.MAX_MODEL_TOKENS: "200000"
+          # The window for a model PR-Agent's MAX_TOKENS table does not list. Without it a
+          # model missing from that table is refused before any call is made ("not defined
+          # in MAX_TOKENS"), and the chain moves on as if the provider had failed: the
+          # primary id was valid at the provider and never called from #111 to #115. Still
+          # clamped by MAX_MODEL_TOKENS above.
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "200000"
+          # PR-Agent sends `medium` by default. The provider behind the primary lists its
+          # accepted levels as low/high/max (see `ai-provider-check.yml`), and the run died
+          # silently after the first call that carried `medium`.
+          CONFIG.REASONING_EFFORT: "high"
           # MUST match the `pull_request` types above. PR-Agent's own default is
           # ['opened', 'reopened', 'ready_for_review', 'review_requested'] -- WITHOUT
           # `synchronize` -- so a workflow that triggers on a push to an open PR builds
