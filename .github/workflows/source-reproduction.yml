@@ -45,6 +45,8 @@ jobs:
 
       - name: Record source and environment
         id: source
+        env:
+          SOURCE_SELECTOR: ${{ inputs.source_ref || github.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/source-reproduction"
@@ -53,6 +55,23 @@ jobs:
           python -m pip freeze > "$RUNNER_TEMP/source-reproduction/installed-packages.txt"
           python --version > "$RUNNER_TEMP/source-reproduction/python-version.txt" 2>&1
           uname -a > "$RUNNER_TEMP/source-reproduction/runner.txt"
+          python - <<'PY'
+          import importlib.metadata
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'source-reproduction'
+          identity = {
+              'schema': 'pii-leak-benchmark/source-build/v1',
+              'source_selector': os.environ['SOURCE_SELECTOR'],
+              'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
+              'distribution_version': importlib.metadata.version('llm-shield-proxy'),
+          }
+          (root / 'source-identity.json').write_text(
+              json.dumps(identity, sort_keys=True, indent=2) + '\n', encoding='utf-8'
+          )
+          PY
 
       - name: Check proxy startup before fixtures
         env:
@@ -80,7 +99,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@73a433906f4f7a2d071a44c780485b8ce3cca541 # operator action with deferred upload
+        uses: ninadphalak/LLM-Shield-Proxy@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506 # operator action with deferred upload
         env:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
@@ -209,7 +228,7 @@ jobs:
           from pii_leak_benchmark.operator_profile import seeded_fixture
 
           root = Path(os.environ['REPORT_DIR'])
-          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json')
+          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json', 'source-identity.json')
           provenance = ('source-commit.txt', 'installed-packages.txt', 'operator-packages.txt',
                         'python-version.txt', 'runner.txt')
           if any(not (root / name).is_file() or not (root / name).stat().st_size for name in names + provenance):
@@ -273,6 +292,7 @@ jobs:
             ${{ runner.temp }}/source-reproduction/summary.md
             ${{ runner.temp }}/source-reproduction/source-response-on.json
             ${{ runner.temp }}/source-reproduction/source-response-off.json
+            ${{ runner.temp }}/source-reproduction/source-identity.json
             ${{ runner.temp }}/source-reproduction/source-commit.txt
             ${{ runner.temp }}/source-reproduction/installed-packages.txt
             ${{ runner.temp }}/source-reproduction/operator-packages.txt

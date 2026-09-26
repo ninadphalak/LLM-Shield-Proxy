@@ -204,7 +204,9 @@ def collect_reports(
         return {}, "The run has no artifacts attached, so there was no report to read."
 
     problems = []
-    for artifact in artifacts:
+    # Prefer the combined source artifact when a run also has an operator-only artifact.
+    # Prefer the latter without changing selection for other submitters.
+    for artifact in sorted(artifacts, key=lambda item: item.get("name") != "source-reproduction"):
         if artifact.get("expired"):
             problems.append(f"`{artifact.get('name')}` has expired")
             continue
@@ -306,6 +308,35 @@ def is_response_split(report: Any) -> bool:
     return isinstance(leak, dict) and "single_chunk" in leak and "adversarial" in leak
 
 
+def is_complete_source_pair(on: Any, off: Any) -> bool:
+    """Require both response arms to cover the same complete midpoint corpus."""
+    if not is_response_split(on) or not is_response_split(off):
+        return False
+    for arm, report in (("on", on), ("off", off)):
+        if report.get("schema") != "llm-shield.streaming-privacy-http-profile/v2.0.0":
+            return False
+        name = (report.get("implementation") or {}).get("name")
+        if not isinstance(name, str) or not name.startswith("external-gateway:") or not name.endswith(f"-response-{arm}"):
+            return False
+        if ((report.get("checks") or {}).get("configured_upstream_boundary") or {}).get("passed") is not True:
+            return False
+        metrics = report.get("metrics") or {}
+        counts = metrics.get("cases_by_condition") or {}
+        if (metrics.get("cases_scored") != 32 or metrics.get("cases_inconclusive") != 0
+                or counts.get("single_chunk") != 16 or counts.get("adversarial") != 16
+                or (metrics.get("partition_oracle") or {}).get("oracle") != "midpoint"):
+            return False
+    for field in ("cases_digest", "harness_revision"):
+        if not on.get(field) or on[field] != off.get(field):
+            return False
+    for section, field in (("corpus", "seed"), ("corpus", "sha256"),
+                           ("instrument", "inspector_sha256")):
+        value = (on.get(section) or {}).get(field)
+        if not value or value != (off.get(section) or {}).get(field):
+            return False
+    return True
+
+
 def _words(entities: list[str]) -> str:
     said = [ENTITY_WORDS.get(name, name.replace("_", " ").lower()) for name in entities]
     if len(said) == 1:
@@ -315,8 +346,16 @@ def _words(entities: list[str]) -> str:
 
 def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     """Derive columns from the reports. Reads provider reach from operator run, and fidelity from raw report."""
-    operator = next((r for r in reports.values() if is_operator_run(r)), None)
-    split = next((r for r in reports.values() if is_response_split(r)), None)
+    operator = next(
+        (r for r in reports.values() if is_operator_run(r) and r.get("verdict") in ("CLEAN", "LEAK")),
+        None,
+    )
+    source_on = reports.get("source-response-on.json")
+    source_off = reports.get("source-response-off.json")
+    if source_on is not None or source_off is not None:
+        split = source_on if is_complete_source_pair(source_on, source_off) else None
+    else:
+        split = next((r for r in reports.values() if is_response_split(r)), None)
     raw = next(
         (
             r
@@ -360,18 +399,34 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
             derived["restored"] = "all" if rate == 1.0 else "none" if rate == 0.0 else "some"
             derived["restoredN"] = float(rate)
 
-    # Record harness version to track instrument changes.
-    for source in (operator, raw, split):
-        if not source:
-            continue
-        value = ((source.get("contract") or {}).get("harness_version")
-                 or source.get("harness_revision"))
-        if value:
-            derived["harness"] = str(value)[:32]
-            break
+    # Each profile may use a different pinned instrument revision.
+    operator_harness = ((operator or {}).get("contract") or {}).get("harness_version")
+    response_harness = (split or {}).get("harness_revision")
+    if operator_harness and response_harness and operator_harness != response_harness:
+        derived["harness"] = (
+            f"{str(operator_harness)[:16]} (operator), {str(response_harness)[:16]} (response)"
+        )
+    else:
+        for source in (operator, raw, split):
+            if not source:
+                continue
+            value = ((source.get("contract") or {}).get("harness_version")
+                     or source.get("harness_revision"))
+            if value:
+                derived["harness"] = str(value)[:32]
+                break
+
+    identity = reports.get("source-identity.json")
+    if isinstance(identity, dict) and identity.get("schema") == "pii-leak-benchmark/source-build/v1":
+        commit = identity.get("source_commit")
+        if isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit):
+            derived["_source_commit"] = commit
 
     if split:
         metrics = split.get("metrics") or {}
+        inconclusive = metrics.get("cases_inconclusive")
+        if isinstance(inconclusive, int) and not isinstance(inconclusive, bool) and inconclusive > 0:
+            derived["_cases_inconclusive"] = inconclusive
         leak = metrics.get("leak_rate") or {}
         counts = metrics.get("cases_by_condition") or {}
         for key, condition, text, number in (
@@ -406,6 +461,10 @@ def write_note(derived: dict[str, Any]) -> str:
             parts.append("Splitting a value across two chunks leaked more of them.")
         elif derived["leakSplitN"] == derived["leakWholeN"]:
             parts.append("Splitting a value changed nothing.")
+    if derived.get("_cases_inconclusive"):
+        parts.append(f"{derived['_cases_inconclusive']} response cases were inconclusive and excluded from the leak-rate denominators.")
+    if derived.get("_source_commit"):
+        parts.append(f"Built from source commit {derived['_source_commit'][:12]}.")
     return " ".join(parts) or "Submitted without a report this check could read."
 
 

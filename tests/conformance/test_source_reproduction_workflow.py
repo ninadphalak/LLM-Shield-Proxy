@@ -19,9 +19,14 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     install = next(step for step in steps if step.get("name") == "Build and install the selected source")
     assert "pip install ." in install["run"]
     assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
+    identity = next(step for step in steps if step.get("id") == "source")
+    assert "source-identity.json" in identity["run"]
+    assert "source_commit" in identity["run"]
+    upload = next(step for step in steps if step.get("name") == "Upload source and response evidence")
+    assert "/source-identity.json" in upload["with"]["path"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
-    assert "@73a433906f4f7a2d071a44c780485b8ce3cca541" in operator["uses"]
+    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
     assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
@@ -51,8 +56,9 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert artifact["if"] == "always() && steps.verify.outcome == 'success'"
     assert artifact["with"]["name"] == "source-reproduction"
     paths = artifact["with"]["path"].splitlines()
-    assert len(paths) == 10
+    assert len(paths) == 11
     assert any(path.endswith("/operator-packages.txt") for path in paths)
+    assert any(path.endswith("/source-identity.json") for path in paths)
     assert any(path.endswith("/source-response-on.json") for path in paths)
     assert any(path.endswith("/source-response-off.json") for path in paths)
     assert any(path.endswith("/verification.txt") for path in paths)
