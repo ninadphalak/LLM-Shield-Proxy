@@ -617,6 +617,21 @@ def test_a_resubmission_replaces_its_own_row_rather_than_adding_a_second(tmp_pat
     assert entries[0]["version"] == "1.2.4"
 
 
+def test_a_rerun_linked_from_the_same_issue_replaces_that_issues_row(tmp_path):
+    """Editing an issue to point at a rerun must not leave two rows for one issue."""
+    path = tmp_path / "submitted-rows.json"
+    path.write_text('{"entries": []}', encoding="utf-8")
+    first = _row()
+    first["runUrl"] = "https://github.com/o/r/actions/runs/1"
+    intake.append_row(first, path=path)
+    rerun = _row()
+    rerun["runUrl"] = "https://github.com/o/r/actions/runs/2"
+    assert first["_submission"]["issue"] == rerun["_submission"]["issue"]
+    intake.append_row(rerun, path=path)
+    entries = json.loads(path.read_text(encoding="utf-8"))["entries"]
+    assert [entry["runUrl"] for entry in entries] == ["https://github.com/o/r/actions/runs/2"]
+
+
 def test_the_rows_file_in_the_tree_is_valid():
     document = json.loads(
         (REPO_ROOT / "website" / "src" / "data" / "submitted-rows.json").read_text(encoding="utf-8")
@@ -795,9 +810,10 @@ def test_the_same_run_posted_from_many_issues_is_one_row(tmp_path):
 def test_two_genuinely_different_runs_both_get_a_row(tmp_path):
     path = tmp_path / "rows.json"
     path.write_text('{"entries": []}', encoding="utf-8")
-    for run in ("42", "43"):
+    for issue, run in ((8, "42"), (9, "43")):
         row = _row()
         row["runUrl"] = f"https://github.com/o/r/actions/runs/{run}"
+        row["_submission"]["issue"] = issue
         intake.append_row(row, path=path)
     assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]) == 2
 
@@ -947,3 +963,150 @@ def test_the_research_spelling_of_the_harness_version_is_read_too():
 
 def test_a_report_with_no_harness_version_records_none():
     assert "harness" not in intake.derive_measurements({"v2.json": _split_report()})
+
+
+# ------------------------------------------------- a submission that is only the run link
+
+RUN = "https://github.com/friend/gateway/actions/runs/777"
+COMMIT = "dceef23176ded64f8b68348121af3cc2427383a2"
+
+
+def _identity(**overrides):
+    identity = {
+        "schema": "pii-leak-benchmark/source-build/v1",
+        "source_repository": "friend/gateway",
+        "source_selector": COMMIT,
+        "source_commit": COMMIT,
+        "product": "Portkey OSS Gateway",
+        "configuration": "OSS output guardrail, unauthenticated call-out",
+        "license": "MIT",
+        "project_url": "https://github.com/Portkey-AI/gateway",
+    }
+    identity.update(overrides)
+    return identity
+
+
+def _bundle(identity=None):
+    return {"current.json": _operator_run(), "portkey-source.json": _split_report(),
+            "source-identity.json": identity if identity is not None else _identity()}
+
+
+def _process(body, bundle):
+    reads = []
+
+    def classify(url):
+        reads.append(url)
+        return "submitted-fork", "A fork.", ("friend", "gateway", "777")
+
+    issue = {"number": 5, "body": body, "user": {"login": "friend"},
+             "created_at": "2026-09-26T00:00:00Z"}
+    row, _, _, problems = intake.process(
+        issue, classify=classify, collect=lambda *where: (bundle, "Read from the artifact.")
+    )
+    return row, problems, reads
+
+
+def test_a_bare_run_link_is_a_complete_submission_for_a_source_bundle():
+    """The one-line `gh issue create` path: the bundle names itself."""
+    row, problems, reads = _process(f"Please add this run: {RUN}\n", _bundle())
+    assert problems == []
+    assert reads == [RUN]
+    assert row["status"] == "published"
+    assert row["project"] == "Portkey OSS Gateway"
+    assert row["license"] == "MIT"
+    assert row["version"] == "commit dceef23176de, OSS output guardrail, unauthenticated call-out"
+    assert row["pricingUrl"] == "https://github.com/Portkey-AI/gateway"
+    assert row["architecture"] == "not-stated"
+    assert row["runUrl"] == RUN
+
+
+def test_the_summary_link_with_blank_name_and_licence_is_filled_from_the_bundle():
+    """The Action's own link leaves these blank and puts the bare commit in the version."""
+    body = intake_body(gateway="", license="", version=COMMIT)
+    row, problems, _ = _process(body, _bundle())
+    assert problems == []
+    assert row["project"] == "Portkey OSS Gateway"
+    assert row["version"].startswith("commit dceef23176de, ")
+
+
+def test_a_tag_selector_is_named_in_the_derived_version():
+    identity = _identity(source_selector="v1.15.2")
+    row, problems, _ = _process(RUN, _bundle(identity))
+    assert problems == []
+    assert row["version"] == "v1.15.2 (commit dceef23176de), OSS output guardrail, unauthenticated call-out"
+
+
+def test_what_the_submitter_typed_wins_over_the_bundle():
+    body = intake_body(gateway="My Portkey build", license="Apache-2.0", version="fork with my patch")
+    row, problems, _ = _process(body, _bundle())
+    assert problems == []
+    assert (row["project"], row["license"], row["version"]) == (
+        "My Portkey build", "Apache-2.0", "fork with my patch")
+
+
+def test_without_a_source_bundle_a_blank_name_is_still_reported():
+    """An operator-only artifact cannot name the gateway, so the submitter is asked."""
+    row, problems, _ = _process(RUN, {"current.json": _operator_run()})
+    assert row == {}
+    assert any('"gateway"' in problem for problem in problems)
+    assert any('"license"' in problem for problem in problems)
+
+
+def test_a_bundle_with_a_foreign_schema_supplies_nothing():
+    row, problems, _ = _process(RUN, _bundle(_identity(schema="something-else")))
+    assert row == {}
+    assert problems
+
+
+def test_a_malformed_link_is_rejected_without_fetching_anything():
+    row, problems, reads = _process(
+        intake_body(run_url="https://example.com/actions/runs/1"), _bundle())
+    assert reads == []
+    assert any("not a GitHub Actions run URL" in problem for problem in problems)
+
+
+def test_replies_go_out_under_the_job_token_not_the_wall_token(monkeypatch):
+    """The wall token cannot comment; a rejection sent under it vanished without a trace."""
+    monkeypatch.setenv("GH_TOKEN", "wall-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "job-token")
+    seen = []
+
+    class Done:
+        returncode = 0
+        stderr = ""
+
+    def run(command, **kwargs):
+        seen.append((command[:3], (kwargs.get("env") or {}).get("GH_TOKEN")))
+        return Done()
+
+    monkeypatch.setattr(intake.subprocess, "run", run)
+    assert intake.comment(7, "hello") and intake.label(7, "needs-info") and intake.close_issue(7)
+    assert [token for _, token in seen] == ["job-token"] * 3
+
+
+def intake_body(*, gateway="Portkey OSS Gateway", version="v1", license="MIT", run_url=RUN):
+    return "\n\n".join([
+        "### Gateway", gateway, "### Version and configuration", version,
+        "### CI run link", run_url, "### How it reads the stream", "not stated",
+        "### License", license,
+    ]) + "\n"
+
+
+def test_a_rerun_from_the_same_issue_is_not_refused_by_the_row_cap(tmp_path, monkeypatch):
+    """At the cap, editing an issue to link a rerun replaces that issue's row."""
+    rows = tmp_path / "submitted-rows.json"
+    entries = []
+    for issue in range(1, intake.MAX_ROWS_PER_SUBMITTER + 1):
+        row = _row()
+        row["runUrl"] = f"https://github.com/o/r/actions/runs/{issue}"
+        row["_submission"]["issue"] = issue
+        entries.append(row)
+    rows.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+    rerun = _row()
+    rerun["runUrl"] = "https://github.com/o/r/actions/runs/999"
+    rerun["_submission"]["issue"] = 3
+    assert intake.is_replacement(rerun, entries)
+    fresh = _row()
+    fresh["runUrl"] = "https://github.com/o/r/actions/runs/1000"
+    fresh["_submission"]["issue"] = 500
+    assert not intake.is_replacement(fresh, entries)

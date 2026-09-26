@@ -26,7 +26,8 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert "/source-identity.json" in upload["with"]["path"]
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["upstream-env"] == "UPSTREAM_BASE_URL"
-    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
+    assert "@29a9932b085e5b063b8c366c3e6bfca2c4af4b06" in operator["uses"]
+    assert operator["with"]["submission-section"] == "false"
     assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
     assert operator["with"]["start-command"].startswith("python -m uvicorn ")
@@ -76,7 +77,7 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     assert "quote(value, safe='')" in verify["run"]
     assert "b64encode(encoded)" in verify["run"]
     assert "a required report or provenance file is absent" in verify["run"]
-    assert "steps.verify.outcome == 'failure'" in steps[-1]["if"]
+    assert steps[-1]["if"] == "always() && steps.result.outputs.status != 'clean'"
 
 
 def test_source_verifier_scans_decoded_json_strings():

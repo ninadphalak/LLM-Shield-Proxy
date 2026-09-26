@@ -19,6 +19,11 @@ jobs:
   reproduce:
     runs-on: ubuntu-latest
     env:
+      # Names this run on the results wall. Change them if your fork measures something else.
+      WALL_PRODUCT: LLM-Shield-Proxy
+      WALL_CONFIGURATION: request redaction on, response redaction on with an off-arm control
+      WALL_LICENSE: Apache-2.0
+      WALL_PROJECT_URL: https://github.com/ninadphalak/LLM-Shield-Proxy
       VALID_VIRTUAL_KEYS: sk-shield-source-reproduction
       OPENAI_API_KEY: sk-synthetic-no-model-call
       UPSTREAM_API_KEY: sk-synthetic-no-model-call
@@ -66,6 +71,10 @@ jobs:
               'schema': 'pii-leak-benchmark/source-build/v1',
               'source_selector': os.environ['SOURCE_SELECTOR'],
               'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
+              'product': os.environ['WALL_PRODUCT'],
+              'configuration': os.environ['WALL_CONFIGURATION'],
+              'license': os.environ['WALL_LICENSE'],
+              'project_url': os.environ['WALL_PROJECT_URL'],
               'distribution_version': importlib.metadata.version('llm-shield-proxy'),
           }
           (root / 'source-identity.json').write_text(
@@ -99,7 +108,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506 # operator action with deferred upload
+        uses: ninadphalak/LLM-Shield-Proxy@29a9932b085e5b063b8c366c3e6bfca2c4af4b06 # operator action; the recipe writes the submission
         env:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
@@ -110,6 +119,7 @@ jobs:
           target-version: ${{ steps.source.outputs.sha }}
           duty: restore
           artifact-name: ''
+          submission-section: 'false'
 
       - name: Stage operator reports with the response pair
         if: always() && steps.operator.outputs.report-directory != ''
@@ -201,8 +211,6 @@ jobs:
           print()
           print('Built from the selected source commit. This does not assert that the installed '
                 'files or dependencies match a published wheel.')
-          print('The operator summary has the current wall-submission link. Its wall row covers '
-                'the operator profile only; the response pair is retained in this run artifact.')
           PY
 
       - name: Verify publishable evidence
@@ -283,6 +291,7 @@ jobs:
           PY
 
       - name: Upload source and response evidence
+        id: upload
         if: always() && steps.verify.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -302,6 +311,127 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-      - name: Report incomplete or leaking measurement
-        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
-        run: exit 1
+      - name: Report the result and how to submit it
+        id: result
+        if: always()
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ runner.temp }}/source-reproduction
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          RESPONSE_OUTCOME: ${{ steps.response.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}, upload=${{ steps.upload.outcome }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlencode
+
+          root = Path(os.environ['REPORT_DIR'])
+          run_url = '{}/{}/actions/runs/{}'.format(
+              os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          product = os.environ['WALL_PRODUCT']
+          status = 'incomplete'
+          # A verdict needs a complete run: verified and uploaded evidence, a passing response
+          # step, and at least one applicable case in every condition of every non-control
+          # response report. Anything less is incomplete, whatever it did observe, because the
+          # summary calls a measured result complete and offers it to the wall.
+          if (os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file()
+                  and (root / 'current.json').is_file()):
+              operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+              leaked = sorted(name for name, state in (operator.get('entities') or {}).items() if state == 'leak')
+              table, response_leak, measured_reports, unmeasured = [], False, 0, False
+              for path in sorted(root.glob('*.json')):
+                  try:
+                      metrics = json.loads(path.read_text(encoding='utf-8')).get('metrics') or {}
+                  except (ValueError, AttributeError):
+                      continue
+                  rates = metrics.get('leak_rate') if isinstance(metrics, dict) else None
+                  if not isinstance(rates, dict):
+                      continue
+                  counts = metrics.get('cases_by_condition') or {}
+                  # The Shield recipe's redaction-off arm is a control: it is meant to leak.
+                  control = path.stem.endswith('-off')
+                  cells = []
+                  for key in ('single_chunk', 'adversarial'):
+                      rate, total = rates.get(key), counts.get(key)
+                      known = isinstance(rate, (int, float)) and isinstance(total, int) and total > 0
+                      cells.append(f'{round(rate * total)} of {total} leaked' if known else 'not measured')
+                      response_leak = response_leak or (known and not control and rate > 0)
+                      unmeasured = unmeasured or (not known and not control)
+                  scored, inconclusive = metrics.get('cases_scored'), metrics.get('cases_inconclusive', 0)
+                  applicable = scored - inconclusive if isinstance(scored, int) and isinstance(inconclusive, int) else 0
+                  if not control:
+                      measured_reports += 1
+                      unmeasured = unmeasured or applicable <= 0
+                  label = path.stem + (' (control, redaction off)' if control else '')
+                  table.append(f"| {label} | {cells[0]} | {cells[1]} | {metrics.get('cases_inconclusive', 0)} |")
+              complete = (os.environ['RESPONSE_OUTCOME'] == 'success' and os.environ['UPLOAD_OUTCOME'] == 'success'
+                          and measured_reports > 0 and not unmeasured
+                          and operator.get('verdict') in ('CLEAN', 'LEAK'))
+              status = 'incomplete' if not complete else 'leak' if leaked or response_leak else 'clean'
+
+          if status == 'incomplete':
+              print('## Result: INCOMPLETE, do not submit')
+              print()
+              print('This run did not produce a verified measurement, so nothing was uploaded and the '
+                    'results wall has nothing to read. It says nothing about the gateway.')
+              print()
+              print(f"Step outcomes: {os.environ['STEP_OUTCOMES']}. Open the first failed step for the reason, "
+                    'then rerun the workflow. A failure before measurement is usually the runner, a download '
+                    'or the proxy not starting.')
+          else:
+              print('## Result: MEASURED LEAK' if status == 'leak' else '## Result: MEASURED CLEAN')
+              print()
+              print('This run is a complete, verified measurement. '
+                    + ('The job is red because the gateway leaked, not because the run broke. '
+                       'A leak is a result worth publishing.' if status == 'leak'
+                       else 'No leak in any case this run measured.'))
+              print()
+              print('Request path: ' + ('the provider received raw ' + ', '.join(leaked) + '.' if leaked
+                                        else 'no raw value reached the provider.'))
+              print()
+              print('| Response report | Value in one chunk | Value split across two chunks | Inconclusive |')
+              print('| :--- | :--- | :--- | ---: |')
+              print('\n'.join(table))
+              print()
+              identity = json.loads((root / 'source-identity.json').read_text(encoding='utf-8'))
+              commit, selector = identity['source_commit'], identity['source_selector']
+              where = f'commit {commit[:12]}' if selector in ('', commit) else f'{selector} (commit {commit[:12]})'
+              sections = {
+                  'Gateway': product,
+                  'Version and configuration': f"{where}, {os.environ['WALL_CONFIGURATION']}",
+                  'Project link': os.environ['WALL_PROJECT_URL'],
+                  'CI run link': run_url,
+                  'How it reads the stream': 'not stated',
+                  'License': os.environ['WALL_LICENSE'],
+                  'Outcome': status.upper(),
+              }
+              body = '\n\n'.join(f'### {heading}\n\n{value}' for heading, value in sections.items()) + '\n'
+              query = urlencode({'title': f'Result: {product}', 'labels': 'conformance-result', 'body': body})
+              print('### Put this run on the results wall')
+              print()
+              print(f'**[Submit this run to the results wall](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query})**: '
+                    'opens a prefilled issue. Press **Create**; nothing needs typing.')
+              print()
+              print('Or, from any terminal signed in to the GitHub CLI:')
+              print()
+              print('```')
+              print(f'gh issue create --repo ninadphalak/LLM-Shield-Proxy --title "Result: {product}" --body "{run_url}"')
+              print('```')
+              print()
+              print('Within a few minutes a bot answers on that issue. It either links your published row '
+                    'or says exactly what stopped it. The numbers on the wall are read from this run\'s '
+                    'artifact, not from the issue.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+          PY
+
+      - name: Fail unless the measurement is complete and clean
+        if: always() && steps.result.outputs.status != 'clean'
+        env:
+          RESULT: ${{ steps.result.outputs.status }}
+        run: |
+          echo "Result: ${RESULT:-incomplete}. The job summary explains it and, for a measurement, how to submit it."
+          exit 1

@@ -30,10 +30,21 @@ def test_litellm_workflow_is_copyable_source_recipe_with_pinned_instruments():
     assert "COPY litellm/" in build["run"]
     assert "sha256:570a872d2fde8f1bc4a147634810941103c14697270f0f2918c5aa7d8201cac5" in build["run"]
     assert "pii-leak-benchmark[validate]==0.2.1" in build["run"]
+    # A fork's newer source may need packages the pinned image predates.
+    assert "optional-dependencies', {}).get('proxy'" in build["run"]
+    assert "import litellm.proxy.proxy_server" in build["run"]
+    assert "proxy-packages.txt" in build["run"]
     services = next(step for step in steps if step.get("name") == "Start pinned local dependencies")
-    assert "docker logs --tail 20" in services["run"]
-    assert 'docker restart "$analyzer"' in services["run"]
-    assert 'analyzer_port=$(docker port "$analyzer" 3000/tcp' in services["run"]
+    # Published ports went through Docker's port proxy, which intermittently hung on
+    # hosted runners while the container served; host networking removes that layer.
+    assert services["run"].count("--network host") == 3
+    assert "docker run -d -p" not in services["run"]
+    assert "docker restart" not in services["run"]
+    assert 'PORT="$analyzer_port"' in services["run"]
+    assert "docker logs --tail 60" in services["run"]
+    # gunicorn 25's control-socket thread froze the forked worker; both images must drop it.
+    assert services["run"].count("GUNICORN_CMD_ARGS='--no-control-socket --timeout 300'") == 2
+    assert "deadline=$((SECONDS + 360))" in services["run"]
 
 
 def test_litellm_configs_route_both_profiles_to_local_capture(tmp_path):
@@ -59,7 +70,8 @@ def test_litellm_measures_and_uploads_only_verified_value_free_reports():
     _, steps = _steps()
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["artifact-name"] == ""
-    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
+    assert "@29a9932b085e5b063b8c366c3e6bfca2c4af4b06" in operator["uses"]
+    assert operator["with"]["submission-section"] == "false"
     response = next(step for step in steps if step.get("id") == "response")
     assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]
     assert "--upstream-port 8799 --model capture" in response["run"]
@@ -79,4 +91,4 @@ def test_litellm_measures_and_uploads_only_verified_value_free_reports():
     assert "if-no-files-found" in upload["with"]
     assert ".log" not in upload["with"]["path"]
     assert ".raw.json" not in upload["with"]["path"]
-    assert "steps.operator.outcome == 'failure'" in steps[-1]["if"]
+    assert steps[-1]["if"] == "always() && steps.result.outputs.status != 'clean'"

@@ -59,7 +59,8 @@ def test_nemo_retains_refused_cases_and_only_uploads_verified_reports():
     _, steps = _steps()
     operator = next(step for step in steps if step.get("id") == "operator")
     assert operator["with"]["artifact-name"] == ""
-    assert "@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506" in operator["uses"]
+    assert "@29a9932b085e5b063b8c366c3e6bfca2c4af4b06" in operator["uses"]
+    assert operator["with"]["submission-section"] == "false"
     response = next(step for step in steps if step.get("id") == "response")
     assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]
     assert "--upstream-port 8799 --model config" in response["run"]
@@ -76,4 +77,4 @@ def test_nemo_retains_refused_cases_and_only_uploads_verified_reports():
     assert upload["with"]["name"] == "source-reproduction"
     assert ".raw.json" not in upload["with"]["path"]
     assert ".log" not in upload["with"]["path"]
-    assert "steps.operator.outcome == 'failure'" in steps[-1]["if"]
+    assert steps[-1]["if"] == "always() && steps.result.outputs.status != 'clean'"

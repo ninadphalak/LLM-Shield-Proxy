@@ -23,6 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      # Names this run on the results wall. Change them if your fork measures something else.
+      WALL_PRODUCT: LiteLLM
+      WALL_CONFIGURATION: Presidio pre_call guardrail with output_parse_pii
+      WALL_LICENSE: MIT outside enterprise/
+      WALL_PROJECT_URL: https://github.com/BerriAI/litellm
       SOURCE_REPOSITORY: ${{ inputs.source_repository || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'BerriAI/litellm' || github.repository) }}
       SOURCE_SELECTOR: ${{ inputs.source_ref || (github.repository == 'ninadphalak/LLM-Shield-Proxy' && 'v1.99.0' || github.sha) }}
       SOURCE_IMAGE: litellm-source-reproduction:${{ github.run_id }}
@@ -82,10 +87,19 @@ jobs:
           FROM ${RUNTIME_IMAGE}
           RUN mv /app/.venv/lib/python3.13/site-packages/litellm /app/litellm-runtime-base
           COPY litellm/ /app/.venv/lib/python3.13/site-packages/litellm/
-          RUN cp /app/litellm-runtime-base/rust_bridge/_native*.so /app/.venv/lib/python3.13/site-packages/litellm/rust_bridge/ \
-              && python -c "import litellm; print(litellm.__file__)"
+          RUN cp /app/litellm-runtime-base/rust_bridge/_native*.so /app/.venv/lib/python3.13/site-packages/litellm/rust_bridge/
+          # A fork's newer source can import a package the pinned image predates (main added
+          # httpx2 after v1.99.0). Install what the selected source declares for the proxy;
+          # anything the image already satisfies is left exactly as pinned.
+          COPY pyproject.toml /tmp/source-pyproject.toml
+          RUN /app/.venv/bin/python -c "import tomllib; p = tomllib.load(open('/tmp/source-pyproject.toml', 'rb'))['project']; open('/tmp/source-requirements.txt', 'w').write(chr(10).join(p.get('dependencies', []) + p.get('optional-dependencies', {}).get('proxy', [])) + chr(10))" \
+              && /app/.venv/bin/python -m ensurepip --upgrade > /dev/null \
+              && /app/.venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir -r /tmp/source-requirements.txt \
+              && /app/.venv/bin/python -m pip freeze > /app/source-build-packages.txt \
+              && /app/.venv/bin/python -c "import litellm.proxy.proxy_server"
           DOCKERFILE
           docker image inspect "$SOURCE_IMAGE" --format '{{.Id}}' > "$out/image-id.txt"
+          docker run --rm --entrypoint cat "$SOURCE_IMAGE" /app/source-build-packages.txt > "$out/proxy-packages.txt"
           python - <<'PY'
           import json
           import os
@@ -96,8 +110,13 @@ jobs:
               'source_repository': os.environ['SOURCE_REPOSITORY'],
               'source_selector': os.environ['SOURCE_SELECTOR'],
               'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
+              'product': os.environ['WALL_PRODUCT'],
+              'configuration': os.environ['WALL_CONFIGURATION'],
+              'license': os.environ['WALL_LICENSE'],
+              'project_url': os.environ['WALL_PROJECT_URL'],
               'runtime_image': os.environ['RUNTIME_IMAGE'],
-              'build_method': 'selected Python source with v1.99.0 runtime dependencies and native bridge',
+              'build_method': ('selected Python source over the v1.99.0 runtime image and native bridge, '
+                               'plus any proxy dependency the source declares that the image lacks'),
           }
           (root / 'source-identity.json').write_text(
               json.dumps(identity, indent=2, sort_keys=True) + '\n', encoding='utf-8'
@@ -105,6 +124,9 @@ jobs:
           PY
 
       - name: Start pinned local dependencies
+        # Every docker call below is bounded, and so is the step: one run hung silently for
+        # 17 minutes inside a single unbounded call and would otherwise have held the job.
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           for image in "$POSTGRES_IMAGE" "$ANALYZER_IMAGE" "$ANONYMIZER_IMAGE"; do
@@ -114,46 +136,57 @@ jobs:
               sleep $((2 ** attempt))
             done
           done
-          pg=$(docker run -d -p 127.0.0.1::5432 \
-            -e POSTGRES_PASSWORD=litellm -e POSTGRES_USER=litellm -e POSTGRES_DB=litellm "$POSTGRES_IMAGE")
-          analyzer=$(docker run -d -p 127.0.0.1::3000 "$ANALYZER_IMAGE")
-          anonymizer=$(docker run -d -p 127.0.0.1::3000 "$ANONYMIZER_IMAGE")
+          # The Presidio images run gunicorn 25, whose master starts a control-socket thread
+          # and then forks the worker. Intermittently the worker froze straight after fork,
+          # before logging "Booting worker", and never answered /health: a lock held by that
+          # thread at fork time. Caught on a hung runner: master logged "Control socket
+          # listening", the worker process existed and never logged a line, and the image's
+          # own in-container health checks piled up unanswered. --no-control-socket removes
+          # the thread. Host networking on job-chosen ports keeps port publishing out of it.
+          read -r pg_port analyzer_port anonymizer_port < <(python -c '
+          import socket
+          sockets = [socket.socket() for _ in range(3)]
+          for sock in sockets:
+              sock.bind(("127.0.0.1", 0))
+          print(" ".join(str(sock.getsockname()[1]) for sock in sockets))
+          for sock in sockets:
+              sock.close()')
+          pg=$(timeout 120 docker run -d --network host \
+            -e POSTGRES_PASSWORD=litellm -e POSTGRES_USER=litellm -e POSTGRES_DB=litellm \
+            "$POSTGRES_IMAGE" -p "$pg_port" -c listen_addresses=127.0.0.1)
+          analyzer=$(timeout 120 docker run -d --network host -e PORT="$analyzer_port" \
+            -e GUNICORN_CMD_ARGS='--no-control-socket --timeout 300' "$ANALYZER_IMAGE")
+          anonymizer=$(timeout 120 docker run -d --network host -e PORT="$anonymizer_port" \
+            -e GUNICORN_CMD_ARGS='--no-control-socket --timeout 300' "$ANONYMIZER_IMAGE")
           echo "PG_CONTAINER=$pg" >> "$GITHUB_ENV"
           echo "ANALYZER_CONTAINER=$analyzer" >> "$GITHUB_ENV"
           echo "ANONYMIZER_CONTAINER=$anonymizer" >> "$GITHUB_ENV"
-          pg_port=$(docker port "$pg" 5432/tcp | sed 's/.*://')
-          analyzer_port=$(docker port "$analyzer" 3000/tcp | sed 's/.*://')
-          anonymizer_port=$(docker port "$anonymizer" 3000/tcp | sed 's/.*://')
           echo "DATABASE_URL=postgresql://litellm:litellm@127.0.0.1:$pg_port/litellm" >> "$GITHUB_ENV"
           echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
           echo "ANONYMIZER_PORT=$anonymizer_port" >> "$GITHUB_ENV"
-          for phase in 1 2 3; do
-            for _ in $(seq 1 60); do
-              if docker exec "$pg" pg_isready -U litellm -d litellm > /dev/null 2>&1 \
-                && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
-                && curl --max-time 1 -s -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
-                exit 0
-              fi
-              sleep 2
-            done
-            if [ "$phase" != 3 ]; then
-              echo 'Presidio analyzer is not ready; restarting its pre-fixture container.'
-              docker restart "$analyzer" > /dev/null
-              analyzer_port=$(docker port "$analyzer" 3000/tcp | sed 's/.*://')
-              echo "ANALYZER_PORT=$analyzer_port" >> "$GITHUB_ENV"
+          deadline=$((SECONDS + 360))
+          attempt=0
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            attempt=$((attempt + 1))
+            if timeout 10 docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm > /dev/null 2>&1 \
+              && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$analyzer_port/health" \
+              && curl --max-time 5 -sf -o /dev/null "http://127.0.0.1:$anonymizer_port/health"; then
+              echo "Local dependencies ready after $attempt checks."
+              exit 0
             fi
+            if [ $((attempt % 15)) = 0 ]; then echo "Still waiting for local dependencies ($attempt checks)."; fi
+            sleep 2
           done
-          echo 'A local dependency did not become ready.'
-          docker exec "$pg" pg_isready -U litellm -d litellm || true
+          echo 'A local dependency did not become ready within six minutes.'
+          timeout 10 docker exec "$pg" pg_isready -h 127.0.0.1 -p "$pg_port" -U litellm -d litellm || true
           for port in "$analyzer_port" "$anonymizer_port"; do
             curl --max-time 5 --silent --show-error -o /dev/null -w "port=$port status=%{http_code}\n" \
               "http://127.0.0.1:$port/health" || true
           done
           free -h || true
           for id in "$pg" "$analyzer" "$anonymizer"; do
-            docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
-            docker stats --no-stream --format 'container={{.Name}} memory={{.MemUsage}}' "$id" || true
-            docker logs --tail 20 "$id" 2>&1 || true
+            timeout 10 docker inspect "$id" --format 'container={{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
+            timeout 10 docker logs --tail 60 "$id" 2>&1 || true
           done
           exit 2
 
@@ -198,7 +231,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@c4e90efb94ad529c4bb8eb6b6b7b1f9f120e1506 # operator action with deferred upload
+        uses: ninadphalak/LLM-Shield-Proxy@29a9932b085e5b063b8c366c3e6bfca2c4af4b06 # operator action; the recipe writes the submission
         with:
           target-base-url: http://127.0.0.1:${{ env.LITELLM_PORT }}/v1
           start-command: >-
@@ -210,6 +243,7 @@ jobs:
           target-version: ${{ env.SOURCE_SELECTOR }}
           duty: restore
           artifact-name: ''
+          submission-section: 'false'
 
       - name: Stage the operator result
         if: always() && steps.operator.outputs.report-directory != ''
@@ -341,6 +375,7 @@ jobs:
           PY
 
       - name: Upload verified source evidence
+        id: upload
         if: always() && steps.verify.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -352,6 +387,7 @@ jobs:
             ${{ runner.temp }}/litellm-source-reproduction/source-identity.json
             ${{ runner.temp }}/litellm-source-reproduction/source-commit.txt
             ${{ runner.temp }}/litellm-source-reproduction/image-id.txt
+            ${{ runner.temp }}/litellm-source-reproduction/proxy-packages.txt
             ${{ runner.temp }}/litellm-source-reproduction/operator-config.yaml
             ${{ runner.temp }}/litellm-source-reproduction/response-config.yaml
             ${{ runner.temp }}/litellm-source-reproduction/response-harness-packages.txt
@@ -370,6 +406,127 @@ jobs:
             if [ -n "$id" ]; then docker rm -f "$id" > /dev/null 2>&1 || true; fi
           done
 
-      - name: Report incomplete or leaking measurement
-        if: always() && (steps.operator.outcome == 'failure' || steps.response.outcome == 'failure' || steps.verify.outcome == 'failure')
-        run: exit 1
+      - name: Report the result and how to submit it
+        id: result
+        if: always()
+        continue-on-error: true
+        env:
+          REPORT_DIR: ${{ runner.temp }}/litellm-source-reproduction
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          RESPONSE_OUTCOME: ${{ steps.response.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}, upload=${{ steps.upload.outcome }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlencode
+
+          root = Path(os.environ['REPORT_DIR'])
+          run_url = '{}/{}/actions/runs/{}'.format(
+              os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          product = os.environ['WALL_PRODUCT']
+          status = 'incomplete'
+          # A verdict needs a complete run: verified and uploaded evidence, a passing response
+          # step, and at least one applicable case in every condition of every non-control
+          # response report. Anything less is incomplete, whatever it did observe, because the
+          # summary calls a measured result complete and offers it to the wall.
+          if (os.environ['VERIFY_OUTCOME'] == 'success' and (root / 'verification.txt').is_file()
+                  and (root / 'current.json').is_file()):
+              operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
+              leaked = sorted(name for name, state in (operator.get('entities') or {}).items() if state == 'leak')
+              table, response_leak, measured_reports, unmeasured = [], False, 0, False
+              for path in sorted(root.glob('*.json')):
+                  try:
+                      metrics = json.loads(path.read_text(encoding='utf-8')).get('metrics') or {}
+                  except (ValueError, AttributeError):
+                      continue
+                  rates = metrics.get('leak_rate') if isinstance(metrics, dict) else None
+                  if not isinstance(rates, dict):
+                      continue
+                  counts = metrics.get('cases_by_condition') or {}
+                  # The Shield recipe's redaction-off arm is a control: it is meant to leak.
+                  control = path.stem.endswith('-off')
+                  cells = []
+                  for key in ('single_chunk', 'adversarial'):
+                      rate, total = rates.get(key), counts.get(key)
+                      known = isinstance(rate, (int, float)) and isinstance(total, int) and total > 0
+                      cells.append(f'{round(rate * total)} of {total} leaked' if known else 'not measured')
+                      response_leak = response_leak or (known and not control and rate > 0)
+                      unmeasured = unmeasured or (not known and not control)
+                  scored, inconclusive = metrics.get('cases_scored'), metrics.get('cases_inconclusive', 0)
+                  applicable = scored - inconclusive if isinstance(scored, int) and isinstance(inconclusive, int) else 0
+                  if not control:
+                      measured_reports += 1
+                      unmeasured = unmeasured or applicable <= 0
+                  label = path.stem + (' (control, redaction off)' if control else '')
+                  table.append(f"| {label} | {cells[0]} | {cells[1]} | {metrics.get('cases_inconclusive', 0)} |")
+              complete = (os.environ['RESPONSE_OUTCOME'] == 'success' and os.environ['UPLOAD_OUTCOME'] == 'success'
+                          and measured_reports > 0 and not unmeasured
+                          and operator.get('verdict') in ('CLEAN', 'LEAK'))
+              status = 'incomplete' if not complete else 'leak' if leaked or response_leak else 'clean'
+
+          if status == 'incomplete':
+              print('## Result: INCOMPLETE, do not submit')
+              print()
+              print('This run did not produce a verified measurement, so nothing was uploaded and the '
+                    'results wall has nothing to read. It says nothing about the gateway.')
+              print()
+              print(f"Step outcomes: {os.environ['STEP_OUTCOMES']}. Open the first failed step for the reason, "
+                    'then rerun the workflow. A failure before measurement is usually the runner, a download '
+                    'or the proxy not starting.')
+          else:
+              print('## Result: MEASURED LEAK' if status == 'leak' else '## Result: MEASURED CLEAN')
+              print()
+              print('This run is a complete, verified measurement. '
+                    + ('The job is red because the gateway leaked, not because the run broke. '
+                       'A leak is a result worth publishing.' if status == 'leak'
+                       else 'No leak in any case this run measured.'))
+              print()
+              print('Request path: ' + ('the provider received raw ' + ', '.join(leaked) + '.' if leaked
+                                        else 'no raw value reached the provider.'))
+              print()
+              print('| Response report | Value in one chunk | Value split across two chunks | Inconclusive |')
+              print('| :--- | :--- | :--- | ---: |')
+              print('\n'.join(table))
+              print()
+              identity = json.loads((root / 'source-identity.json').read_text(encoding='utf-8'))
+              commit, selector = identity['source_commit'], identity['source_selector']
+              where = f'commit {commit[:12]}' if selector in ('', commit) else f'{selector} (commit {commit[:12]})'
+              sections = {
+                  'Gateway': product,
+                  'Version and configuration': f"{where}, {os.environ['WALL_CONFIGURATION']}",
+                  'Project link': os.environ['WALL_PROJECT_URL'],
+                  'CI run link': run_url,
+                  'How it reads the stream': 'not stated',
+                  'License': os.environ['WALL_LICENSE'],
+                  'Outcome': status.upper(),
+              }
+              body = '\n\n'.join(f'### {heading}\n\n{value}' for heading, value in sections.items()) + '\n'
+              query = urlencode({'title': f'Result: {product}', 'labels': 'conformance-result', 'body': body})
+              print('### Put this run on the results wall')
+              print()
+              print(f'**[Submit this run to the results wall](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query})**: '
+                    'opens a prefilled issue. Press **Create**; nothing needs typing.')
+              print()
+              print('Or, from any terminal signed in to the GitHub CLI:')
+              print()
+              print('```')
+              print(f'gh issue create --repo ninadphalak/LLM-Shield-Proxy --title "Result: {product}" --body "{run_url}"')
+              print('```')
+              print()
+              print('Within a few minutes a bot answers on that issue. It either links your published row '
+                    'or says exactly what stopped it. The numbers on the wall are read from this run\'s '
+                    'artifact, not from the issue.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'status={status}\n')
+          PY
+
+      - name: Fail unless the measurement is complete and clean
+        if: always() && steps.result.outputs.status != 'clean'
+        env:
+          RESULT: ${{ steps.result.outputs.status }}
+        run: |
+          echo "Result: ${RESULT:-incomplete}. The job summary explains it and, for a measurement, how to submit it."
+          exit 1
