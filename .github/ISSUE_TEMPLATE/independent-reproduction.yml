@@ -1,0 +1,59 @@
+name: Independent reproduction
+description: Send back your run of the fragmentation result (Tracks 1 and 2).
+title: "Independent reproduction: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for running it. A failure, a mismatch or a disagreement is as useful as a
+        clean pass, so send it whatever happened. Steps:
+        https://llmshieldproxy.com/docs/conformance/reproduce-fragmentation/
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The 40-character code that `git rev-parse HEAD` printed.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Python version
+      placeholder: "Windows 11, Python 3.12.4"
+    validations:
+      required: true
+  - type: input
+    id: track1
+    attributes:
+      label: Test 1 last line
+      placeholder: "RESULT: all 2 policies reproduced the published reports."
+    validations:
+      required: true
+  - type: input
+    id: track2
+    attributes:
+      label: Test 2 last line
+      placeholder: "RESULT: all 2 policies reproduced the published reports."
+  - type: textarea
+    id: files
+    attributes:
+      label: Your result files
+      description: Drag my-reproduction.zip into this box. It holds your reports and both tests' output.
+    validations:
+      required: true
+  - type: textarea
+    id: code-read
+    attributes:
+      label: Code read (optional)
+      description: If you read the code, do the two policies differ in anything besides holding back the end of the text?
+  - type: textarea
+    id: problems
+    attributes:
+      label: Anything that failed, was unclear, or that you disagree with
+  - type: input
+    id: who
+    attributes:
+      label: Your name, and any connection to the author or to Presidio
+      description: '"None" is fine. This is published with your result.'
+    validations:
+      required: true
