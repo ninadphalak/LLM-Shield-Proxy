@@ -174,6 +174,35 @@
         "evidence": "Read from the artifact `source-reproduction` on that run.",
         "notes": ""
       }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-27",
+      "project": "NeMo Guardrails",
+      "version": "commit e2451f99ac8a, Presidio-backed output detection rail",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "none",
+      "restoredN": 0.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "responseInconclusive": 8,
+      "leakWhole": "0 of 12",
+      "leakWholeN": 0.0,
+      "leakSplit": "0 of 12",
+      "leakSplitN": 0.0,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Did not give the caller their own data back. Splitting a value changed nothing. 8 response cases were inconclusive and excluded from the leak-rate denominators. Built from source co",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "Apache-2.0",
+      "runUrl": "https://github.com/teg0011/Guardrails/actions/runs/36344884134",
+      "pricingUrl": "https://github.com/NVIDIA/NeMo-Guardrails",
+      "_submission": {
+        "issue": 129,
+        "submitter": "teg0011",
+        "ranIn": "teg0011/Guardrails",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": ""
+      }
     }
   ]
 }
