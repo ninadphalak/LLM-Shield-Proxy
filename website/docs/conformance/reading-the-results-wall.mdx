@@ -71,10 +71,13 @@ to any clean response pip: see [read the checks together](#read-the-checks-toget
 **The replication line** counts the card's runs and the distinct people who ran them, and says
 how far the card is from being called replicated. The rule is the one in
 [submitting a result](./submitting.md): a result is **replicated** only when three different
-people have run the same gateway and configuration. Runs by the benchmark maintainers, whether
-measured in this repository or submitted from a fork, do not count toward the three, and neither
-do runs by the gateway's own team. Until then the card reads **Unreplicated**, with a three-step
-meter beside the words.
+people have run the same gateway and configuration. On the wall, only verified runs from a fork
+count toward the three. Runs by the benchmark maintainers, whether measured in this repository or
+submitted from a fork, do not count. Neither do runs in the gateway's own repository, which are
+its team's CI, or runs whose origin could not be checked. The wall cannot tell whether a fork
+belongs to someone on the gateway's team, so submitters are asked to say so, and a run that
+declares it is removed from the count by hand. Until there are three, the card reads
+**Unreplicated**, with a three-step meter beside the words.
 
 **Disputed** marks a card where two runs of the same version disagree on a check, and names the
 check. Both runs stay on the card. Disagreements are published, not averaged, because they usually

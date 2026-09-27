@@ -297,7 +297,11 @@ function groupRuns(rows: ResultRow[], ids: Map<ResultRow, string>): Group[] {
     const independent = [
       ...new Set(
         runs
-          .filter((run) => run.row.provenance !== 'measured-here' && run.submitter)
+          // Only a verified fork run can count. A run in the gateway's own repository
+          // (`submitted-main`, `submitted-branch`) is the gateway team's CI, and an unverified
+          // run proves nothing about who ran it. A fork owned by someone on the gateway's team
+          // looks like any other fork from here, which is why submitters are asked to declare it.
+          .filter((run) => run.row.provenance === 'submitted-fork' && run.submitter)
           .map((run) => (run.submitter as string).toLowerCase())
           .filter((handle) => !BENCHMARK_MAINTAINERS.has(handle)),
       ),
@@ -709,7 +713,7 @@ function Replication({group}: {group: Group}): ReactNode {
   return (
     <div
       className={clsx(styles.replication, group.replicated && styles.replicated)}
-      title="A result is replicated when three different people outside the benchmark maintainers and the gateway's own team have run the same gateway and configuration.">
+      title="A result is replicated when three different people, other than the benchmark maintainers, have each run the same gateway and configuration from their own fork. Runs in the gateway's own repository do not count.">
       <span className={styles.meter} aria-hidden="true">
         {Array.from({length: REPLICATED_AT}, (_, i) => (
           <span key={i} className={clsx(styles.meterStep, i < shown && styles.meterOn)} />
