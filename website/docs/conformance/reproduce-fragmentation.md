@@ -36,9 +36,12 @@ key, no model, no network egress. Two policies, about 35 seconds each.
 ### 1. Get the code
 
 ```bash
-git clone https://github.com/ninadphalak/LLM-Shield-Proxy.git
+git clone -c core.longpaths=true https://github.com/ninadphalak/LLM-Shield-Proxy.git
 cd LLM-Shield-Proxy
 ```
+
+`core.longpaths` stops Windows from failing the checkout with `Filename too long`; it
+changes nothing elsewhere.
 
 If you were given a specific commit, check it out now:
 
@@ -180,21 +183,22 @@ curl -s -X POST http://127.0.0.1:5002/analyze \
 
 ### 2. Run the pair
 
+From the repository root, with the environment from Track 1 still active:
+
 ```bash
-PYTHONPATH=pii-leak-benchmark python -m pii_leak_benchmark.v2_emitter --validate \
-  --only presidio-chunk-local,presidio-retention \
-  --seed a1b2c3d4e5f60001 --out ./reproduction-presidio
+python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio
 ```
+
+It runs both wrappers against the analyzer and compares every field with the published
+reports, in the same format as Track 1. If it says `did NOT reproduce`, first check that
+the analyzer is still up (`docker ps` lists `presidio-analyzer`, and the `curl` above
+answers): with no analyzer running, every field differs.
 
 ### 3. Read the result
 
 The pinned image reproduced both stored reports on 2026-09-16, matching every compared
 field. CI now runs that pair too. This verifies the image as a reproduction target without
-rewriting historical target metadata. For the recursive comparison, run:
-
-```bash
-python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio-compared
-```
+rewriting historical target metadata.
 
 One seed, midpoint split oracle:
 
@@ -483,12 +487,15 @@ published the numbers. A rigged inspector would reproduce perfectly on six runne
 The part that needs a human reading the code rather than a green check is small, and it is
 worth naming exactly:
 
-| What to read | Where |
+All four are in `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py`. Search the file for
+the name in the second column; line numbers move as the file changes.
+
+| What to read | Search for |
 | :--- | :--- |
-| The chunk-local policy | `ChunkLocal` in `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py`, line 379 |
-| The retaining policy, including its boundary rule | `Retaining` (line 394) and `Retaining._cut` (line 414), same file |
-| What both share, so the only difference is retention | `_redact_then_rehydrate` (line 339) and the `Policy` base (line 321) |
-| How a leak is decided and tiered | `_leak_tier` (line 1973) |
+| The chunk-local policy | `class ChunkLocal` |
+| The retaining policy, including its boundary rule | `class Retaining` and its `def _cut` |
+| What both share, so the only difference is retention | `def _redact_then_rehydrate` and `class Policy` |
+| How a leak is decided and tiered | `def _leak_tier` |
 
 Those four are the whole argument. If the two policies differ anywhere except retention,
 the comparison is not measuring what it claims to measure, and that is a finding worth
