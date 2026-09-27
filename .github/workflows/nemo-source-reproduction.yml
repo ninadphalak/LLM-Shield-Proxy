@@ -155,7 +155,7 @@ jobs:
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
-        uses: ninadphalak/LLM-Shield-Proxy@29a9932b085e5b063b8c366c3e6bfca2c4af4b06 # operator action; the recipe writes the submission
+        uses: ninadphalak/LLM-Shield-Proxy@80bac14e5117f4514ceb15189478de4fc7fff219 # operator action; the recipe writes the submission
         with:
           target-base-url: http://127.0.0.1:${{ env.NEMO_PORT }}/v1
           start-command: >-
