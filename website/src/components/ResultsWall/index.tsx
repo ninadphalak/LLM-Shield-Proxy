@@ -325,7 +325,7 @@ function groupRuns(rows: ResultRow[], ids: Map<ResultRow, string>): Group[] {
       return seen.size > 1;
     });
 
-    const base = `card-${slug(key.replace('|', ' ')) || 'gateway'}`;
+    const base = `card-${slug(key.replace(/|/g, ' ')) || 'gateway'}`;
     let id = base;
     for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`;
     taken.add(id);
