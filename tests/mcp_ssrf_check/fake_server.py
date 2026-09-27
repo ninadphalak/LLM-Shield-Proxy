@@ -253,7 +253,8 @@ class FakeMcpServer:
         with self._lock:
             self.fetched_urls.append(target)
         try:
-            with urllib.request.urlopen(target, timeout=2) as response:  # noqa: S310 - test double, loopback only
+            # This is the vulnerable fetch tool the checker exists to catch; it runs only in tests.
+            with urllib.request.urlopen(target, timeout=2) as response:  # noqa: S310  # codeql[py/full-ssrf]
                 size = len(response.read())
         except (urllib.error.URLError, OSError, ValueError) as exc:
             return {"content": [{"type": "text", "text": f"fetch failed: {type(exc).__name__}"}], "isError": True}

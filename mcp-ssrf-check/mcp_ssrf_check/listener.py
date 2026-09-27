@@ -9,6 +9,7 @@ else's host.
 
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -17,6 +18,10 @@ from typing import Dict, List, Optional
 
 REDIRECT_PREFIX = "/redirect/"
 HIT_PREFIX = "/hit/"
+
+# Tokens are minted by the checker: a hex nonce, a spelling label, an optional suffix. Anything
+# else in a path is not ours, is never recorded, and never reaches a response header.
+_TOKEN = re.compile(r"^[A-Za-z0-9-]{1,80}$")
 
 
 class _Recorder:
@@ -47,6 +52,9 @@ class _Handler(BaseHTTPRequestHandler):
         peer = self.client_address[0]
         if path.startswith(REDIRECT_PREFIX):
             token = path[len(REDIRECT_PREFIX):]
+            if not _TOKEN.match(token):
+                self._not_found()
+                return
             self.recorder.record(token, peer)
             self.send_response(302)
             self.send_header("Location", f"{self.redirect_base}{HIT_PREFIX}{token}-redirected")
@@ -54,7 +62,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.startswith(HIT_PREFIX):
-            self.recorder.record(path[len(HIT_PREFIX):], peer)
+            token = path[len(HIT_PREFIX):]
+            if not _TOKEN.match(token):
+                self._not_found()
+                return
+            self.recorder.record(token, peer)
         body = b"mcp-ssrf-check callback\n"
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
@@ -62,6 +74,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if with_body:
             self.wfile.write(body)
+
+    def _not_found(self) -> None:
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 - name fixed by the base class
         self._serve(True)
