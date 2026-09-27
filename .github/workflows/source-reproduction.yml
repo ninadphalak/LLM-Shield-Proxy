@@ -398,7 +398,9 @@ jobs:
           if status == 'incomplete':
               # Name the first stage that failed and what to do about it, so an incomplete run
               # tells its operator more than "open the logs".
-              source_ref = os.environ.get('SOURCE_REF', '')
+              # The ref is operator input: collapse whitespace so a newline in it cannot add
+              # lines to GITHUB_OUTPUT (such as status=clean) or to the error annotation.
+              source_ref = ' '.join(os.environ.get('SOURCE_REF', '').split())
               where = f'`{source_ref}`' if source_ref else 'the latest commit of the branch you ran'
               new_run = 'Start a new run with **Run workflow**; **Re-run jobs** reuses the same inputs.'
               rerun = ('This is usually the runner or a download, not the proxy: click **Re-run jobs**, '

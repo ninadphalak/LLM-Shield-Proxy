@@ -248,3 +248,13 @@ def test_a_failed_upload_is_named_as_the_reason(tmp_path, name):
     assert status == "incomplete"
     assert "**What went wrong:** The verified evidence could not be uploaded." in summary
     assert "**Re-run jobs**" in summary
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_newline_in_the_ref_cannot_rewrite_the_status(tmp_path, name, monkeypatch):
+    monkeypatch.setenv("CHECKOUT_OUTCOME", "failure")
+    monkeypatch.setenv("SOURCE_REF", "v1\nstatus=clean\nx=")
+    status, _ = _run(tmp_path, name, verified=False)
+    lines = (tmp_path / "output.txt").read_text().splitlines()
+    assert status == "incomplete"
+    assert [line.split("=", 1)[0] for line in lines] == ["status", "reason"]
