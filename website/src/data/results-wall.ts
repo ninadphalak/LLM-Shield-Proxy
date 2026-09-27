@@ -490,11 +490,14 @@ function isOurs(project: string): boolean {
 }
 
 export function passes(row: ResultRow): boolean {
+  // Unjudged response cases are not clean ones: a row with any is not a pass, whatever
+  // its leak counts read.
   return (
     row.sentN === 0 &&
     row.restoredN === 1 &&
     row.leakWholeN === 0 &&
-    row.leakSplitN === 0
+    row.leakSplitN === 0 &&
+    !row.responseInconclusive
   );
 }
 
