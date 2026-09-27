@@ -146,6 +146,34 @@
         "evidence": "Read from the artifact `source-reproduction` on that run.",
         "notes": ""
       }
+    },
+    {
+      "status": "published",
+      "date": "2026-09-27",
+      "project": "LiteLLM",
+      "version": "commit 0351d2846286, Presidio pre_call guardrail with output_parse_pii",
+      "sentN": 1,
+      "sent": "AWS keys",
+      "restored": "none",
+      "restoredN": 0.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "0 of 16",
+      "leakWholeN": 0.0,
+      "leakSplit": "0 of 16",
+      "leakSplitN": 0.0,
+      "note": "Sent AWS keys to the provider. Did not give the caller their own data back. Splitting a value changed nothing. Built from source commit 0351d2846286.",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "MIT outside enterprise/",
+      "runUrl": "https://github.com/teg0011/litellm/actions/runs/36344664791",
+      "pricingUrl": "https://github.com/BerriAI/litellm",
+      "_submission": {
+        "issue": 128,
+        "submitter": "teg0011",
+        "ranIn": "teg0011/litellm",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": ""
+      }
     }
   ]
 }
