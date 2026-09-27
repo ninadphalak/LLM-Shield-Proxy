@@ -83,6 +83,7 @@ jobs:
           fetch-depth: 1
 
       - name: Review
+        id: review
         # Pinned to a commit SHA with the tag in a comment, matching every other action in
         # this repository: it receives a repository token and the subscription token.
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
@@ -135,3 +136,39 @@ jobs:
               Verdict: MERGEABLE
               Verdict: BLOCKING (<n> findings)
             Post only GitHub comments; do not answer in messages.
+
+      # How much of the subscription one review used, on the run's Summary page. Numbers
+      # only: the execution file also holds everything the model read and wrote, which
+      # can include PR content, so nothing but these counters leaves it. `costUSD` is
+      # what the same tokens would cost at API prices -- a yardstick, not a bill.
+      - name: Report usage
+        if: always() && steps.review.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          raw = open(os.environ["EXECUTION_FILE"], encoding="utf-8").read().strip()
+          try:
+              items = json.loads(raw)
+          except json.JSONDecodeError:
+              items = [json.loads(line) for line in raw.splitlines() if line.strip()]
+          if isinstance(items, dict):
+              items = [items]
+          result = next((i for i in reversed(items) if isinstance(i, dict) and i.get("type") == "result"), {})
+          rows = [f"### Review usage, PR #{os.environ['PR_NUMBER']}", "",
+                  "| model | input | output | cache read | cache write | API-price equivalent |",
+                  "|---|---:|---:|---:|---:|---:|"]
+          for model, u in (result.get("modelUsage") or {}).items():
+              rows.append(f"| {model} | {u.get('inputTokens', 0):,} | {u.get('outputTokens', 0):,} | "
+                          f"{u.get('cacheReadInputTokens', 0):,} | {u.get('cacheCreationInputTokens', 0):,} | "
+                          f"${u.get('costUSD', 0):.3f} |")
+          rows += ["", f"turns: {result.get('num_turns', '?')}, "
+                       f"duration: {result.get('duration_ms', 0) / 1000:.0f}s, "
+                       f"total API-price equivalent: ${result.get('total_cost_usd', 0):.3f}"]
+          text = "\n".join(rows)
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(text + "\n")
+          PY
