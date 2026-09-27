@@ -225,6 +225,31 @@ def _classify(result, reached: bool) -> str:
     return "unclear"
 
 
+def _redirect_probe(call, listener: CallbackListener, nonce: str, callback_host: str, redirect_target: str, settle: float) -> Dict[str, Any]:
+    port = listener.port
+    # A target the server fetches when asked directly proves nothing about redirects.
+    direct_token = f"{nonce}-redirect-target"
+    listener.expect(direct_token)
+    try:
+        direct = call(f"http://{redirect_target}:{port}/hit/{direct_token}")
+    except httpx.HTTPError as exc:
+        return {"outcome": "transport-error", "error": type(exc).__name__}
+    if listener.wait_for(direct_token, settle):
+        return {"outcome": "not-exercised", "note": f"the server fetches {redirect_target} when asked directly", "response": direct.summary()}
+    token = f"{nonce}-redirect"
+    listener.expect(token)
+    try:
+        result = call(f"http://{callback_host}:{port}/redirect/{token}")
+    except httpx.HTTPError as exc:
+        return {"outcome": "transport-error", "error": type(exc).__name__}
+    first_hop = listener.wait_for(token, settle)
+    if not first_hop:
+        return {"outcome": "not-exercised", "note": f"the first hop on {callback_host} never arrived", "response": result.summary()}
+    if listener.wait_for(f"{token}-redirected", settle):
+        return {"outcome": "reached", "target": redirect_target, "response": result.summary(), "peers": listener.peers(f"{token}-redirected")}
+    return {"outcome": "refused", "target": redirect_target, "response": result.summary()}
+
+
 def check_tool_url_ssrf(
     client: httpx.Client,
     url: str,
@@ -234,10 +259,17 @@ def check_tool_url_ssrf(
     argument: str,
     listener: CallbackListener,
     callback_host: str = "127.0.0.1",
+    redirect_target: Optional[str] = None,
     control_url: Optional[str] = None,
     settle: float = 0.5,
 ) -> List[CheckResult]:
-    """Ask the named tool to fetch the listener by every loopback spelling, and see what arrives."""
+    """Ask the named tool to fetch the listener by every loopback spelling, and see what arrives.
+
+    The redirect probe runs only when ``redirect_target`` is given: the listener answers the
+    first hop on ``callback_host`` with a 302 to ``redirect_target``. It shows something only
+    when the server allows the first hop and refuses the target when asked for it directly,
+    so both are checked and the probe is reported as not exercised otherwise.
+    """
     results: List[CheckResult] = []
     nonce = _nonce()
     port = listener.port
@@ -269,6 +301,7 @@ def check_tool_url_ssrf(
 
     for label, host in LOOPBACK_SPELLINGS:
         token = f"{nonce}-{label}"
+        listener.expect(token)
         probe = f"http://{host}:{port}/hit/{token}"
         try:
             result = call(probe)
@@ -288,31 +321,22 @@ def check_tool_url_ssrf(
             wiring_error = f"JSON-RPC {err.get('code')} on tools/call: check --fetch-tool and --url-argument"
         matrix[label] = entry
 
-    token = f"{nonce}-redirect"
-    try:
-        result = call(f"http://{callback_host}:{port}/redirect/{token}")
-    except httpx.HTTPError as exc:
-        matrix["redirect"] = {"outcome": "transport-error", "error": type(exc).__name__}
+    if redirect_target is None:
+        matrix["redirect"] = {"outcome": "not-requested", "note": "pass --redirect-target to probe redirect following"}
     else:
-        first_hop = listener.wait_for(token, settle)
-        followed = listener.wait_for(f"{token}-redirected", settle) if first_hop else False
-        if not first_hop:
-            matrix["redirect"] = {"outcome": "not-exercised", "response": result.summary()}
-        elif followed:
-            matrix["redirect"] = {"outcome": "reached", "response": result.summary(), "peers": listener.peers(f"{token}-redirected")}
+        matrix["redirect"] = _redirect_probe(call, listener, nonce, callback_host, redirect_target, settle)
+        if matrix["redirect"]["outcome"] == "reached":
             reached.append("redirect")
-        else:
-            matrix["redirect"] = {"outcome": "refused", "response": result.summary()}
 
     evidence = {
         "tool": tool,
         "argument": argument,
-        "listener": {"host": listener.host, "port": port, "ipv6": listener.ipv6_bound},
+        "listener": {"host": listener.host, "port": port, "ipv6": listener.ipv6_bound, "redirect_host": listener.redirect_host},
         "spellings": matrix,
     }
     title = "URL-fetching tool refuses loopback"
     if reached:
-        detail = f"the tool fetched the checker's loopback listener via: {', '.join(reached)}"
+        detail = f"the tool fetched the checker's listener via: {', '.join(reached)}"
         results.append(CheckResult("tool-url-ssrf", title, FAIL, detail, evidence, SBP_SSRF))
     elif wiring_error:
         results.append(CheckResult("tool-url-ssrf", title, INCONCLUSIVE, wiring_error, evidence, SBP_SSRF))

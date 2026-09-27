@@ -24,12 +24,20 @@ Not on PyPI yet. From a clone, `pip install ./mcp-ssrf-check` does the same.
 | `origin-header` | The same request with `Origin: https://evil-<nonce>.invalid` | 403 (any 4xx is recorded as a pass, with the status) | Served. The transport specification requires 403. |
 | `origin-null` | `Origin: null` | Reported, never scored | |
 | `session-binding` | `tools/list` with a fabricated `Mcp-Session-Id`; then a fresh session, DELETE, and reuse | Both refused (404) | Either honoured |
-| `tool-url-ssrf` | `tools/call` on the named tool with a URL for the checker's own loopback listener, spelled nine ways, plus a redirect | Every spelling refused and nothing reached the listener | Anything reached the listener, or a redirect was followed to loopback |
+| `tool-url-ssrf` | `tools/call` on the named tool with a URL for the checker's own loopback listener, spelled nine ways; with `--redirect-target`, also a redirect from `--callback-host` into that target | Every spelling refused and nothing reached the listener | Anything reached the listener, or the redirect was followed into the target |
 
 The loopback spellings are `127.0.0.1`, `localhost`, `[::1]`, `[::ffff:127.0.0.1]`,
 `2130706433`, `0x7f000001`, `0177.0.0.1`, `127.1` and `0.0.0.0`. A guard that compares host
 strings passes the first and fails the rest; a guard that resolves and then checks every
 address passes them all. The report names each spelling that arrived.
+
+The redirect probe is opt-in because it only shows something when the server allows the first
+hop and refuses the target when asked directly; the checker verifies the second condition and
+reports the probe as not exercised otherwise. On one host, `--callback-host localhost
+--redirect-target 127.0.0.1` catches a guard that checks the hostname of the first hop and never
+looks at where the redirect goes. Across a network namespace, name the address the server can
+reach the listener on as `--callback-host`, and an address it should refuse as `--redirect-target`
+(the listener must be bound where that address lands: `--listen-host 0.0.0.0`).
 
 `session-binding` is skipped on the stateless lifecycle (protocol `2026-07-28` and later),
 which has no sessions, and on stateful servers that issue no session id.
@@ -47,9 +55,10 @@ server can reach.
 `--control-url` names a URL the tool is expected to fetch successfully. It proves the tool
 and argument are wired before the loopback probes are read.
 
-Evidence in the report is HTTP status codes, JSON-RPC message shapes (`result` or `error`
-plus the error code), the spellings sent, and which peer address arrived at the listener.
-No response body is copied into it.
+Evidence in the report is HTTP status codes, content types, JSON-RPC message shapes (`result`
+or `error` plus the error code), the spellings sent, and which peer address arrived at the
+listener. No response text is copied into it, not even from a rejection page, because the
+report is meant to be uploaded as a CI artifact.
 
 ## What it does not check
 
@@ -57,6 +66,7 @@ No response body is copied into it.
   needs a DNS zone you control; this tool has none.
 - Private-range egress to addresses other than loopback. The probes target only the
   checker's own listener.
+- Redirect following, unless you pass `--redirect-target`.
 - `resources/read` with a URI the server fetches. Only `tools/call` is exercised.
 - Anything the official conformance suite already covers. Its `dns-rebinding` scenario sends
   `Host` and `Origin` together and accepts any 4xx; this tool reports them separately
@@ -97,6 +107,7 @@ No response body is copied into it.
 --listen-host ADDR        where the callback listener binds (default 127.0.0.1)
 --listen-port PORT        default: any free port
 --callback-host HOST      the address the server should use to reach the listener
+--redirect-target ADDR    enable the redirect probe: where the first hop redirects to
 --settle SECONDS          wait for a callback after each tool call (default 0.5)
 --no-ipv6                 do not also bind the listener on ::1
 --json-out PATH           write the report as JSON

@@ -45,6 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--listen-host", default="127.0.0.1", help="address the callback listener binds (default loopback)")
     parser.add_argument("--listen-port", type=int, default=0, help="callback listener port (default: any free port)")
     parser.add_argument("--callback-host", default="127.0.0.1", help="host the server should use to reach the listener")
+    parser.add_argument(
+        "--redirect-target",
+        help=(
+            "enable the redirect probe: an address the listener answers on that the server should refuse when "
+            "asked directly (for example 127.0.0.1 when server and checker share a host)"
+        ),
+    )
     parser.add_argument("--settle", type=float, default=0.5, help="seconds to wait for a callback after each tool call")
     parser.add_argument("--no-ipv6", action="store_true", help="do not bind the listener on ::1")
     parser.add_argument("--json-out", help="write the report as JSON to this path")
@@ -107,7 +114,7 @@ def run(args: argparse.Namespace) -> Report:
                 )
             )
         else:
-            with CallbackListener(args.listen_host, args.listen_port, ipv6=not args.no_ipv6) as listener:
+            with CallbackListener(args.listen_host, args.listen_port, ipv6=not args.no_ipv6, redirect_host=args.redirect_target) as listener:
                 checks.extend(
                     check_tool_url_ssrf(
                         client,
@@ -117,6 +124,7 @@ def run(args: argparse.Namespace) -> Report:
                         argument=args.url_argument,
                         listener=listener,
                         callback_host=args.callback_host,
+                        redirect_target=args.redirect_target,
                         control_url=args.control_url,
                         settle=args.settle,
                     )

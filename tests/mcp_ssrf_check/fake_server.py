@@ -58,6 +58,7 @@ class FakeMcpServer:
         validate_host: bool = True,
         validate_origin: bool = True,
         reject_null_origin: bool = True,
+        html_errors: bool = False,
         delete_supported: bool = True,
         fetch_guard: str = "resolve",
         sse: bool = False,
@@ -70,6 +71,7 @@ class FakeMcpServer:
         self.validate_host = validate_host
         self.validate_origin = validate_origin
         self.reject_null_origin = reject_null_origin
+        self.html_errors = html_errors
         self.delete_supported = delete_supported
         self.fetch_guard = fetch_guard
         self.sse = sse
@@ -122,20 +124,31 @@ class FakeMcpServer:
             def _error(self, status: int, req_id: Any, code: int, message: str) -> None:
                 self._reply(status, {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}})
 
+            def _reject(self, status: int) -> None:
+                if not owner.html_errors:
+                    self._reply(status, None)
+                    return
+                body = b"<html><body><pre>DEBUG-PAGE-MARKER Traceback: /srv/app/gate.py line 12</pre></body></html>"
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def _gate(self) -> bool:
                 allowed_hosts = {f"127.0.0.1:{owner.port}", f"localhost:{owner.port}", f"[::1]:{owner.port}"}
                 if owner.validate_host and self.headers.get("Host") not in allowed_hosts:
-                    self._reply(421, None)
+                    self._reject(421)
                     return False
                 origin = self.headers.get("Origin")
                 if owner.validate_origin and origin is not None:
                     allowed = {f"http://{h}" for h in allowed_hosts}
                     if origin == "null":
                         if owner.reject_null_origin:
-                            self._reply(403, None)
+                            self._reject(403)
                             return False
                     elif origin not in allowed:
-                        self._reply(403, None)
+                        self._reject(403)
                         return False
                 return True
 

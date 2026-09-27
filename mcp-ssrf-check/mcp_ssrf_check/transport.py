@@ -27,10 +27,6 @@ STATELESS_VERSION = "2026-07-28"
 STATEFUL_VERSION = "2025-11-25"
 CLIENT_INFO = {"name": "mcp-ssrf-check", "version": __version__}
 
-# How much of a non-JSON body to keep for the report. Enough to see an HTML error page's
-# title, not enough to copy a server's response into a file by accident.
-BODY_HEAD_CHARS = 200
-
 NAMED_METHODS = {"tools/call": "name", "resources/read": "uri", "prompts/get": "name"}
 
 
@@ -44,7 +40,7 @@ class HttpResult:
     headers: Dict[str, str]
     message: Optional[Dict[str, Any]]
     body_kind: str
-    body_head: str
+    content_type: str = ""
 
     @property
     def has_result(self) -> bool:
@@ -57,15 +53,17 @@ class HttpResult:
         return None
 
     def summary(self) -> Dict[str, Any]:
-        """Status and message shape only: never the body of a result."""
+        """Status, body kind and message shape only. No response text is ever copied here:
+        the report is meant to be uploaded as a CI artifact, and a rejection page from the
+        server under test may carry a stack trace or an internal path."""
         out: Dict[str, Any] = {"status": self.status, "body": self.body_kind}
+        if self.content_type:
+            out["content_type"] = self.content_type
         if self.has_result:
             out["jsonrpc"] = "result"
         elif self.jsonrpc_error is not None:
             out["jsonrpc"] = "error"
             out["error_code"] = self.jsonrpc_error.get("code")
-        elif self.body_head:
-            out["body_head"] = self.body_head
         return out
 
 
@@ -181,18 +179,17 @@ def post(
                 if isinstance(candidate, dict) and candidate.get("id") == req_id and ("result" in candidate or "error" in candidate):
                     message = candidate
                     break
-            return HttpResult(response.status_code, resp_headers, message, "sse", "")
+            return HttpResult(response.status_code, resp_headers, message, "sse", content_type)
 
         raw = response.read()
         if not raw:
-            return HttpResult(response.status_code, resp_headers, None, "empty", "")
+            return HttpResult(response.status_code, resp_headers, None, "empty", content_type)
         try:
             parsed = json.loads(raw)
         except ValueError:
-            head = raw[: BODY_HEAD_CHARS * 2].decode("utf-8", "replace")[:BODY_HEAD_CHARS]
-            return HttpResult(response.status_code, resp_headers, None, "other", head)
+            return HttpResult(response.status_code, resp_headers, None, "other", content_type)
         message = parsed if isinstance(parsed, dict) else None
-        return HttpResult(response.status_code, resp_headers, message, "json", "")
+        return HttpResult(response.status_code, resp_headers, message, "json", content_type)
 
 
 def delete_session(client: httpx.Client, url: str, lifecycle: Lifecycle, session_id: str) -> int:

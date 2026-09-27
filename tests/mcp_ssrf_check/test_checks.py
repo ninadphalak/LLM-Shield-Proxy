@@ -32,12 +32,12 @@ def test_hardened_stateful_server_passes_every_check():
     assert checks["tool-url-ssrf"].status == PASS, checks["tool-url-ssrf"].detail
     assert report.exit_code() == EXIT_OK
     outcomes = {k: v["outcome"] for k, v in checks["tool-url-ssrf"].evidence["spellings"].items()}
-    assert set(outcomes.values()) <= {"refused", "not-exercised"}, outcomes
+    assert set(outcomes.values()) <= {"refused", "not-exercised", "not-requested"}, outcomes
 
 
 def test_weak_server_fails_host_origin_session_and_ssrf():
     with FakeMcpServer(validate_host=False, validate_origin=False, check_session=False, fetch_guard="none") as server:
-        report = _run(server.url, "--fetch-tool", "fetch")
+        report = _run(server.url, "--fetch-tool", "fetch", "--redirect-target", "127.0.0.1")
     checks = _by_id(report)
     assert checks["host-header"].status == FAIL
     assert checks["origin-header"].status == FAIL
@@ -48,17 +48,42 @@ def test_weak_server_fails_host_origin_session_and_ssrf():
     spellings = ssrf.evidence["spellings"]
     assert spellings["direct"]["outcome"] == "reached"
     assert spellings["localhost"]["outcome"] == "reached"
-    assert spellings["redirect"]["outcome"] == "reached", spellings["redirect"]
+    # A weak server fetches 127.0.0.1 directly, so the redirect probe cannot show anything on it.
+    assert spellings["redirect"]["outcome"] == "not-exercised", spellings["redirect"]
     assert report.exit_code() == EXIT_FAIL
 
 
 def test_verdicts_name_what_was_sent_and_not_what_came_back():
-    """Evidence carries status codes and message shapes only, never a body the server returned."""
-    with FakeMcpServer(validate_host=False, fetch_guard="none") as server:
+    """Evidence carries status codes and message shapes only, never a body the server returned:
+    not a tool result, not an initialize result, and not a rejection page either."""
+    with FakeMcpServer(fetch_guard="none", html_errors=True) as server:
         report = _run(server.url, "--fetch-tool", "fetch")
     dumped = json.dumps(report.to_dict())
     assert "TOOL-OUTPUT-MARKER" not in dumped
     assert "serverInfo" not in dumped
+    assert "DEBUG-PAGE-MARKER" not in dumped
+    assert "/srv/app" not in dumped
+    checks = _by_id(report)
+    assert checks["host-header"].status == PASS
+    assert checks["host-header"].evidence["response"]["body"] == "other"
+    assert checks["host-header"].evidence["response"]["content_type"] == "text/html"
+
+
+def test_redirect_probe_catches_a_guard_that_checks_only_the_first_hop():
+    """The string guard allows the hostname spelling and blocks 127.0.0.1, so a redirect from
+    localhost into 127.0.0.1 is exactly the hop it fails to re-check."""
+    with FakeMcpServer(fetch_guard="string") as server:
+        report = _run(server.url, "--fetch-tool", "fetch", "--callback-host", "localhost", "--redirect-target", "127.0.0.1")
+    spellings = _by_id(report)["tool-url-ssrf"].evidence["spellings"]
+    assert spellings["redirect"]["outcome"] == "reached", spellings["redirect"]
+    assert spellings["redirect"]["target"] == "127.0.0.1"
+
+
+def test_redirect_probe_is_not_run_without_a_target():
+    with FakeMcpServer(fetch_guard="none") as server:
+        report = _run(server.url, "--fetch-tool", "fetch")
+    spellings = _by_id(report)["tool-url-ssrf"].evidence["spellings"]
+    assert spellings["redirect"]["outcome"] == "not-requested"
 
 
 def test_stateless_server_skips_sessions_and_still_checks_headers():

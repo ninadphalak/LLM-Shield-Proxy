@@ -1,15 +1,18 @@
 """A callback listener that records which probe URLs a tool actually fetched.
 
-The SSRF check hands the server URLs that all point at this listener's port on loopback,
-each spelled differently. A request arriving here is proof the tool dialled that spelling.
-Nothing here leaves the machine: the listener binds loopback unless told otherwise, and the
-probe URLs are the listener's own addresses, never a cloud metadata endpoint or anyone
-else's host.
+The SSRF check hands the server URLs that all point at this listener's port, each spelled
+differently. A request arriving here is proof the tool dialled that spelling. Nothing here
+leaves the machine: the listener binds loopback unless told otherwise, and the probe URLs are
+the listener's own addresses, never a cloud metadata endpoint or anyone else's host.
+
+The listener answers only for tokens the checker registered with ``expect()``. A path that
+names anything else is 404, is never recorded, and never appears in a response header: the
+``Location`` of a redirect is built from the registered copy of the token, not from the
+request.
 """
 
 from __future__ import annotations
 
-import re
 import socket
 import threading
 import time
@@ -18,16 +21,23 @@ from typing import Dict, List, Optional
 
 REDIRECT_PREFIX = "/redirect/"
 HIT_PREFIX = "/hit/"
-
-# Tokens are minted by the checker: a hex nonce, a spelling label, an optional suffix. Anything
-# else in a path is not ours, is never recorded, and never reaches a response header.
-_TOKEN = re.compile(r"^[A-Za-z0-9-]{1,80}$")
+REDIRECTED_SUFFIX = "-redirected"
 
 
 class _Recorder:
     def __init__(self) -> None:
         self.lock = threading.Lock()
+        self.expected: Dict[str, str] = {}
         self.hits: Dict[str, List[dict]] = {}
+
+    def expect(self, token: str) -> None:
+        with self.lock:
+            self.expected[token] = token
+
+    def registered(self, token: str) -> Optional[str]:
+        """The checker's own copy of ``token`` if it was registered, else None."""
+        with self.lock:
+            return self.expected.get(token)
 
     def record(self, token: str, peer: str) -> None:
         with self.lock:
@@ -47,24 +57,28 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - signature fixed by the base class
         return
 
+    def _empty(self, status: int, location: Optional[str] = None) -> None:
+        self.send_response(status)
+        if location is not None:
+            self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _serve(self, with_body: bool) -> None:
         path = self.path.split("?", 1)[0]
         peer = self.client_address[0]
         if path.startswith(REDIRECT_PREFIX):
-            token = path[len(REDIRECT_PREFIX):]
-            if not _TOKEN.match(token):
-                self._not_found()
+            token = self.recorder.registered(path[len(REDIRECT_PREFIX):])
+            if token is None:
+                self._empty(404)
                 return
             self.recorder.record(token, peer)
-            self.send_response(302)
-            self.send_header("Location", f"{self.redirect_base}{HIT_PREFIX}{token}-redirected")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            self._empty(302, f"{self.redirect_base}{HIT_PREFIX}{token}{REDIRECTED_SUFFIX}")
             return
         if path.startswith(HIT_PREFIX):
-            token = path[len(HIT_PREFIX):]
-            if not _TOKEN.match(token):
-                self._not_found()
+            token = self.recorder.registered(path[len(HIT_PREFIX):])
+            if token is None:
+                self._empty(404)
                 return
             self.recorder.record(token, peer)
         body = b"mcp-ssrf-check callback\n"
@@ -74,11 +88,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if with_body:
             self.wfile.write(body)
-
-    def _not_found(self) -> None:
-        self.send_response(404)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 - name fixed by the base class
         self._serve(True)
@@ -98,14 +107,20 @@ class _V6Server(ThreadingHTTPServer):
 
 
 class CallbackListener:
-    """Listen on IPv4 loopback (or ``host``) and, when possible, IPv6 loopback on the same port."""
+    """Listen on ``host`` (IPv4) and, when ``host`` is loopback, on ``::1`` at the same port.
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0, ipv6: bool = True) -> None:
+    ``redirect_host`` is the address a redirect points the fetching tool at. It must be an
+    address this listener answers on, and it should be one the server's guard refuses when
+    given directly; otherwise the redirect probe shows nothing.
+    """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, ipv6: bool = True, redirect_host: Optional[str] = None) -> None:
         self.recorder = _Recorder()
         self._servers: List[ThreadingHTTPServer] = []
         self._threads: List[threading.Thread] = []
         self.host = host
         self.port = port
+        self.redirect_host = redirect_host or ("127.0.0.1" if host in ("127.0.0.1", "localhost", "0.0.0.0") else host)
         self.ipv6_bound = False
         self._want_ipv6 = ipv6
 
@@ -121,7 +136,8 @@ class CallbackListener:
         v4 = ThreadingHTTPServer((self.host, self.port), handler)
         v4.daemon_threads = True
         self.port = v4.server_address[1]
-        handler.redirect_base = f"http://127.0.0.1:{self.port}"
+        redirect_host = f"[{self.redirect_host}]" if ":" in self.redirect_host and not self.redirect_host.startswith("[") else self.redirect_host
+        handler.redirect_base = f"http://{redirect_host}:{self.port}"
         self._servers.append(v4)
         if self._want_ipv6 and self.host in ("127.0.0.1", "localhost"):
             try:
@@ -141,6 +157,11 @@ class CallbackListener:
             server.shutdown()
             server.server_close()
         self._servers.clear()
+
+    def expect(self, token: str) -> None:
+        """Register a token the checker is about to send; only registered tokens are answered."""
+        self.recorder.expect(token)
+        self.recorder.expect(f"{token}{REDIRECTED_SUFFIX}")
 
     def seen(self, token: str) -> bool:
         return self.recorder.seen(token)
