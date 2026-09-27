@@ -303,7 +303,9 @@ a.person:hover {
 }
 
 .sort:focus-visible,
+.more:focus-visible,
 .permalink:focus-visible,
+.run:focus-visible,
 .card:focus-visible {
   outline: 2px solid var(--w-link);
   outline-offset: 2px;
@@ -340,6 +342,10 @@ a.person:hover {
 
 .legendLink {
   font-weight: 600;
+}
+
+.legendOrder {
+  font-style: italic;
 }
 
 /* ---------------------------------------------------------------- cards */
@@ -690,10 +696,10 @@ a.person:hover {
   color: var(--w-muted);
 }
 
-.date,
-.harness {
+.date {
   color: var(--w-muted);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Freshness, not ranking. An old row is an older measurement, not a worse gateway. */
@@ -760,28 +766,257 @@ a.person:hover {
   height: 0.9rem;
 }
 
-/* Who ran it: on the card's main line, with the submitter's face when there is one. */
-.runBy {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem 0.45rem;
-  margin: 0.4rem 0 0;
-  font-size: 0.85rem;
-  font-weight: 600;
+.houseMark {
+  color: var(--w-pass);
 }
 
 .handle {
   font-weight: 800;
 }
 
-.issueLink {
+/* ---------------------------------------------------------------- replication */
+
+/* How far a card is from "replicated": three steps, filled by independent submitters. */
+.replication {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px dashed var(--w-card-edge);
+  border-radius: 10px;
+  background: var(--w-raised);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.replicated {
+  border-style: solid;
+  border-color: var(--w-pass);
+  background: var(--w-pass-bg);
+}
+
+.meter {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+}
+
+.meterStep {
+  width: 0.7rem;
+  height: 1.1rem;
+  border: 2px solid var(--w-muted);
+  border-radius: 3px;
+}
+
+.meterOn {
+  border-color: var(--w-pass);
+  background: var(--w-pass);
+}
+
+/* Two runs of one version that disagree. Shown loudly; neither run is dropped. */
+.disputed,
+.changed {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.disputed {
+  border: 2px solid var(--w-warn);
+  background: var(--w-warn-bg);
+}
+
+.disputeMark {
+  color: var(--w-warn);
+  font-weight: 900;
+}
+
+.changed {
+  border: 1px solid var(--w-card-edge);
+  color: var(--w-muted);
+}
+
+.changed strong {
+  color: var(--w-ink);
+}
+
+.headline {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.headlineCaption {
+  margin: 0;
   font-size: 0.8rem;
+  color: var(--w-muted);
+}
+
+.captionLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---------------------------------------------------------------- the runs under a card */
+
+.runsBlock {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--w-card-edge);
+}
+
+.runsTitle {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--w-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.runs {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * One run per line: who, when and what, the three pips, then links. It wraps rather than
+ * scrolls on a phone, and every part keeps its words.
+ */
+.run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--w-card-edge);
+  border-radius: 10px;
+  background: var(--w-raised);
+  font-size: 0.8rem;
+  scroll-margin-top: calc(var(--ifm-navbar-height, 60px) + 1.5rem);
+}
+
+.run[hidden] {
+  display: none;
+}
+
+.runLinked {
+  border: 2px solid var(--w-gold-3);
+  background: linear-gradient(135deg, rgba(247, 209, 84, 0.28), transparent 75%), var(--w-card);
+  box-shadow: 0 0 14px 2px var(--w-glow);
+}
+
+.runWho {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-weight: 600;
 }
 
-.houseMark {
-  color: var(--w-pass);
+.runWhat {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.45rem;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.runVersion {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.76rem;
+}
+
+.runConfig {
+  font-family: var(--ifm-font-family-base);
+  color: var(--w-muted);
+}
+
+.runResult,
+.runLinks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.45rem;
+}
+
+.runLinks {
+  margin-left: auto;
+}
+
+.runLinks a {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.miniChecks {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.mini {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: var(--w-tone);
+  color: var(--w-card);
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.mini.unmeasured {
+  background: transparent;
+  border: 2px dashed var(--w-none);
+  color: var(--w-none);
+}
+
+.runCount {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.runTag {
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--w-gold-1), var(--w-gold-2) 50%, var(--w-gold-3));
+  color: var(--w-gold-ink);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.more {
+  justify-self: start;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--w-card-edge);
+  border-radius: 999px;
+  background: var(--w-card);
+  color: var(--w-link);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.more:hover {
+  border-color: var(--w-link);
 }
 
 /* ---------------------------------------------------------------- motion */
@@ -799,6 +1034,10 @@ a.person:hover {
 
   .linked {
     animation: rise 420ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards, beacon 1.6s ease-in-out 3;
+  }
+
+  .runLinked {
+    animation: runBeacon 1.6s ease-in-out 3;
   }
 
   .tier3::after {
@@ -828,6 +1067,16 @@ a.person:hover {
   }
   50% {
     box-shadow: 0 0 0 6px var(--w-gold-3), 0 0 44px 14px var(--w-glow);
+  }
+}
+
+@keyframes runBeacon {
+  0%,
+  100% {
+    box-shadow: 0 0 14px 2px var(--w-glow);
+  }
+  50% {
+    box-shadow: 0 0 24px 8px var(--w-glow);
   }
 }
 
@@ -877,5 +1126,9 @@ a.person:hover {
 
   .medalCount {
     font-size: 1.15rem;
+  }
+
+  .runLinks {
+    margin-left: 0;
   }
 }

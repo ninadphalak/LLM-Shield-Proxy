@@ -11,6 +11,7 @@ import {
   checkStates,
   checksPassed,
   firstIndependentPass,
+  isOurs,
   passes,
   type CheckKey,
   type CheckState,
@@ -27,6 +28,26 @@ const CHECKS = 3;
 
 /** Rows older than this read as worth rerunning rather than as current. */
 const STALE_AFTER_DAYS = 180;
+
+/** Runs shown under a card before the rest fold behind "Show all N runs". */
+const VISIBLE_RUNS = 3;
+
+/**
+ * Distinct independent submitters a gateway and configuration needs before it is called
+ * replicated. The number and the rule come from `website/docs/conformance/submitting.md`.
+ */
+const REPLICATED_AT = 3;
+
+/**
+ * People whose runs never count toward replication, whatever they ran.
+ *
+ * `submitting.md` excludes a gateway's own maintainers. The people who maintain this
+ * benchmark are excluded as well, for every gateway: their runs in this repository are
+ * already `measured-here` and do not count, and the same person submitting the same kind of
+ * run from a fork is no more independent for having used a different button. Erring this way
+ * can only undercount replication, never claim one that did not happen.
+ */
+const BENCHMARK_MAINTAINERS = new Set(['ninadphalak']);
 
 function daysSince(date: string): number | null {
   const then = Date.parse(date);
@@ -64,13 +85,16 @@ function slug(text: string): string {
 }
 
 /**
- * A stable DOM id for every row, so any row can be linked to.
+ * A stable DOM id for every run, so any run can be linked to.
  *
- * A submitted row is `issue-<number>`, which is what the intake bot links to from the issue
+ * A submitted run is `issue-<number>`, which is what the intake bot links to from the issue
  * (`row_url` in `scripts/process_conformance_submission.py`); change one and the other must
- * follow. A row with no issue is a slug of its gateway and version. Issue ids are assigned
+ * follow. A run with no issue is a slug of its gateway and version. Issue ids are assigned
  * first so that a slug can never take one, and a repeated slug gets a numeric suffix in the
  * order the rows are declared, which does not change when a reader sorts.
+ *
+ * These ids belong to the run, not the card, so grouping runs under one card changed none of
+ * them: a link made when every run had a card of its own lands on the same run today.
  */
 function assignIds(rows: ResultRow[]): Map<ResultRow, string> {
   const ids = new Map<ResultRow, string>();
@@ -115,12 +139,231 @@ const MOVED_ANCHORS: Record<string, 'read' | 'submit'> = {
   'what-to-send': 'submit',
 };
 
+// --------------------------------------------------------------------------- grouping
+
+/**
+ * One name per gateway, so "Portkey" and "Portkey OSS Gateway" count once. A negative
+ * control is a run with no gateway in it, so it is not counted as one.
+ */
+function gatewayKey(project: string): string | undefined {
+  const key = project
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '')
+    .replace(/\b(oss )?gateway$/, '')
+    .trim();
+  if (!key || key.startsWith('no-gateway')) return undefined;
+  return key;
+}
+
+/**
+ * A row's `version` field, read as the version that ran and the configuration it ran in.
+ *
+ * Every row on the wall writes it the same way: the version first, then a comma, then the
+ * configuration ("1.6.6, response scan on", "commit caba832d976f, OSS output guardrail,
+ * unauthenticated call-out"). One older row writes "1.99 with Presidio", so " with " also
+ * separates the two when there is no comma. A field with neither is a version alone, and its
+ * configuration is not stated ("0.24.0", "OSS gateway").
+ */
+function splitVersion(text: string): {version: string; config: string} {
+  const comma = text.indexOf(',');
+  if (comma >= 0) {
+    return {version: text.slice(0, comma).trim(), config: text.slice(comma + 1).trim()};
+  }
+  const withAt = text.search(/\swith\s/i);
+  if (withAt > 0) {
+    return {
+      version: text.slice(0, withAt).trim(),
+      config: text.slice(withAt).replace(/^\s*with\s+/i, '').trim(),
+    };
+  }
+  return {version: text.trim(), config: ''};
+}
+
+function normalise(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim();
+}
+
+/**
+ * Two wordings of one configuration, written down so a reviewer can check each one.
+ *
+ * Kept to cases the rows themselves settle. LLM-Shield-Proxy redacts the request by default,
+ * so "request redaction on, response redaction on" is the configuration the maintainers'
+ * rows call "response scan on"; the off-arm is a control inside that run, and the row's
+ * numbers are from the arm with redaction on. Anything not listed here is grouped only when
+ * its wording matches, so a doubtful pair shows as two cards rather than one merged claim.
+ */
+const CONFIG_ALIASES: Record<string, string> = {
+  'request redaction on, response redaction on with an off-arm control': 'response scan on',
+};
+
+/**
+ * Which runs of a card count as the same pinned version, for the dispute rule. A commit hash
+ * is the version whatever words surround it ("fork main dceef23176de" and "commit
+ * dceef23176de" are one build); otherwise the version text itself.
+ */
+function versionKey(version: string): string {
+  const hash = version.toLowerCase().match(/\b[0-9a-f]{7,40}\b/);
+  return hash ? hash[0] : normalise(version);
+}
+
+type Run = {
+  row: ResultRow;
+  id: string;
+  /** Position in the declared rows, which breaks date ties: a later row is the newer one. */
+  order: number;
+  version: string;
+  config: string;
+  issue?: number;
+  submitter?: string;
+  states: Record<CheckKey, CheckState>;
+};
+
+type Group = {
+  id: string;
+  name: string;
+  /** The configuration as the card shows it, or empty when no run states one. */
+  config: string;
+  runs: Run[];
+  /** The run the card's shield and pips come from: the newest with all three checks measured. */
+  headline: Run;
+  /** False when no run measured all three checks, so the headline is simply the newest. */
+  headlineComplete: boolean;
+  latest: string;
+  independent: string[];
+  replicated: boolean;
+  /** Checks on which two runs of the SAME version disagree. The target is disputed. */
+  disputed: {check: CheckKey; version: string}[];
+  /** Checks that came out differently in different versions: revision history, not dispute. */
+  changed: CheckKey[];
+};
+
+const CHECK_KEYS: CheckKey[] = ['request', 'whole', 'split'];
+
+const newestFirst = (a: Run, b: Run) => b.row.date.localeCompare(a.row.date) || b.order - a.order;
+
+/**
+ * One card per gateway and configuration, with every run of it stacked underneath.
+ *
+ * THE GROUPING RULE. Two runs share a card when (1) their gateways are the same by
+ * `gatewayKey`, the same normalisation the "Gateways tested" count uses, so "Portkey" and
+ * "Portkey OSS Gateway" are one gateway and "LLM-Shield-Proxy (ours)" is LLM-Shield-Proxy;
+ * and (2) the configuration half of their `version` field (see `splitVersion`) is the same
+ * text, ignoring case, spacing and a trailing full stop, after `CONFIG_ALIASES`. The version
+ * half is deliberately NOT part of the key: a new release or commit of the same setup is a
+ * reproduction of it, which is what `submitting.md` counts toward replication. A run whose
+ * configuration is not stated only groups with other unstated runs of the same gateway,
+ * never with a configured one, because "not stated" is not evidence of "the same".
+ *
+ * A run with no gateway in it (the no-gateway control) groups by its full project name, so
+ * it keeps a card of its own.
+ */
+function groupRuns(rows: ResultRow[], ids: Map<ResultRow, string>): Group[] {
+  const byKey = new Map<string, Run[]>();
+  rows.forEach((row, order) => {
+    const {version, config} = splitVersion(row.version);
+    const configKey = normalise(config);
+    const canonical = CONFIG_ALIASES[configKey] ?? configKey;
+    const gateway = gatewayKey(row.project) ?? normalise(row.project);
+    const key = `${gateway}|${canonical}`;
+    const {issue, submitter} = submissionOf(row);
+    const run: Run = {
+      row,
+      id: ids.get(row) ?? `result-${order}`,
+      order,
+      version,
+      config,
+      issue,
+      submitter,
+      states: checkStates(row),
+    };
+    byKey.set(key, [...(byKey.get(key) ?? []), run]);
+  });
+
+  const groups: Group[] = [];
+  // A card id must never take a run's id, or a bot link would land on the wrong thing.
+  const taken = new Set(ids.values());
+  for (const [key, unsorted] of byKey) {
+    const runs = [...unsorted].sort(newestFirst);
+    const complete = runs.find((run) => !Object.values(run.states).includes('unmeasured'));
+    const headline = complete ?? runs[0];
+    const headlineComplete = complete !== undefined;
+    const configKey = key.slice(key.indexOf('|') + 1);
+    const aliased = Object.values(CONFIG_ALIASES).includes(configKey);
+    // An aliased card shows the shared wording; any other shows its newest run's own words.
+    const config = aliased
+      ? (runs.find((run) => normalise(run.config) === configKey)?.config ?? configKey)
+      : runs[0].config;
+
+    const independent = [
+      ...new Set(
+        runs
+          // Only a verified fork run can count. A run in the gateway's own repository
+          // (`submitted-main`, `submitted-branch`) is the gateway team's CI, and an unverified
+          // run proves nothing about who ran it. A fork owned by someone on the gateway's team
+          // looks like any other fork from here, which is why submitters are asked to declare it.
+          .filter((run) => run.row.provenance === 'submitted-fork' && run.submitter)
+          .map((run) => (run.submitter as string).toLowerCase())
+          .filter((handle) => !BENCHMARK_MAINTAINERS.has(handle)),
+      ),
+    ];
+
+    // Disagreements are kept and shown, never averaged (submitting.md). Only runs of the
+    // same pinned version can dispute each other; a different result from a different
+    // version is a change, and the runs list shows which version changed it.
+    const disputed: Group['disputed'] = [];
+    const byVersion = new Map<string, Run[]>();
+    for (const run of runs) {
+      const vk = versionKey(run.version);
+      byVersion.set(vk, [...(byVersion.get(vk) ?? []), run]);
+    }
+    for (const same of byVersion.values()) {
+      if (same.length < 2) continue;
+      for (const check of CHECK_KEYS) {
+        const seen = new Set(same.map((run) => run.states[check]).filter((s) => s !== 'unmeasured'));
+        if (seen.size > 1) disputed.push({check, version: same[0].version});
+      }
+    }
+    const changed = CHECK_KEYS.filter((check) => {
+      if (disputed.some((d) => d.check === check)) return false;
+      const seen = new Set(runs.map((run) => run.states[check]).filter((s) => s !== 'unmeasured'));
+      return seen.size > 1;
+    });
+
+    const base = `card-${slug(key.replaceAll('|', ' ')) || 'gateway'}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`;
+    taken.add(id);
+
+    groups.push({
+      id,
+      // The newest run's name. "(ours)" is dropped because the card says so in a chip.
+      name: runs[0].row.project.replace(/\s*\(ours\)\s*$/i, ''),
+      config,
+      runs,
+      headline,
+      headlineComplete,
+      latest: runs[0].row.date,
+      independent,
+      replicated: independent.length >= REPLICATED_AT,
+      disputed,
+      changed,
+    });
+  }
+  return groups;
+}
+
 // --------------------------------------------------------------------------- the checks
 
 const CHECK_LABEL: Record<CheckKey, string> = {
   request: 'Request path',
   whole: 'Value whole in response',
   split: 'Value split across chunks',
+};
+
+const CHECK_SHORT: Record<CheckKey, string> = {
+  request: 'request',
+  whole: 'whole',
+  split: 'split',
 };
 
 /** Glyph and word for every state, so no state is carried by colour alone. */
@@ -202,7 +445,7 @@ function Checks({row}: {row: ResultRow}): ReactNode {
   };
   return (
     <ul className={styles.checks}>
-      {(Object.keys(CHECK_LABEL) as CheckKey[]).map((key) => (
+      {CHECK_KEYS.map((key) => (
         <li key={key} className={clsx(styles.check, styles[states[key]])}>
           <span className={styles.pip} aria-hidden="true">
             {STATE[states[key]].glyph}
@@ -217,6 +460,25 @@ function Checks({row}: {row: ResultRow}): ReactNode {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** One run's three checks in a line: a glyph each, a word each for a screen reader. */
+function MiniChecks({states}: {states: Record<CheckKey, CheckState>}): ReactNode {
+  return (
+    <span className={styles.miniChecks}>
+      {CHECK_KEYS.map((key) => (
+        <span
+          key={key}
+          className={clsx(styles.mini, styles[states[key]])}
+          title={`${CHECK_LABEL[key]}: ${STATE[states[key]].word}`}>
+          <span aria-hidden="true">{STATE[states[key]].glyph}</span>
+          <span className={styles.srOnly}>
+            {CHECK_LABEL[key]}: {STATE[states[key]].word}.{' '}
+          </span>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -271,7 +533,7 @@ function Flags({flags}: {flags?: {count: number; issue: number}}): ReactNode {
       href={safeHref(`${REPO}/issues/${issue}`)}
       target="_blank"
       rel="noreferrer"
-      title={`${label} about this row. Click to read them.`}>
+      title={`${label} about this run. Click to read them.`}>
       {flags.count} open {flags.count === 1 ? 'question' : 'questions'}
     </a>
   );
@@ -295,7 +557,7 @@ function Medal({passed}: {passed: number}): ReactNode {
     <div
       className={clsx(styles.medal, styles[TIER[passed]])}
       role="img"
-      aria-label={`${passed} of ${CHECKS} checks passed`}>
+      aria-label={`${passed} of ${CHECKS} checks passed in the latest complete run`}>
       <span className={styles.medalFace}>
         <span className={styles.medalCount}>{passed}</span>
         <span className={styles.medalOf}>of {CHECKS}</span>
@@ -322,94 +584,192 @@ function Avatar({handle, size = 28}: {handle: string; size?: number}): ReactNode
 }
 
 /**
- * Who ran it, on the card's main line rather than in a tooltip.
- *
- * A submitted row names its submitter with their avatar, beside the run it links to, so a
- * reader can see a person ran it instead of inferring one from a URL. A row with no
- * submitter says in plain words who produced it, from its provenance.
+ * Who ran it, in plain words when there is no submitter to name. A submitted run names its
+ * submitter with their avatar instead, so a reader can see a person ran it rather than
+ * inferring one from a URL.
  */
 const NO_SUBMITTER: Record<ResultRow['provenance'], string> = {
-  'measured-here': 'Run by the benchmark maintainers',
-  'submitted-main': "Run in the project's own CI",
-  'submitted-branch': "Run in the project's own CI",
-  'submitted-fork': 'Run in a fork',
-  'submitted-unverified': 'Self-reported, with no run to point at',
+  'measured-here': 'benchmark maintainers',
+  'submitted-main': "the project's own CI",
+  'submitted-branch': "the project's own CI",
+  'submitted-fork': 'a fork',
+  'submitted-unverified': 'self-reported',
 };
 
-function RunBy({row}: {row: ResultRow}): ReactNode {
-  const {issue, submitter} = submissionOf(row);
+function RunLine({
+  run,
+  groupConfig,
+  linked,
+  milestone,
+  hidden,
+}: {
+  run: Run;
+  groupConfig: string;
+  linked: boolean;
+  milestone: boolean;
+  hidden: boolean;
+}): ReactNode {
+  const {row, submitter, issue} = run;
   const provenance = PROVENANCE[row.provenance];
-  const run = safeHref(row.runUrl);
+  const ciRun = safeHref(row.runUrl);
+  const report = safeHref(row.reportUrl);
+  const passed = checksPassed(row);
+  const maintainer = submitter && BENCHMARK_MAINTAINERS.has(submitter.toLowerCase());
+  // A run worded differently from its card (an alias) shows its own words, so grouping never
+  // hides what a submitter wrote.
+  const differs = run.config !== '' && normalise(run.config) !== normalise(groupConfig);
   return (
-    <p className={styles.runBy}>
-      {submitter ? (
-        <>
-          <Avatar handle={submitter} size={22} />
-          <span>
-            Run by{' '}
+    <li
+      id={run.id}
+      tabIndex={-1}
+      hidden={hidden}
+      className={clsx(styles.run, linked && styles.runLinked)}>
+      <span className={styles.runWho}>
+        {submitter ? (
+          <>
+            <Avatar handle={submitter} size={22} />
             <a
               className={styles.handle}
               href={safeHref(`https://github.com/${submitter}`)}
               target="_blank"
-              rel="noreferrer">
+              rel="noreferrer"
+              title={maintainer ? 'A benchmark maintainer. Does not count toward replication.' : undefined}>
               @{submitter}
             </a>
-          </span>
-        </>
-      ) : (
-        <>
-          <span className={styles.houseMark} aria-hidden="true">
-            ◆
-          </span>
-          <span>{NO_SUBMITTER[row.provenance]}</span>
-        </>
-      )}
-      <span className={styles.chip} title={provenance.hint}>
-        {run ? (
-          <a href={run} target="_blank" rel="noreferrer">
-            {provenance.label}, see the run
-          </a>
+          </>
         ) : (
-          provenance.label
+          <>
+            <span className={styles.houseMark} aria-hidden="true">
+              ◆
+            </span>
+            <span>{NO_SUBMITTER[row.provenance]}</span>
+          </>
         )}
       </span>
-      {issue && (
-        <a
-          className={styles.issueLink}
-          href={safeHref(`${REPO}/issues/${issue}`)}
-          target="_blank"
-          rel="noreferrer"
-          title="The submission issue">
-          #{issue}
+      <span className={styles.runWhat}>
+        <time className={styles.date} dateTime={row.date}>
+          {row.date}
+        </time>
+        <span
+          className={styles.runVersion}
+          title={row.harness ? `Measured with pii-leak-benchmark ${row.harness}.` : undefined}>
+          {run.version}
+          {differs && <span className={styles.runConfig}> ({run.config})</span>}
+        </span>
+      </span>
+      <span className={styles.runResult}>
+        <MiniChecks states={run.states} />
+        <span className={styles.runCount} aria-hidden="true">
+          {passed}/{CHECKS}
+        </span>
+        <span className={styles.chip} title={provenance.hint}>
+          {provenance.label}
+        </span>
+      </span>
+      <span className={styles.runLinks}>
+        {ciRun ? (
+          <a href={ciRun} target="_blank" rel="noreferrer" title="The CI run behind this result">
+            CI run
+          </a>
+        ) : report ? (
+          <a href={report} title="The report behind this result">
+            report
+          </a>
+        ) : null}
+        {issue && (
+          <a
+            href={safeHref(`${REPO}/issues/${issue}`)}
+            target="_blank"
+            rel="noreferrer"
+            title="The submission issue">
+            #{issue}
+          </a>
+        )}
+        <Flags flags={row.flags} />
+        {milestone && (
+          <span
+            className={styles.milestone}
+            title="The first gateway not written by this project to answer all three questions. Computed from the rows, not awarded.">
+            <Trophy className={styles.inlineTrophy} /> First independent pass
+          </span>
+        )}
+        {linked && <span className={styles.runTag}>Linked run</span>}
+        <a className={styles.permalink} href={safeHref(`#${run.id}`)} title="Link to this run">
+          #<span className={styles.srOnly}>Link to this run</span>
         </a>
-      )}
-    </p>
+      </span>
+    </li>
+  );
+}
+
+/**
+ * How far a card is from being called replicated, in the words `submitting.md` uses, with a
+ * three-step meter beside the words for a reader scanning the wall.
+ */
+function Replication({group}: {group: Group}): ReactNode {
+  const runs = group.runs.length;
+  const people = group.independent.length;
+  const shown = Math.min(people, REPLICATED_AT);
+  return (
+    <div
+      className={clsx(styles.replication, group.replicated && styles.replicated)}
+      title="A result is replicated when three different people, other than the benchmark maintainers, have each run the same gateway and configuration from their own fork. Runs in the gateway's own repository do not count.">
+      <span className={styles.meter} aria-hidden="true">
+        {Array.from({length: REPLICATED_AT}, (_, i) => (
+          <span key={i} className={clsx(styles.meterStep, i < shown && styles.meterOn)} />
+        ))}
+      </span>
+      <span>
+        <strong>
+          {runs} {runs === 1 ? 'run' : 'runs'}
+        </strong>
+        , {people} independent {people === 1 ? 'submitter' : 'submitters'}.{' '}
+        {group.replicated ? (
+          <strong>Replicated.</strong>
+        ) : (
+          <>
+            <strong>Unreplicated:</strong> {shown} of the {REPLICATED_AT} independent submitters
+            needed to call it replicated.
+          </>
+        )}
+      </span>
+    </div>
   );
 }
 
 function Card({
-  row,
-  id,
+  group,
   linked,
   index,
   milestone,
+  expanded,
+  onToggle,
 }: {
-  row: ResultRow;
-  id: string;
-  linked: boolean;
+  group: Group;
+  /** The id the address points at, when it is this card or one of its runs. */
+  linked?: string;
   index: number;
-  milestone: boolean;
+  milestone?: ResultRow;
+  expanded: boolean;
+  onToggle: () => void;
 }): ReactNode {
+  const row = group.headline.row;
   const passed = checksPassed(row);
   const full = passes(row) && passed === CHECKS;
-  const age = daysSince(row.date);
+  const age = daysSince(group.latest);
   const stale = age !== null && age > STALE_AFTER_DAYS;
-  const architecture = ARCHITECTURE[row.architecture];
-  const pricing = safeHref(row.pricingUrl);
+  // A property of the configuration, so the newest run that states it speaks for the card.
+  const architecture =
+    ARCHITECTURE[group.runs.find((run) => run.row.architecture !== 'not-stated')?.row.architecture ?? 'not-stated'];
+  const licensed = group.runs[0].row;
+  const pricing = safeHref(group.runs.find((run) => run.row.pricingUrl)?.row.pricingUrl);
   const state = passed === CHECKS ? styles.stateGold : passed > 0 ? styles.statePartial : styles.stateNone;
+  const hasMilestone = milestone !== undefined && group.runs.some((run) => run.row === milestone);
+  const listId = `${group.id}-runs`;
+  const extra = group.runs.length - VISIBLE_RUNS;
   return (
     <li
-      id={id}
+      id={group.id}
       tabIndex={-1}
       className={clsx(styles.card, state, linked && styles.linked)}
       style={{'--i': Math.min(index, 12)} as CSSProperties}>
@@ -421,64 +781,129 @@ function Card({
       <div className={styles.cardHead}>
         <Medal passed={passed} />
         <div className={styles.identity}>
-          <h3 className={styles.project}>{row.project}</h3>
-          <p className={styles.version}>{row.version}</p>
-          <RunBy row={row} />
+          <h3 className={styles.project}>{group.name}</h3>
+          <p className={styles.version}>
+            {group.config ? group.config : <em>Configuration not stated</em>}
+          </p>
           <p className={styles.tags}>
             {full && (
               <span
                 className={styles.fullPass}
-                title="Nothing reached the provider, every value came back to the caller, and nothing it never sent got through, whole or split.">
+                title="In the latest complete run: nothing reached the provider, every value came back to the caller, and nothing it never sent got through, whole or split.">
                 ★ Full pass
               </span>
             )}
-            {milestone && (
+            {hasMilestone && (
               <span
                 className={styles.milestone}
                 title="The first gateway not written by this project to answer all three questions. Computed from the rows, not awarded.">
                 <Trophy className={styles.inlineTrophy} /> First independent pass
               </span>
             )}
-            <span className={styles.chip}>
+            <span className={styles.chip} title="Licence">
               {pricing ? (
                 <a href={pricing} target="_blank" rel="noreferrer">
-                  {row.license}
+                  {licensed.license}
                 </a>
               ) : (
-                row.license
+                licensed.license
               )}
             </span>
-            <Flags flags={row.flags} />
+            {isOurs(group.name) && (
+              <span className={clsx(styles.chip, styles.chipQuiet)} title="This project wrote this gateway.">
+                ours
+              </span>
+            )}
           </p>
         </div>
-        <a className={styles.permalink} href={safeHref(`#${id}`)} title="Link to this result">
-          #<span className={styles.srOnly}>Link to this result</span>
+        <a className={styles.permalink} href={safeHref(`#${group.id}`)} title="Link to this card">
+          #<span className={styles.srOnly}>Link to this card</span>
         </a>
       </div>
 
-      <Checks row={row} />
-      <Fidelity row={row} />
+      <Replication group={group} />
 
-      <p className={styles.note}>{row.note}</p>
+      {group.disputed.length > 0 && (
+        <p className={styles.disputed}>
+          <span className={styles.disputeMark} aria-hidden="true">
+            ⚑
+          </span>
+          <span>
+            <strong>Disputed.</strong> Runs of the same version disagree on{' '}
+            {group.disputed.map((d) => `${CHECK_LABEL[d.check].toLowerCase()} (${d.version})`).join(', ')}.
+            Both are kept below, not averaged.
+          </span>
+        </p>
+      )}
+      {group.changed.length > 0 && (
+        <p className={styles.changed}>
+          <span aria-hidden="true">↻</span>{' '}
+          <span>
+            <strong>Changed between versions</strong> on{' '}
+            {group.changed.map((check) => CHECK_LABEL[check].toLowerCase()).join(', ')}. The runs
+            below show which version did what.
+          </span>
+        </p>
+      )}
+
+      <div className={styles.headline}>
+        <p className={styles.headlineCaption}>
+          <span className={styles.captionLabel}>
+            {group.runs.length === 1
+              ? 'The only run'
+              : group.headlineComplete
+                ? 'Latest complete run'
+                : 'Latest run'}
+          </span>{' '}
+          {row.date}, {group.headline.version}
+          {row.harness && (
+            <span
+              title="Two runs measured with different harness versions were produced by different code.">
+              , harness {row.harness}
+            </span>
+          )}
+        </p>
+        <Checks row={row} />
+        <Fidelity row={row} />
+        <p className={styles.note}>{row.note}</p>
+      </div>
 
       <div className={styles.meta}>
         <span className={clsx(styles.chip, styles.chipQuiet)} title={architecture.hint}>
-          {architecture.label}
+          Reads the stream: {architecture.label}
         </span>
-        <span className={styles.date}>
-          {safeHref(row.reportUrl) ? <a href={safeHref(row.reportUrl)}>{row.date}</a> : row.date}
-        </span>
-        {row.harness && (
-          <span
-            className={styles.harness}
-            title={`Measured with pii-leak-benchmark ${row.harness}. Two rows measured with different harness versions were produced by different code.`}>
-            harness {row.harness}
-          </span>
-        )}
         {stale && (
-          <span className={styles.stale} title="Measured a while ago. The project has probably shipped since.">
+          <span className={styles.stale} title="Last measured a while ago. The project has probably shipped since.">
             worth rerunning
           </span>
+        )}
+      </div>
+
+      <div className={styles.runsBlock}>
+        <p className={styles.runsTitle} id={`${listId}-title`}>
+          {group.runs.length === 1 ? 'Run' : `All ${group.runs.length} runs, newest first`}
+        </p>
+        <ol className={styles.runs} id={listId} aria-labelledby={`${listId}-title`}>
+          {group.runs.map((run, i) => (
+            <RunLine
+              key={run.id}
+              run={run}
+              groupConfig={group.config}
+              linked={run.id === linked}
+              milestone={run.row === milestone}
+              hidden={!expanded && i >= VISIBLE_RUNS}
+            />
+          ))}
+        </ol>
+        {extra > 0 && (
+          <button
+            type="button"
+            className={styles.more}
+            aria-expanded={expanded}
+            aria-controls={listId}
+            onClick={onToggle}>
+            {expanded ? 'Show fewer runs' : `Show all ${group.runs.length} runs`}
+          </button>
         )}
       </div>
     </li>
@@ -486,20 +911,6 @@ function Card({
 }
 
 // --------------------------------------------------------------------------- the scoreboard
-
-/**
- * One name per gateway, so "Portkey" and "Portkey OSS Gateway" count once. A negative
- * control is a run with no gateway in it, so it is not counted as one.
- */
-function gatewayKey(project: string): string | undefined {
-  const key = project
-    .toLowerCase()
-    .replace(/\(.*?\)/g, '')
-    .replace(/\b(oss )?gateway$/, '')
-    .trim();
-  if (!key || key.startsWith('no-gateway')) return undefined;
-  return key;
-}
 
 type Contributor = {handle: string; runs: number; first: string};
 
@@ -524,10 +935,12 @@ function contributors(rows: ResultRow[]): Contributor[] {
 
 function Scoreboard({
   rows,
+  groups,
   milestone,
   milestoneId,
 }: {
   rows: ResultRow[];
+  groups: Group[];
   milestone?: ResultRow;
   milestoneId?: string;
 }): ReactNode {
@@ -535,6 +948,7 @@ function Scoreboard({
   const people = contributors(rows);
   const leaks = rows.filter((row) => Object.values(checkStates(row)).includes('fail')).length;
   const gold = rows.filter((row) => checksPassed(row) === CHECKS).length;
+  const replicated = groups.filter((group) => group.replicated).length;
   const measuredHere = rows.filter((row) => row.provenance === 'measured-here').length;
   const stats: {value: number; label: string; hint: string; tone?: string}[] = [
     {value: rows.length, label: 'Runs on the wall', hint: 'One gateway, one version, one configuration each.'},
@@ -547,6 +961,11 @@ function Scoreboard({
       tone: styles.statLeak,
     },
     {value: gold, label: 'Gold shields', hint: 'Runs with all three checks passed.', tone: styles.statGold},
+    {
+      value: replicated,
+      label: 'Replicated',
+      hint: `Gateway and configuration cards run by ${REPLICATED_AT} independent submitters.`,
+    },
   ];
   return (
     <section className={styles.scoreboard} aria-label="Scoreboard">
@@ -618,34 +1037,41 @@ function Scoreboard({
 
 // --------------------------------------------------------------------------- the wall
 
-type SortKey = 'newest' | 'checks' | 'gateway' | 'provenance';
+type SortKey = 'newest' | 'checks' | 'gateway' | 'replication';
 
 /**
- * The reader's order, never the site's. The page ships newest first; "Most checks passed"
- * is there because a reader may reasonably want it, and choosing it changes nothing but
- * their own view.
+ * The reader's order, never the site's. The page ships with the most recently run card first;
+ * "Most checks passed" is there because a reader may reasonably want it, and choosing it
+ * changes nothing but their own view. Every order works on whole cards: a card's runs always
+ * stay newest first underneath it.
  */
-const SORTS: {key: SortKey; label: string; compare: (a: ResultRow, b: ResultRow) => number}[] = [
-  {key: 'newest', label: 'Newest', compare: (a, b) => b.date.localeCompare(a.date)},
+const SORTS: {key: SortKey; label: string; compare: (a: Group, b: Group) => number}[] = [
+  {
+    key: 'newest',
+    label: 'Most recent run',
+    compare: (a, b) => b.latest.localeCompare(a.latest) || b.runs[0].order - a.runs[0].order,
+  },
   {
     key: 'checks',
     label: 'Most checks passed',
     compare: (a, b) =>
-      checksPassed(b) - checksPassed(a) ||
-      Number(passes(b)) - Number(passes(a)) ||
-      b.date.localeCompare(a.date),
+      checksPassed(b.headline.row) - checksPassed(a.headline.row) ||
+      Number(passes(b.headline.row)) - Number(passes(a.headline.row)) ||
+      b.latest.localeCompare(a.latest),
   },
   {
     key: 'gateway',
     label: 'Gateway',
     compare: (a, b) =>
-      `${a.project} ${a.version}`.toLowerCase().localeCompare(`${b.project} ${b.version}`.toLowerCase()),
+      `${a.name} ${a.config}`.toLowerCase().localeCompare(`${b.name} ${b.config}`.toLowerCase()),
   },
   {
-    key: 'provenance',
-    label: 'Who ran it',
+    key: 'replication',
+    label: 'Most independent runs',
     compare: (a, b) =>
-      PROVENANCE[b.provenance].rank - PROVENANCE[a.provenance].rank || b.date.localeCompare(a.date),
+      b.independent.length - a.independent.length ||
+      b.runs.length - a.runs.length ||
+      b.latest.localeCompare(a.latest),
   },
 ];
 
@@ -660,6 +1086,9 @@ function Legend({readHref}: {readHref: string}): ReactNode {
           {STATE[state].word}
         </span>
       ))}
+      <span className={styles.legendOrder} title="The order of the three pips on every run line.">
+        pip order: {CHECK_KEYS.map((key) => CHECK_SHORT[key]).join(', ')}
+      </span>
       <a className={styles.legendLink} href={safeHref(readHref)}>
         How to read a card
       </a>
@@ -672,9 +1101,15 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
   // undefined until a gateway this project did not write answers all three questions.
   const milestone = useMemo(() => firstIndependentPass(rows), [rows]);
   const ids = useMemo(() => assignIds(rows), [rows]);
+  const groups = useMemo(() => groupRuns(rows, ids), [rows, ids]);
   const [sort, setSort] = useState<SortKey>('newest');
   const [linked, setLinked] = useState<string | undefined>();
   const [missing, setMissing] = useState<string | undefined>();
+  // A reader's own choice to open or close a card's runs. A card with no entry here is
+  // closed, unless the address points at one of its folded runs.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Bumped on every fragment followed, so following the same link twice scrolls twice.
+  const [visit, setVisit] = useState(0);
   const location = useLocation();
   const history = useHistory();
   const readPage = useBaseUrl('/docs/conformance/reading-the-results-wall');
@@ -682,15 +1117,23 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
 
   const sorted = useMemo(() => {
     const compare = SORTS.find((option) => option.key === sort)?.compare ?? SORTS[0].compare;
-    // Array sort is stable, so rows that tie keep the order they are declared in.
-    return [...rows].sort(compare);
-  }, [rows, sort]);
+    // Array sort is stable, so cards that tie keep the order they were grouped in.
+    return [...groups].sort(compare);
+  }, [groups, sort]);
+
+  /** Every id a fragment may name, run or card, mapped to the card it lives in. */
+  const owner = useMemo(() => {
+    const map = new Map<string, Group>();
+    for (const group of groups) {
+      map.set(group.id, group);
+      for (const run of group.runs) map.set(run.id, group);
+    }
+    return map;
+  }, [groups]);
 
   /**
-   * Follow the address's fragment to a row: scroll it into view, mark it, and move focus
-   * to it so a screen reader starts there too. Rows exist in the server-rendered page, but
-   * the layout can still move after mount (fonts, avatars), so the scroll is checked again
-   * once things settle.
+   * Follow the address's fragment to a run or a card: open the card if the run is folded,
+   * mark both, and ask for a scroll once the page has rendered the run visible.
    */
   const follow = useCallback(
     (hash: string) => {
@@ -710,30 +1153,20 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
         history.replace(`${moved === 'read' ? readPage : submitPage}#${target}`);
         return;
       }
-      const known = [...ids.values()].includes(target);
-      setLinked(known ? target : undefined);
-      setMissing(!known && /^issue-[1-9]\d*$/.test(target) ? target.slice('issue-'.length) : undefined);
-      if (!known) return;
-      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      const scroll = (behavior: ScrollBehavior) => {
-        const element = document.getElementById(target);
-        if (!element) return;
-        element.scrollIntoView({block: 'center', behavior});
-        element.focus({preventScroll: true});
-      };
-      const frame = window.requestAnimationFrame(() => scroll(reduce ? 'auto' : 'smooth'));
-      const settle = window.setTimeout(() => {
-        const element = document.getElementById(target);
-        if (!element) return;
-        const box = element.getBoundingClientRect();
-        if (box.bottom < 0 || box.top > window.innerHeight) scroll('auto');
-      }, 900);
-      return () => {
-        window.cancelAnimationFrame(frame);
-        window.clearTimeout(settle);
-      };
+      const group = owner.get(target);
+      setLinked(group ? target : undefined);
+      setMissing(!group && /^issue-[1-9]\d*$/.test(target) ? target.slice('issue-'.length) : undefined);
+      if (!group) return;
+      // A link to a folded run opens its card, even one the reader closed earlier.
+      setOpen((current) => {
+        if (!(group.id in current)) return current;
+        const next = {...current};
+        delete next[group.id];
+        return next;
+      });
+      setVisit((n) => n + 1);
     },
-    [history, ids, readPage, submitPage],
+    [history, owner, readPage, submitPage],
   );
 
   useEffect(() => follow(location.hash), [follow, location.hash]);
@@ -745,9 +1178,39 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
     return () => window.removeEventListener('hashchange', onHash);
   }, [follow]);
 
+  /**
+   * Scroll after React has committed, so a run that was folded is already visible. Runs exist
+   * in the server-rendered page, but the layout can still move after mount (fonts, avatars),
+   * so the scroll is checked again once things settle. Focus moves too, so a screen reader
+   * starts at the run.
+   */
+  useEffect(() => {
+    if (!linked || visit === 0) return undefined;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const scroll = (behavior: ScrollBehavior) => {
+      const element = document.getElementById(linked);
+      if (!element) return;
+      element.scrollIntoView({block: 'center', behavior});
+      element.focus({preventScroll: true});
+    };
+    const frame = window.requestAnimationFrame(() => scroll(reduce ? 'auto' : 'smooth'));
+    const settle = window.setTimeout(() => {
+      const element = document.getElementById(linked);
+      if (!element) return;
+      const box = element.getBoundingClientRect();
+      if (box.bottom < 0 || box.top > window.innerHeight) scroll('auto');
+    }, 900);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settle);
+    };
+  }, [linked, visit]);
+
+  const milestoneId = milestone && ids.get(milestone);
+
   return (
     <div className={styles.wall} id="everything-we-have-tested">
-      <Scoreboard rows={rows} milestone={milestone} milestoneId={milestone && ids.get(milestone)} />
+      <Scoreboard rows={rows} groups={groups} milestone={milestone} milestoneId={milestoneId} />
 
       {missing && (
         <p className={styles.missing} role="status">
@@ -759,7 +1222,7 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
       )}
 
       <div className={styles.toolbar}>
-        <div className={styles.sorts} role="group" aria-label="Order the results">
+        <div className={styles.sorts} role="group" aria-label="Order the cards">
           <span className={styles.sortLabel}>Order</span>
           {SORTS.map((option) => (
             <button
@@ -776,16 +1239,19 @@ export default function ResultsWall({rows = ROWS}: Props): ReactNode {
       </div>
 
       <ol className={styles.cards}>
-        {sorted.map((row, index) => {
-          const id = ids.get(row) ?? `result-${index}`;
+        {sorted.map((group, index) => {
+          const mine = linked !== undefined && owner.get(linked) === group;
+          const linkedRun = mine ? group.runs.findIndex((run) => run.id === linked) : -1;
+          const expanded = open[group.id] ?? linkedRun >= VISIBLE_RUNS;
           return (
             <Card
-              key={id}
-              row={row}
-              id={id}
-              linked={id === linked}
+              key={group.id}
+              group={group}
+              linked={mine ? linked : undefined}
               index={index}
-              milestone={row === milestone}
+              milestone={milestone}
+              expanded={expanded}
+              onToggle={() => setOpen((current) => ({...current, [group.id]: !expanded}))}
             />
           );
         })}
