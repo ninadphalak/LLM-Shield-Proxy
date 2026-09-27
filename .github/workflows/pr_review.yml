@@ -6,7 +6,16 @@ name: PR Review
 # Runs on the repository owner's Claude subscription through `claude setup-token`, stored as
 # the CLAUDE_CODE_OAUTH_TOKEN secret. There is no per-token bill; every run draws on the
 # same usage limits as the owner's interactive sessions, which is why pushes do not review.
-# It replaced a pay-per-token review chain on 2026-09-26.
+# It replaced a pay-per-token review chain on 2026-09-26, which is kept as a FALLBACK:
+#
+#   - automatically, when the subscription review fails (usage limit reached, outage);
+#   - on purpose, with `gh variable set PR_REVIEW_ENGINE --body fallback`, to save the
+#     subscription for interactive work. `gh variable delete PR_REVIEW_ENGINE` switches back.
+#
+# The fallback bills per token on the keys in DEEPSEEK_API_KEY_PR / GEMINI_API_KEY_PR and
+# the model chain in PR_REVIEW_MODEL / PR_REVIEW_FALLBACKS. An empty balance there means
+# the fallback fails and so does the required check -- which is the honest outcome when no
+# reviewer could run.
 
 # `synchronize` is still listened for, and the job below SKIPS it. That is deliberate.
 #
@@ -84,6 +93,10 @@ jobs:
 
       - name: Review
         id: review
+        if: vars.PR_REVIEW_ENGINE != 'fallback'
+        # A failure here must not fail the job before the fallback gets its turn. The job
+        # still fails if the fallback also fails: that step has no continue-on-error.
+        continue-on-error: true
         # Pinned to a commit SHA with the tag in a comment, matching every other action in
         # this repository: it receives a repository token and the subscription token.
         uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
@@ -136,6 +149,69 @@ jobs:
               Verdict: MERGEABLE
               Verdict: BLOCKING (<n> findings)
             Post only GitHub comments; do not answer in messages.
+
+      # ---- Fallback: the pay-per-token review chain -------------------------------------
+      # Runs only when the subscription review did not: it failed, or PR_REVIEW_ENGINE says
+      # to skip it. Every key name below is PR-Agent's own; an unrecognised one is silently
+      # ignored, not rejected (CONTEXT detail N).
+      #
+      # The credential NAME comes from a variable because GitHub Actions allows no
+      # expression on the left of an env mapping; exporting the pair at runtime is what
+      # keeps provider names out of this file beyond the secret names.
+      - name: Configure fallback credentials
+        if: steps.review.outcome == 'failure' || vars.PR_REVIEW_ENGINE == 'fallback'
+        env:
+          PROVIDER_A_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
+          PROVIDER_B_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
+          PROVIDER_A_KEY_ENV: ${{ vars.PR_PROVIDER_A_KEY_ENV }}
+          PROVIDER_B_KEY_ENV: ${{ vars.PR_PROVIDER_B_KEY_ENV }}
+        run: |
+          set -euo pipefail
+          # No `set -x` here, ever: it would echo the expanded credential.
+          if [ -n "${PROVIDER_A_KEY_ENV:-}" ] && [ -n "${PROVIDER_A_KEY:-}" ]; then
+            echo "${PROVIDER_A_KEY_ENV}=${PROVIDER_A_KEY}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${PROVIDER_B_KEY_ENV:-}" ] && [ -n "${PROVIDER_B_KEY:-}" ]; then
+            echo "${PROVIDER_B_KEY_ENV}=${PROVIDER_B_KEY}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fallback review
+        if: steps.review.outcome == 'failure' || vars.PR_REVIEW_ENGINE == 'fallback'
+        uses: the-pr-agent/pr-agent@f3b385ea2927247ddcff2fe252472380b9c8f5fc # v0.45.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFIG.MODEL: ${{ vars.PR_REVIEW_MODEL }}
+          # Last entry should be a different provider: only that survives an account-level
+          # outage or an empty balance on the primary's provider.
+          CONFIG.FALLBACK_MODELS: ${{ vars.PR_REVIEW_FALLBACKS }}
+          # A clamp, min(model limit, this), so it stays a ceiling on spend.
+          CONFIG.MAX_MODEL_TOKENS: "200000"
+          # Without this a model missing from PR-Agent's MAX_TOKENS table is refused before
+          # any call ("not defined in MAX_TOKENS"); the primary was never called from #111
+          # to #115 because of it. Still clamped by MAX_MODEL_TOKENS.
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "200000"
+          # PR-Agent sends `medium` by default; the primary's provider accepts low/high/max
+          # only, and the run died silently after the first call carrying `medium`.
+          CONFIG.REASONING_EFFORT: "high"
+          # Exactly the pull_request events that pass the job's `if:`. An event that reaches
+          # PR-Agent and is not listed is skipped with a green result and no review.
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review"]'
+          # Review only. `/improve` is the larger bill and its suggestions fed the fix loop;
+          # `auto_describe` would overwrite PR bodies that carry the evidence.
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
+          # PR-Agent reads these from the default branch; `.llm/` is gitignored by design.
+          CONFIG.REPO_CONTEXT_FILES: '[".github/REVIEW-CONTEXT.md"]'
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
+            This is a streaming privacy gateway and a measurement harness for regulated
+            environments. Report only: (1) anything that could let personal data, secrets or
+            PII reach a log, a trace, an upstream provider or a published artifact; (2)
+            fail-open behaviour in a security or policy gate, which must deny on error,
+            timeout or missing config; (3) unbounded memory or blocking calls on the async
+            streaming hot path; (4) a published measurement or claim the code does not
+            establish; (5) a correctness bug with a concrete failing input. Ignore
+            formatting, naming and style; ruff, bandit and pyright gate those.
 
       # How much of the subscription one review used, on the run's Summary page. Numbers
       # only: the execution file also holds everything the model read and wrote, which
