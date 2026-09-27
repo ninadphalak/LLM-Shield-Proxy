@@ -90,7 +90,7 @@ Test: `test_an_allowed_call_resolves_each_url_once`.
 [`mcp-ssrf-check`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/mcp-ssrf-check) is a small tool that runs the client side of these properties against an MCP server you operate: `Host` and `Origin` validation, session id binding, and, for a tool you name, whether it can be made to fetch loopback under nine spellings of the address, and, when you name a redirect target, whether it follows a redirect into it. It sends requests only to your server and to a listener it opens on your own machine.
 
 ```bash
-pip install "git+https://github.com/ninadphalak/LLM-Shield-Proxy#subdirectory=mcp-ssrf-check"
+pip install mcp-ssrf-check
 mcp-ssrf-check --url http://127.0.0.1:8000/mcp --fetch-tool fetch --url-argument url
 ```
 
