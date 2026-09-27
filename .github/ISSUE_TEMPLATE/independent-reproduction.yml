@@ -38,7 +38,7 @@ body:
     id: files
     attributes:
       label: Your result files
-      description: Drag my-reproduction.zip into this box, then paste everything both tests printed below it.
+      description: Drag my-reproduction.zip into this box. It holds your reports and both tests' output.
     validations:
       required: true
   - type: textarea
