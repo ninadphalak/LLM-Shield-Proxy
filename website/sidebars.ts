@@ -37,6 +37,7 @@ const sidebars: SidebarsConfig = {
         'integrations',
         'policies',
         'guides/mcp-tool-governance',
+        'guides/mcp-egress-screening',
         'guides/pilot-assessment',
         {
           type: 'category',
