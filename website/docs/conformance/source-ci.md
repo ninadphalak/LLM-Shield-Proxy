@@ -29,8 +29,7 @@ Keep this page open in another tab; the steps send you back to the table above.
 
 1. **Fork the proxy.** Click the link in the table's **Proxy repository to fork** column.
    On that GitHub page, click **Fork**, then **Create fork**. Everything you click from here
-   on is in your fork, at `github.com/YOUR-NAME/...`, not in the original repository. If
-   you forked it some time ago, delete that fork and fork again, so it has the current tags.
+   on is in your fork, at `github.com/YOUR-NAME/...`, not in the original repository.
 2. **Add the workflow file.** Skip this step for LLM-Shield-Proxy: the file is already in
    your fork. For the other three proxies:
    1. In the table's **Workflow file to add** column, click the file name that ends in
@@ -73,7 +72,7 @@ Keep this page open in another tab; the steps send you back to the table above.
    | --- | --- | --- |
    | **Result: MEASURED LEAK** | The run worked and the proxy leaked. The job is red on purpose. | Yes. A leak is a result. |
    | **Result: MEASURED CLEAN** | The run worked and nothing leaked in any measured case. The job is green. | Yes. |
-   | **Result: INCOMPLETE, do not submit** | Something failed before a measurement existed, so nothing was uploaded. It says nothing about the proxy. | No. Rerun the workflow. |
+   | **Result: INCOMPLETE, do not submit** | Something failed before a measurement existed, so nothing was uploaded. It says nothing about the proxy. The summary says what went wrong and what to do next. | No. Follow the summary's **What to do**, then run again. |
 
 ## Put it on the wall
 

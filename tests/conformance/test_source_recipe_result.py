@@ -227,3 +227,34 @@ def test_the_result_step_reads_the_upload_outcome(name):
     assert _result_step(name)["env"]["UPLOAD_OUTCOME"] == "${{ steps.upload.outcome }}"
     # An upload failure must be visible in the incomplete message, not only in the status.
     assert "upload=${{ steps.upload.outcome }}" in _result_step(name)["env"]["STEP_OUTCOMES"]
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_an_incomplete_run_names_what_went_wrong_and_what_to_do(tmp_path, name, monkeypatch):
+    monkeypatch.setenv("CHECKOUT_OUTCOME", "failure")
+    monkeypatch.setenv("BUILD_OUTCOME", "skipped")
+    monkeypatch.setenv("SOURCE_REF", "v9.9.9")
+    status, summary = _run(tmp_path, name, verified=False)
+    assert status == "incomplete"
+    assert "**What went wrong:** The source to build, `v9.9.9`, could not be fetched." in summary
+    assert "**What to do:**" in summary and "**Run workflow**" in summary
+    reason = dict(line.split("=", 1) for line in (tmp_path / "output.txt").read_text().splitlines())["reason"]
+    assert reason == "The source to build, `v9.9.9`, could not be fetched."
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_failed_upload_is_named_as_the_reason(tmp_path, name):
+    status, summary = _run(tmp_path, name, upload_outcome="failure")
+    assert status == "incomplete"
+    assert "**What went wrong:** The verified evidence could not be uploaded." in summary
+    assert "**Re-run jobs**" in summary
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_newline_in_the_ref_cannot_rewrite_the_status(tmp_path, name, monkeypatch):
+    monkeypatch.setenv("CHECKOUT_OUTCOME", "failure")
+    monkeypatch.setenv("SOURCE_REF", "v1\nstatus=clean\nx=")
+    status, _ = _run(tmp_path, name, verified=False)
+    lines = (tmp_path / "output.txt").read_text().splitlines()
+    assert status == "incomplete"
+    assert [line.split("=", 1)[0] for line in lines] == ["status", "reason"]
