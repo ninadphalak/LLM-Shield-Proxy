@@ -169,6 +169,19 @@ export type ResultRow = {
    * of the same target that disagree both stay up.
    */
   flags?: {count: number; issue: number};
+  /**
+   * Response cases the run could not judge, because the gateway produced no stream for them.
+   * They are left out of the leak denominators, which is why a row can read "0 of 12". A
+   * response check with any of these was not shown clean, whatever its leak count, so the
+   * wall does not count it as passed. Same rule as the README badge.
+   */
+  responseInconclusive?: number;
+  /**
+   * Who submitted the row and from which issue, written by the intake workflow. Absent on
+   * rows this project measured. Arrives from outside, so the wall validates both fields
+   * before using either to shape an id, a link or an image address.
+   */
+  _submission?: {issue?: number; submitter?: string};
 };
 
 /**
@@ -348,6 +361,9 @@ export const MEASURED_ROWS: ResultRow[] = [
     leakSplitN: 0.0,
     note: 'All four data types reached the provider. Nothing was restored, and 8 of 32 cases produced no stream at all.',
     harness: '0.2.1',
+    // The 8 cases in the note above. Without this the wall would count "0 of 12" as two
+    // clean response checks, which the run never showed.
+    responseInconclusive: 8,
     provenance: 'measured-here',
     architecture: 'not-stated',
     license: 'Apache-2.0',
@@ -505,4 +521,48 @@ export function firstIndependentPass(rows: ResultRow[]): ResultRow | undefined {
   if (winners.length === 0) return undefined;
   if (winners.length > 1 && winners[0].date === winners[1].date) return undefined;
   return winners[0];
+}
+
+/** The three checks a row is scored on, in the order the wall and the badge show them. */
+export type CheckKey = 'request' | 'whole' | 'split';
+
+/**
+ * How one check came out.
+ *
+ * `unmeasured` and `incomplete` are not passes and not failures. A run that did not look
+ * found nothing, and a run with unjudged cases did not show the check clean. Neither may be
+ * rendered as the flattering reading.
+ */
+export type CheckState = 'pass' | 'fail' | 'unmeasured' | 'incomplete';
+
+function leakState(count: number | undefined, inconclusive: number): CheckState {
+  if (count === undefined || count === null) return 'unmeasured';
+  if (count > 0) return 'fail';
+  return inconclusive > 0 ? 'incomplete' : 'pass';
+}
+
+/**
+ * The three checks for one row: the request path, a value sent whole in the response, and a
+ * value split across two chunks.
+ *
+ * MUST AGREE WITH `checksPassed` in `website/scripts/generate-result-badges.mjs`, which draws
+ * the README badge for the same row. A wall that said 2 of 3 beside a badge saying 1 of 3
+ * would be the page contradicting itself, so the rule is the same: a check passes only when
+ * it was measured in full and nothing leaked.
+ *
+ * Deliberately NOT the page's full pass, which also asks that the caller's own data came
+ * back. That fourth question is shown beside the checks rather than folded into them, so a
+ * gateway that leaked nothing because it returned nothing does not read as a clean sweep.
+ */
+export function checkStates(row: ResultRow): Record<CheckKey, CheckState> {
+  const inconclusive = row.responseInconclusive ?? 0;
+  return {
+    request: row.sentN === 0 ? 'pass' : 'fail',
+    whole: leakState(row.leakWholeN, inconclusive),
+    split: leakState(row.leakSplitN, inconclusive),
+  };
+}
+
+export function checksPassed(row: ResultRow): number {
+  return Object.values(checkStates(row)).filter((state) => state === 'pass').length;
 }

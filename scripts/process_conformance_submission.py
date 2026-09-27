@@ -603,9 +603,22 @@ def build_row(
     return row
 
 
+def row_url(issue: Optional[int]) -> str:
+    """The wall, opened at one issue's row, or the top of the wall when there is no issue.
+
+    Every link the bot posts goes through here. A submitter who follows one lands on their
+    own row rather than the top of the page: the wall gives each submitted row the id
+    `issue-<number>` and scrolls to and marks whichever one the fragment names
+    (`website/src/components/ResultsWall`). Change one and the other must follow.
+    """
+    if isinstance(issue, int) and not isinstance(issue, bool) and issue > 0:
+        return f"{WALL_URL}#issue-{issue}"
+    return WALL_URL
+
+
 def badge_markdown(issue: int) -> str:
-    """README Markdown for the wall-hosted badge of one published row."""
-    return f"[![pii-leak-benchmark result]({BADGE_SVG.format(issue=issue)})]({WALL_URL})"
+    """README Markdown for the wall-hosted badge of one published row, linking to that row."""
+    return f"[![pii-leak-benchmark result]({BADGE_SVG.format(issue=issue)})]({row_url(issue)})"
 
 
 def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: list[str]) -> str:
@@ -618,8 +631,9 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
 
     published = row.get("status") == "published"
     body = json.dumps(row, indent=2, ensure_ascii=False)
+    issue = (row.get("_submission") or {}).get("issue")
     lines = [
-        f"**Published.** Your row is on the [results wall]({WALL_URL})."
+        f"**Published.** [See your row on the results wall]({row_url(issue)})."
         if published
         else "**Not published yet.** The submission parsed, but no report could be read from the run.",
         "",
@@ -636,7 +650,6 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
             "can establish that.",
             "",
         ]
-        issue = (row.get("_submission") or {}).get("issue")
         if isinstance(issue, int) and issue > 0:
             lines += [
                 "A badge for your README, served from this row. It shows how many of the three "

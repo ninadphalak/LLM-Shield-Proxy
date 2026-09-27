@@ -1117,7 +1117,26 @@ def test_the_published_reply_carries_the_wall_badge_for_that_issue():
     text = intake.render_comment(row, "reason", "evidence", [])
     assert "(https://llmshieldproxy.com/conformance-badges/issue-7.svg)" in text
     assert "pii-leak-benchmark" in text and "leaked" not in text.split("```md")[1]
-    assert "(https://llmshieldproxy.com/docs/conformance/who-has-run-it)" in text
+
+
+def test_every_wall_link_in_the_published_reply_opens_that_issues_row():
+    """A submitter clicking through from their issue lands on their row, not the top.
+
+    The wall gives a submitted row the id `issue-<number>` and scrolls to whichever one the
+    fragment names. Both the "your row" link and the README badge's link target carry it.
+    """
+    row = _row()
+    text = intake.render_comment(row, "reason", "evidence", [])
+    wall = "https://llmshieldproxy.com/docs/conformance/who-has-run-it"
+    targets = re.findall(r"\]\((https://llmshieldproxy\.com/docs/[^)]*)\)", text)
+    assert targets, "the reply links to the wall nowhere"
+    assert set(targets) == {f"{wall}#issue-7"}, targets
+    assert intake.badge_markdown(7).endswith(f"]({wall}#issue-7)")
+
+
+@pytest.mark.parametrize("issue", [None, 0, -3, True, "7"])
+def test_a_row_link_without_a_usable_issue_falls_back_to_the_top_of_the_wall(issue):
+    assert intake.row_url(issue) == "https://llmshieldproxy.com/docs/conformance/who-has-run-it"
 
 
 def test_an_unpublished_reply_offers_no_badge():
