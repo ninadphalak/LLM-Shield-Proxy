@@ -8,10 +8,10 @@ import styles from './styles.module.css';
 /**
  * A short, read-only view of the results wall for the homepage.
  *
- * WHY A SEPARATE COMPONENT. `ResultsWall` is the full instrument: every column, sortable,
+ * WHY A SEPARATE COMPONENT. `ResultsWall` is the full instrument: every run, every check,
  * with provenance and architecture. That belongs on its own page. What a first visitor
  * needs is the single most legible finding, which is what reached the provider, and a way through
- * to the real table. Anything more is a wall of numbers before they know what is being
+ * to the full wall. Anything more is a wall of numbers before they know what is being
  * counted.
  *
  * It reads the row data, never its own copy of the figures, so it cannot drift from the

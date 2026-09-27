@@ -1,0 +1,197 @@
+---
+title: How to read the results wall
+sidebar_label: How to read the wall
+sidebar_position: 2.1
+description: What the three checks on the results wall measure, what a leak count can and cannot tell you, and why the wall is not a ranking.
+---
+
+import CorpusCredits from '@site/src/components/CorpusCredits';
+import DefinedTerm from '@site/src/components/DefinedTerm';
+
+# How to read the results wall
+
+The [results wall](./who-has-run-it.mdx) is a card per run. This page explains what is on a
+card, and what the numbers on it can and cannot tell you.
+
+## What the check asks
+
+An LLM gateway sits between your application and the model provider. This check asks whether
+yours does three things:
+
+1. **Keep the caller's data away from the provider.** If you configured it to redact an email
+   address, that address should not appear in the request it sends upstream.
+2. **Give the caller their own data back.** The response should still read correctly to the
+   person who sent it.
+3. **Keep out data the caller never sent.** If the model produces someone else's phone number, it
+   must not reach the client. Including when the stream splits it across two chunks.
+
+Do all three and you pass.
+
+## Reading a card {#reading-a-card}
+
+**The shield** counts three checks, and says the count on its face:
+
+- **Request path.** Nothing the caller sent reached the provider.
+- **Value whole in response.** A value the caller never sent, injected into the response in one
+  piece, did not reach the client.
+- **Value split across chunks.** The same, with the value split across two stream chunks.
+
+Gold is 3 of 3, silver 2, bronze 1, and a plain shield 0. It is the same count, by the same rule,
+as the README badge the intake gives a submitted row, so a card and a badge for the same run
+never disagree. The coloured edge along the top of a card says the same thing again: gold for
+3 of 3, amber for some, red for none.
+
+**Each check is a pip**, and each pip says what it found in words as well as colour:
+
+- **✓ passed.** Measured in full, and nothing leaked.
+- **✕ leaked.** Something got through. The line beside it says what, or how many of how many.
+- **! incomplete.** Nothing leaked, but some cases produced no stream and could not be judged.
+  A check that was not shown clean is not counted as passed.
+- **– not measured.** The run did not look. The operator check that runs in a gateway's own CI
+  measures what it sends upstream, and the two response checks come from a separate profile, so
+  a row from such a run has nothing here. It is never read as zero.
+
+**Gave the caller's own data back** sits under the pips rather than inside the shield, because
+it answers the second question and not the other two. When it says `none`, the card says so next
+to any clean response pip: see [read the checks together](#read-the-checks-together).
+
+**Full pass** marks a run that answers all three questions: all three checks passed and every
+value came back to the caller. That is the page's own criterion, restated in code.
+
+**First independent pass** is the one mark worth wanting, and nobody holds it yet. See
+[Ours did not pass either, at first](#ours-did-not-pass-either-at-first).
+
+**An arrow next to a leak count** compares a gateway with its own earlier version on the wall,
+never with another project. `↓2` means two fewer values leaked than last time.
+
+**Who ran it** is under the gateway's name. A submitted run shows the person who submitted it,
+with their GitHub avatar and a link to their profile, then where it ran: this project, a
+project's own CI on its main branch, a branch, or a fork, or sent in with no run to point at. It
+links to the run when there is one, and to the submission issue. A run with no submitter says in
+plain words who produced it, such as "Run by the benchmark maintainers". The contributors across
+the top of the wall are everyone who has submitted one.
+
+**Along the bottom:**
+
+- **How it reads the stream.** See [why there is no speed column](#why-there-is-no-speed-column).
+- **The date**, linking to the report, and the **harness** version that produced it. Two runs
+  measured with different harness versions were produced by different code.
+- **Worth rerunning** on a run more than six months old. An old run is an older measurement, not
+  a worse gateway.
+- **Open questions**, if anyone has disputed the row. See
+  [If you think a row is wrong](#if-you-think-a-row-is-wrong).
+
+**Every card has its own link.** The `#` in a card's corner is a link straight to it, and the
+reply on a submission issue links straight to that submission's card. A linked card is ringed in
+gold and labelled **Linked result**.
+
+## Read the checks together {#read-the-checks-together}
+
+Read the checks together, because any one of them alone will mislead you. A gateway showing `0`
+leaked to the client may simply have returned nothing at all, and it may still have sent the
+caller's data straight to the provider. Every gateway on the wall was configured to redact, so a
+value reaching the provider is a control that was switched on and did not hold.
+
+None of these are product defects in the abstract. Each card is one version in one configuration.
+
+## Ours did not pass either, at first
+
+With its response scan on, 1.6.0 leaked 2 of the 16 values sent whole and 4 of the 16 sent
+split. We wrote the check and it caught us.
+
+**1.6.6 passes.** Nothing reaches the provider, every value comes back to the caller, and
+every injected value is caught both whole and split across two chunks. Both runs are on the
+wall, so the change is something you can see rather than take on trust, and the report behind
+it is on the [results page](./results.md).
+
+**On the default settings it still does not pass.** Response scanning is off unless you turn
+it on, because it changes what callers receive, so the out-of-the-box run leaks 16 of 16
+both ways. That run is on the wall too.
+
+A result from the people who built the instrument is the most conflicted one there, which is
+why the "Who ran it" order sorts our own runs alongside the self-reported ones rather than
+above them. That does not change because the number improved.
+
+**No gateway other than ours has passed yet.** The first one that does gets the **First
+independent pass** trophy at the top of the wall and a mark on its card, and keeps them. It goes
+to any gateway we did not write, whether we measured it or its own maintainers did, as long as
+there is a run behind the numbers to open. It is computed from the published rows rather than
+handed out, which is not the same as saying it cannot be gamed: a project that fabricated a
+report could take it, and would be doing so in public under its own name.
+
+Find a case that trips either configuration and we will add it to the corpus and credit you.
+
+## Why there is no speed column
+
+The obvious missing number is latency, and it is missing on purpose. Every result here would be
+timed on whatever machine the submitter happened to use, so a fast gateway on a slow runner would
+look worse than a slow one on fast hardware. That is hardware noise published as a product
+characteristic.
+
+What you actually want from a speed number is the **design tradeoff**, and that is on every card
+already, under "How it reads the stream". There are three ways to build this and each one costs
+something:
+
+- **Checks each chunk alone.** Fastest, and it cannot see a value split across two chunks.
+- **Waits for the whole response.** Sees everything, and the user waits for the entire answer
+  before any of it appears.
+- **Holds back a short tail.** Keeps the text streaming and still catches most splits. Leaks if
+  the tail is shorter than the value.
+
+There is no free option. That is why it is worth measuring, and why the label tells you more
+than a millisecond count would.
+
+## Two bugs that look identical in a leak count {#two-bugs}
+
+The same number in a leak count can mean two different defects, which need different fixes.
+This is the main reason the wall is not a ranking.
+
+| | Sent whole<br/>`user@example.com` | Split across two chunks<br/>`user@exa` + `mple.com` |
+| :--- | :--- | :--- |
+| <DefinedTerm term="Detector gap" definition="The gateway never spots the value, so it leaks whether the stream splits it or not." /> | leaks | leaks |
+| <DefinedTerm term="Boundary bug" definition="The gateway spots the whole value but not its halves, so it only leaks when the stream splits it." /> | caught | leaks |
+
+### Detector gap {#detector-gap}
+
+The gateway never recognises the value at all. Splitting the stream changes nothing, because it
+was not going to catch it either way. Usually a missing pattern, an encoding it does not decode,
+or a look-alike character it does not fold.
+
+### Boundary bug {#boundary-bug}
+
+The gateway recognises the whole value but not its halves. It is clean until the stream splits
+the value across two chunks, and then it leaks. This is the defect the split check exists to
+find, and it is invisible to any test that sends values whole.
+
+## Why we do not rank these
+
+The wall ships newest first. You can reorder it for yourself, including by the number of checks
+passed, and that changes only your view. We do not publish it in a ranked order:
+
+- **Runs are not comparable.** Each result is one version, one configuration, one set of test
+  values.
+- **A ranking starts arguments about fairness instead of getting gateways tested.**
+- **The same leak count can mean two different bugs**, as [the table above](#two-bugs) shows.
+
+The shield is a count of what one run passed, not a place in a league. The arrows are the one
+comparison we do draw, and they only ever compare a gateway with its own earlier version on the
+wall. That is revision history rather than a ranking: it says a team fixed something, which is
+the entire behaviour the wall exists to encourage.
+
+## If you think a row is wrong
+
+Ours included. [Open a question](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)
+and the count appears on that card, linking to what you wrote. Nothing is hidden or moved
+down the wall while it is open: the wall publishes disagreements rather than settling them
+quietly, which is the same reason two runs of the same gateway that disagree both stay up. The
+count clears when the question is closed.
+
+## Credit
+
+<CorpusCredits />
+
+Full numbers for every run on the wall, including the reference policies we use to calibrate the
+instrument, are on the [published results](./results.md) page, generated from the report files in
+the repository.
+
+Questions about any of this are welcome in the same issue tracker.
