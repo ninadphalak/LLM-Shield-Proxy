@@ -8,12 +8,12 @@ It sends requests to two places only: the server you name, and a listener it ope
 on your own machine. It never scans anything else, and it does not read or store tool output.
 
 ```bash
-pip install "git+https://github.com/ninadphalak/LLM-Shield-Proxy#subdirectory=mcp-ssrf-check"
+pip install mcp-ssrf-check
 mcp-ssrf-check --url http://127.0.0.1:8000/mcp
 mcp-ssrf-check --url http://127.0.0.1:8000/mcp --fetch-tool fetch --url-argument url
 ```
 
-Not on PyPI yet. From a clone, `pip install ./mcp-ssrf-check` does the same.
+From a clone, `pip install ./mcp-ssrf-check` installs the working tree instead.
 
 ## What it checks
 
@@ -81,7 +81,7 @@ report is meant to be uploaded as a CI artifact.
     sleep 2
 - name: Check Host, Origin, sessions and URL-fetching SSRF
   run: |
-    pip install "git+https://github.com/ninadphalak/LLM-Shield-Proxy#subdirectory=mcp-ssrf-check"
+    pip install mcp-ssrf-check
     mcp-ssrf-check --url http://127.0.0.1:8000/mcp \
       --fetch-tool fetch --url-argument url \
       --json-out mcp-ssrf-check.json
