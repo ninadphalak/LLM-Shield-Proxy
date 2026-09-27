@@ -103,9 +103,9 @@ Both reports must also carry corpus digest
 
 Item 4 is not a formality. A run that fails, a step that does not work on your machine, a
 number that does not match, or a reading of the result you think is wrong is more useful
-than a clean pass. Open a
-[GitHub issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues) or send the files
-directly.
+than a clean pass. Send them with the
+[independent reproduction form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=independent-reproduction.yml),
+or send the files directly.
 
 ### 6. Optional: run it in your own GitHub Actions
 
