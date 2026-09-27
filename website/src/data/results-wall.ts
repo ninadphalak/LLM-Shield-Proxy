@@ -485,7 +485,7 @@ export const ROWS: ResultRow[] = [...MEASURED_ROWS, ...SUBMITTED_ROWS];
  * A prefix test, not a regular expression: the first version shipped a literal backspace
  * where a word boundary belonged, matched nothing, and our own row took the milestone.
  */
-function isOurs(project: string): boolean {
+export function isOurs(project: string): boolean {
   return project.toLowerCase().startsWith('llm-shield-proxy');
 }
 

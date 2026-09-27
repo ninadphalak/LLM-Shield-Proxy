@@ -10,8 +10,9 @@ import DefinedTerm from '@site/src/components/DefinedTerm';
 
 # How to read the results wall
 
-The [results wall](./who-has-run-it.mdx) is a card per run. This page explains what is on a
-card, and what the numbers on it can and cannot tell you.
+The [results wall](./who-has-run-it.mdx) has one card per gateway and configuration, with every
+run of it stacked underneath. This page explains what is on a card, and what the numbers on it can
+and cannot tell you.
 
 ## What the check asks
 
@@ -29,7 +30,19 @@ Do all three and you pass.
 
 ## Reading a card {#reading-a-card}
 
-**The shield** counts three checks, and says the count on its face:
+**One card is one gateway in one configuration.** Portkey with its output guardrail is one card,
+however many people have run it and on however many commits. LLM-Shield-Proxy with response
+scanning on and LLM-Shield-Proxy on its default settings are two cards, because they are two
+different setups that give different answers. Runs share a card when the gateway is the same (so
+"Portkey" and "Portkey OSS Gateway" are one gateway) and the configuration they state is the same.
+A run that does not state its configuration only shares a card with other runs that do not state
+one either, because "not stated" is not evidence of "the same".
+
+**The header** names the gateway, the configuration, and its licence, linking to the project.
+
+**The shield** is the card's headline: the three checks of its **latest complete run**, the newest
+run that measured all three. The line above the pips says which run that is, with its date,
+version and harness. The shield counts three checks, and says the count on its face:
 
 - **Request path.** Nothing the caller sent reached the provider.
 - **Value whole in response.** A value the caller never sent, injected into the response in one
@@ -37,9 +50,9 @@ Do all three and you pass.
 - **Value split across chunks.** The same, with the value split across two stream chunks.
 
 Gold is 3 of 3, silver 2, bronze 1, and a plain shield 0. It is the same count, by the same rule,
-as the README badge the intake gives a submitted row, so a card and a badge for the same run
-never disagree. The coloured edge along the top of a card says the same thing again: gold for
-3 of 3, amber for some, red for none.
+as the README badge the intake gives a submitted run, so a run and its badge never disagree. The
+coloured edge along the top of a card says the same thing again: gold for 3 of 3, amber for some,
+red for none.
 
 **Each check is a pip**, and each pip says what it found in words as well as colour:
 
@@ -49,14 +62,30 @@ never disagree. The coloured edge along the top of a card says the same thing ag
   A check that was not shown clean is not counted as passed.
 - **– not measured.** The run did not look. The operator check that runs in a gateway's own CI
   measures what it sends upstream, and the two response checks come from a separate profile, so
-  a row from such a run has nothing here. It is never read as zero.
+  a run from such a check has nothing here. It is never read as zero.
 
 **Gave the caller's own data back** sits under the pips rather than inside the shield, because
 it answers the second question and not the other two. When it says `none`, the card says so next
 to any clean response pip: see [read the checks together](#read-the-checks-together).
 
-**Full pass** marks a run that answers all three questions: all three checks passed and every
-value came back to the caller. That is the page's own criterion, restated in code.
+**The replication line** counts the card's runs and the distinct people who ran them, and says
+how far the card is from being called replicated. The rule is the one in
+[submitting a result](./submitting.md): a result is **replicated** only when three different
+people have run the same gateway and configuration. Runs by the benchmark maintainers, whether
+measured in this repository or submitted from a fork, do not count toward the three, and neither
+do runs by the gateway's own team. Until then the card reads **Unreplicated**, with a three-step
+meter beside the words.
+
+**Disputed** marks a card where two runs of the same version disagree on a check, and names the
+check. Both runs stay on the card. Disagreements are published, not averaged, because they usually
+point at an undocumented default, version drift or a platform difference.
+
+**Changed between versions** is the quieter mark for runs of different versions that came out
+differently. That is revision history rather than a dispute: the runs underneath show which
+version did what.
+
+**Full pass** marks a card whose latest complete run answers all three questions: all three checks
+passed and every value came back to the caller. That is the page's own criterion, restated in code.
 
 **First independent pass** is the one mark worth wanting, and nobody holds it yet. See
 [Ours did not pass either, at first](#ours-did-not-pass-either-at-first).
@@ -64,26 +93,37 @@ value came back to the caller. That is the page's own criterion, restated in cod
 **An arrow next to a leak count** compares a gateway with its own earlier version on the wall,
 never with another project. `↓2` means two fewer values leaked than last time.
 
-**Who ran it** is under the gateway's name. A submitted run shows the person who submitted it,
-with their GitHub avatar and a link to their profile, then where it ran: this project, a
-project's own CI on its main branch, a branch, or a fork, or sent in with no run to point at. It
-links to the run when there is one, and to the submission issue. A run with no submitter says in
-plain words who produced it, such as "Run by the benchmark maintainers". The contributors across
-the top of the wall are everyone who has submitted one.
+**Reads the stream** sits under the note. See
+[why there is no speed column](#why-there-is-no-speed-column). **Worth rerunning** appears when
+the newest run on a card is more than six months old. An old run is an older measurement, not a
+worse gateway.
 
-**Along the bottom:**
+### The runs under a card {#the-runs-under-a-card}
 
-- **How it reads the stream.** See [why there is no speed column](#why-there-is-no-speed-column).
-- **The date**, linking to the report, and the **harness** version that produced it. Two runs
-  measured with different harness versions were produced by different code.
-- **Worth rerunning** on a run more than six months old. An old run is an older measurement, not
-  a worse gateway.
-- **Open questions**, if anyone has disputed the row. See
+Every run of the card's gateway and configuration is listed underneath, newest first, one line
+each:
+
+- **Who ran it.** A submitted run shows the submitter's GitHub avatar and handle, linking to their
+  profile. A run this project measured says **benchmark maintainers**. The contributors across the
+  top of the wall are everyone who has submitted one.
+- **When and what.** The date, then the version or commit that ran. A run that worded its
+  configuration differently from the card shows its own words in brackets, so grouping never hides
+  what a submitter wrote.
+- **Its three pips**, in the same order as the card's (request, whole, split), with the number
+  passed beside them.
+- **Where it ran**: measured here, a project's own CI on its main branch, a branch, or a fork, or
+  sent in with no run to point at.
+- **Links**: the CI run behind it, or the report for a run measured here, and the submission issue.
+  **Open questions** appear here if anyone has disputed that run. See
   [If you think a row is wrong](#if-you-think-a-row-is-wrong).
 
-**Every card has its own link.** The `#` in a card's corner is a link straight to it, and the
-reply on a submission issue links straight to that submission's card. A linked card is ringed in
-gold and labelled **Linked result**.
+A card with more than three runs shows the newest three and folds the rest behind **Show all N
+runs**.
+
+**Every run and every card has its own link.** The `#` at the end of a run line links straight to
+that run, and the `#` in a card's corner to the card. The reply on a submission issue links
+straight to that submission's run: the page opens the card if the run is folded, scrolls to it,
+rings the card in gold with a **Linked result** ribbon, and marks the run itself **Linked run**.
 
 ## Read the checks together {#read-the-checks-together}
 
@@ -109,8 +149,8 @@ it on, because it changes what callers receive, so the out-of-the-box run leaks 
 both ways. That run is on the wall too.
 
 A result from the people who built the instrument is the most conflicted one there, which is
-why the "Who ran it" order sorts our own runs alongside the self-reported ones rather than
-above them. That does not change because the number improved.
+why none of our own runs count toward calling a card replicated, our own gateway's included.
+That does not change because the number improved.
 
 **No gateway other than ours has passed yet.** The first one that does gets the **First
 independent pass** trophy at the top of the wall and a mark on its card, and keeps them. It goes
@@ -129,7 +169,7 @@ look worse than a slow one on fast hardware. That is hardware noise published as
 characteristic.
 
 What you actually want from a speed number is the **design tradeoff**, and that is on every card
-already, under "How it reads the stream". There are three ways to build this and each one costs
+already, under "Reads the stream". There are three ways to build this and each one costs
 something:
 
 - **Checks each chunk alone.** Fastest, and it cannot see a value split across two chunks.
@@ -165,15 +205,16 @@ find, and it is invisible to any test that sends values whole.
 
 ## Why we do not rank these
 
-The wall ships newest first. You can reorder it for yourself, including by the number of checks
-passed, and that changes only your view. We do not publish it in a ranked order:
+The wall ships with the most recently run card first. You can reorder it for yourself, including
+by the number of checks passed, and that changes only your view. We do not publish it in a ranked order:
 
 - **Runs are not comparable.** Each result is one version, one configuration, one set of test
   values.
 - **A ranking starts arguments about fairness instead of getting gateways tested.**
 - **The same leak count can mean two different bugs**, as [the table above](#two-bugs) shows.
 
-The shield is a count of what one run passed, not a place in a league. The arrows are the one
+The shield is a count of what one run passed, the card's latest complete one, not a place in a
+league. The arrows are the one
 comparison we do draw, and they only ever compare a gateway with its own earlier version on the
 wall. That is revision history rather than a ranking: it says a team fixed something, which is
 the entire behaviour the wall exists to encourage.
@@ -181,7 +222,7 @@ the entire behaviour the wall exists to encourage.
 ## If you think a row is wrong
 
 Ours included. [Open a question](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)
-and the count appears on that card, linking to what you wrote. Nothing is hidden or moved
+and the count appears on that run's line, linking to what you wrote. Nothing is hidden or moved
 down the wall while it is open: the wall publishes disagreements rather than settling them
 quietly, which is the same reason two runs of the same gateway that disagree both stay up. The
 count clears when the question is closed.
