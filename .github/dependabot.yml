@@ -17,3 +17,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # The source recipes pin this repository's own Action as the measuring instrument, and
+      # the Action installs the harness from that commit. Moving the pin changes how results
+      # are scored while the wall still labels them with the same harness version, so it is
+      # bumped by hand, together with a harness version bump, never by Dependabot.
+      - dependency-name: "ninadphalak/LLM-Shield-Proxy"
