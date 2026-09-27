@@ -38,12 +38,14 @@ jobs:
       PORTKEY_GUARDRAIL_CONFIG: '{"output_guardrails":[{"checks":[{"id":"portkey.pii","parameters":{"redact":true}}]}]}'
     steps:
       - name: Require a ref for another repository
+        id: ref_check
         if: inputs.source_repository != '' && inputs.source_ref == ''
         run: |
           echo 'Set source_ref when source_repository names another repository.'
           exit 2
 
       - name: Check out the proxy source
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ env.SOURCE_REPOSITORY }}
@@ -56,6 +58,7 @@ jobs:
           python-version: '3.12'
 
       - name: Build the checked-out proxy
+        id: build
         run: docker build --file Dockerfile --tag "$SOURCE_IMAGE" .
 
       - name: Record source and configuration
@@ -298,6 +301,10 @@ jobs:
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           RESPONSE_OUTCOME: ${{ steps.response.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          REF_CHECK_OUTCOME: ${{ steps.ref_check.outcome }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SOURCE_REF: ${{ inputs.source_ref }}
           STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}, upload=${{ steps.upload.outcome }}
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
@@ -350,15 +357,48 @@ jobs:
                           and operator.get('verdict') in ('CLEAN', 'LEAK'))
               status = 'incomplete' if not complete else 'leak' if leaked or response_leak else 'clean'
 
+          reason = ''
           if status == 'incomplete':
+              # Name the first stage that failed and what to do about it, so an incomplete run
+              # tells its operator more than "open the logs".
+              source_ref = os.environ.get('SOURCE_REF', '')
+              where = f'`{source_ref}`' if source_ref else 'the latest commit of the branch you ran'
+              new_run = 'Start a new run with **Run workflow**; **Re-run jobs** reuses the same inputs.'
+              rerun = ('This is usually the runner or a download, not the proxy: click **Re-run jobs**, '
+                       'then **Re-run all jobs**. If it fails the same way twice, '
+                       '[open an issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues) '
+                       'with this run\'s link.')
+              stages = (
+                  ('REF_CHECK_OUTCOME', 'A source repository was named without a tag, branch or commit.',
+                   'Type the tag, branch or commit to build in the first box. ' + new_run),
+                  ('CHECKOUT_OUTCOME', f'The source to build, {where}, could not be fetched.',
+                   'Check its spelling. A fork copies only its default branch, so a release tag may exist '
+                   'only in the original repository. Type your fork\'s default branch, such as `main`, or a '
+                   'commit your fork has. ' + new_run),
+                  ('BUILD_OUTCOME', f'The source to build, {where}, did not build.',
+                   'Open the failed step, marked with a red cross in the job\'s step list, for the error. '
+                   'A download or network error usually passes on a rerun; a compile error means that '
+                   'commit does not build, so pick another. ' + rerun),
+                  ('STARTUP_OUTCOME', 'The proxy was built but did not start.',
+                   'The step "Check proxy startup before fixtures" prints its log. If the log points at '
+                   'the code, that commit does not start; pick another. ' + rerun),
+                  ('RESPONSE_OUTCOME', 'The response-path measurement did not finish.', rerun),
+                  ('VERIFY_OUTCOME', 'The evidence did not pass verification.', rerun),
+                  ('UPLOAD_OUTCOME', 'The verified evidence could not be uploaded.', rerun),
+              )
+              failed = next((stage for stage in stages if os.environ.get(stage[0]) == 'failure'), None)
+              reason, todo = (failed[1], failed[2]) if failed else (
+                  'No step failed outright, but the evidence was not complete enough to count.', rerun)
               print('## Result: INCOMPLETE, do not submit')
               print()
               print('This run did not produce a verified measurement, so nothing was uploaded and the '
                     'results wall has nothing to read. It says nothing about the gateway.')
               print()
-              print(f"Step outcomes: {os.environ['STEP_OUTCOMES']}. Open the first failed step for the reason, "
-                    'then rerun the workflow. A failure before measurement is usually the runner, a download '
-                    'or the proxy not starting.')
+              print(f'**What went wrong:** {reason}')
+              print()
+              print(f'**What to do:** {todo}')
+              print()
+              print(f"Step outcomes: {os.environ['STEP_OUTCOMES']}.")
           else:
               print('## Result: MEASURED LEAK' if status == 'leak' else '## Result: MEASURED CLEAN')
               print()
@@ -404,12 +444,18 @@ jobs:
                     'artifact, not from the issue.')
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write(f'status={status}\n')
+              output.write(f'reason={reason}\n')
           PY
 
       - name: Fail unless the measurement is complete and clean
         if: always() && steps.result.outputs.status != 'clean'
         env:
           RESULT: ${{ steps.result.outputs.status }}
+          REASON: ${{ steps.result.outputs.reason }}
         run: |
-          echo "Result: ${RESULT:-incomplete}. The job summary explains it and, for a measurement, how to submit it."
+          if [ "${RESULT:-incomplete}" = incomplete ]; then
+            echo "::error title=Incomplete, do not submit::${REASON:-The run did not finish.} The run's summary says what to do next."
+          else
+            echo "Result: $RESULT. The job summary explains it and how to submit it."
+          fi
           exit 1
