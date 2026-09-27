@@ -1,6 +1,6 @@
 # Standing context for automated code review
 
-This file is handed to the PR-Agent reviewer in CI as repository context. It is committed and
+This file is read by the automated reviewer in CI (`.github/workflows/pr_review.yml`) as repository context. It is committed and
 public on purpose, and it is deliberately short.
 
 It carries the invariants a reviewer cannot infer from a diff. It is **not** a map of the
