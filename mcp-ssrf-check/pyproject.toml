@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-ssrf-check"
+version = "0.1.0"
+description = "Check your own MCP server for missing Host and Origin validation, unbound session ids, and URL-fetching tools that reach loopback."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [
+    {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
+]
+maintainers = [
+    {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "ssrf",
+    "dns-rebinding",
+    "security",
+    "streamable-http",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
+# Standard library plus httpx. Nothing else, for the same reason pii-leak-benchmark has the
+# same rule: a maintainer runs this against their own server without installing anyone's
+# gateway, and a checker that carries one vendor's dependency tree cannot be neutral.
+dependencies = [
+    "httpx>=0.24.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/mcp-ssrf-check"
+Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
+"Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
+
+[project.scripts]
+mcp-ssrf-check = "mcp_ssrf_check.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mcp_ssrf_check*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]

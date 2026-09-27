@@ -81,7 +81,7 @@ jobs:
 
       - name: Run Bandit Security Vulnerability Scanner
         run: |
-          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ -s B101,B104,B311
+          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ mcp-ssrf-check/mcp_ssrf_check/ -s B101,B104,B311
 
       - name: Run Pyright static type checking
         # The engine Pylance runs, so the editor, the pre-commit hook and this step are

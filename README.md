@@ -7,13 +7,16 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
-This repository contains two related packages:
+This repository contains three related packages:
 
 1. **[`pii-leak-benchmark`](pii-leak-benchmark/)** tests an OpenAI-compatible streaming gateway. It
    checks whether the gateway sends the test values to its model provider and whether the client
    gets the original values back.
 2. **LLM-Shield-Proxy** is a self-hosted streaming privacy gateway. The benchmark tests it by name
    and applies the same publication rules used for every other gateway.
+3. **[`mcp-ssrf-check`](mcp-ssrf-check/)** checks an MCP server you operate for missing `Host` and
+   `Origin` validation, unbound session ids, and URL-fetching tools that reach loopback. It talks
+   only to your server and to a listener it opens on your own machine.
 
 ## What changed after the first benchmark run
 
