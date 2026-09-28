@@ -4,11 +4,12 @@
 [![PyPI: llm-shield-proxy](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green&label=llm-shield-proxy)](https://pypi.org/project/llm-shield-proxy/)
 [![PyPI: pii-leak-benchmark](https://img.shields.io/pypi/v/pii-leak-benchmark.svg?color=green&label=pii-leak-benchmark)](https://pypi.org/project/pii-leak-benchmark/)
 [![PyPI: mcp-ssrf-check](https://img.shields.io/pypi/v/mcp-ssrf-check.svg?color=green&label=mcp-ssrf-check)](https://pypi.org/project/mcp-ssrf-check/)
+[![PyPI: chunk-invariance](https://img.shields.io/pypi/v/chunk-invariance.svg?color=green&label=chunk-invariance)](https://pypi.org/project/chunk-invariance/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
-This repository contains three related packages:
+This repository contains four related packages:
 
 1. **[`pii-leak-benchmark`](pii-leak-benchmark/)** tests an OpenAI-compatible streaming gateway. It
    checks whether the gateway sends the test values to its model provider and whether the client
@@ -17,7 +18,11 @@ This repository contains three related packages:
    and applies the same publication rules used for every other gateway.
 3. **[`mcp-ssrf-check`](mcp-ssrf-check/)** checks an MCP server you operate for missing `Host` and
    `Origin` validation, unbound session ids, and URL-fetching tools that reach loopback. It talks
-   only to your server and to a listener it opens on your own machine.
+   only to your server and to a listener it opens on your own machine. It also runs as a GitHub
+   Action that writes the result table to the job summary.
+4. **[`chunk-invariance`](chunk-invariance/)** turns the split-boundary rule into one test
+   assertion: every way of splitting an input into chunks must stream to the same output as
+   filtering it whole. Python, with a TypeScript version in [`chunk-invariance-js/`](chunk-invariance-js/).
 
 ## What changed after the first benchmark run
 
