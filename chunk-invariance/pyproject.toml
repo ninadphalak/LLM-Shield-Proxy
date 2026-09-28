@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chunk-invariance"
+version = "0.1.0"
+description = "Assert that a streaming filter gives the same output however its input is split into chunks."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [
+    {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
+]
+maintainers = [
+    {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
+]
+keywords = [
+    "streaming",
+    "testing",
+    "redaction",
+    "guardrails",
+    "chunk-boundary",
+    "property-based-testing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Framework :: Hypothesis",
+    "Framework :: Pytest",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+# No runtime dependencies. Hypothesis is optional and only chunk_invariance.strategies imports it.
+dependencies = []
+
+[project.optional-dependencies]
+hypothesis = ["hypothesis>=6"]
+
+[project.urls]
+Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/chunk-invariance"
+Repository = "https://github.com/ninadphalak/LLM-Shield-Proxy"
+"Bug Tracker" = "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
+
+[tool.setuptools.packages.find]
+include = ["chunk_invariance*"]
+
+[tool.setuptools.package-data]
+chunk_invariance = ["py.typed"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]

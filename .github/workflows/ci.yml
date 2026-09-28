@@ -81,7 +81,7 @@ jobs:
 
       - name: Run Bandit Security Vulnerability Scanner
         run: |
-          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ mcp-ssrf-check/mcp_ssrf_check/ -s B101,B104,B311
+          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ mcp-ssrf-check/mcp_ssrf_check/ chunk-invariance/chunk_invariance/ -s B101,B104,B311
 
       - name: Run Pyright static type checking
         # The engine Pylance runs, so the editor, the pre-commit hook and this step are
@@ -371,3 +371,71 @@ jobs:
       - name: A main-branch run must publish verifiable report provenance
         if: ${{ github.event_name == 'push' }}
         run: test -n "${{ steps.control.outputs.attestation-url }}"
+
+  chunk-invariance-python:
+    name: chunk-invariance on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    # Installed alone, as a user installs it: nothing may arrive with it but the optional
+    # Hypothesis extra, and its tests must run without the gateway's conftest.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the library alone
+        run: |
+          python -m pip install --upgrade pip
+          pip install ./chunk-invariance
+          python - <<'PY'
+          import subprocess, sys
+          frozen = subprocess.run([sys.executable, "-m", "pip", "list", "--format=freeze"],
+                                  capture_output=True, text=True, check=True).stdout
+          installed = {line.split("==")[0].strip().lower().replace("_", "-")
+                       for line in frozen.splitlines() if line.strip()}
+          extra = sorted(installed - {"chunk-invariance", "pip", "setuptools", "wheel"})
+          print("installed:", sorted(installed))
+          assert not extra, f"installing chunk-invariance pulled {extra}"
+          PY
+
+      - name: Run its tests with the Hypothesis extra
+        run: |
+          pip install "./chunk-invariance[hypothesis]" pytest
+          # --confcutdir keeps pytest from loading tests/conftest.py, which imports the gateway.
+          python -m pytest --confcutdir=tests/chunk_invariance tests/chunk_invariance -v -p no:cacheprovider
+
+  chunk-invariance-js:
+    name: chunk-invariance (TypeScript) on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22", "24"]
+    defaults:
+      run:
+        working-directory: chunk-invariance-js
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Build and test (ESM and CommonJS)
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      - name: The packed tarball holds the build and nothing else
+        run: |
+          npm pack --dry-run --json --ignore-scripts > pack.json
+          node scripts/check-pack.cjs pack.json
