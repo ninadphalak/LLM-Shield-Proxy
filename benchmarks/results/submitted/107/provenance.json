@@ -1,0 +1,25 @@
+{
+  "schema": "llm-shield-proxy/submitted-row-archive/v1",
+  "issue": 107,
+  "submitter": "ninadphalak",
+  "ranIn": "ninadphalak/Guardrails",
+  "ranInOwnerType": "User",
+  "runUrl": "https://github.com/ninadphalak/Guardrails/actions/runs/36223257023",
+  "runId": 36223257023,
+  "headSha": "c37da56a222e419f1630b3a9d386266b5ff11470",
+  "workflowPath": ".github/workflows/nemo-source-reproduction.yml",
+  "runCreatedAt": "2026-09-26T06:16:25Z",
+  "artifact": {
+    "name": "source-reproduction",
+    "id": 10899069706,
+    "bytes": 12592,
+    "sha256": "d4e52efeeabf00d719950987102c21a83371685a75408d84cf93026925d54bea"
+  },
+  "harness": "0.4.1 (operator), 0.2.1 (response)",
+  "redactedFields": [
+    "target.base_url",
+    "capture.target_must_be_preconfigured_for",
+    "capture.self_probe.advertised_url"
+  ],
+  "archivedAt": "2026-09-28T16:56:07Z"
+}

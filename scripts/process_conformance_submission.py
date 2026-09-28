@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import io
 import json
 import os
@@ -90,6 +92,29 @@ MAX_REPORTS = 25
 
 # Flood guard limit for rows per account.
 MAX_ROWS_PER_SUBMITTER = 12
+
+# Where the reports behind each submitted row are kept, one directory per issue. GitHub deletes
+# a run's artifacts after the repository's retention period (90 days by default), and after
+# that a row's run link opens a run with nothing behind it. The copy here keeps the row
+# checkable for as long as the row exists.
+ARCHIVE_ROOT = REPO_ROOT / "benchmarks" / "results" / "submitted"
+ARCHIVE_FILES = ("reports.json", "provenance.json")
+# Reports on the wall so far are 10 to 40 KB each. A larger archive is refused, not trimmed.
+MAX_ARCHIVE_BYTES = 2 * 1024 * 1024
+
+# The fields `submitting.md` tells people to redact before a report is published: they can
+# hold a hosted gateway's account id, a tunnel hostname or a probe secret. Replaced rather than
+# deleted, as that page says, so the report keeps its shape. Kept equal to
+# `pii_leak_benchmark.submit.REDACT_BEFORE_PUBLISHING` by a test; not imported, because this
+# job runs without the harness installed.
+REDACT_BEFORE_PUBLISHING = (
+    ("target", "base_url"),
+    ("capture", "target_must_be_preconfigured_for"),
+    ("capture", "self_probe", "advertised_url"),
+)
+REDACTED = "[REDACTED]"
+
+OWNER_TYPES = ("User", "Organization")
 
 
 # --------------------------------------------------------------------------- parsing
@@ -253,8 +278,13 @@ def collect_reports(
     *,
     api: Callable[[str], Any] = _api,
     download: Callable[[str, str, int], bytes] = _download_zip,
+    sink: Optional[dict[str, Any]] = None,
 ) -> tuple[dict[str, Any], str]:
-    """Return the JSON reports attached to a run. Ignores errors to yield empty results on failure."""
+    """Return the JSON reports attached to a run. Ignores errors to yield empty results on failure.
+
+    `sink`, when given, receives the name, id, size and sha256 of the artifact the reports
+    were read from, for the archive's provenance record.
+    """
     try:
         listing = api(f"https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts")
     except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -276,11 +306,19 @@ def collect_reports(
             problems.append(f"`{artifact.get('name')}` is larger than this job will fetch")
             continue
         try:
-            reports = reports_from_zip(download(owner, repo, int(artifact["id"])))
+            data = download(owner, repo, int(artifact["id"]))
+            reports = reports_from_zip(data)
         except (RuntimeError, OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             problems.append(f"`{artifact.get('name')}` could not be read ({type(exc).__name__})")
             continue
         if any(is_operator_run(report) or is_response_split(report) for report in reports.values()):
+            if sink is not None:
+                sink.update({
+                    "name": str(artifact.get("name") or ""),
+                    "id": int(artifact["id"]),
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                })
             return reports, f"Read from the artifact `{artifact.get('name')}` on that run."
     if problems:
         return {}, "No report could be read: " + "; ".join(problems[:3]) + "."
@@ -291,9 +329,14 @@ def collect_reports(
 
 
 def classify_provenance(
-    run_url: str, fetch: Callable[[str], Any] = _api
+    run_url: str, fetch: Callable[[str], Any] = _api, *, sink: Optional[dict[str, Any]] = None
 ) -> tuple[str, str, Optional[tuple[str, str, str]]]:
-    """Determine provenance value from the linked run, proving branch and repository origin."""
+    """Determine provenance value from the linked run, proving branch and repository origin.
+
+    `sink`, when given, receives what the archive's provenance record needs from the run:
+    its id, commit, workflow file, creation time, and whether the repository it ran in
+    belongs to a person or an organisation.
+    """
     if not run_url:
         return "submitted-unverified", "No run was linked, so the result is taken at face value.", None
     match = RUN_URL.match(run_url.strip())
@@ -315,6 +358,15 @@ def classify_provenance(
         )
     if not isinstance(run, dict):
         return "submitted-unverified", "The run API returned something unreadable.", None
+    if sink is not None:
+        owner_type = str(((run.get("repository") or {}).get("owner") or {}).get("type") or "")
+        sink.update({
+            "runId": int(run_id),
+            "headSha": str(run.get("head_sha") or ""),
+            "workflowPath": str(run.get("path") or ""),
+            "runCreatedAt": str(run.get("created_at") or ""),
+            "ownerType": owner_type if owner_type in OWNER_TYPES else "",
+        })
 
     head_repo = run.get("head_repository") or {}
     home_repo = run.get("repository") or {}
@@ -763,6 +815,79 @@ def append_row(row: dict[str, Any], path: Optional[Path] = None) -> None:
     )
 
 
+def redact_report(report: Any) -> Any:
+    """A copy of `report` with every `REDACT_BEFORE_PUBLISHING` field that is present replaced."""
+    redacted = copy.deepcopy(report)
+    for path in REDACT_BEFORE_PUBLISHING:
+        node = redacted
+        for key in path[:-1]:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, dict) and path[-1] in node:
+            node[path[-1]] = REDACTED
+    return redacted
+
+
+def archive_dir(issue_number: int) -> Path:
+    return ARCHIVE_ROOT / str(int(issue_number))
+
+
+def write_archive(
+    row: dict[str, Any],
+    material: dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
+    root: Optional[Path] = None,
+) -> str:
+    """Keep the reports a row was read from, and where they came from. Returns the path.
+
+    Two files under `benchmarks/results/submitted/<issue>/`, both written by this job from
+    parsed JSON rather than copied as bytes: `reports.json`, every report in the artifact with
+    the redacted fields replaced, and `provenance.json`. An issue edited to link a rerun
+    replaces its directory, as it replaces its row.
+    """
+    submission = row.get("_submission") or {}
+    issue = int(submission.get("issue") or 0)
+    if issue <= 0:
+        raise RuntimeError("a row without an issue number cannot be archived")
+    run = material.get("run") or {}
+    artifact = material.get("artifact") or {}
+    reports = {
+        name: redact_report(report)
+        for name, report in sorted((material.get("reports") or {}).items())
+    }
+    provenance = {
+        "schema": "llm-shield-proxy/submitted-row-archive/v1",
+        "issue": issue,
+        "submitter": submission.get("submitter", ""),
+        "ranIn": submission.get("ranIn", ""),
+        "ranInOwnerType": run.get("ownerType", ""),
+        "runUrl": row.get("runUrl", ""),
+        "runId": run.get("runId"),
+        "headSha": run.get("headSha", ""),
+        "workflowPath": run.get("workflowPath", ""),
+        "runCreatedAt": run.get("runCreatedAt", ""),
+        "artifact": artifact,
+        "harness": row.get("harness", ""),
+        "redactedFields": [".".join(path) for path in REDACT_BEFORE_PUBLISHING],
+        "archivedAt": (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    texts = {
+        "reports.json": json.dumps(reports, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        "provenance.json": json.dumps(provenance, indent=2, ensure_ascii=False) + "\n",
+    }
+    if sum(len(text.encode("utf-8")) for text in texts.values()) > MAX_ARCHIVE_BYTES:
+        raise RuntimeError("the reports are larger than the archive keeps")
+    base = root or ARCHIVE_ROOT
+    target = base / str(issue)
+    target.mkdir(parents=True, exist_ok=True)
+    for stale in target.iterdir():
+        if stale.name not in ARCHIVE_FILES:
+            stale.unlink()
+    for name, text in texts.items():
+        (target / name).write_text(text, encoding="utf-8", newline="\n")
+    return target.relative_to(REPO_ROOT).as_posix() if root is None else target.as_posix()
+
+
 def _run(*command: str, cwd: Optional[Path] = None) -> None:
     subprocess.run(command, check=True, cwd=cwd or REPO_ROOT)  # nosec B603 - fixed argument lists
 
@@ -823,14 +948,19 @@ def publish(row: dict[str, Any], issue_number: int) -> bool:
     """Land the row via an auto-merging pull request. False when the wall already has it."""
     _run("git", "config", "user.name", "github-actions[bot]")
     _run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
-    _run("git", "add", str(ROWS_FILE.relative_to(REPO_ROOT)))
+    rows_path = ROWS_FILE.relative_to(REPO_ROOT).as_posix()
+    archive = archive_dir(issue_number).relative_to(REPO_ROOT).as_posix()
+    _run("git", "add", rows_path)
+    if (REPO_ROOT / archive).is_dir():
+        _run("git", "add", archive)
 
-    # Verify only the expected file is staged.
+    # This pull request merges with no review, which is safe only while it can hold nothing
+    # but data this job wrote: the rows file and this one issue's two archive files.
     staged = subprocess.run(  # nosec B603 B607 - fixed argument list
         ["git", "diff", "--cached", "--name-only"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
-    allowed = {ROWS_FILE.relative_to(REPO_ROOT).as_posix()}
+    allowed = {rows_path, *(f"{archive}/{name}" for name in ARCHIVE_FILES)}
     if set(staged) - allowed:
         raise RuntimeError(
             "refusing to publish: this job may only change "
@@ -853,9 +983,9 @@ def publish(row: dict[str, Any], issue_number: int) -> bool:
         f"Every measured column was read from the artifact of the run linked in that "
         f"issue, not from anything typed in it. Provenance: `{row['provenance']}`.\n\n"
         f"The site was built before this branch was pushed, so the row is known not to "
-        f"break it. This pull request may only ever contain "
-        f"`{ROWS_FILE.relative_to(REPO_ROOT).as_posix()}`; the job refuses to push if "
-        f"anything else is staged.\n\n"
+        f"break it. This pull request may only ever contain `{rows_path}` and the two "
+        f"archive files in `{archive}/`; the job refuses to push if anything else is "
+        f"staged.\n\n"
         f"Closes #{issue_number}\n"
     )
     try:
@@ -912,8 +1042,15 @@ def process(
     *,
     classify: Callable[[str], tuple[str, str, Optional[tuple[str, str, str]]]] = classify_provenance,
     collect: Callable[..., tuple[dict[str, Any], str]] = collect_reports,
+    material: Optional[dict[str, Any]] = None,
 ) -> tuple[dict[str, Any], str, str, list[str]]:
-    """Issue in, row out: (row, provenance reason, evidence, problems)."""
+    """Issue in, row out: (row, provenance reason, evidence, problems).
+
+    `material`, when given, receives what `write_archive` keeps: the reports and what was
+    recorded about the run and the artifact they came from.
+    """
+    run_meta: dict[str, Any] = {}
+    artifact_meta: dict[str, Any] = {}
     body = issue.get("body") or ""
     fields = parse_submission(body)
     if not fields.get("run_url"):
@@ -925,8 +1062,10 @@ def process(
     # name, licence and configuration the issue left out. A malformed link is reported by
     # `validate` below and nothing is fetched for it.
     if RUN_URL.match(fields.get("run_url", "").strip()):
-        provenance, reason, where = classify(fields["run_url"])
-        reports, evidence = collect(*where) if where else ({}, "No run to read a report from.")
+        provenance, reason, where = classify(fields["run_url"], sink=run_meta)
+        reports, evidence = (
+            collect(*where, sink=artifact_meta) if where else ({}, "No run to read a report from.")
+        )
         fields = fill_from_bundle(fields, reports)
     problems = validate(fields)
     if problems:
@@ -941,6 +1080,10 @@ def process(
         date=(str(issue.get("created_at") or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")),
         evidence=evidence,
     )
+    if run_meta.get("ownerType"):
+        row["_submission"]["ranInOwnerType"] = run_meta["ownerType"]
+    if material is not None:
+        material.update({"reports": reports, "run": run_meta, "artifact": artifact_meta})
     return row, reason, evidence, []
 
 
@@ -962,7 +1105,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("Event carries no issue number.", file=sys.stderr)
         return 2
 
-    row, reason, evidence, problems = process(issue)
+    material: dict[str, Any] = {}
+    row, reason, evidence, problems = process(issue, material=material)
     text = render_comment(row, reason, evidence, problems)
     if args.dry_run:
         print(text)
@@ -1014,6 +1158,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         label(issue_number, "needs-info")
         return 1
 
+    try:
+        # Written before the row, so the row can name it and the build can check it exists.
+        row["_submission"]["archive"] = write_archive(row, material)
+    except (RuntimeError, OSError, ValueError) as exc:
+        comment(
+            issue_number,
+            "This result was read and verified, but a copy of its report could not be kept "
+            f"({type(exc).__name__}), and a row is only published with one. Nothing is wrong "
+            "with your submission. The failure is on this side and someone will pick it up.",
+        )
+        label(issue_number, "needs-info")
+        print(f"Archiving failed: {exc}", file=sys.stderr)
+        return 1
     append_row(row)
     try:
         # The content scan and the site build are gates: a row either passes both or is not

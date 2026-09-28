@@ -180,8 +180,18 @@ export type ResultRow = {
    * Who submitted the row and from which issue, written by the intake workflow. Absent on
    * rows this project measured. Arrives from outside, so the wall validates both fields
    * before using either to shape an id, a link or an image address.
+   *
+   * `archive` is the directory in this repository holding the reports the row was read from,
+   * kept because GitHub deletes a run's artifacts after 90 days. `ranInOwnerType` says
+   * whether the repository the run ran in belongs to a person or an organisation. Both are
+   * absent on rows published before the archive existed.
    */
-  _submission?: {issue?: number; submitter?: string};
+  _submission?: {
+    issue?: number;
+    submitter?: string;
+    archive?: string;
+    ranInOwnerType?: 'User' | 'Organization';
+  };
 };
 
 /**
@@ -445,6 +455,23 @@ function publishedRows(entries: SubmittedEntry[]): ResultRow[] {
       // quietly, so the upgrade is refused loudly instead.
       if (entry.provenance === 'measured-here') {
         throw new Error(`${where}: a submitted row cannot claim "measured-here".`);
+      }
+      // The archive may only be this row's own issue directory: the wall turns it into a
+      // link, and the build separately refuses one whose files are missing
+      // (`website/scripts/check-evidence-archives.mjs`).
+      const submission = (entry._submission ?? {}) as Record<string, unknown>;
+      if (
+        submission.archive !== undefined &&
+        submission.archive !== `benchmarks/results/submitted/${String(submission.issue)}`
+      ) {
+        throw new Error(`${where}: "archive" must be this row's own issue directory.`);
+      }
+      if (
+        submission.ranInOwnerType !== undefined &&
+        submission.ranInOwnerType !== 'User' &&
+        submission.ranInOwnerType !== 'Organization'
+      ) {
+        throw new Error(`${where}: "ranInOwnerType" must be "User" or "Organization".`);
       }
       if (!(String(entry.architecture) in ARCHITECTURE)) {
         throw new Error(`${where}: "${String(entry.architecture)}" is not an architecture value.`);

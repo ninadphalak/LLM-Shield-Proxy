@@ -1,0 +1,25 @@
+{
+  "schema": "llm-shield-proxy/submitted-row-archive/v1",
+  "issue": 125,
+  "submitter": "teg0011",
+  "ranIn": "teg0011/gateway",
+  "ranInOwnerType": "User",
+  "runUrl": "https://github.com/teg0011/gateway/actions/runs/36343970530",
+  "runId": 36343970530,
+  "headSha": "caba832d976f445024a133f69c5abe177897d79c",
+  "workflowPath": ".github/workflows/portkey-source-reproduction.yml",
+  "runCreatedAt": "2026-09-27T19:20:09Z",
+  "artifact": {
+    "name": "source-reproduction",
+    "id": 10939868228,
+    "bytes": 11036,
+    "sha256": "acda2186ba32fdf8d17e2f188953175c4cb9ebdfcd2aa1b41297a98613ec5b5e"
+  },
+  "harness": "0.4.1 (operator), 0.2.1 (response)",
+  "redactedFields": [
+    "target.base_url",
+    "capture.target_must_be_preconfigured_for",
+    "capture.self_probe.advertised_url"
+  ],
+  "archivedAt": "2026-09-28T16:56:10Z"
+}

@@ -32,6 +32,16 @@ SUBMISSION_SECTIONS = (
     "Notes",
 )
 
+# Report fields that can hold a hosted gateway's account id, a tunnel hostname or a probe
+# secret, as `submitting.md` lists them. `submit` never sends the report, so none of them leaves
+# the machine from here; the results-wall intake replaces them before it keeps a copy of a
+# report, and a test holds its list equal to this one.
+REDACT_BEFORE_PUBLISHING = (
+    ("target", "base_url"),
+    ("capture", "target_must_be_preconfigured_for"),
+    ("capture", "self_probe", "advertised_url"),
+)
+
 # Standard fallback paths for finding a report.
 DEFAULT_REPORTS = (
     Path("pii-check") / "current.json",

@@ -1048,14 +1048,14 @@ def _bundle(identity=None):
 def _process(body, bundle):
     reads = []
 
-    def classify(url):
+    def classify(url, sink=None):
         reads.append(url)
         return "submitted-fork", "A fork.", ("friend", "gateway", "777")
 
     issue = {"number": 5, "body": body, "user": {"login": "friend"},
              "created_at": "2026-09-26T00:00:00Z"}
     row, _, _, problems = intake.process(
-        issue, classify=classify, collect=lambda *where: (bundle, "Read from the artifact.")
+        issue, classify=classify, collect=lambda *where, sink=None: (bundle, "Read from the artifact.")
     )
     return row, problems, reads
 
@@ -1215,7 +1215,8 @@ def test_a_failed_site_build_still_answers_the_submitter(monkeypatch, tmp_path):
     monkeypatch.setattr(intake, "ROWS_FILE", rows)
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"issue": {"number": 9, "body": "x", "user": {"login": "s"}}}))
-    monkeypatch.setattr(intake, "process", lambda issue: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "process", lambda issue, material=None: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "write_archive", lambda row, material: "benchmarks/results/submitted/7")
     monkeypatch.setattr(intake, "wait_for_earlier_rows", lambda number: None)
     monkeypatch.setattr(intake, "_run", lambda *command, cwd=None: None)
     monkeypatch.setattr(intake, "check_row_content", lambda: None)
@@ -1278,7 +1279,8 @@ def test_main_waits_and_catches_up_with_main_before_touching_the_rows(monkeypatc
     monkeypatch.setattr(intake, "ROWS_FILE", rows)
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"issue": {"number": 9, "body": "x", "user": {"login": "s"}}}))
-    monkeypatch.setattr(intake, "process", lambda issue: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "process", lambda issue, material=None: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "write_archive", lambda row, material: "benchmarks/results/submitted/7")
     order = []
     monkeypatch.setattr(intake, "wait_for_earlier_rows", lambda number: order.append("wait"))
     monkeypatch.setattr(intake, "_run", lambda *command, cwd=None: order.append(" ".join(command[:3])))
@@ -1321,3 +1323,166 @@ def test_inconclusive_response_cases_are_published_as_a_field():
                            intake.derive_measurements({"current.json": _operator_run(), "x.json": response}),
                            issue_number=7, submitter="s", date="2026-09-26", evidence="e")
     assert row["responseInconclusive"] == 8
+
+
+# ------------------------------------------------------------------- the evidence archive
+
+
+def _secret_report():
+    report = _operator_run()
+    report["target"] = {"base_url": "https://acct-1234.gateway.example/v1", "name": "gw"}
+    report["capture"] = {
+        "target_must_be_preconfigured_for": "https://tunnel-5678.example/v1",
+        "self_probe": {"advertised_url": "https://probe-secret-9abc.example", "recorded": True},
+    }
+    return report
+
+
+def test_the_redaction_list_is_the_harness_list():
+    from pii_leak_benchmark.submit import REDACT_BEFORE_PUBLISHING
+
+    assert intake.REDACT_BEFORE_PUBLISHING == REDACT_BEFORE_PUBLISHING
+
+
+def test_the_archive_keeps_every_report_and_where_it_came_from(tmp_path):
+    row = _row()
+    row["runUrl"] = "https://github.com/someone/gateway/actions/runs/42"
+    row["_submission"]["ranIn"] = "someone/gateway"
+    material = {
+        "reports": {"current.json": _secret_report(), "portkey-source.json": _split_report()},
+        "run": {"runId": 42, "headSha": "a" * 40, "workflowPath": ".github/workflows/x.yml",
+                "runCreatedAt": "2026-09-27T00:00:00Z", "ownerType": "User"},
+        "artifact": {"name": "source-reproduction", "id": 9, "bytes": 100, "sha256": "b" * 64},
+    }
+    now = intake.datetime(2026, 9, 28, 12, 0, tzinfo=intake.timezone.utc)
+    written = intake.write_archive(row, material, now=now, root=tmp_path)
+
+    folder = tmp_path / "7"
+    assert written == folder.as_posix()
+    assert sorted(p.name for p in folder.iterdir()) == ["provenance.json", "reports.json"]
+    reports = json.loads((folder / "reports.json").read_text(encoding="utf-8"))
+    assert set(reports) == {"current.json", "portkey-source.json"}
+    assert reports["current.json"]["target"] == {"base_url": "[REDACTED]", "name": "gw"}
+    assert reports["current.json"]["capture"]["self_probe"]["recorded"] is True
+    # The input is left alone: the row is derived from it after this.
+    assert material["reports"]["current.json"]["target"]["base_url"].startswith("https://acct")
+
+    provenance = json.loads((folder / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["issue"] == 7
+    assert provenance["ranIn"] == "someone/gateway"
+    assert provenance["ranInOwnerType"] == "User"
+    assert provenance["headSha"] == "a" * 40
+    assert provenance["artifact"]["sha256"] == "b" * 64
+    assert provenance["archivedAt"] == "2026-09-28T12:00:00Z"
+
+
+def test_no_redacted_value_reaches_the_archive_in_any_form(tmp_path):
+    row = _row()
+    intake.write_archive(row, {"reports": {"current.json": _secret_report()}}, root=tmp_path)
+    raw = b"".join(path.read_bytes() for path in (tmp_path / "7").iterdir())
+    for secret in (b"acct-1234", b"tunnel-5678", b"probe-secret-9abc"):
+        assert secret not in raw
+
+
+def test_a_rerun_replaces_the_archive_and_an_oversized_one_is_refused(tmp_path, monkeypatch):
+    row = _row()
+    folder = tmp_path / "7"
+    folder.mkdir()
+    (folder / "left-over.json").write_text("{}", encoding="utf-8")
+    intake.write_archive(row, {"reports": {"current.json": _operator_run()}}, root=tmp_path)
+    assert sorted(p.name for p in folder.iterdir()) == ["provenance.json", "reports.json"]
+
+    monkeypatch.setattr(intake, "MAX_ARCHIVE_BYTES", 100)
+    with pytest.raises(RuntimeError, match="larger than the archive keeps"):
+        intake.write_archive(row, {"reports": {"current.json": _operator_run()}}, root=tmp_path)
+
+
+def test_the_artifact_read_is_recorded_with_its_digest():
+    data = _zip_of({"current.json": _operator_run()})
+    sink = {}
+    reports, _ = intake.collect_reports(
+        "o", "r", "42",
+        api=lambda u: {"artifacts": [{"id": 3, "name": "pii-leak-benchmark", "expired": False}]},
+        download=lambda *a: data,
+        sink=sink,
+    )
+    assert "current.json" in reports
+    assert sink == {"name": "pii-leak-benchmark", "id": 3, "bytes": len(data),
+                    "sha256": intake.hashlib.sha256(data).hexdigest()}
+
+
+@pytest.mark.parametrize("owner_type,recorded", [("Organization", "Organization"),
+                                                 ("User", "User"), ("Bot", "")])
+def test_the_run_records_who_owns_the_repository_it_ran_in(owner_type, recorded):
+    payload = _run_payload(branch="main")
+    payload.update({"head_sha": "c" * 40, "path": ".github/workflows/w.yml",
+                    "created_at": "2026-09-27T01:02:03Z"})
+    payload["repository"]["owner"] = {"type": owner_type}
+    sink = {}
+    intake.classify_provenance("https://github.com/o/r/actions/runs/42", fetch=_fetch(payload), sink=sink)
+    assert sink == {"runId": 42, "headSha": "c" * 40, "workflowPath": ".github/workflows/w.yml",
+                    "runCreatedAt": "2026-09-27T01:02:03Z", "ownerType": recorded}
+
+
+def test_process_hands_the_archive_what_it_read():
+    def classify(url, sink=None):
+        sink.update({"ownerType": "Organization", "runId": 777})
+        return "submitted-fork", "A fork.", ("friend", "gateway", "777")
+
+    def collect(*where, sink=None):
+        sink.update({"name": "source-reproduction", "sha256": "d" * 64})
+        return _bundle(), "Read from the artifact."
+
+    material = {}
+    issue = {"number": 5, "body": RUN, "user": {"login": "friend"},
+             "created_at": "2026-09-26T00:00:00Z"}
+    row, _, _, problems = intake.process(issue, classify=classify, collect=collect, material=material)
+    assert problems == []
+    assert row["_submission"]["ranInOwnerType"] == "Organization"
+    assert set(material["reports"]) == set(_bundle())
+    assert material["artifact"]["sha256"] == "d" * 64
+
+
+def test_publishing_allows_this_issues_archive_and_nothing_else(monkeypatch):
+    rows = "website/src/data/submitted-rows.json"
+    own = ["benchmarks/results/submitted/7/reports.json",
+           "benchmarks/results/submitted/7/provenance.json"]
+    calls = []
+    monkeypatch.setattr(intake.subprocess, "run", _fake_git([rows, *own], calls))
+    intake.publish(_row(), 7)
+    assert any(" ".join(call).startswith("gh pr create") for call in calls)
+
+    for extra in ("benchmarks/results/submitted/8/reports.json",
+                  "benchmarks/results/submitted/7/evil.json",
+                  "benchmarks/results/v2-response-split/litellm-presidio.json"):
+        calls = []
+        monkeypatch.setattr(intake.subprocess, "run", _fake_git([rows, *own, extra], calls))
+        with pytest.raises(RuntimeError, match="refusing to publish"):
+            intake.publish(_row(), 7)
+        assert not any("push" in call for call in calls)
+
+
+def test_a_row_is_not_published_when_its_report_cannot_be_kept(tmp_path, monkeypatch):
+    rows = tmp_path / "rows.json"
+    rows.write_text('{"entries": []}', encoding="utf-8")
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"issue": {"number": 7}}), encoding="utf-8")
+    monkeypatch.setattr(intake, "ROWS_FILE", rows)
+    monkeypatch.setattr(intake, "process", lambda issue, material=None: (_row(), "r", "e", []))
+    monkeypatch.setattr(intake, "wait_for_earlier_rows", lambda number: None)
+    monkeypatch.setattr(intake, "_run", lambda *command, cwd=None: None)
+
+    def cannot_keep(row, material):
+        raise RuntimeError("the reports are larger than the archive keeps")
+
+    monkeypatch.setattr(intake, "write_archive", cannot_keep)
+    published = []
+    monkeypatch.setattr(intake, "publish", lambda row, number: published.append(row))
+    said = []
+    monkeypatch.setattr(intake, "comment", lambda number, text: said.append(text) or True)
+    monkeypatch.setattr(intake, "label", lambda number, name: True)
+
+    assert intake.main(["--event-path", str(event)]) == 1
+    assert published == []
+    assert json.loads(rows.read_text(encoding="utf-8"))["entries"] == []
+    assert "could not be kept" in said[0]

@@ -31,7 +31,9 @@
         "submitter": "ninadphalak",
         "ranIn": "ninadphalak/llm-shield-intake-test",
         "evidence": "Read from the artifact `pii-leak-benchmark` on that run.",
-        "notes": "End-to-end test of the automated results-wall intake. This is the negative control: a direct connection with no gateway in the middle, so every data type is expected to leak. Retriggering intake after switching publication to the pull-request path. Retrigger: Actions may now open pull requests."
+        "notes": "End-to-end test of the automated results-wall intake. This is the negative control: a direct connection with no gateway in the middle, so every data type is expected to leak. Retriggering intake after switching publication to the pull-request path. Retrigger: Actions may now open pull requests.",
+        "archive": "benchmarks/results/submitted/56",
+        "ranInOwnerType": "User"
       }
     },
     {
@@ -59,7 +61,9 @@
         "submitter": "ninadphalak",
         "ranIn": "ninadphalak/gateway",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": "Public fork source-build reproduction. The CI run is red for a measured leak; the verified combined artifact is retained. Intake retry after content-scan fix."
+        "notes": "Public fork source-build reproduction. The CI run is red for a measured leak; the verified combined artifact is retained. Intake retry after content-scan fix.",
+        "archive": "benchmarks/results/submitted/101",
+        "ranInOwnerType": "User"
       }
     },
     {
@@ -87,7 +91,9 @@
         "submitter": "ninadphalak",
         "ranIn": "ninadphalak/Guardrails",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": ""
+        "notes": "",
+        "archive": "benchmarks/results/submitted/107",
+        "ranInOwnerType": "User"
       },
       "responseInconclusive": 8
     },
@@ -116,7 +122,9 @@
         "submitter": "ninadphalak",
         "ranIn": "ninadphalak/gateway",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": ""
+        "notes": "",
+        "archive": "benchmarks/results/submitted/108",
+        "ranInOwnerType": "User"
       }
     },
     {
@@ -144,7 +152,9 @@
         "submitter": "teg0011",
         "ranIn": "teg0011/gateway",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": ""
+        "notes": "",
+        "archive": "benchmarks/results/submitted/125",
+        "ranInOwnerType": "User"
       }
     },
     {
@@ -172,7 +182,9 @@
         "submitter": "teg0011",
         "ranIn": "teg0011/litellm",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": ""
+        "notes": "",
+        "archive": "benchmarks/results/submitted/128",
+        "ranInOwnerType": "User"
       }
     },
     {
@@ -201,7 +213,9 @@
         "submitter": "teg0011",
         "ranIn": "teg0011/Guardrails",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": ""
+        "notes": "",
+        "archive": "benchmarks/results/submitted/129",
+        "ranInOwnerType": "User"
       }
     },
     {
@@ -229,7 +243,9 @@
         "submitter": "teg0011",
         "ranIn": "teg0011/LLM-Shield-Proxy",
         "evidence": "Read from the artifact `source-reproduction` on that run.",
-        "notes": ""
+        "notes": "",
+        "archive": "benchmarks/results/submitted/133",
+        "ranInOwnerType": "User"
       }
     }
   ]
