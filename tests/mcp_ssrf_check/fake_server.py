@@ -64,6 +64,8 @@ class FakeMcpServer:
         sse: bool = False,
         tool_name: str = "fetch",
         url_argument: str = "url",
+        port: int = 0,
+        protocol_version: str = STATEFUL,
     ) -> None:
         self.stateless = stateless
         self.sessions = sessions and not stateless
@@ -80,10 +82,12 @@ class FakeMcpServer:
         self.live_sessions: set = set()
         self.terminated_sessions: set = set()
         self.fetched_urls: list = []
+        self.authorization_headers: list = []
         self._lock = threading.Lock()
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
-        self.port = 0
+        self.port = port
+        self.protocol_version = protocol_version
 
     @property
     def url(self) -> str:
@@ -136,6 +140,8 @@ class FakeMcpServer:
                 self.wfile.write(body)
 
             def _gate(self) -> bool:
+                with owner._lock:
+                    owner.authorization_headers.append(self.headers.get("Authorization"))
                 allowed_hosts = {f"127.0.0.1:{owner.port}", f"localhost:{owner.port}", f"[::1]:{owner.port}"}
                 if owner.validate_host and self.headers.get("Host") not in allowed_hosts:
                     self._reject(421)
@@ -208,7 +214,7 @@ class FakeMcpServer:
                         with owner._lock:
                             owner.live_sessions.add(sid)
                         headers["Mcp-Session-Id"] = sid
-                    result = {"protocolVersion": STATEFUL, "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "0"}}
+                    result = {"protocolVersion": owner.protocol_version, "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "0"}}
                     self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": result}, headers, as_sse=owner.sse)
                     return
                 if owner.sessions and owner.check_session:
@@ -243,7 +249,7 @@ class FakeMcpServer:
                     return
                 self._error(404, req_id, -32601, "method not found")
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
         self._server.daemon_threads = True
         self.port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
@@ -273,3 +279,28 @@ class FakeMcpServer:
             return {"content": [{"type": "text", "text": f"fetch failed: {type(exc).__name__}"}], "isError": True}
         # The marker lets a test prove that tool output never reaches the checker's report.
         return {"content": [{"type": "text", "text": f"fetched {size} bytes TOOL-OUTPUT-MARKER"}]}
+
+
+MODES = {
+    "hardened": {},
+    "weak": {"validate_host": False, "validate_origin": False, "check_session": False, "fetch_guard": "none"},
+}
+
+
+def main() -> None:
+    """Serve one mode in the foreground, for the CI job that runs the GitHub Action against it."""
+    import argparse
+    import time
+
+    parser = argparse.ArgumentParser(description="Serve the checker's test double on loopback.")
+    parser.add_argument("--mode", choices=sorted(MODES), required=True)
+    parser.add_argument("--port", type=int, required=True)
+    args = parser.parse_args()
+    with FakeMcpServer(port=args.port, **MODES[args.mode]) as server:
+        print(f"{args.mode} test double at {server.url}", flush=True)
+        while True:
+            time.sleep(3600)
+
+
+if __name__ == "__main__":
+    main()

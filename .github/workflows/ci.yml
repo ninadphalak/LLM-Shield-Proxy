@@ -439,3 +439,89 @@ jobs:
         run: |
           npm pack --dry-run --json --ignore-scripts > pack.json
           node scripts/check-pack.cjs pack.json
+
+  mcp-ssrf-check-action:
+    name: mcp-ssrf-check action (hardened passes, weak fails)
+    runs-on: ubuntu-latest
+    # The action is what a server maintainer puts in their own CI. It runs here from the
+    # working tree against the test double in both modes, so the job proves the action
+    # passes a server that validates and fails one that does not.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Start the hardened and the weak test double
+        run: |
+          python tests/mcp_ssrf_check/fake_server.py --mode hardened --port 18080 > hardened-server.log 2>&1 &
+          python tests/mcp_ssrf_check/fake_server.py --mode weak --port 18081 > weak-server.log 2>&1 &
+          python - <<'PY'
+          import socket, time
+          deadline = time.monotonic() + 30
+          for port in (18080, 18081):
+              while True:
+                  try:
+                      socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                      break
+                  except OSError:
+                      if time.monotonic() > deadline:
+                          raise SystemExit(f"test double on {port} did not start")
+                      time.sleep(0.2)
+          PY
+
+      - name: Hardened server must pass
+        id: hardened
+        uses: ./mcp-ssrf-check
+        with:
+          url: http://127.0.0.1:18080/mcp
+          fetch-tool: fetch
+          redirect-target: 127.0.0.1
+          fail-on: inconclusive
+          source: ./mcp-ssrf-check
+          json-out: hardened-report.json
+          artifact-name: mcp-ssrf-check-hardened
+
+      - name: Weak server must fail
+        id: weak
+        continue-on-error: true
+        uses: ./mcp-ssrf-check
+        with:
+          url: http://127.0.0.1:18081/mcp
+          fetch-tool: fetch
+          redirect-target: 127.0.0.1
+          source: ./mcp-ssrf-check
+          json-out: weak-report.json
+          artifact-name: mcp-ssrf-check-weak
+
+      - name: Assert both outcomes
+        env:
+          HARDENED_OUTCOME: ${{ steps.hardened.outputs.outcome }}
+          WEAK_STEP: ${{ steps.weak.outcome }}
+          WEAK_OUTCOME: ${{ steps.weak.outputs.outcome }}
+          WEAK_EXIT_CODE: ${{ steps.weak.outputs.exit-code }}
+        run: |
+          set -euo pipefail
+          echo "hardened=$HARDENED_OUTCOME weak step=$WEAK_STEP weak=$WEAK_OUTCOME exit=$WEAK_EXIT_CODE"
+          test "$HARDENED_OUTCOME" = "pass"
+          test "$WEAK_STEP" = "failure"
+          test "$WEAK_OUTCOME" = "fail"
+          test "$WEAK_EXIT_CODE" = "1"
+          python - <<'PY'
+          import json
+          hardened = {c["id"]: c["status"] for c in json.load(open("hardened-report.json"))["checks"]}
+          weak = {c["id"]: c["status"] for c in json.load(open("weak-report.json"))["checks"]}
+          print("hardened:", hardened)
+          print("weak:", weak)
+          assert "fail" not in hardened.values() and "inconclusive" not in hardened.values(), hardened
+          for check in ("host-header", "origin-header", "session-binding", "tool-url-ssrf"):
+              assert hardened[check] == "pass", (check, hardened[check])
+              assert weak[check] == "fail", (check, weak[check])
+          PY
+
+      - name: Server logs
+        if: always()
+        run: cat hardened-server.log weak-server.log

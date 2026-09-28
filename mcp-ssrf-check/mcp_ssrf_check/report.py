@@ -18,6 +18,10 @@ EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_INCONCLUSIVE = 2
 
+# Characters CommonMark lets a backslash escape, which covers table pipes, links, images,
+# HTML tags, emphasis and code spans.
+_MARKDOWN_SPECIAL = set("\\`*_{}[]()<>#+-.!|~&\"'")
+
 
 @dataclass
 class CheckResult:
@@ -68,6 +72,39 @@ class Report:
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(self.to_dict(), fh, indent=2, sort_keys=True)
             fh.write("\n")
+
+    def render_markdown(self) -> str:
+        """The same table as ``render_text``, for a CI job summary such as ``$GITHUB_STEP_SUMMARY``.
+
+        The only text here the server under test chooses is its protocol version, which
+        ``open_lifecycle`` accepts only in date form, so it cannot carry a bare URL that GitHub would
+        autolink. Every interpolated string is also escaped, so none can leave its cell or render as
+        a link, image, HTML tag, emphasis or code span.
+        """
+
+        def cell(text: str) -> str:
+            text = " ".join(text.splitlines())
+            return "".join("\\" + ch if ch in _MARKDOWN_SPECIAL else ch for ch in text)
+
+        counts = self.summary()
+        lines = [
+            f"### mcp-ssrf-check {cell(self.version)}",
+            "",
+            f"Target {cell(self.target)}, lifecycle {cell(self.lifecycle or 'unknown')} "
+            f"({cell(self.protocol_version or 'no version negotiated')}).",
+            "",
+            "| Result | Check | Detail |",
+            "| :--- | :--- | :--- |",
+        ]
+        for check in self.checks:
+            lines.append(f"| {cell(check.status.upper())} | {cell(check.id)} | {cell(check.detail)} |")
+        lines.append("")
+        lines.append("Summary: " + ", ".join(f"{k} {v}" for k, v in counts.items() if v) + ".")
+        return "\n".join(lines) + "\n"
+
+    def write_markdown(self, path: str) -> None:
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(self.render_markdown())
 
     def render_text(self) -> str:
         width = max([len(c.id) for c in self.checks] + [8])

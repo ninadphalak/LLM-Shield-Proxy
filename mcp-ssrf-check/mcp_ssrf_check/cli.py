@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -24,6 +25,10 @@ from .transport import TargetUnreachable, open_lifecycle
 
 CHECK_NAMES = ("host", "origin", "origin-null", "session", "ssrf")
 
+# Read when --bearer is absent, so CI can pass a secret without putting it in argv, where
+# every other process on the runner can read it.
+BEARER_ENV = "MCP_SSRF_CHECK_BEARER"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -35,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--url", required=True, help="the server's MCP endpoint, for example http://127.0.0.1:8000/mcp")
     parser.add_argument("--lifecycle", choices=("auto", "stateless", "stateful"), default="auto")
-    parser.add_argument("--bearer", help="bearer token sent as Authorization on every request")
+    parser.add_argument(
+        "--bearer", help=f"bearer token sent as Authorization on every request (default: ${BEARER_ENV}, if set)"
+    )
     parser.add_argument("--header", action="append", default=[], metavar="NAME=VALUE", help="extra header, repeatable")
     parser.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds")
     parser.add_argument("--skip", default="", help="comma-separated checks to skip: " + ", ".join(CHECK_NAMES))
@@ -55,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--settle", type=float, default=0.5, help="seconds to wait for a callback after each tool call")
     parser.add_argument("--no-ipv6", action="store_true", help="do not bind the listener on ::1")
     parser.add_argument("--json-out", help="write the report as JSON to this path")
+    parser.add_argument("--markdown-out", help="write the result table as Markdown to this path (for a CI job summary)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -76,8 +84,9 @@ def run(args: argparse.Namespace) -> Report:
         raise SystemExit(f"--skip names unknown checks: {', '.join(sorted(unknown))}")
 
     headers = _parse_headers(args.header)
-    if args.bearer:
-        headers["Authorization"] = f"Bearer {args.bearer}"
+    bearer = args.bearer or os.environ.get(BEARER_ENV)
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     checks: List[CheckResult] = []
@@ -143,6 +152,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.json_out:
         report.write_json(args.json_out)
         print(f"report written to {args.json_out}")
+    if args.markdown_out:
+        report.write_markdown(args.markdown_out)
     return report.exit_code()
 
 
