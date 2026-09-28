@@ -68,14 +68,27 @@ function daysSince(date: string): number | null {
  */
 const HANDLE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 
-function submissionOf(row: ResultRow): {issue?: number; submitter?: string} {
+function submissionOf(row: ResultRow): {
+  issue?: number;
+  submitter?: string;
+  archive?: string;
+  ownerType?: 'User' | 'Organization';
+} {
   const raw = row._submission;
   if (!raw || typeof raw !== 'object') return {};
   const issue = Number.parseInt(String(raw.issue), 10);
   const submitter = typeof raw.submitter === 'string' ? raw.submitter : '';
+  const valid = Number.isSafeInteger(issue) && issue > 0;
   return {
-    issue: Number.isSafeInteger(issue) && issue > 0 ? issue : undefined,
+    issue: valid ? issue : undefined,
     submitter: HANDLE.test(submitter) ? submitter : undefined,
+    // Rebuilt from the issue number rather than read, so no other path can shape the link.
+    archive:
+      valid && raw.archive === `benchmarks/results/submitted/${issue}` ? raw.archive : undefined,
+    ownerType:
+      raw.ranInOwnerType === 'User' || raw.ranInOwnerType === 'Organization'
+        ? raw.ranInOwnerType
+        : undefined,
   };
 }
 
@@ -222,6 +235,9 @@ type Run = {
   config: string;
   issue?: number;
   submitter?: string;
+  /** The repository directory holding the reports this run's numbers were read from. */
+  archive?: string;
+  ownerType?: 'User' | 'Organization';
   states: Record<CheckKey, CheckState>;
 };
 
@@ -367,7 +383,7 @@ function groupRuns(
     const gateway = gatewayKey(row.project);
     // The control keeps its whole name as its key and is marked so it never becomes a proxy.
     const key = gateway ? `${gateway}|${canonical}` : `\u0000${normalise(row.project)}|${canonical}`;
-    const {issue, submitter} = submissionOf(row);
+    const {issue, submitter, archive, ownerType} = submissionOf(row);
     const run: Run = {
       row,
       id: ids.get(row) ?? `${prefix}result-${order}`,
@@ -376,6 +392,8 @@ function groupRuns(
       config,
       issue,
       submitter,
+      archive,
+      ownerType,
       states: checkStates(row),
     };
     byKey.set(key, [...(byKey.get(key) ?? []), run]);
@@ -872,8 +890,14 @@ function RunLine({
   /** On the example, this run carries the "who ran it" and "where it ran" numbers. */
   annotate?: boolean;
 }): ReactNode {
-  const {row, submitter, issue} = run;
+  const {row, submitter, issue, archive, ownerType} = run;
   const where = WHERE[row.provenance];
+  const owner =
+    ownerType === 'Organization'
+      ? ' The repository it ran in belongs to an organisation.'
+      : ownerType === 'User'
+        ? ' The repository it ran in belongs to a person.'
+        : '';
   const passed = checksPassed(row);
   const maintainer = submitter && BENCHMARK_MAINTAINERS.has(submitter.toLowerCase());
   const who = useMark(9);
@@ -929,7 +953,7 @@ function RunLine({
         </span>
         <span
           className={clsx(styles.chip, styles.whereChip, chipMark.marked)}
-          title={where.hint}
+          title={where.hint + owner}
           {...chipMark.attrs}>
           {chipMark.mark}
           {where.label}
@@ -945,6 +969,14 @@ function RunLine({
             report
           </Link>
         ) : null}
+        {archive && (
+          <Link
+            href={safeHref(`${REPO}/tree/main/${archive}`)}
+            external
+            title="A copy of the reports these numbers were read from, kept in this repository after the CI run's own files expire">
+            saved report
+          </Link>
+        )}
         {issue && (
           <Link href={safeHref(`${REPO}/issues/${issue}`)} external title="The submission issue">
             #{issue}
