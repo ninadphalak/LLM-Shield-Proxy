@@ -33,6 +33,8 @@
   --w-on-link: #ffffff;
   --w-callout: #8250df;
   --w-callout-bg: #fbefff;
+  --w-tip-bg: #1f2328;
+  --w-tip-ink: #ffffff;
 
   color: var(--w-ink);
 }
@@ -61,6 +63,8 @@
   --w-on-link: #0b1320;
   --w-callout: #d2a8ff;
   --w-callout-bg: rgba(163, 113, 247, 0.16);
+  --w-tip-bg: #f0f3f6;
+  --w-tip-ink: #0b1320;
 }
 
 .tokens a {
@@ -1468,6 +1472,88 @@ a.person:hover {
 
 .exampleLegend .legendNumber {
   flex: none;
+}
+
+/* ---------------------------------------------------------------- tips */
+
+/*
+ * Every labelled part of a card explains itself on hover, keyboard focus or tap, so a reader
+ * never has to learn the card from another page. Hidden with `display: none`, not opacity, so
+ * a tip near the edge adds no sideways scroll while it is not showing.
+ */
+.tipHost {
+  position: relative;
+}
+
+.tipHost:focus-visible {
+  outline: 2px solid var(--w-link);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.tip {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: min(19rem, calc(100vw - 3rem));
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: var(--w-tip-bg);
+  color: var(--w-tip-ink);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  overflow-wrap: normal;
+  pointer-events: none;
+}
+
+.tipHost:hover > .tip,
+.tipHost:focus-visible > .tip,
+.tipHost:focus-within > .tip {
+  display: block;
+}
+
+/* The card being read sits above its neighbours, so a tip that leaves it is not covered. */
+.card:hover,
+.card:focus-within {
+  z-index: 2;
+}
+
+.legendTip {
+  flex-basis: 100%;
+  color: var(--w-ink);
+  font-weight: 600;
+}
+
+/*
+ * On a phone there is no room beside a part, so the tip becomes a bar along the bottom of the
+ * screen, shown while the part is tapped.
+ */
+@media (max-width: 600px), (hover: none) {
+  .tip {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+    font-size: 0.88rem;
+  }
+
+  /* A lifted card would become the fixed tip's frame instead of the screen. */
+  .cards > .card:hover {
+    transform: none;
+  }
 }
 
 /* ---------------------------------------------------------------- motion */
