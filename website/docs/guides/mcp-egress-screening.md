@@ -94,6 +94,16 @@ pip install mcp-ssrf-check
 mcp-ssrf-check --url http://127.0.0.1:8000/mcp --fetch-tool fetch --url-argument url
 ```
 
+In GitHub Actions, start the server in an earlier step and use the action. It writes the result table to the job summary, uploads the JSON report, and fails the step when a check fails.
+
+```yaml
+- uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-v0.2.0
+  with:
+    url: http://127.0.0.1:8000/mcp
+    fetch-tool: fetch
+    bearer: ${{ secrets.MCP_TOKEN }}
+```
+
 ## Related reading
 
 - [MCP Tool Policy Configuration](/docs/guides/mcp-tool-governance): the policy schema and client recipes for the route.

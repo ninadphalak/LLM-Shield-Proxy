@@ -1,0 +1,216 @@
+name: "MCP SSRF check"
+description: >-
+  Check an MCP server you operate for missing Host and Origin validation, session ids it
+  never issued, and URL-fetching tools that reach loopback. Writes a table to the job
+  summary and uploads the JSON report as an artifact.
+author: "Ninad Phalak"
+
+# Usage: `uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-vX.Y.Z`. The tag and the
+# default `source` below name the same version; tests/mcp_ssrf_check/test_action.py keeps them
+# equal to mcp-ssrf-check/pyproject.toml.
+#
+# The server must already be running and reachable from the runner. The checker opens a
+# callback listener on the runner's loopback, so a server in a container needs
+# `callback-host` set to an address that reaches the runner.
+
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  url:
+    description: "The server's MCP endpoint, for example http://127.0.0.1:8000/mcp."
+    required: true
+  lifecycle:
+    description: "auto, stateless or stateful."
+    required: false
+    default: "auto"
+  bearer:
+    description: "Bearer token sent as Authorization on every request. Pass a secret; it goes to the checker through the environment, never argv."
+    required: false
+    default: ""
+  fetch-tool:
+    description: "Name of a tool that fetches a URL. Enables the SSRF check."
+    required: false
+    default: ""
+  url-argument:
+    description: "The tool argument that carries the URL."
+    required: false
+    default: "url"
+  redirect-target:
+    description: "Enables the redirect probe: an address the server should refuse when asked directly, for example 127.0.0.1."
+    required: false
+    default: ""
+  callback-host:
+    description: "Host the server should use to reach the checker's listener."
+    required: false
+    default: "127.0.0.1"
+  skip:
+    description: "Comma-separated checks to skip: host, origin, origin-null, session, ssrf."
+    required: false
+    default: ""
+  json-out:
+    description: "Path for the JSON report."
+    required: false
+    default: "mcp-ssrf-check-report.json"
+  fail-on:
+    description: >-
+      fail: the step fails when a check fails. inconclusive: it also fails when a check is
+      inconclusive. Under either setting the step fails when the baseline request was not
+      accepted, because then nothing was checked.
+    required: false
+    default: "fail"
+  artifact-name:
+    description: "Name of the uploaded report artifact. Set to an empty string to skip the upload."
+    required: false
+    default: "mcp-ssrf-check-report"
+  python-version:
+    description: "Python used to run the checker."
+    required: false
+    default: "3.12"
+  source:
+    description: "What pip installs. The default is the version this tag was released with; a path such as ./mcp-ssrf-check runs a working tree."
+    required: false
+    default: "mcp-ssrf-check==0.2.0"
+
+outputs:
+  outcome:
+    description: "pass, fail or inconclusive."
+    value: ${{ steps.run.outputs.outcome }}
+  exit-code:
+    description: "The checker's exit code: 0 no failure, 1 a check failed, 2 inconclusive."
+    value: ${{ steps.run.outputs.exit-code }}
+  report-path:
+    description: "Path to the JSON report."
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install the checker
+      shell: bash
+      env:
+        CHECKER_SOURCE: ${{ inputs.source }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        # Standard library plus httpx.
+        python -m pip install "$CHECKER_SOURCE"
+        mcp-ssrf-check --version
+
+    - name: Run the checks
+      id: run
+      shell: bash
+      env:
+        MCP_SSRF_CHECK_BEARER: ${{ inputs.bearer }}
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_LIFECYCLE: ${{ inputs.lifecycle }}
+        INPUT_FETCH_TOOL: ${{ inputs.fetch-tool }}
+        INPUT_URL_ARGUMENT: ${{ inputs.url-argument }}
+        INPUT_REDIRECT_TARGET: ${{ inputs.redirect-target }}
+        INPUT_CALLBACK_HOST: ${{ inputs.callback-host }}
+        INPUT_SKIP: ${{ inputs.skip }}
+        INPUT_JSON_OUT: ${{ inputs.json-out }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_FAIL_ON" in
+          fail|inconclusive) ;;
+          *) echo "::error::fail-on must be fail or inconclusive, got '$INPUT_FAIL_ON'"; exit 2 ;;
+        esac
+        # A literal token (not a secret) would otherwise appear in the log if anything echoed it.
+        if [ -n "$MCP_SSRF_CHECK_BEARER" ]; then
+          echo "::add-mask::$MCP_SSRF_CHECK_BEARER"
+        fi
+        summary="$RUNNER_TEMP/mcp-ssrf-check-summary.md"
+        rm -f "$INPUT_JSON_OUT" "$summary"
+        args=(
+          --url "$INPUT_URL"
+          --lifecycle "$INPUT_LIFECYCLE"
+          --url-argument "$INPUT_URL_ARGUMENT"
+          --callback-host "$INPUT_CALLBACK_HOST"
+          --json-out "$INPUT_JSON_OUT"
+          --markdown-out "$summary"
+        )
+        # `if`, not `[ ... ] && ...`: under `set -e` a false test ending a line exits the step.
+        if [ -n "$INPUT_FETCH_TOOL" ]; then
+          args+=(--fetch-tool "$INPUT_FETCH_TOOL")
+        fi
+        if [ -n "$INPUT_REDIRECT_TARGET" ]; then
+          args+=(--redirect-target "$INPUT_REDIRECT_TARGET")
+        fi
+        if [ -n "$INPUT_SKIP" ]; then
+          args+=(--skip "$INPUT_SKIP")
+        fi
+        # The bearer reaches the checker as MCP_SSRF_CHECK_BEARER, never as an argument.
+        set +e
+        mcp-ssrf-check "${args[@]}"
+        status=$?
+        set -e
+        echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+        echo "report=$INPUT_JSON_OUT" >> "$GITHUB_OUTPUT"
+        if [ -f "$summary" ]; then
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        # The checker could not produce a report (bad input, or the connection failed
+        # outside a check): nothing was measured, so this is never a pass.
+        if [ ! -f "$INPUT_JSON_OUT" ]; then
+          echo "outcome=inconclusive" >> "$GITHUB_OUTPUT"
+          echo "decision=error" >> "$GITHUB_OUTPUT"
+          echo "::error::mcp-ssrf-check exited $status without writing a report."
+          exit 0
+        fi
+        python - "$INPUT_JSON_OUT" "$INPUT_FAIL_ON" <<'PY' >> "$GITHUB_OUTPUT"
+        import json, sys
+
+        report = json.load(open(sys.argv[1], encoding="utf-8"))
+        fail_on = sys.argv[2]
+        statuses = {c["id"]: c["status"] for c in report["checks"]}
+        if "fail" in statuses.values():
+            outcome = "fail"
+        elif "inconclusive" in statuses.values():
+            outcome = "inconclusive"
+        else:
+            outcome = "pass"
+        if outcome == "fail" or statuses.get("baseline") != "pass":
+            decision = "error"
+        elif outcome == "inconclusive":
+            decision = "error" if fail_on == "inconclusive" else "warning"
+        else:
+            decision = "ok"
+        print(f"outcome={outcome}")
+        print(f"decision={decision}")
+        PY
+
+    - name: Upload the report
+      if: ${{ always() && inputs.artifact-name != '' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.json-out }}
+        if-no-files-found: warn
+        retention-days: 90
+
+    - name: Apply fail-on
+      shell: bash
+      env:
+        RUN_OUTCOME: ${{ steps.run.outputs.outcome }}
+        RUN_DECISION: ${{ steps.run.outputs.decision }}
+        RUN_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        set -euo pipefail
+        case "$RUN_DECISION" in
+          ok) ;;
+          warning)
+            echo "::warning::mcp-ssrf-check was inconclusive; see the job summary. Set fail-on: inconclusive to fail the step on this." ;;
+          *)
+            echo "::error::mcp-ssrf-check outcome $RUN_OUTCOME; see the job summary."
+            # The checker's own code when it has one, so callers can tell 1 from 2.
+            if [ "${RUN_EXIT_CODE:-0}" != "0" ]; then exit "$RUN_EXIT_CODE"; fi
+            exit 1 ;;
+        esac

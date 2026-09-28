@@ -69,6 +69,32 @@ class Report:
             json.dump(self.to_dict(), fh, indent=2, sort_keys=True)
             fh.write("\n")
 
+    def render_markdown(self) -> str:
+        """The same table as ``render_text``, for a CI job summary such as ``$GITHUB_STEP_SUMMARY``."""
+
+        def cell(text: str) -> str:
+            return text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+        counts = self.summary()
+        lines = [
+            f"### mcp-ssrf-check {self.version}",
+            "",
+            f"Target `{cell(self.target).replace('`', '')}`, lifecycle {self.lifecycle or 'unknown'} "
+            f"({self.protocol_version or 'no version negotiated'}).",
+            "",
+            "| Result | Check | Detail |",
+            "| :--- | :--- | :--- |",
+        ]
+        for check in self.checks:
+            lines.append(f"| {check.status.upper()} | `{check.id}` | {cell(check.detail)} |")
+        lines.append("")
+        lines.append("Summary: " + ", ".join(f"{k} {v}" for k, v in counts.items() if v) + ".")
+        return "\n".join(lines) + "\n"
+
+    def write_markdown(self, path: str) -> None:
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(self.render_markdown())
+
     def render_text(self) -> str:
         width = max([len(c.id) for c in self.checks] + [8])
         lines = [

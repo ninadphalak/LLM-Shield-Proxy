@@ -74,23 +74,46 @@ report is meant to be uploaded as a CI artifact.
 
 ## In CI
 
+The GitHub Action installs the checker, runs it, writes the result table to the job summary,
+uploads the JSON report as an artifact, and fails the step when a check fails. Start the server
+in an earlier step; the action does not start it.
+
 ```yaml
 - name: Start the server under test
   run: |
     python -m my_mcp_server --port 8000 &
     sleep 2
 - name: Check Host, Origin, sessions and URL-fetching SSRF
-  run: |
-    pip install mcp-ssrf-check
-    mcp-ssrf-check --url http://127.0.0.1:8000/mcp \
-      --fetch-tool fetch --url-argument url \
-      --json-out mcp-ssrf-check.json
-- uses: actions/upload-artifact@v4
-  if: always()
+  uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-v0.2.0
   with:
-    name: mcp-ssrf-check
-    path: mcp-ssrf-check.json
+    url: http://127.0.0.1:8000/mcp
+    fetch-tool: fetch
+    url-argument: url
+    bearer: ${{ secrets.MCP_TOKEN }}
 ```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `url` | required | the MCP endpoint |
+| `lifecycle` | `auto` | `auto`, `stateless` or `stateful` |
+| `bearer` | empty | sent as `Authorization: Bearer`; passed through the environment, never argv |
+| `fetch-tool` | empty | enables the SSRF check |
+| `url-argument` | `url` | the tool argument that carries the URL |
+| `redirect-target` | empty | enables the redirect probe |
+| `callback-host` | `127.0.0.1` | the address the server uses to reach the checker's listener |
+| `skip` | empty | comma-separated checks to skip |
+| `json-out` | `mcp-ssrf-check-report.json` | report path |
+| `fail-on` | `fail` | `fail`: the step fails on a `FAIL`. `inconclusive`: also on `INCONCLUSIVE` |
+| `artifact-name` | `mcp-ssrf-check-report` | empty skips the upload |
+| `source` | this tag's version | what pip installs; a path runs a working tree |
+
+Under either `fail-on` setting the step fails when the baseline request was not accepted, since
+then nothing was checked. Outputs: `outcome` (`pass`, `fail`, `inconclusive`), `exit-code` and
+`report-path`. Tags are `mcp-check-vX.Y.Z`, and each installs checker version `X.Y.Z` from PyPI.
+
+Without the action, the CLI does the same with `--json-out` and `--markdown-out` (append the
+Markdown file to `$GITHUB_STEP_SUMMARY`). Set `MCP_SSRF_CHECK_BEARER` instead of passing
+`--bearer`, so the token stays out of the process list.
 
 ## Options
 
@@ -98,6 +121,7 @@ report is meant to be uploaded as a CI artifact.
 --url URL                 the MCP endpoint (required)
 --lifecycle auto|stateless|stateful
 --bearer TOKEN            sent as Authorization: Bearer on every request
+                          (default: $MCP_SSRF_CHECK_BEARER)
 --header NAME=VALUE       extra header, repeatable
 --timeout SECONDS         HTTP timeout (default 10)
 --skip host,origin,origin-null,session,ssrf
@@ -111,6 +135,7 @@ report is meant to be uploaded as a CI artifact.
 --settle SECONDS          wait for a callback after each tool call (default 0.5)
 --no-ipv6                 do not also bind the listener on ::1
 --json-out PATH           write the report as JSON
+--markdown-out PATH       write the result table as Markdown (for a CI job summary)
 ```
 
 ## Why it exists

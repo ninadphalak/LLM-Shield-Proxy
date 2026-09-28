@@ -7,7 +7,7 @@ import pytest
 from mcp_ssrf_check.cli import build_parser, main, run
 from mcp_ssrf_check.report import EXIT_FAIL, EXIT_INCONCLUSIVE, EXIT_OK, FAIL, INCONCLUSIVE, INFO, PASS, SKIP
 
-from .fake_server import FakeMcpServer
+from .fake_server import MODES, FakeMcpServer
 
 
 def _run(url, *extra):
@@ -36,7 +36,7 @@ def test_hardened_stateful_server_passes_every_check():
 
 
 def test_weak_server_fails_host_origin_session_and_ssrf():
-    with FakeMcpServer(validate_host=False, validate_origin=False, check_session=False, fetch_guard="none") as server:
+    with FakeMcpServer(**MODES["weak"]) as server:
         report = _run(server.url, "--fetch-tool", "fetch", "--redirect-target", "127.0.0.1")
     checks = _by_id(report)
     assert checks["host-header"].status == FAIL
@@ -178,3 +178,40 @@ def test_json_report_carries_schema_target_and_summary(tmp_path, capsys):
 def test_unknown_skip_name_is_rejected():
     with pytest.raises(SystemExit):
         _run("http://127.0.0.1:1/mcp", "--skip", "hots")
+
+
+def test_bearer_is_read_from_the_environment_when_not_passed(monkeypatch):
+    monkeypatch.setenv("MCP_SSRF_CHECK_BEARER", "env-token")
+    with FakeMcpServer() as server:
+        _run(server.url, "--skip", "host,origin,origin-null,session")
+    assert server.authorization_headers
+    assert set(server.authorization_headers) == {"Bearer env-token"}
+
+
+def test_bearer_flag_wins_over_the_environment(monkeypatch):
+    monkeypatch.setenv("MCP_SSRF_CHECK_BEARER", "env-token")
+    with FakeMcpServer() as server:
+        _run(server.url, "--bearer", "flag-token", "--skip", "host,origin,origin-null,session")
+    assert set(server.authorization_headers) == {"Bearer flag-token"}
+
+
+def test_markdown_summary_is_one_row_per_check(tmp_path):
+    out = tmp_path / "summary.md"
+    with FakeMcpServer(**MODES["weak"]) as server:
+        code = main(["--url", server.url, "--settle", "0.05", "--markdown-out", str(out)])
+    assert code == EXIT_FAIL
+    text = out.read_text(encoding="utf-8")
+    rows = [line for line in text.splitlines() if line.startswith("| ") and "`" in line]
+    assert len(rows) == 6, rows
+    assert "| FAIL | `host-header` |" in text
+    assert "| SKIP | `tool-url-ssrf` |" in text
+    assert "Summary: " in text
+
+
+def test_markdown_cells_cannot_break_the_table():
+    from mcp_ssrf_check.report import CheckResult, Report
+
+    report = Report("http://x/mcp`|", "stateful", "v", [CheckResult("a", "t", PASS, "one | two\nthree")], "0", "now")
+    row = next(line for line in report.render_markdown().splitlines() if "`a`" in line)
+    assert row == "| PASS | `a` | one \\| two three |"
+    assert "Target `http://x/mcp\\|`" in report.render_markdown()

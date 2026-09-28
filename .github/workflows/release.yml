@@ -82,3 +82,91 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+
+  # mcp-ssrf-check releases: tag `mcp-check-vX.Y.Z`, then publish a GitHub Release on it. The
+  # tag does not start with `v`, so the proxy job above and docker-publish.yml skip it.
+  # Publishing uses PyPI trusted publishing: both indexes must list this repository,
+  # workflow `release.yml` and the environment named below as a trusted publisher.
+  build-mcp-ssrf-check:
+    name: Build and verify mcp-ssrf-check
+    if: startsWith(github.event.release.tag_name, 'mcp-check-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: The tag must name the packaged version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine pyyaml
+          version=$(python -c "import tomllib; print(tomllib.load(open('mcp-ssrf-check/pyproject.toml', 'rb'))['project']['version'])")
+          action_pin=$(python -c "import yaml; print(yaml.safe_load(open('mcp-ssrf-check/action.yml'))['inputs']['source']['default'])")
+          echo "tag=$TAG pyproject=$version action=$action_pin"
+          test "$TAG" = "mcp-check-v$version"
+          test "$action_pin" = "mcp-ssrf-check==$version"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          python -m build mcp-ssrf-check --outdir dist
+          python -m twine check --strict dist/*
+
+      - name: Run the built wheel, not the source tree
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          /tmp/clean/bin/mcp-ssrf-check --version
+          python tests/mcp_ssrf_check/fake_server.py --mode hardened --port 18080 &
+          sleep 2
+          cd /tmp && /tmp/clean/bin/mcp-ssrf-check --url http://127.0.0.1:18080/mcp --fetch-tool fetch
+
+      - name: Keep the distributions for the publish jobs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mcp-ssrf-check-dist
+          path: dist/
+          retention-days: 7
+
+  publish-mcp-ssrf-check-testpypi:
+    name: Publish mcp-ssrf-check to TestPyPI
+    needs: build-mcp-ssrf-check
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mcp-ssrf-check-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # A version already uploaded by hand is not an error.
+          skip-existing: true
+
+  publish-mcp-ssrf-check-pypi:
+    name: Publish mcp-ssrf-check to PyPI
+    needs: publish-mcp-ssrf-check-testpypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mcp-ssrf-check-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          skip-existing: true
