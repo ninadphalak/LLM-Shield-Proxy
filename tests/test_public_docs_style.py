@@ -9,6 +9,8 @@ PUBLIC_ROOT_FILES = (
     "STABILITY.md",
     "LIMITATIONS.md",
     ".github/actions/README.md",
+    "chunk-invariance/README.md",
+    "chunk-invariance-js/README.md",
 )
 PUBLIC_DIRECTORIES = (
     REPO_ROOT / "benchmarks",

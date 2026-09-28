@@ -117,6 +117,8 @@ The first assertion tells you the implementation is wrong. The second tells you 
 
 **What to put in the corpus.** Fixed-length patterns exercise the boundary; variable-length ones exercise the ceiling. Include at least one unbounded pattern, a PEM block or a long JWT, or the suite will pass on an implementation that releases on overflow. Include a value immediately adjacent to non-ASCII text, and a script written without spaces, since a tail bounded by word delimiters grows without limit there.
 
+**As a library.** [`chunk-invariance`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/chunk-invariance) packages the first assertion for Python (PyPI) and TypeScript (npm), with no dependencies. It tries the whole input and every single cut by default, reports the smallest split that fails, and includes design A, design B and a correct hold-back filter as examples.
+
 ## Open questions
 
 - **The latency cost of design 2 is unmeasured across implementations.** The claim that a held tail is a few characters on ordinary prose is plausible and is what the settlement-point implementations report, but no one has published a comparison of time-to-first-token against an unfiltered stream. That number decides whether maintainers accept design 2 or settle for design 1.

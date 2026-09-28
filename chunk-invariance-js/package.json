@@ -1,0 +1,72 @@
+{
+  "name": "chunk-invariance",
+  "version": "0.1.0",
+  "description": "Assert that a streaming filter gives the same output however its input is split into chunks.",
+  "keywords": [
+    "streaming",
+    "testing",
+    "redaction",
+    "guardrails",
+    "chunk-boundary",
+    "vitest",
+    "jest",
+    "node-test"
+  ],
+  "license": "Apache-2.0",
+  "author": "Ninad Phalak <ninadphalak@gmail.com>",
+  "homepage": "https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/chunk-invariance-js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ninadphalak/LLM-Shield-Proxy.git",
+    "directory": "chunk-invariance-js"
+  },
+  "bugs": {
+    "url": "https://github.com/ninadphalak/LLM-Shield-Proxy/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./examples": {
+      "import": {
+        "types": "./dist/esm/examples.d.ts",
+        "default": "./dist/esm/examples.js"
+      },
+      "require": {
+        "types": "./dist/cjs/examples.d.ts",
+        "default": "./dist/cjs/examples.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node scripts/mark-module-types.cjs",
+    "test": "npm run build && node --test test/core.test.mjs test/examples.test.mjs test/require.test.cjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "typescript": "5.9.3"
+  }
+}
