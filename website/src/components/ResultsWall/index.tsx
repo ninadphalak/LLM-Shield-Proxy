@@ -1,4 +1,4 @@
-import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
+import {createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState} from 'react';
 import type {CSSProperties, ReactNode} from 'react';
 import clsx from 'clsx';
 import {useHistory, useLocation} from '@docusaurus/router';
@@ -507,10 +507,58 @@ const REPLICATE_ANY = {
  */
 const ExampleMode = createContext(false);
 
-/** A numbered target for the annotated example. Outside the example it is nothing at all. */
-function useMark(n: number): {attrs: Record<string, number>; mark: ReactNode; marked?: string} {
+/**
+ * What each part of a card means, shown when a reader hovers over it, focuses it or taps it,
+ * so nobody has to learn the card from another page first. The numbers are the same parts the
+ * annotated example labels.
+ */
+const TIPS: Record<number, string> = {
+  1: 'Checks passed out of 3 in this proxy’s latest complete run. Gold is 3 of 3.',
+  2: 'The latest complete run in plain words: what happened, when it ran, which version, and who ran it.',
+  3: 'The request path. The proxy was set to redact personal data before passing the request on. “Yes” means raw data still reached the model provider.',
+  4: 'A value the caller never sent was put into the reply in one piece. “Yes” means it reached the user.',
+  5: 'The same kind of value, split across two chunks of the streamed reply. “Yes” means it got through. A proxy that checks each chunk alone misses these.',
+  6: 'Did callers get their own values back in the reply? “No” means a low leak count may only mean little came back at all.',
+  7: 'People other than the benchmark maintainers who ran this proxy and setup from their own fork. 3 make it replicated.',
+  8: 'The setup that was tested. A proxy tested in several setups has one section for each.',
+  9: 'One run: who ran it, when, and which version or commit.',
+  11: 'Opens step-by-step instructions for running this check on this proxy yourself.',
+};
+
+type TipOptions = {
+  /** The words, when they depend on the run rather than the part. */
+  text?: string;
+  /**
+   * Whether the part itself takes keyboard focus. Off where it would add a tab stop to every
+   * run line, and where the part already holds a link that shows the tip when focused.
+   */
+  focusable?: boolean;
+};
+
+type Marked = {attrs: Record<string, string | number>; mark: ReactNode; marked?: string};
+
+/** A tip for one part: shown on hover, on keyboard focus and on tap, and read as its description. */
+function useTip(text: string, {focusable = true}: TipOptions = {}): Marked {
+  const id = useId();
+  return {
+    attrs: {...(focusable ? {tabIndex: 0} : {}), 'aria-describedby': id},
+    marked: styles.tipHost,
+    mark: (
+      <span role="tooltip" id={id} className={styles.tip}>
+        {text}
+      </span>
+    ),
+  };
+}
+
+/**
+ * One labelled part of a card. On a real card it carries its tip; on the annotated example
+ * it carries its number instead, because the labels beside the example already say it.
+ */
+function useMark(n: number, options: TipOptions = {}): Marked {
   const example = useContext(ExampleMode);
-  if (!example) return {attrs: {}, mark: null};
+  const tip = useTip(options.text ?? TIPS[n] ?? '', options);
+  if (!example) return tip;
   return {
     attrs: {'data-callout': n},
     mark: (
@@ -696,13 +744,17 @@ function Checks({row}: {row: ResultRow}): ReactNode {
 
 /** One run's three checks in a line: a glyph each, a word each for a screen reader. */
 function MiniChecks({states}: {states: Record<CheckKey, CheckState>}): ReactNode {
+  const example = useContext(ExampleMode);
+  const tip = useTip(
+    `Small pips, left to right: ${CHECK_KEYS.map((key) => CHECK_PIP[key]).join(', ')}. ` +
+      '✓ passed, ✕ leaked, ! unclear, – not tested.',
+    {focusable: false},
+  );
   return (
-    <span className={styles.miniChecks}>
+    <span className={clsx(styles.miniChecks, !example && tip.marked)} {...(example ? {} : tip.attrs)}>
+      {!example && tip.mark}
       {CHECK_KEYS.map((key) => (
-        <span
-          key={key}
-          className={clsx(styles.mini, styles[states[key]])}
-          title={`${CHECK_SHORT[key]}: ${STATE[states[key]].word}`}>
+        <span key={key} className={clsx(styles.mini, styles[states[key]])}>
           <span aria-hidden="true">{STATE[states[key]].glyph}</span>
           <span className={styles.srOnly}>
             {CHECK_SHORT[key]}: {STATE[states[key]].word}.{' '}
@@ -899,10 +951,14 @@ function RunLine({
         : '';
   const passed = checksPassed(row);
   const maintainer = submitter && BENCHMARK_MAINTAINERS.has(submitter.toLowerCase());
-  const who = useMark(9);
-  const chip = useMark(10);
-  const whoMark = annotate ? who : {attrs: {}, mark: null, marked: undefined};
-  const chipMark = annotate ? chip : {attrs: {}, mark: null, marked: undefined};
+  const example = useContext(ExampleMode);
+  // Every run line gets its tips, hover and tap only: focus would add two tab stops per run.
+  const who = useMark(9, {focusable: false});
+  const chip = useMark(10, {text: where.hint + owner, focusable: false});
+  // The example numbers these on its first run only.
+  const plain: Marked = {attrs: {}, mark: null, marked: undefined};
+  const whoMark = annotate || !example ? who : plain;
+  const chipMark = annotate || !example ? chip : plain;
   // A run worded differently from its configuration (an alias) shows its own words, so
   // grouping never hides what a submitter wrote.
   const differs = run.config !== '' && normalise(run.config) !== normalise(configLabel);
@@ -952,7 +1008,6 @@ function RunLine({
         </span>
         <span
           className={clsx(styles.chip, styles.whereChip, chipMark.marked)}
-          title={where.hint + owner}
           {...chipMark.attrs}>
           {chipMark.mark}
           {where.label}
@@ -1023,7 +1078,6 @@ function ReplicationSummary({proxy}: {proxy: Proxy}): ReactNode {
   return (
     <div
       className={clsx(styles.replication, config.replicated && styles.replicated, marked)}
-      title={REPLICATION_RULE}
       {...attrs}>
       {mark}
       <Meter count={people} />
@@ -1241,7 +1295,8 @@ function Verdict({proxy}: {proxy: Proxy}): ReactNode {
 }
 
 function Replicate({proxy, docsBase}: {proxy: Proxy; docsBase: string}): ReactNode {
-  const {attrs, mark, marked} = useMark(11);
+  // The button inside already takes focus, and focusing it shows the tip.
+  const {attrs, mark, marked} = useMark(11, {focusable: false});
   const target = REPLICATE[proxy.key] ?? REPLICATE_ANY;
   return (
     <div className={clsx(styles.replicate, marked)} {...attrs}>
@@ -1857,6 +1912,9 @@ function Legend(): ReactNode {
       ))}
       <span className={styles.legendOrder} title="The order of the three small pips on every run line.">
         Small pips, left to right: {CHECK_KEYS.map((key) => CHECK_PIP[key]).join(', ')}
+      </span>
+      <span className={styles.legendTip}>
+        Hover over any part of a card, or tap it on a phone, to see what it means.
       </span>
     </p>
   );
