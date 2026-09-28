@@ -509,44 +509,49 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     return derived
 
 
-NOTE_LIMIT = 300
+# Room for every measurement sentence with all the known entity types named, plus the commit.
+NOTE_LIMIT = 360
 
 
 def write_note(derived: dict[str, Any]) -> str:
     """Build a summary sentence based only on recorded measurements.
 
-    Whole sentences only. A sentence that would take the note past `NOTE_LIMIT` is left out
-    rather than cut, so a published note never ends mid-word ("Built from source co"). The
-    measurements come first, so what drops is the source commit, which the run line on the
-    wall already shows in the version.
+    Whole sentences only, never cut at `NOTE_LIMIT`: cutting made two notes end "Built from
+    source co". Every measurement sentence stays. When they do not fit with the full list of
+    leaked types, the list is given as a count. The source commit, which the run line on the
+    wall already shows in the version, is added only if it still fits.
     """
-    parts: list[str] = []
     leaked = derived.get("_leaked")
-    if leaked is not None:
-        parts.append(
-            "Kept everything out of the provider request."
-            if not leaked
-            else f"Sent {_words(leaked)} to the provider."
-        )
+    rest: list[str] = []
     restored = derived.get("restored")
     if restored == "all":
-        parts.append("Handed every value back to the client.")
+        rest.append("Handed every value back to the client.")
     elif restored == "none":
-        parts.append("Did not give the caller their own data back.")
+        rest.append("Did not give the caller their own data back.")
     if "leakSplitN" in derived and "leakWholeN" in derived:
         if derived["leakSplitN"] > derived["leakWholeN"]:
-            parts.append("Splitting a value across two chunks leaked more of them.")
+            rest.append("Splitting a value across two chunks leaked more of them.")
         elif derived["leakSplitN"] == derived["leakWholeN"]:
-            parts.append("Splitting a value changed nothing.")
+            rest.append("Splitting a value changed nothing.")
     if derived.get("_cases_inconclusive"):
-        parts.append(f"{derived['_cases_inconclusive']} response cases were inconclusive and excluded from the leak-rate denominators.")
+        rest.append(f"{derived['_cases_inconclusive']} response cases were inconclusive and excluded from the leak-rate denominators.")
+
+    def measured(sent: str | None) -> str:
+        return " ".join(([sent] if sent else []) + rest)
+
+    if leaked is None:
+        note = measured(None)
+    elif not leaked:
+        note = measured("Kept everything out of the provider request.")
+    else:
+        note = measured(f"Sent {_words(leaked)} to the provider.")
+        if len(note) > NOTE_LIMIT:
+            count = len(leaked)
+            note = measured(f"Sent {count} data {'type' if count == 1 else 'types'} to the provider.")
     if derived.get("_source_commit"):
-        parts.append(f"Built from source commit {derived['_source_commit'][:12]}.")
-    note = ""
-    for part in parts:
-        longer = f"{note} {part}".strip()
-        if len(longer) <= NOTE_LIMIT:
-            note = longer
+        with_commit = f"{note} Built from source commit {derived['_source_commit'][:12]}.".strip()
+        if len(with_commit) <= NOTE_LIMIT:
+            note = with_commit
     return note or "Submitted without a report this check could read."
 
 

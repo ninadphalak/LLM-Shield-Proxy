@@ -417,10 +417,10 @@ def test_source_pair_scores_the_on_arm_even_when_off_appears_first():
     assert "source commit aaaaaaaa" in intake.write_note(derived)
 
 
-def test_a_long_note_drops_whole_sentences_instead_of_ending_mid_word():
+def test_a_long_note_is_never_cut_mid_word():
     # The shape of the NeMo rows from issues #107 and #129: six entity types reached the
     # provider, nothing came back, eight cases were inconclusive, and a source commit. Cut at
-    # 300 characters, that note used to end "Built from source co".
+    # 300 characters, that note used to end "Built from source co"; now it fits whole.
     derived = {
         "_leaked": ["AWS_ACCESS_KEY_ID", "CREDIT_CARD", "EMAIL", "GITHUB_TOKEN", "SLACK_TOKEN", "SSN"],
         "restored": "none",
@@ -431,12 +431,44 @@ def test_a_long_note_drops_whole_sentences_instead_of_ending_mid_word():
     }
     note = intake.write_note(derived)
     assert len(note) <= intake.NOTE_LIMIT
-    assert note.endswith("denominators.")
-    assert "Built from source" not in note
+    assert "excluded from the leak-rate denominators." in note
+    assert note.endswith("Built from source commit e2451f99ac8a.")
     # A short note still carries the commit.
     assert intake.write_note({"_leaked": [], "_source_commit": "a" * 40}).endswith(
         "Built from source commit aaaaaaaaaaaa."
     )
+
+
+def test_a_long_note_never_drops_a_measurement_to_keep_the_commit():
+    # Review finding on #145: with "leaked more" instead of "changed nothing", the
+    # inconclusive sentence overflowed by one character, was skipped, and the shorter commit
+    # sentence after it was kept.
+    derived = {
+        "_leaked": ["AWS_ACCESS_KEY_ID", "CREDIT_CARD", "EMAIL", "GITHUB_TOKEN", "SLACK_TOKEN", "SSN"],
+        "restored": "none",
+        "leakWholeN": 0.0,
+        "leakSplitN": 1.0,
+        "_cases_inconclusive": 8,
+        "_source_commit": "e2451f99ac8a" + "0" * 28,
+    }
+    note = intake.write_note(derived)
+    assert len(note) <= intake.NOTE_LIMIT
+    assert note.startswith("Sent AWS keys, card numbers,")
+    assert "leaked more of them." in note
+    assert "8 response cases were inconclusive" in note
+
+    # Every known type named, every sentence: still fits, commit and all.
+    derived["_leaked"] = list(intake.ENTITY_WORDS)
+    assert intake.write_note(derived).endswith("Built from source commit e2451f99ac8a.")
+
+    # Worst case: every known type plus unknown ones, every sentence, a large count. The list
+    # becomes a count rather than pushing a measurement out.
+    derived["_leaked"] = [*intake.ENTITY_WORDS, *(f"CUSTOM_TYPE_{n}" for n in range(12))]
+    derived["_cases_inconclusive"] = 999
+    note = intake.write_note(derived)
+    assert len(note) <= intake.NOTE_LIMIT
+    assert note.startswith(f"Sent {len(derived['_leaked'])} data types to the provider.")
+    assert "999 response cases were inconclusive" in note
 
 
 def test_source_pair_needs_both_valid_arms_before_publishing_response_columns():
