@@ -76,9 +76,10 @@ class Report:
     def render_markdown(self) -> str:
         """The same table as ``render_text``, for a CI job summary such as ``$GITHUB_STEP_SUMMARY``.
 
-        The target's protocol version, and details that quote it, come from the server under test,
-        so every interpolated string is escaped: it can neither leave its cell nor render as a link,
-        an image, HTML or emphasis.
+        The only text here the server under test chooses is its protocol version, which
+        ``open_lifecycle`` accepts only in date form, so it cannot carry a bare URL that GitHub would
+        autolink. Every interpolated string is also escaped, so none can leave its cell or render as
+        a link, image, HTML tag, emphasis or code span.
         """
 
         def cell(text: str) -> str:

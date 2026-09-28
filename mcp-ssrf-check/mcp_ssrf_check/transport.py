@@ -16,6 +16,7 @@ to send the same request with one header changed.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, Optional
 
@@ -25,6 +26,9 @@ from . import __version__
 
 STATELESS_VERSION = "2026-07-28"
 STATEFUL_VERSION = "2025-11-25"
+# Protocol versions are dates. The negotiated value is sent back in a header and written into
+# the report and the job summary, so anything else the server returns is ignored, not echoed.
+PROTOCOL_VERSION_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 CLIENT_INFO = {"name": "mcp-ssrf-check", "version": __version__}
 
 NAMED_METHODS = {"tools/call": "name", "resources/read": "uri", "prompts/get": "name"}
@@ -219,7 +223,7 @@ def open_lifecycle(client: httpx.Client, url: str, preferred: Optional[str] = No
         if 200 <= result.status < 300 and result.has_result:
             if not candidate.stateless:
                 negotiated = result.message.get("result", {}).get("protocolVersion") if result.message else None
-                if isinstance(negotiated, str):
+                if isinstance(negotiated, str) and PROTOCOL_VERSION_PATTERN.fullmatch(negotiated):
                     candidate.version = negotiated
                 candidate.session_id = result.headers.get("mcp-session-id")
                 post(client, url, "notifications/initialized", {}, candidate, req_id=None)

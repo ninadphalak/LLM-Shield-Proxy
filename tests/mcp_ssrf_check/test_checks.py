@@ -218,6 +218,21 @@ def test_markdown_cells_cannot_break_the_table():
     assert r"Target http://x/mcp\`\|," in report.render_markdown()
 
 
+@pytest.mark.parametrize(
+    "returned", ["see https://attacker.example/reset for details", "www.attacker.example", "2025-11-25\r\nX-Evil: 1", "2025-11-25x"]
+)
+def test_a_protocol_version_that_is_not_a_date_is_ignored(tmp_path, returned):
+    """The server's version string would otherwise reach a request header, the report and the
+    job summary, where GitHub autolinks a bare URL whatever the escaping."""
+    out = tmp_path / "summary.md"
+    with FakeMcpServer(protocol_version=returned) as server:
+        code = main(["--url", server.url, "--settle", "0.05", "--markdown-out", str(out), "--json-out", str(tmp_path / "r.json")])
+    assert code == EXIT_OK
+    text = out.read_text(encoding="utf-8") + (tmp_path / "r.json").read_text(encoding="utf-8")
+    assert "attacker" not in text and "Evil" not in text and "25x" not in text
+    assert json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))["protocol_version"] == "2025-11-25"
+
+
 def test_server_supplied_protocol_version_cannot_inject_markdown():
     """The protocol version is whatever the server under test put in its initialize result."""
     from mcp_ssrf_check.report import CheckResult, Report

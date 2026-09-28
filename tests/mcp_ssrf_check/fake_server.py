@@ -65,6 +65,7 @@ class FakeMcpServer:
         tool_name: str = "fetch",
         url_argument: str = "url",
         port: int = 0,
+        protocol_version: str = STATEFUL,
     ) -> None:
         self.stateless = stateless
         self.sessions = sessions and not stateless
@@ -86,6 +87,7 @@ class FakeMcpServer:
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self.port = port
+        self.protocol_version = protocol_version
 
     @property
     def url(self) -> str:
@@ -212,7 +214,7 @@ class FakeMcpServer:
                         with owner._lock:
                             owner.live_sessions.add(sid)
                         headers["Mcp-Session-Id"] = sid
-                    result = {"protocolVersion": STATEFUL, "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "0"}}
+                    result = {"protocolVersion": owner.protocol_version, "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "0"}}
                     self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": result}, headers, as_sse=owner.sse)
                     return
                 if owner.sessions and owner.check_session:
