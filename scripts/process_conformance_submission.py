@@ -509,8 +509,17 @@ def derive_measurements(reports: dict[str, Any]) -> dict[str, Any]:
     return derived
 
 
+NOTE_LIMIT = 300
+
+
 def write_note(derived: dict[str, Any]) -> str:
-    """Build a summary sentence based only on recorded measurements."""
+    """Build a summary sentence based only on recorded measurements.
+
+    Whole sentences only. A sentence that would take the note past `NOTE_LIMIT` is left out
+    rather than cut, so a published note never ends mid-word ("Built from source co"). The
+    measurements come first, so what drops is the source commit, which the run line on the
+    wall already shows in the version.
+    """
     parts: list[str] = []
     leaked = derived.get("_leaked")
     if leaked is not None:
@@ -533,7 +542,12 @@ def write_note(derived: dict[str, Any]) -> str:
         parts.append(f"{derived['_cases_inconclusive']} response cases were inconclusive and excluded from the leak-rate denominators.")
     if derived.get("_source_commit"):
         parts.append(f"Built from source commit {derived['_source_commit'][:12]}.")
-    return " ".join(parts) or "Submitted without a report this check could read."
+    note = ""
+    for part in parts:
+        longer = f"{note} {part}".strip()
+        if len(longer) <= NOTE_LIMIT:
+            note = longer
+    return note or "Submitted without a report this check could read."
 
 
 # ------------------------------------------------------------------------ the row
@@ -580,7 +594,7 @@ def build_row(
         "project": clean(fields.get("gateway", ""), limit=80),
         "version": clean(fields.get("version", ""), limit=120),
         **measured,
-        "note": clean(write_note(derived), limit=300),
+        "note": clean(write_note(derived), limit=NOTE_LIMIT),
         "provenance": provenance,
         "architecture": normalize_architecture(fields.get("architecture", "")) or "not-stated",
         "license": clean(fields.get("license", ""), limit=40),

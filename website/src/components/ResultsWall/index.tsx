@@ -444,11 +444,10 @@ function groupRuns(
  * Where "Replicate this result" goes for each proxy, by `gatewayKey`.
  *
  * The four proxies with a ready-made source-build workflow land on their own row of the
- * "Test a proxy from your own fork" table, which carries a matching id. LLM Guard is a scanner
- * library rather than a gateway, and the CI page's LLM Guard section names the small wrapper
- * this project measured it through. Guardrails AI has no page of its own, so it goes to the
- * commands that measure any named gateway on both paths. Anything else goes to the general
- * "add your gateway" steps.
+ * "Test a proxy from your own fork" table, which carries a matching id. LLM Guard and
+ * Guardrails AI are libraries rather than gateways, so they land on the same page's section
+ * for running the small wrapper gateway this project measured each one through. Anything else
+ * goes to the general "add your gateway" steps.
  */
 const REPLICATE: Record<string, {path: string; hint: string}> = {
   portkey: {
@@ -468,12 +467,12 @@ const REPLICATE: Record<string, {path: string; hint: string}> = {
     hint: 'Fork it and click Run: the workflow is already in the repository.',
   },
   'llm guard': {
-    path: 'ci#llm-guard',
-    hint: 'Wrap LLM Guard in the same small gateway used here, then run the check.',
+    path: 'source-ci#replicate-llm-guard',
+    hint: 'Run it on your machine through the same small gateway used here. No API key needed.',
   },
   'guardrails ai': {
-    path: 'reproduce-fragmentation#publishing-a-comparative-row-instead',
-    hint: 'Run the request and response checks against it yourself.',
+    path: 'source-ci#replicate-guardrails-ai',
+    hint: 'Run it on your machine through the same small gateway used here. No API key needed.',
   },
 };
 

@@ -417,6 +417,28 @@ def test_source_pair_scores_the_on_arm_even_when_off_appears_first():
     assert "source commit aaaaaaaa" in intake.write_note(derived)
 
 
+def test_a_long_note_drops_whole_sentences_instead_of_ending_mid_word():
+    # The shape of the NeMo rows from issues #107 and #129: six entity types reached the
+    # provider, nothing came back, eight cases were inconclusive, and a source commit. Cut at
+    # 300 characters, that note used to end "Built from source co".
+    derived = {
+        "_leaked": ["AWS_ACCESS_KEY_ID", "CREDIT_CARD", "EMAIL", "GITHUB_TOKEN", "SLACK_TOKEN", "SSN"],
+        "restored": "none",
+        "leakWholeN": 0.0,
+        "leakSplitN": 0.0,
+        "_cases_inconclusive": 8,
+        "_source_commit": "e2451f99ac8a" + "0" * 28,
+    }
+    note = intake.write_note(derived)
+    assert len(note) <= intake.NOTE_LIMIT
+    assert note.endswith("denominators.")
+    assert "Built from source" not in note
+    # A short note still carries the commit.
+    assert intake.write_note({"_leaked": [], "_source_commit": "a" * 40}).endswith(
+        "Built from source commit aaaaaaaaaaaa."
+    )
+
+
 def test_source_pair_needs_both_valid_arms_before_publishing_response_columns():
     on, off = _source_pair()
     for reports in (
