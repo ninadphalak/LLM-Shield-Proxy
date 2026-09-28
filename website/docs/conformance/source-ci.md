@@ -7,7 +7,9 @@ You can measure a privacy proxy yourself, from a fork, and put the result on the
 [results wall](./who-has-run-it.mdx). You need a GitHub account and about ten minutes of
 clicking; the run itself takes 15 to 40 minutes. No model provider account, API key or
 local install is needed. You fork the proxy you want to test, not this benchmark; the one
-exception is LLM-Shield-Proxy, where the proxy and the benchmark share a repository.
+exception is LLM-Shield-Proxy, where the proxy and the benchmark share a repository. LLM Guard and
+Guardrails AI are libraries rather than proxies, so they
+[run on your own machine](#llm-guard-and-guardrails-ai) instead.
 
 Running the workflow publishes nothing. Run it as often as you like, on any branch; a result
 reaches the wall only when you choose to submit it.
@@ -104,6 +106,90 @@ proxy's name, licence and tested configuration come from the workflow too, so th
 is all the wall needs. The one exception: if you change the **Gateway** or
 **Version and configuration** field in the issue before creating it, your text is shown
 instead.
+
+## LLM Guard and Guardrails AI {#llm-guard-and-guardrails-ai}
+
+These two are libraries, not proxies, so there is no fork to run. The results wall measured each
+one through a small gateway in this repository that calls the library around every response. You
+run the same gateway and the same check on your own machine. You need Python 3.10, 3.11 or 3.12
+for the library, and Git. No model provider account or API key is needed.
+
+The commands are for Linux and macOS. On Windows, use `py -3.12` for `python3.12`, and
+`Scripts\` for `bin/` in every path.
+
+1. **Get this repository and install the check.** The check goes in its own environment, apart
+   from the library it measures:
+
+   ```bash
+   git clone https://github.com/ninadphalak/LLM-Shield-Proxy
+   cd LLM-Shield-Proxy
+   python3 -m venv venv-harness
+   venv-harness/bin/pip install "./pii-leak-benchmark[validate]"
+   ```
+
+2. **Install the library and start its gateway**, in a second terminal in the same folder. Leave
+   it running. Pick the one you are replicating.
+
+3. **Run the check** from the first terminal, with the command under that library below. It
+   takes a minute or two and writes one JSON report into `my-run/`. In the line it prints,
+   `outcome=fail` means something leaked, and `schema=VALID` means the report is complete.
+
+4. **Send it in.** A run on your own machine has no CI run to link, so it goes in as a report
+   rather than through the one-click route above. Open an issue with the JSON report and the
+   facts in [What a submission should contain](./submitting.md#what-a-submission-should-contain):
+   the library version, your Python version and operating system, and the gateway mode you used.
+
+### LLM Guard {#replicate-llm-guard}
+
+LLM Guard 0.3.16 installs PyTorch and transformer models, a download of several gigabytes. The
+gateway has two modes, and the wall shows one configuration for each: `buffered` waits for the
+whole response before scanning it, `chunk-local` scans each chunk alone. Start one:
+
+```bash
+python3.12 -m venv venv-llmguard
+venv-llmguard/bin/pip install llm-guard==0.3.16
+LLMGUARD_MODE=buffered venv-llmguard/bin/python benchmarks/llm-guard-v2-profile/gateway.py \
+  --port 8790 --upstream http://127.0.0.1:8799/v1/chat/completions
+```
+
+Then run the check, naming the mode you started in `--only` (`llm-guard-buffered` or
+`llm-guard-chunk-local`):
+
+```bash
+V2_REQUEST_PATH_REDACTION=configured venv-harness/bin/python -m pii_leak_benchmark.v2_emitter \
+  --validate --only llm-guard-buffered --gateway-url http://127.0.0.1:8790/v1/chat/completions \
+  --upstream-port 8799 --model capture --seed a1b2c3d4e5f60001 --out my-run
+```
+
+The mode is read once, when the gateway starts. To measure the other one, stop the gateway and
+start it again with the other `LLMGUARD_MODE`. The gateway's own notes are in
+[`benchmarks/llm-guard-v2-profile/gateway.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/llm-guard-v2-profile/gateway.py).
+
+### Guardrails AI {#replicate-guardrails-ai}
+
+The gateway feeds each response through Guardrails AI 0.10.2's own streaming validator, which
+holds text back until the end of a sentence, with this project's four detection patterns inside
+it. Guardrails AI has no way to put a caller's own values back, so it is not asked to redact the
+request, and the check is told so. A run should print the numbers on the wall: 2 of 16 values
+leaked both whole and split (`leak_single=0.125 leak_adv=0.125`).
+
+```bash
+python3.12 -m venv venv-guardrails
+venv-guardrails/bin/pip install guardrails-ai==0.10.2
+venv-guardrails/bin/python benchmarks/guardrails-v2-profile/gateway.py --port 8791
+```
+
+Then run the check:
+
+```bash
+V2_REQUEST_PATH_REDACTION=not-configured venv-harness/bin/python -m pii_leak_benchmark.v2_emitter \
+  --validate --only guardrails-ai-stream-validate \
+  --gateway-url http://127.0.0.1:8791/v1/chat/completions \
+  --upstream-port 8799 --model capture --seed a1b2c3d4e5f60001 --out my-run
+```
+
+The gateway's own notes, including why the caller gets none of their data back, are in
+[`benchmarks/guardrails-v2-profile/gateway.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/guardrails-v2-profile/gateway.py).
 
 ## What the result does and does not show
 
