@@ -4,8 +4,8 @@
       "ci_provider": "github-actions",
       "commit_sha": "ce1cd0c554d12872dec2777549aebc9be990bd25",
       "repository": "ninadphalak/llm-shield-intake-test",
-      "run_url": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/35490370868",
-      "runner": "GitHub Actions 1000005345",
+      "run_url": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/36495598565",
+      "runner": "GitHub Actions 1000013954",
       "verification": "self-reported",
       "workflow_ref": "ninadphalak/llm-shield-intake-test/.github/workflows/pii-leak-check.yml@refs/heads/main"
     },
@@ -13,12 +13,12 @@
       "authentication_required": false,
       "bind_host": "127.0.0.1",
       "mode": "loopback",
-      "port": 37389,
+      "port": 37705,
       "self_probe": {
         "performed": true,
         "recorded": true,
-        "round_trip_ms": 33.270921999999814,
-        "url": "http://127.0.0.1:37389/v1/__conformance_capture_probe__/liztwhecdsitmpdlacclkhxa"
+        "round_trip_ms": 42.943519000004926,
+        "url": "http://127.0.0.1:37705/v1/__conformance_capture_probe__/uimewuvksjznttpifhfxpezq"
       },
       "target_must_be_preconfigured_for": "[REDACTED]"
     },
@@ -26,10 +26,10 @@
       "client_observed_latency": {
         "iterations": 1,
         "iterations_measured": 1,
-        "mean": 34.23684700000251,
-        "p50": 34.23684700000251,
-        "p95": 34.23684700000251,
-        "p99": 34.23684700000251,
+        "mean": 42.81600200000213,
+        "p50": 42.81600200000213,
+        "p95": 42.81600200000213,
+        "p99": 42.81600200000213,
         "passed": true,
         "threshold_enforced": false,
         "unit": "milliseconds"
@@ -181,7 +181,7 @@
       "values_published": false,
       "varies_per_run": false
     },
-    "generated_at": "2026-09-20T04:56:10.509288Z",
+    "generated_at": "2026-09-28T23:01:04.491883Z",
     "harness_revision": "ce1cd0c554d12872dec2777549aebc9be990bd25",
     "implementation": {
       "labels_are_operator_supplied": true,
@@ -243,16 +243,16 @@
       "ci_provider": "github-actions",
       "commit_sha": "ce1cd0c554d12872dec2777549aebc9be990bd25",
       "repository": "ninadphalak/llm-shield-intake-test",
-      "run_url": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/35490370868",
-      "runner": "GitHub Actions 1000005345",
+      "run_url": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/36495598565",
+      "runner": "GitHub Actions 1000013954",
       "verification": "self-reported",
       "workflow_ref": "ninadphalak/llm-shield-intake-test/.github/workflows/pii-leak-check.yml@refs/heads/main"
     },
     "contract": {
       "duty": "restore",
       "fixture_sha256": "7dc537dbaad3af8b96a1252278720116a09c07bbcb31c1e3ca90dd2e8c412bc3",
-      "harness_version": "0.3.2",
-      "instrument_sha256": "3a98129d6136683b058eb434a78911749e2228c6d903ef19a8b5ae4ed5d3d9c5",
+      "harness_version": "0.4.1",
+      "instrument_sha256": "b4d88e5e1446a62f0a34ecf540b261814ef043e6b7e4bf756db96089ded6335c",
       "iterations": 3,
       "model": "conformance-model",
       "profile": "pii-secrets-v1",
@@ -433,7 +433,7 @@
         "values_published": false
       }
     ],
-    "generated_at": "2026-09-20T04:56:11.058458Z",
+    "generated_at": "2026-09-28T23:01:05.079839Z",
     "reason": "Raw fixture values reached the upstream: AWS_ACCESS_KEY_ID, CREDIT_CARD, EMAIL, GITHUB_TOKEN, SLACK_TOKEN, SSN.",
     "required_checks": {
       "client_observed_latency": true,
@@ -451,8 +451,8 @@
       "ci_provider": "github-actions",
       "commit_sha": "ce1cd0c554d12872dec2777549aebc9be990bd25",
       "repository": "ninadphalak/llm-shield-intake-test",
-      "run_url": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/35490370868",
-      "runner": "GitHub Actions 1000005345",
+      "run_url": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/36495598565",
+      "runner": "GitHub Actions 1000013954",
       "verification": "self-reported",
       "workflow_ref": "ninadphalak/llm-shield-intake-test/.github/workflows/pii-leak-check.yml@refs/heads/main"
     },
@@ -464,8 +464,8 @@
       "self_probe": {
         "performed": true,
         "recorded": true,
-        "round_trip_ms": 14.586366000003181,
-        "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/ehtwswndydtvemxjohjykphx"
+        "round_trip_ms": 18.969491000000005,
+        "url": "http://127.0.0.1:8765/v1/__conformance_capture_probe__/forvnvloixilrlgprjehhvab"
       },
       "target_must_be_preconfigured_for": "[REDACTED]"
     },
@@ -473,10 +473,10 @@
       "client_observed_latency": {
         "iterations": 3,
         "iterations_measured": 3,
-        "mean": 9.780520000001994,
-        "p50": 10.152503000000479,
-        "p95": 10.152503000000479,
-        "p99": 10.152503000000479,
+        "mean": 20.325748666669103,
+        "p50": 20.109827000005964,
+        "p95": 20.109827000005964,
+        "p99": 20.109827000005964,
         "passed": true,
         "threshold_enforced": false,
         "unit": "milliseconds"
@@ -628,7 +628,7 @@
       "values_published": false,
       "varies_per_run": false
     },
-    "generated_at": "2026-09-20T04:56:11.058458Z",
+    "generated_at": "2026-09-28T23:01:05.079839Z",
     "harness_revision": "ce1cd0c554d12872dec2777549aebc9be990bd25",
     "implementation": {
       "labels_are_operator_supplied": true,
@@ -690,9 +690,9 @@
     "label": "PII leak check",
     "message": "leaked: AWS_ACCESS_KEY_ID, CREDIT_CARD, EMAIL, GITHUB_TOKEN, SLACK_TOKEN, SSN",
     "pii_leak_benchmark": {
-      "generated_at": "2026-09-20T04:56:11.058458Z",
-      "harness_revision": "0.3.2",
-      "instrument_sha256": "3a98129d6136683b058eb434a78911749e2228c6d903ef19a8b5ae4ed5d3d9c5",
+      "generated_at": "2026-09-28T23:01:05.079839Z",
+      "harness_revision": "0.4.1",
+      "instrument_sha256": "b4d88e5e1446a62f0a34ecf540b261814ef043e6b7e4bf756db96089ded6335c",
       "model": "conformance-model",
       "result": "LEAK",
       "target": "unrecorded",
