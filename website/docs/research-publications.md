@@ -11,7 +11,7 @@ LLM-Shield-Proxy maintains an open evidence base for streaming privacy gateways,
 
 ## Tools
 
-- [`chunk-invariance`](https://pypi.org/project/chunk-invariance/): a test assertion that a streaming filter gives the same output however its input is split into chunks. It reports the smallest split that fails. Python, with a TypeScript version in the [repository](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/chunk-invariance-js).
+- [`chunk-invariance`](https://pypi.org/project/chunk-invariance/): a test assertion that a streaming filter gives the same output however its input is split into chunks. It reports the smallest split that fails. Python on PyPI, and TypeScript on [npm](https://www.npmjs.com/package/chunk-invariance).
 - [`pii-leak-benchmark`](https://pypi.org/project/pii-leak-benchmark/): measures a running streaming gateway. See the [Reproduction Guide](/docs/conformance/reproducing).
 - [`mcp-ssrf-check`](https://pypi.org/project/mcp-ssrf-check/): checks an MCP server you operate for `Host` and `Origin` validation, session id binding, and URL-fetching tools that reach loopback. It runs from the command line or as a GitHub Action; see [MCP Egress Screening](/docs/guides/mcp-egress-screening#checking-your-own-server).
 

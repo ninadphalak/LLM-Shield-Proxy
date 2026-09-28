@@ -22,7 +22,8 @@ This repository contains four related packages:
    Action that writes the result table to the job summary.
 4. **[`chunk-invariance`](chunk-invariance/)** turns the split-boundary rule into one test
    assertion: every way of splitting an input into chunks must stream to the same output as
-   filtering it whole. Python, with a TypeScript version in [`chunk-invariance-js/`](chunk-invariance-js/).
+   filtering it whole. Python on PyPI, and TypeScript on [npm](https://www.npmjs.com/package/chunk-invariance)
+   ([`chunk-invariance-js/`](chunk-invariance-js/)).
 
 ## What changed after the first benchmark run
 
