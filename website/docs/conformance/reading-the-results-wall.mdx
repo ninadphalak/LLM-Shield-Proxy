@@ -6,13 +6,18 @@ description: What the three checks on the results wall measure, what a leak coun
 ---
 
 import CorpusCredits from '@site/src/components/CorpusCredits';
+import {AnnotatedExample} from '@site/src/components/ResultsWall';
 import DefinedTerm from '@site/src/components/DefinedTerm';
 
 # How to read the results wall
 
-The [results wall](./who-has-run-it.mdx) has one card per gateway and configuration, with every
-run of it stacked underneath. This page explains what is on a card, and what the numbers on it can
-and cannot tell you.
+The [results wall](./who-has-run-it.mdx) has one card per proxy. Every configuration it was tested
+in, and every run of each, is inside that one card. Here is one, made from sample data, with each
+part labelled:
+
+<AnnotatedExample />
+
+The rest of this page explains what the numbers can and cannot tell you.
 
 ## What the check asks
 
@@ -30,103 +35,69 @@ Do all three and you pass.
 
 ## Reading a card {#reading-a-card}
 
-**One card is one gateway in one configuration.** Portkey with its output guardrail is one card,
-however many people have run it and on however many commits. LLM-Shield-Proxy with response
-scanning on and LLM-Shield-Proxy on its default settings are two cards, because they are two
-different setups that give different answers. Runs share a card when the gateway is the same (so
-"Portkey" and "Portkey OSS Gateway" are one gateway) and the configuration they state is the same.
-A run that does not state its configuration only shares a card with other runs that do not state
-one either, because "not stated" is not evidence of "the same".
+**One card is one proxy.** "Portkey" and "Portkey OSS Gateway" are one proxy, and so are
+"LLM-Shield-Proxy" and "LLM-Shield-Proxy (ours)". A proxy tested in more than one setup, for
+example LLM-Shield-Proxy with response scanning on and on its default settings, has one section per
+configuration inside its card. Runs share a section when the configuration they state is the same.
+A run that states no configuration only shares a section with other runs that state none, because
+"not stated" is not evidence of "the same".
 
-**The header** names the gateway, the configuration, and its licence, linking to the project.
+**The top of the card** speaks for the proxy's **latest complete run**: the newest run, in any of
+its configurations, that measured all three checks. The shield counts the checks it passed: gold
+for 3 of 3, silver 2, bronze 1, a plain shield 0. It is the same count, by the same rule, as the
+README badge a submitted run gets, so a run and its badge never disagree. The line under the
+proxy's name says the result in words and which run it came from.
 
-**The shield** is the card's headline: the three checks of its **latest complete run**, the newest
-run that measured all three. The line above the pips says which run that is, with its date,
-version and harness. The shield counts three checks, and says the count on its face:
-
-- **Request path.** Nothing the caller sent reached the provider.
-- **Value whole in response.** A value the caller never sent, injected into the response in one
-  piece, did not reach the client.
-- **Value split across chunks.** The same, with the value split across two stream chunks.
-
-Gold is 3 of 3, silver 2, bronze 1, and a plain shield 0. It is the same count, by the same rule,
-as the README badge the intake gives a submitted run, so a run and its badge never disagree. The
-coloured edge along the top of a card says the same thing again: gold for 3 of 3, amber for some,
-red for none.
-
-**Each check is a pip**, and each pip says what it found in words as well as colour:
+**Each check is a question**, and "yes" is the bad answer to all three. Every answer is given in
+words as well as a colour and a glyph:
 
 - **✓ passed.** Measured in full, and nothing leaked.
-- **✕ leaked.** Something got through. The line beside it says what, or how many of how many.
-- **! incomplete.** Nothing leaked, but some cases produced no stream and could not be judged.
+- **✕ leaked.** Something got through. The answer says what, or how many of how many.
+- **! unclear.** Nothing leaked, but some cases produced no stream and could not be judged.
   A check that was not shown clean is not counted as passed.
-- **– not measured.** The run did not look. The operator check that runs in a gateway's own CI
-  measures what it sends upstream, and the two response checks come from a separate profile, so
-  a run from such a check has nothing here. It is never read as zero.
+- **– not tested.** The run did not look. A run from the operator check in a gateway's own CI
+  measures only what it sends upstream, so its two response checks are empty. They are never read
+  as zero.
 
-**Gave the caller's own data back** sits under the pips rather than inside the shield, because
-it answers the second question and not the other two. When it says `none`, the card says so next
-to any clean response pip: see [read the checks together](#read-the-checks-together).
+**Gave callers their own data back** answers the second question, so it sits under the three
+checks rather than in the shield. When it says **No**, see
+[read the checks together](#read-the-checks-together).
 
-**The replication line** counts the card's runs and the distinct people who ran them, and says
-how far the card is from being called replicated. The rule is the one in
-[submitting a result](./submitting.md): a result is **replicated** only when three different
-people have run the same gateway and configuration. On the wall, only verified runs from a fork
-count toward the three. Runs by the benchmark maintainers, whether measured in this repository or
-submitted from a fork, do not count. Neither do runs in the gateway's own repository, which are
-its team's CI, or runs whose origin could not be checked. The wall cannot tell whether a fork
-belongs to someone on the gateway's team, so submitters are asked to say so, and a run that
-declares it is removed from the count by hand. Until there are three, the card reads
-**Unreplicated**, with a three-step meter beside the words.
+**Independent runs** count toward calling a configuration **replicated**. The rule is the one in
+[submitting a result](./submitting.md): three different people have run the same proxy and
+configuration. Only verified runs from a fork count. Runs by the benchmark maintainers, runs in the
+proxy's own repository (its team's CI) and runs whose origin could not be checked do not. The wall
+cannot tell whether a fork belongs to someone on the proxy's team, so submitters are asked to say
+so, and a run that does is removed from the count by hand. Each configuration keeps its own count;
+the top of the card shows the one closest to three.
 
-**Disputed** marks a card where two runs of the same version disagree on a check, and names the
-check. Both runs stay on the card. Disagreements are published, not averaged, because they usually
-point at an undocumented default, version drift or a platform difference.
+**Disputed** marks a configuration where two runs of the same version disagree on a check. Both
+runs stay up: disagreements are published, not averaged, because they usually point at an
+undocumented default, version drift or a platform difference. **Changed between versions** is the
+quieter mark for different versions that came out differently, which is revision history rather
+than a dispute.
 
-**Changed between versions** is the quieter mark for runs of different versions that came out
-differently. That is revision history rather than a dispute: the runs underneath show which
-version did what.
+**Full pass** marks a proxy whose latest complete run passed all three checks and gave every value
+back. **First independent pass** is the one mark worth wanting, and nobody holds it yet. See
+[Ours did not pass either, at first](#ours-did-not-pass-either-at-first). An arrow next to a leak
+count, such as `↓2`, compares a run with the same proxy's earlier version, never with another
+project. **Worth rerunning** appears when a proxy's newest run is more than six months old.
 
-**Full pass** marks a card whose latest complete run answers all three questions: all three checks
-passed and every value came back to the caller. That is the page's own criterion, restated in code.
+**Replicate this result** goes straight to the instructions for running that proxy yourself.
 
-**First independent pass** is the one mark worth wanting, and nobody holds it yet. See
-[Ours did not pass either, at first](#ours-did-not-pass-either-at-first).
+### The runs under a configuration {#the-runs-under-a-card}
 
-**An arrow next to a leak count** compares a gateway with its own earlier version on the wall,
-never with another project. `↓2` means two fewer values leaked than last time.
+Each configuration lists its runs newest first, one line each: who ran it (a submitted run shows
+the submitter's GitHub avatar and handle), the date, the version or commit, its three small pips in
+the order request, whole, split, where it ran, and links to the CI run or report and the submission
+issue. **Open questions** appear on a run's line if anyone has disputed it; see
+[If you think a row is wrong](#if-you-think-a-row-is-wrong). Beyond three runs the rest fold behind
+**Show all N runs**.
 
-**Reads the stream** sits under the note. See
-[why there is no speed column](#why-there-is-no-speed-column). **Worth rerunning** appears when
-the newest run on a card is more than six months old. An old run is an older measurement, not a
-worse gateway.
-
-### The runs under a card {#the-runs-under-a-card}
-
-Every run of the card's gateway and configuration is listed underneath, newest first, one line
-each:
-
-- **Who ran it.** A submitted run shows the submitter's GitHub avatar and handle, linking to their
-  profile. A run this project measured says **benchmark maintainers**. The contributors across the
-  top of the wall are everyone who has submitted one.
-- **When and what.** The date, then the version or commit that ran. A run that worded its
-  configuration differently from the card shows its own words in brackets, so grouping never hides
-  what a submitter wrote.
-- **Its three pips**, in the same order as the card's (request, whole, split), with the number
-  passed beside them.
-- **Where it ran**: measured here, a project's own CI on its main branch, a branch, or a fork, or
-  sent in with no run to point at.
-- **Links**: the CI run behind it, or the report for a run measured here, and the submission issue.
-  **Open questions** appear here if anyone has disputed that run. See
-  [If you think a row is wrong](#if-you-think-a-row-is-wrong).
-
-A card with more than three runs shows the newest three and folds the rest behind **Show all N
-runs**.
-
-**Every run and every card has its own link.** The `#` at the end of a run line links straight to
-that run, and the `#` in a card's corner to the card. The reply on a submission issue links
-straight to that submission's run: the page opens the card if the run is folded, scrolls to it,
-rings the card in gold with a **Linked result** ribbon, and marks the run itself **Linked run**.
+**Every run has its own link.** The `#` at the end of a run line links to that run, and the `#`
+next to a proxy's name to its card. The reply on a submission issue links straight to its run: the
+page opens the fold if the run is in it, scrolls there, rings the card in gold and marks the run
+**Linked run**.
 
 ## Read the checks together {#read-the-checks-together}
 
@@ -152,7 +123,7 @@ it on, because it changes what callers receive, so the out-of-the-box run leaks 
 both ways. That run is on the wall too.
 
 A result from the people who built the instrument is the most conflicted one there, which is
-why none of our own runs count toward calling a card replicated, our own gateway's included.
+why none of our own runs count toward calling a configuration replicated, our own gateway's included.
 That does not change because the number improved.
 
 **No gateway other than ours has passed yet.** The first one that does gets the **First
@@ -172,7 +143,7 @@ look worse than a slow one on fast hardware. That is hardware noise published as
 characteristic.
 
 What you actually want from a speed number is the **design tradeoff**, and that is on every card
-already, under "Reads the stream". There are three ways to build this and each one costs
+already, under "Reads the reply". There are three ways to build this and each one costs
 something:
 
 - **Checks each chunk alone.** Fastest, and it cannot see a value split across two chunks.
@@ -208,7 +179,7 @@ find, and it is invisible to any test that sends values whole.
 
 ## Why we do not rank these
 
-The wall ships with the most recently run card first. You can reorder it for yourself, including
+The wall ships with the most recently run proxy first. You can reorder it for yourself, including
 by the number of checks passed, and that changes only your view. We do not publish it in a ranked order:
 
 - **Runs are not comparable.** Each result is one version, one configuration, one set of test
@@ -216,7 +187,7 @@ by the number of checks passed, and that changes only your view. We do not publi
 - **A ranking starts arguments about fairness instead of getting gateways tested.**
 - **The same leak count can mean two different bugs**, as [the table above](#two-bugs) shows.
 
-The shield is a count of what one run passed, the card's latest complete one, not a place in a
+The shield is a count of what one run passed, the proxy's latest complete one, not a place in a
 league. The arrows are the one
 comparison we do draw, and they only ever compare a gateway with its own earlier version on the
 wall. That is revision history rather than a ranking: it says a team fixed something, which is

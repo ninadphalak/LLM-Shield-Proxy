@@ -5,10 +5,11 @@
  * and green help a reader scan; they never carry a meaning on their own, so the page reads
  * the same to someone who cannot tell them apart and to a screen reader.
  *
- * Colours are tokens on the wall itself, set for light and again for dark, so no rule
- * below names a colour that only works in one theme.
+ * Colours are tokens, set for light and again for dark, so no rule below names a colour that
+ * only works in one theme. They sit on `.tokens` rather than on the wall, because the annotated
+ * example card is also shown on its own, on the page that explains the wall.
  */
-.wall {
+.tokens {
   --w-card: #ffffff;
   --w-card-edge: #d0d7de;
   --w-raised: #f6f8fa;
@@ -29,12 +30,18 @@
   --w-gold-ink: #2b1d00;
   --w-glow: rgba(245, 180, 0, 0.55);
   --w-shadow: 0 1px 2px rgba(31, 35, 40, 0.06), 0 6px 18px rgba(31, 35, 40, 0.06);
+  --w-on-link: #ffffff;
+  --w-callout: #8250df;
+  --w-callout-bg: #fbefff;
 
-  margin: 1.25rem 0 2rem;
   color: var(--w-ink);
 }
 
-:global([data-theme='dark']) .wall {
+.wall {
+  margin: 1.25rem 0 2rem;
+}
+
+:global([data-theme='dark']) .tokens {
   --w-card: #131a24;
   --w-card-edge: #2b3440;
   --w-raised: #0f151e;
@@ -51,9 +58,12 @@
   --w-link: #58a6ff;
   --w-glow: rgba(247, 209, 84, 0.45);
   --w-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --w-on-link: #0b1320;
+  --w-callout: #d2a8ff;
+  --w-callout-bg: rgba(163, 113, 247, 0.16);
 }
 
-.wall a {
+.tokens a {
   color: var(--w-link);
 }
 
@@ -216,7 +226,7 @@
   text-decoration: none;
 }
 
-.wall a.person {
+.tokens a.person {
   color: var(--w-ink);
 }
 
@@ -304,6 +314,8 @@ a.person:hover {
 
 .sort:focus-visible,
 .more:focus-visible,
+.howToToggle:focus-visible,
+.replicateButton:focus-visible,
 .permalink:focus-visible,
 .run:focus-visible,
 .card:focus-visible {
@@ -340,9 +352,6 @@ a.person:hover {
   font-size: 0.7rem;
 }
 
-.legendLink {
-  font-weight: 600;
-}
 
 .legendOrder {
   font-style: italic;
@@ -352,7 +361,7 @@ a.person:hover {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 25rem), 1fr));
   gap: 1rem;
   margin: 0;
   padding: 0;
@@ -426,11 +435,6 @@ a.person:hover {
   line-height: 1.25;
 }
 
-.version {
-  margin: 0.1rem 0 0;
-  font-size: 0.85rem;
-  color: var(--w-muted);
-}
 
 .tags {
   display: flex;
@@ -448,11 +452,11 @@ a.person:hover {
   text-decoration: none;
 }
 
-.wall a.permalink {
+.tokens a.permalink {
   color: var(--w-muted);
 }
 
-.wall a.permalink:hover {
+.tokens a.permalink:hover {
   color: var(--w-link);
   text-decoration: none;
 }
@@ -547,25 +551,43 @@ a.person:hover {
   list-style: none;
 }
 
+/* Each check is a question and its answer, with the pip beside both. */
 .check {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.55rem;
   margin: 0;
   padding: 0.4rem 0.55rem;
   border-radius: 10px;
   background: var(--w-tone-bg);
 }
 
+.check .pip {
+  grid-row: span 2;
+}
+
+.checkQuestion {
+  font-size: 0.78rem;
+  color: var(--w-muted);
+  line-height: 1.3;
+}
+
+.checkAnswer {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .pip {
-  --w-tone: var(--w-none);
   display: inline-grid;
   place-items: center;
   flex: none;
   width: 1.45rem;
   height: 1.45rem;
   border-radius: 50%;
-  background: var(--w-tone);
+  /* The state class sits on the row, so the pip reads its tone from there. */
+  background: var(--w-tone, var(--w-none));
   color: var(--w-card);
   font-size: 0.85rem;
   font-weight: 900;
@@ -606,24 +628,8 @@ a.person:hover {
   color: var(--w-none);
 }
 
-.checkText {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
 
-.checkLabel {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--w-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
 
-.checkDetail {
-  font-size: 0.9rem;
-  font-weight: 600;
-}
 
 .fidelity {
   display: flex;
@@ -671,14 +677,6 @@ a.person:hover {
 
 /* ---------------------------------------------------------------- chips and footer */
 
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.5rem;
-  margin-top: auto;
-  font-size: 0.78rem;
-}
 
 .chip {
   display: inline-block;
@@ -727,7 +725,7 @@ a.person:hover {
   text-decoration: none;
 }
 
-.wall a.flag {
+.tokens a.flag {
   color: var(--w-ink);
 }
 
@@ -846,32 +844,11 @@ a.person:hover {
   color: var(--w-ink);
 }
 
-.headline {
-  display: grid;
-  gap: 0.55rem;
-}
 
-.headlineCaption {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--w-muted);
-}
 
-.captionLabel {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
 
 /* ---------------------------------------------------------------- the runs under a card */
 
-.runsBlock {
-  display: grid;
-  gap: 0.35rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--w-card-edge);
-}
 
 .runsTitle {
   margin: 0;
@@ -925,14 +902,6 @@ a.person:hover {
   font-weight: 600;
 }
 
-.runWhat {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 0.45rem;
-  flex: 1 1 10rem;
-  min-width: 0;
-}
 
 .runVersion {
   font-family: var(--ifm-font-family-monospace);
@@ -1019,6 +988,488 @@ a.person:hover {
   border-color: var(--w-link);
 }
 
+/* ---------------------------------------------------------------- one card per proxy */
+
+.medalWrap {
+  position: relative;
+  flex: none;
+}
+
+.muted {
+  color: var(--w-muted);
+}
+
+/* The proxy's result in words, before any pip: what a stranger reads first. */
+.verdict {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border-left: 4px solid var(--w-state);
+  border-radius: 0 10px 10px 0;
+  background: var(--w-raised);
+}
+
+.verdictTitle {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.verdictDetail {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--w-muted);
+}
+
+.verdictCaption {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--w-muted);
+}
+
+.cardBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.summary {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.configs {
+  display: grid;
+  gap: 0.6rem;
+}
+
+/* One configuration of the proxy, when it has several. A single one needs no box of its own. */
+.config {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.6rem 0.65rem;
+  border: 1px solid var(--w-card-edge);
+  border-radius: 12px;
+  background: var(--w-raised);
+  scroll-margin-top: calc(var(--ifm-navbar-height, 60px) + 1.5rem);
+}
+
+.config:focus-visible {
+  outline: 2px solid var(--w-link);
+  outline-offset: 2px;
+}
+
+.configSolo {
+  padding: 0.6rem 0 0;
+  border: 0;
+  border-top: 1px solid var(--w-card-edge);
+  border-radius: 0;
+  background: transparent;
+}
+
+.config .run {
+  background: var(--w-card);
+}
+
+.configSolo .run {
+  background: var(--w-raised);
+}
+
+.configLinked {
+  border-color: var(--w-gold-3);
+  box-shadow: 0 0 0 2px var(--w-gold-3);
+}
+
+.configHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem 0.75rem;
+}
+
+.configTitle {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+}
+
+.eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--w-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.configName {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.configResult {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.configMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.configReplication {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.configReplication .meterStep {
+  width: 0.55rem;
+  height: 0.85rem;
+}
+
+.replicatedText {
+  color: var(--w-pass);
+  font-weight: 800;
+}
+
+.runMain {
+  display: inline-flex;
+  flex: 1 1 13rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  min-width: 0;
+}
+
+.chip.whereChip {
+  font-weight: 500;
+}
+
+/* "Replicate this result": the one thing a reader can do next, so it is a real button. */
+.replicate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  margin-top: auto;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--w-card-edge);
+}
+
+.replicateButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.95rem;
+  border-radius: 999px;
+  background: var(--w-link);
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.tokens a.replicateButton,
+.tokens .replicateButton {
+  color: var(--w-on-link);
+}
+
+.tokens a.replicateButton:hover {
+  color: var(--w-on-link);
+  text-decoration: none;
+  filter: brightness(1.1);
+}
+
+.replicateHint {
+  flex: 1 1 12rem;
+  font-size: 0.8rem;
+  color: var(--w-muted);
+}
+
+/* The no-gateway baseline. Not a proxy, so a slim strip under the cards rather than a card. */
+.control {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1.25rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px dashed var(--w-card-edge);
+  border-radius: 12px;
+  background: var(--w-raised);
+  scroll-margin-top: calc(var(--ifm-navbar-height, 60px) + 1.5rem);
+}
+
+.controlTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.6rem;
+  margin: 0;
+  font-weight: 800;
+}
+
+.controlText {
+  margin: 0 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--w-muted);
+}
+
+.control .run {
+  background: var(--w-card);
+}
+
+/* ---------------------------------------------------------------- how to read a card */
+
+.howTo {
+  margin: 0 0 1rem;
+  border: 1px solid var(--w-callout);
+  border-radius: 14px;
+  background: var(--w-card);
+  scroll-margin-top: calc(var(--ifm-navbar-height, 60px) + 1rem);
+}
+
+.howTo:focus {
+  outline: none;
+}
+
+.howToToggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  width: 100%;
+  padding: 0.7rem 1rem;
+  border: 0;
+  border-radius: 14px;
+  background: var(--w-callout-bg);
+  color: var(--w-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.howToOpen .howToToggle {
+  border-radius: 14px 14px 0 0;
+}
+
+.chevron {
+  display: inline-block;
+  color: var(--w-callout);
+  font-size: 0.9rem;
+}
+
+.howToOpen .chevron {
+  transform: rotate(90deg);
+}
+
+.howToLabel {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.howToHint {
+  font-size: 0.85rem;
+  color: var(--w-muted);
+}
+
+.howToBody {
+  padding: 1rem;
+}
+
+.howToMore {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--w-muted);
+}
+
+/* ---------------------------------------------------------------- the annotated example */
+
+.example {
+  margin: 0;
+}
+
+.exampleCaption {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  color: var(--w-muted);
+}
+
+.exampleCaption strong {
+  color: var(--w-ink);
+}
+
+.stage {
+  position: relative;
+}
+
+/* Wide: labels either side of the card, arrows drawn from each label to its part. */
+.arrows .stage {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, 1fr) minmax(19rem, 24rem) minmax(8.5rem, 1fr);
+  gap: 2.25rem;
+  align-items: start;
+}
+
+.calloutColumn {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.callout {
+  position: absolute;
+  right: 0;
+  left: 0;
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--w-callout);
+  border-radius: 8px;
+  background: var(--w-callout-bg);
+  color: var(--w-ink);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.left .callout {
+  text-align: right;
+}
+
+.leaders {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.leader {
+  fill: none;
+  stroke: var(--w-callout);
+  stroke-width: 1.5;
+}
+
+.arrowHead {
+  fill: var(--w-callout);
+}
+
+.exampleCardWrap {
+  min-width: 0;
+}
+
+.markers .exampleCardWrap {
+  max-width: 30rem;
+  margin: 0 auto;
+}
+
+.exampleCard {
+  animation: none;
+}
+
+.exampleRibbon {
+  right: auto;
+  left: 1rem;
+  background: var(--w-callout);
+  color: var(--w-card);
+}
+
+.fakeLink {
+  color: var(--w-link);
+  text-decoration: underline dotted;
+  cursor: default;
+}
+
+.tokens .replicateButton.fakeLink {
+  color: var(--w-on-link);
+  text-decoration: none;
+}
+
+.fakeAvatar {
+  display: inline-grid;
+  place-items: center;
+  background: var(--w-callout);
+  color: var(--w-card);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+/* A numbered part of the example. The number shows only when there are no arrows. */
+.marked {
+  position: relative;
+}
+
+.mark,
+.legendNumber {
+  display: inline-grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 50%;
+  background: var(--w-callout);
+  color: var(--w-card);
+  font-size: 0.72rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.mark {
+  position: absolute;
+  z-index: 1;
+  /* Top right, where a part's own text never starts, so the number covers nothing. */
+  top: -0.6rem;
+  right: -0.6rem;
+  box-shadow: 0 0 0 2px var(--w-card);
+}
+
+.arrows .mark {
+  display: none;
+}
+
+.markers .marked {
+  outline: 1px dashed var(--w-callout);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* A chip is too small to share its corner with a number, so it makes room. */
+.markers .chip.marked {
+  padding-right: 1.05rem;
+}
+
+.exampleLegend {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 30rem;
+  margin: 1rem auto 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.exampleLegend li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.exampleLegend .legendNumber {
+  flex: none;
+}
+
 /* ---------------------------------------------------------------- motion */
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1030,6 +1481,17 @@ a.person:hover {
 
   .card:hover {
     transform: translateY(-2px);
+  }
+
+  /* The example's arrows are drawn to where its parts are, so the example stays still. */
+  .exampleCard,
+  .exampleCard:hover {
+    animation: none;
+    transform: none;
+  }
+
+  .chevron {
+    transition: transform 160ms ease;
   }
 
   .linked {

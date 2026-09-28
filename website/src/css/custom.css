@@ -144,3 +144,23 @@
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/*
+ * "Replicate this result" on the results wall links to one proxy's row of a table
+ * (`<span id="replicate-...">` in its first cell). Keep the row clear of the sticky navbar
+ * and mark it, so the reader lands on the row that is theirs.
+ */
+[id^='replicate-'] {
+  /* The id sits inside a padded cell, so leave room for the row's own top edge too. */
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 3rem);
+}
+
+tr:has([id^='replicate-']:target) {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: -2px;
+  background: var(--ifm-color-emphasis-100);
+}
+
+details#llm-guard {
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 1.5rem);
+}
