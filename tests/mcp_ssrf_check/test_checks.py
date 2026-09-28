@@ -1,6 +1,7 @@
 """The checker against servers whose behaviour is known, so every verdict is accounted for."""
 
 import json
+import re
 import socket
 
 import pytest
@@ -201,10 +202,10 @@ def test_markdown_summary_is_one_row_per_check(tmp_path):
         code = main(["--url", server.url, "--settle", "0.05", "--markdown-out", str(out)])
     assert code == EXIT_FAIL
     text = out.read_text(encoding="utf-8")
-    rows = [line for line in text.splitlines() if line.startswith("| ") and "`" in line]
+    rows = [line for line in text.splitlines() if line.startswith("| ") and not line.startswith("| Result") and ":---" not in line]
     assert len(rows) == 6, rows
-    assert "| FAIL | `host-header` |" in text
-    assert "| SKIP | `tool-url-ssrf` |" in text
+    assert r"| FAIL | host\-header |" in text
+    assert r"| SKIP | tool\-url\-ssrf |" in text
     assert "Summary: " in text
 
 
@@ -212,6 +213,26 @@ def test_markdown_cells_cannot_break_the_table():
     from mcp_ssrf_check.report import CheckResult, Report
 
     report = Report("http://x/mcp`|", "stateful", "v", [CheckResult("a", "t", PASS, "one | two\nthree")], "0", "now")
-    row = next(line for line in report.render_markdown().splitlines() if "`a`" in line)
-    assert row == "| PASS | `a` | one \\| two three |"
-    assert "Target `http://x/mcp\\|`" in report.render_markdown()
+    row = next(line for line in report.render_markdown().splitlines() if line.startswith("| PASS"))
+    assert row == r"| PASS | a | one \| two three |"
+    assert r"Target http://x/mcp\`\|," in report.render_markdown()
+
+
+def test_server_supplied_protocol_version_cannot_inject_markdown():
+    """The protocol version is whatever the server under test put in its initialize result."""
+    from mcp_ssrf_check.report import CheckResult, Report
+
+    forged = "x)\n\n| FAIL | `spoofed` | forged |\n\n| PASS | `tool-url-ssrf` | fine | ![t](http://evil/p.png) <img src=x>"
+    report = Report(
+        "http://x/mcp", "stateful", forged, [CheckResult("baseline", "t", PASS, f"protocol {forged}")], "0", "now"
+    )
+    text = report.render_markdown()
+    table_rows = [line for line in text.splitlines() if line.startswith("|")]
+    assert len(table_rows) == 3, table_rows
+    assert "spoofed" not in "".join(line for line in text.splitlines() if line.startswith("| FAIL"))
+    # With every backslash escape removed, no character that could open a link, image, HTML
+    # tag or code span is left.
+    unescaped = re.sub(r"\\.", "", text)
+    for opener in "![<`":
+        assert opener not in unescaped, opener
+    assert r"\!\[t\]\(http://evil/p\.png\) \<img src=x\>" in text

@@ -18,6 +18,10 @@ EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_INCONCLUSIVE = 2
 
+# Characters CommonMark lets a backslash escape, which covers table pipes, links, images,
+# HTML tags, emphasis and code spans.
+_MARKDOWN_SPECIAL = set("\\`*_{}[]()<>#+-.!|~&\"'")
+
 
 @dataclass
 class CheckResult:
@@ -70,23 +74,29 @@ class Report:
             fh.write("\n")
 
     def render_markdown(self) -> str:
-        """The same table as ``render_text``, for a CI job summary such as ``$GITHUB_STEP_SUMMARY``."""
+        """The same table as ``render_text``, for a CI job summary such as ``$GITHUB_STEP_SUMMARY``.
+
+        The target's protocol version, and details that quote it, come from the server under test,
+        so every interpolated string is escaped: it can neither leave its cell nor render as a link,
+        an image, HTML or emphasis.
+        """
 
         def cell(text: str) -> str:
-            return text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+            text = " ".join(text.splitlines())
+            return "".join("\\" + ch if ch in _MARKDOWN_SPECIAL else ch for ch in text)
 
         counts = self.summary()
         lines = [
-            f"### mcp-ssrf-check {self.version}",
+            f"### mcp-ssrf-check {cell(self.version)}",
             "",
-            f"Target `{cell(self.target).replace('`', '')}`, lifecycle {self.lifecycle or 'unknown'} "
-            f"({self.protocol_version or 'no version negotiated'}).",
+            f"Target {cell(self.target)}, lifecycle {cell(self.lifecycle or 'unknown')} "
+            f"({cell(self.protocol_version or 'no version negotiated')}).",
             "",
             "| Result | Check | Detail |",
             "| :--- | :--- | :--- |",
         ]
         for check in self.checks:
-            lines.append(f"| {check.status.upper()} | `{check.id}` | {cell(check.detail)} |")
+            lines.append(f"| {cell(check.status.upper())} | {cell(check.id)} | {cell(check.detail)} |")
         lines.append("")
         lines.append("Summary: " + ", ".join(f"{k} {v}" for k, v in counts.items() if v) + ".")
         return "\n".join(lines) + "\n"
