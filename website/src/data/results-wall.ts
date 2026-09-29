@@ -137,6 +137,7 @@ export type ResultRow = {
   license: string;
   /** Link to the project's OWN pricing page. Never our characterisation of their tiers. */
   pricingUrl?: string;
+  /** The report behind a measured row. `./x` means the conformance docs page `x`. */
   reportUrl?: string;
   /** Link to the CI run behind a submitted row, so the provenance claim is clickable. */
   runUrl?: string;

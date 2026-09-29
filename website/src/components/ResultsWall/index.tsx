@@ -942,6 +942,11 @@ function RunLine({
   annotate?: boolean;
 }): ReactNode {
   const {row, submitter, issue, archive, ownerType} = run;
+  // `./results` in the data means the conformance docs' results page. Resolved here rather than
+  // left relative, because the page is served at `.../who-has-run-it/` with a trailing slash
+  // and a relative link would land on `.../who-has-run-it/results`, which does not exist.
+  const docsBase = useBaseUrl('/docs/conformance/');
+  const report = row.reportUrl?.startsWith('./') ? docsBase + row.reportUrl.slice(2) : row.reportUrl;
   const where = WHERE[row.provenance];
   const owner =
     ownerType === 'Organization'
@@ -1018,17 +1023,17 @@ function RunLine({
           <Link href={safeHref(row.runUrl)} external title="The CI run behind this result">
             CI run
           </Link>
-        ) : row.reportUrl ? (
-          <Link href={safeHref(row.reportUrl)} title="The report behind this result">
-            report
+        ) : report ? (
+          <Link href={safeHref(report)} title="The published results this run's numbers come from">
+            details
           </Link>
         ) : null}
         {archive && (
           <Link
             href={safeHref(`${REPO}/tree/main/${archive}`)}
             external
-            title="A copy of the reports these numbers were read from, kept in this repository after the CI run's own files expire">
-            saved report
+            title="The reports these numbers were read from, kept in this repository after the CI run's own files expire">
+            details
           </Link>
         )}
         {issue && (
