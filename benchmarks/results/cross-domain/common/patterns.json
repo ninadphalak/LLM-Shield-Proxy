@@ -1,0 +1,5 @@
+{
+  "email": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+  "ssn": "\\b[0-9]{3}-[0-9]{2}-[0-9]{4}\\b",
+  "pem": "-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=\\r\\n]+-----END [A-Z ]*PRIVATE KEY-----"
+}

@@ -1,0 +1,17 @@
+# replace-response in stream mode (handler.go:52,98-112): regex replacements through
+# icholy/replace with MaxMatchSize fixed at 2048 bytes (handler.go:192-197).
+{
+  order replace after encode
+  admin off
+}
+:8080 {
+  replace {
+    stream
+    re "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}" "[REDACTED]"
+    re "\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b" "[REDACTED]"
+    re "-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=\r\n]+-----END [A-Z ]*PRIVATE KEY-----" "[REDACTED]"
+  }
+  reverse_proxy XD_ORIGIN_HOST:18080 {
+    flush_interval -1
+  }
+}

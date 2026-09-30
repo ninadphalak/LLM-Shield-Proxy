@@ -1,0 +1,387 @@
+{
+ "target": "caddy replace-response (stream)",
+ "version": "v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0=; replace-response 8096288",
+ "note": "same setup, origin pause 1000 ms between the two writes, cuts 2040..2100 into the 3,242-byte key (MaxMatchSize 2048)",
+ "splits": "whole + every single cut from 8 bytes before the value to 8 after",
+ "cases": [
+  {
+   "name": "pem4096",
+   "value_length": 3242,
+   "whole": {
+    "leak": "none",
+    "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+   },
+   "splits_tried": 61,
+   "leaking_splits": 0,
+   "first_leaking_cut_in_value": null,
+   "rows": [
+    {
+     "cut": 2069,
+     "cut_in_value": 2040,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2070,
+     "cut_in_value": 2041,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2071,
+     "cut_in_value": 2042,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2072,
+     "cut_in_value": 2043,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2073,
+     "cut_in_value": 2044,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2074,
+     "cut_in_value": 2045,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2075,
+     "cut_in_value": 2046,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2076,
+     "cut_in_value": 2047,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2077,
+     "cut_in_value": 2048,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2078,
+     "cut_in_value": 2049,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2079,
+     "cut_in_value": 2050,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2080,
+     "cut_in_value": 2051,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2081,
+     "cut_in_value": 2052,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2082,
+     "cut_in_value": 2053,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2083,
+     "cut_in_value": 2054,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2084,
+     "cut_in_value": 2055,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2085,
+     "cut_in_value": 2056,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2086,
+     "cut_in_value": 2057,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2087,
+     "cut_in_value": 2058,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2088,
+     "cut_in_value": 2059,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2089,
+     "cut_in_value": 2060,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2090,
+     "cut_in_value": 2061,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2091,
+     "cut_in_value": 2062,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2092,
+     "cut_in_value": 2063,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2093,
+     "cut_in_value": 2064,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2094,
+     "cut_in_value": 2065,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2095,
+     "cut_in_value": 2066,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2096,
+     "cut_in_value": 2067,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2097,
+     "cut_in_value": 2068,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2098,
+     "cut_in_value": 2069,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2099,
+     "cut_in_value": 2070,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2100,
+     "cut_in_value": 2071,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2101,
+     "cut_in_value": 2072,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2102,
+     "cut_in_value": 2073,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2103,
+     "cut_in_value": 2074,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2104,
+     "cut_in_value": 2075,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2105,
+     "cut_in_value": 2076,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2106,
+     "cut_in_value": 2077,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2107,
+     "cut_in_value": 2078,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2108,
+     "cut_in_value": 2079,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2109,
+     "cut_in_value": 2080,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2110,
+     "cut_in_value": 2081,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2111,
+     "cut_in_value": 2082,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2112,
+     "cut_in_value": 2083,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2113,
+     "cut_in_value": 2084,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2114,
+     "cut_in_value": 2085,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2115,
+     "cut_in_value": 2086,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2116,
+     "cut_in_value": 2087,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2117,
+     "cut_in_value": 2088,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2118,
+     "cut_in_value": 2089,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2119,
+     "cut_in_value": 2090,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2120,
+     "cut_in_value": 2091,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2121,
+     "cut_in_value": 2092,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2122,
+     "cut_in_value": 2093,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2123,
+     "cut_in_value": 2094,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2124,
+     "cut_in_value": 2095,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2125,
+     "cut_in_value": 2096,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2126,
+     "cut_in_value": 2097,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2127,
+     "cut_in_value": 2098,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2128,
+     "cut_in_value": 2099,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    },
+    {
+     "cut": 2129,
+     "cut_in_value": 2100,
+     "leak": "none",
+     "output": "header line one\nuser record: [REDACTED] ; trailing text\n"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,110 @@
+{
+ "gitleaks": {
+  "image": "ghcr.io/gitleaks/gitleaks:v8.30.1",
+  "digest": "sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f",
+  "files": [
+   {
+    "file": "gitleaks_control_inside_first_read.txt",
+    "key_start": 50000,
+    "key_end": 51678,
+    "size": 300000,
+    "dir": {
+     "findings": 1,
+     "rules": [
+      "private-key"
+     ],
+     "lines": [
+      626
+     ]
+    },
+    "stdin": {
+     "findings": 1,
+     "rules": [
+      "private-key"
+     ],
+     "lines": [
+      626
+     ]
+    }
+   },
+   {
+    "file": "gitleaks_straddle_extension_cap.txt",
+    "key_start": 124000,
+    "key_end": 125678,
+    "size": 300000,
+    "dir": {
+     "findings": 0,
+     "rules": [],
+     "lines": []
+    },
+    "stdin": {
+     "findings": 1,
+     "rules": [
+      "private-key"
+     ],
+     "lines": [
+      1551
+     ]
+    }
+   },
+   {
+    "file": "gitleaks_straddle_read_edge_only.txt",
+    "key_start": 99500,
+    "key_end": 101178,
+    "size": 300000,
+    "dir": {
+     "findings": 1,
+     "rules": [
+      "private-key"
+     ],
+     "lines": [
+      1244
+     ]
+    },
+    "stdin": {
+     "findings": 1,
+     "rules": [
+      "private-key"
+     ],
+     "lines": [
+      1244
+     ]
+    }
+   }
+  ]
+ },
+ "trufflehog": {
+  "image": "trufflesecurity/trufflehog:3.97.9",
+  "digest": "sha256:52e67fef4d054ecff5c2ce4b4ae376626d1ef54aa0898b53cac19c25e92e14db",
+  "files": [
+   {
+    "file": "trufflehog_control_inside_chunk.txt",
+    "key_start": 5000,
+    "key_end": 8242,
+    "size": 40960,
+    "findings": 1,
+    "detectors": [
+     "PrivateKey"
+    ]
+   },
+   {
+    "file": "trufflehog_straddle_covered_by_peek.txt",
+    "key_start": 10100,
+    "key_end": 11778,
+    "size": 40960,
+    "findings": 1,
+    "detectors": [
+     "PrivateKey"
+    ]
+   },
+   {
+    "file": "trufflehog_straddle_past_peek.txt",
+    "key_start": 10100,
+    "key_end": 13342,
+    "size": 40960,
+    "findings": 0,
+    "detectors": []
+   }
+  ]
+ }
+}

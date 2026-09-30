@@ -1,0 +1,12 @@
+{
+ "target": "fluent-bit tail + lua redact on docker json-file log",
+ "variant": "multiline",
+ "records": [
+  {
+   "log_length": 18333,
+   "redactions": 1,
+   "leak": "none"
+  }
+ ],
+ "any_leak": false
+}
