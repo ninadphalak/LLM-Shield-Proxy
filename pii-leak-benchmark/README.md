@@ -92,15 +92,28 @@ redact everything and the echo half fails. `DeltaFrag` is the headline number be
 gateway can score perfectly when values arrive whole and still leak when the transport
 splits them, and only the gap between the two shows it.
 
+The profile is the `pii-leak-benchmark-v2` command (`python -m pii_leak_benchmark.v2_emitter`
+is the same parser and the same run). It works from any directory: `--validate` checks
+each report against the v2 schema bundled with the package, and `--json-out` writes one
+summary row per policy with the seed, the four rates, the case counts, the outcome and
+the instrument digests, never the report and never the gateway address.
+
 ```bash
 # the five reference policies, no containers, no credentials
-python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/v2 \
+pii-leak-benchmark-v2 --validate --out ./benchmark-output/v2 \
   --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
 
 # a real gateway you are already running, configured to use the capture as its upstream
-python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/my-gateway \
-  --only my-gateway --gateway-url http://127.0.0.1:4000/v1/chat/completions --upstream-port 8799
+pii-leak-benchmark-v2 --validate --out ./benchmark-output/my-gateway \
+  --only my-gateway --gateway-url http://127.0.0.1:4000/v1/chat/completions --upstream-port 8799 \
+  --seed a1b2c3d4e5f60001 --json-out ./benchmark-output/my-gateway/summary.json
 ```
+
+`--seed` reproduces the fixture selection, which is how a published row's seeds are
+replayed; `--only` picks the policies (or names the label for an external gateway); `--out`
+is required and is where `<policy>.json` lands. To replay a published results-wall row with
+the gateway, its detector and this harness all in containers, use a replication pack under
+[`benchmarks/replication/`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/benchmarks/replication).
 
 **Cut at every internal split point, not just the midpoint.** By default an adversarial case
 cuts its value once, in the middle. That is one sample, and for a detector that scores a
@@ -180,7 +193,7 @@ Every product result currently has one run from this project's maintainer. A res
 
 A submission needs both the exact configuration and the JSON report produced by the run. See [submitting](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md).
 
-To check a report before you send it, install `pii-leak-benchmark[validate]` and validate it against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json). The schema is published in the repository rather than bundled here, so there is exactly one copy. It re-derives `outcome` in both directions, so a hand-edited report fails validation.
+To check a report before you send it, install `pii-leak-benchmark[validate]` and validate it against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json). The v1 schema is published in the repository rather than bundled here, so there is exactly one copy. It re-derives `outcome` in both directions, so a hand-edited report fails validation. The v2 schema is bundled so `pii-leak-benchmark-v2 --validate` works anywhere; a test pins the bundled copy to `spec/v2.0.0` byte for byte.
 
 ## Relationship to LLM-Shield-Proxy
 

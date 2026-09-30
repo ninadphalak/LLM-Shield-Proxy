@@ -242,6 +242,8 @@ common reason, and it says so.
 **LiteLLM answers 401.** The database was not up when it started, or the key does not
 match `master_key`. Restart it after `docker logs litellm-db` shows Postgres ready.
 
+**You want the published LiteLLM row itself, pinned versions and all.** That is one command: [reproduce a published row](./reproducing.md#reproduce-a-published-row-in-one-command).
+
 **Results differ from our published table.** That is interesting and we want to hear about
 it. Versions move, defaults change, and a disagreement usually means a real difference
 rather than a mistake. [Open a question](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)

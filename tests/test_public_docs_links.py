@@ -194,8 +194,9 @@ def test_public_readme_links_into_the_repository_resolve() -> None:
 # not be flagged.
 #
 # Captures the whole tag, not just three numbers, so `benchmark-v0.4.1rc1` is
-# reported as a mismatch instead of passing as `0.4.1`.
-PINNED_BENCHMARK_TAG = re.compile(r"benchmark-v([\w.]+)")
+# reported as a mismatch instead of passing as `0.4.1`. The `@` is part of the
+# shape: the `pii-leak-benchmark-v2` command is a name, not a pin.
+PINNED_BENCHMARK_TAG = re.compile(r"@benchmark-v([\w.]+)")
 BENCHMARK_ROOT = REPO_ROOT / "pii-leak-benchmark"
 # The root README is not listed: it has a `>=` floor, not a pin.
 VERSIONED_PUBLIC_FILES = (
