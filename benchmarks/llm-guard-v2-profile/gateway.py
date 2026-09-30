@@ -130,6 +130,9 @@ def _handler_class():
             try:
                 self._respond()
             except Exception as exc:  # noqa: BLE001
+                # The type name alone goes to the log: it carries no request value, so a
+                # CI job can print a count of these lines without printing the fixture.
+                print(f"gateway error: {type(exc).__name__}", file=sys.stderr, flush=True)
                 body = json.dumps({"gateway_error": f"{type(exc).__name__}: {exc}"}).encode()
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")

@@ -26,6 +26,7 @@ RECIPES = {
     "portkey-source-reproduction.yml": ("portkey-source.json",),
     "litellm-source-reproduction.yml": ("litellm-source.json",),
     "nemo-source-reproduction.yml": ("nemo-source.json",),
+    "wrappers-source-reproduction.yml": ("llm-guard-buffered.json",),
 }
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 RUN = "https://github.com/friend/proxy/actions/runs/4242"
@@ -163,11 +164,35 @@ def test_the_bundle_names_itself_so_a_bare_run_link_is_enough(name):
         assert _job(name)["env"][env].strip(), (name, env)
 
 
-def test_the_four_result_steps_are_one_step():
+def test_the_result_steps_are_one_step():
     """A fix to one copy must reach the others; only the report directory differs."""
     bodies = {name: yaml.safe_dump({k: v for k, v in _result_step(name).items() if k != "env"})
               for name in RECIPES}
     assert len(set(bodies.values())) == 1
+
+
+@pytest.mark.parametrize("name", sorted(RECIPES))
+def test_a_held_run_is_measured_but_not_offered_to_the_wall(tmp_path, name, monkeypatch):
+    """One issue is one row: a run that measured several configurations says so instead."""
+    monkeypatch.setenv("SUBMISSION_HOLD_REASON", "This run measured every wrapper at once.")
+    status, summary = _run(tmp_path, name, response_leak=True)
+    assert status == "leak"
+    assert "MEASURED LEAK" in summary and "8 of 16 leaked" in summary
+    assert "This run measured every wrapper at once." in summary
+    assert "issues/new" not in summary and "gh issue create" not in summary
+
+
+def test_a_wrapper_run_names_its_wrapper_on_the_wall(tmp_path):
+    """The prefilled issue for one wrapper carries that wrapper's name and configuration."""
+    env = _job("wrappers-source-reproduction.yml")["env"]
+    assert env["WALL_PRODUCT"] == "${{ matrix.product }}"
+    assert env["WALL_CONFIGURATION"] == "${{ matrix.configuration }}"
+    status, summary = _run(tmp_path, "wrappers-source-reproduction.yml", request_leak=True)
+    assert status == "leak"
+    link = re.search(r"\((https://github\.com/ninadphalak/LLM-Shield-Proxy/issues/new\?[^)]+)\)", summary)
+    fields = intake.parse_submission(parse_qs(urlparse(link.group(1)).query)["body"][0])
+    assert fields["gateway"] == "${{ matrix.product }}"
+    assert fields["version"] == "v9.9.9 (commit 0123456789ab), ${{ matrix.configuration }}"
 
 
 @pytest.mark.parametrize("name", sorted(RECIPES))

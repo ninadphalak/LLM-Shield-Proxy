@@ -486,11 +486,11 @@ const REPLICATE: Record<string, {path: string; hint: string}> = {
   },
   'llm guard': {
     path: 'source-ci#replicate-llm-guard',
-    hint: 'Run it on your machine through the same small gateway used here. No API key needed.',
+    hint: 'Fork LLM-Shield-Proxy and click Run: the workflow runs the same small gateway used here. No API key needed.',
   },
   'guardrails ai': {
     path: 'source-ci#replicate-guardrails-ai',
-    hint: 'Run it on your machine through the same small gateway used here. No API key needed.',
+    hint: 'Fork LLM-Shield-Proxy and click Run: the workflow runs the same small gateway used here. No API key needed.',
   },
 };
 
