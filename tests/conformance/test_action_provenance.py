@@ -1,3 +1,7 @@
+import pytest
+import sys
+import subprocess
+import json
 import re
 from pathlib import Path
 
@@ -280,6 +284,49 @@ def test_composite_action_runs_the_response_profile_only_when_asked():
     assert "${{ inputs.response-out }}" in paths
     assert fail["env"]["OPERATOR_OUTCOME"] == "${{ steps.run.outcome }}"
     assert fail["env"]["RESPONSE_LEAKED"] == "${{ steps.response.outputs.leaked }}"
+    # An all-inconclusive run is a non-pass, never a clean one.
+    assert '"$RESPONSE_LEAKED" = "incomplete"' in fail["run"]
+    assert document["outputs"]["response-applicable"]["value"] == "${{ steps.response.outputs.applicable }}"
+    assert document["outputs"]["response-inconclusive"]["value"] == "${{ steps.response.outputs.inconclusive }}"
+
+
+def _response_output_script() -> str:
+    """The Python the response step runs to derive its outputs, lifted from the heredoc."""
+    text = ACTION.read_text(encoding="utf-8")
+    start = text.index("        import json, sys
+        rows = json.load(open(sys.argv[1]")
+    end = text.index("        PY
+", start)
+    return "
+".join(line[8:] for line in text[start:end].splitlines())
+
+
+@pytest.mark.parametrize(
+    ("rows", "metrics", "expected"),
+    [
+        # Every case inconclusive: the rates are 0.0 by construction, which is not a measurement.
+        ([{"leak_single_chunk": 0.0, "leak_adversarial": 0.0}], {"cases_applicable": 0, "cases_inconclusive": 32}, "incomplete"),
+        ([], {"cases_applicable": 32, "cases_inconclusive": 0}, "incomplete"),
+        ([{"leak_single_chunk": 0.0, "leak_adversarial": 0.0}], {"cases_applicable": 32, "cases_inconclusive": 0}, "false"),
+        ([{"leak_single_chunk": 0.0, "leak_adversarial": 0.0625}], {"cases_applicable": 30, "cases_inconclusive": 2}, "true"),
+    ],
+)
+def test_response_profile_output_reads_incomplete_when_nothing_was_scored(tmp_path, rows, metrics, expected):
+    summary = tmp_path / "response-summary.json"
+    report = tmp_path / "policy.json"
+    summary.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+    report.write_text(json.dumps({"metrics": metrics}), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-", str(summary), str(report)],
+        input=_response_output_script(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    outputs = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    assert outputs["leaked"] == expected
+    assert outputs["applicable"] == str(metrics["cases_applicable"])
+    assert outputs["inconclusive"] == str(metrics["cases_inconclusive"])
 
 
 def test_main_ci_proves_the_response_profile_on_the_negative_control():
