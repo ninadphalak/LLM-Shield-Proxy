@@ -291,6 +291,19 @@ That is the whole setup. Everything below is optional.
 
 ## Optional: the rest
 
+### Run the response-split profile as well
+
+`profiles: operator` is the default and runs the request-path check above. `profiles: both`
+adds the response-split profile from the same job: the action starts its own capture on
+`response-capture-port` (8799 by default), your gateway must send upstream traffic there
+while it runs, and the step summary gains a table with FidelityRate, the leak rate with the
+value whole and split across two chunks, and DeltaFrag. The raw report is uploaded next to
+the operator report and validates against the published schema. `profiles: response` runs
+only that profile. The seed is `response-seed`, the published one by default. This needs a
+harness with the `pii-leak-benchmark-v2` command, so `source: ./pii-leak-benchmark` from a
+current checkout, or a release later than 0.4.1.
+
+
 <details>
 <summary><b>Show the result on your README</b></summary>
 

@@ -1,59 +1,137 @@
-name: Reproduce proxy source build
+name: Reproduce library wrappers
+
+# LLM Guard and Guardrails AI are libraries, not proxies, so there is no proxy repository to
+# fork. This recipe runs from a fork of this repository instead: it installs the pinned library,
+# starts the small gateway this project measured it through, and runs the same two profiles
+# the proxy recipes run, at the published harness version and the published seed.
 
 on:
   workflow_dispatch:
     inputs:
-      source_ref:
-        description: Proxy tag, branch, or commit to build (leave the workflow branch on main)
+      wrapper:
+        description: Which wrapper to measure (all runs one job per wrapper and offers no submission link)
         required: true
-        default: v1.6.6
-        type: string
+        default: all
+        type: choice
+        options:
+          - llm-guard-chunk-local
+          - llm-guard-buffered
+          - guardrails-ai
+          - all
   pull_request:
     paths:
-      - .github/workflows/source-reproduction.yml
+      - .github/workflows/wrappers-source-reproduction.yml
 
 permissions:
   contents: read
 
 jobs:
-  reproduce:
+  select:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      single: ${{ steps.matrix.outputs.single }}
+    steps:
+      - name: Turn the wrapper choice into one job per wrapper
+        id: matrix
+        env:
+          WRAPPER: ${{ inputs.wrapper || 'all' }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+
+          # Each entry names the published row it reproduces: the library pin, the gateway in
+          # this repository, the mode the gateway reads at start, the report name, and what the
+          # results wall shows for it. A pull request runs all three.
+          WRAPPERS = {
+              'llm-guard-chunk-local': {
+                  'product': 'LLM Guard',
+                  'configuration': '0.3.16, scanned per chunk (LLMGUARD_MODE=chunk-local)',
+                  'license': 'MIT',
+                  'project_url': 'https://github.com/protectai/llm-guard',
+                  'package': 'llm-guard==0.3.16',
+                  'distribution': 'llm-guard',
+                  'gateway': 'benchmarks/llm-guard-v2-profile/gateway.py',
+                  'mode': 'chunk-local',
+                  'policy': 'llm-guard-chunk-local',
+                  'port': '8790',
+                  'duty': 'restore',
+                  'request_path_redaction': 'configured',
+              },
+              'llm-guard-buffered': {
+                  'product': 'LLM Guard',
+                  'configuration': '0.3.16, whole response buffered (LLMGUARD_MODE=buffered)',
+                  'license': 'MIT',
+                  'project_url': 'https://github.com/protectai/llm-guard',
+                  'package': 'llm-guard==0.3.16',
+                  'distribution': 'llm-guard',
+                  'gateway': 'benchmarks/llm-guard-v2-profile/gateway.py',
+                  'mode': 'buffered',
+                  'policy': 'llm-guard-buffered',
+                  'port': '8790',
+                  'duty': 'restore',
+                  'request_path_redaction': 'configured',
+              },
+              'guardrails-ai': {
+                  'product': 'Guardrails AI',
+                  'configuration': '0.10.2, its streaming validator holding to the sentence boundary, request path not masked',
+                  'license': 'Apache-2.0',
+                  'project_url': 'https://github.com/guardrails-ai/guardrails',
+                  'package': 'guardrails-ai==0.10.2',
+                  'distribution': 'guardrails-ai',
+                  'gateway': 'benchmarks/guardrails-v2-profile/gateway.py',
+                  'mode': '',
+                  'policy': 'guardrails-ai-stream-validate',
+                  'port': '8791',
+                  'duty': 'anonymize',
+                  'request_path_redaction': 'not-configured',
+              },
+          }
+          selected = os.environ['WRAPPER']
+          names = list(WRAPPERS) if selected == 'all' else [selected]
+          unknown = [name for name in names if name not in WRAPPERS]
+          if unknown:
+              raise SystemExit(f'Unknown wrapper {unknown}; choose one of {sorted(WRAPPERS)} or all.')
+          print('matrix=' + json.dumps({'include': [dict(wrapper=name, **WRAPPERS[name]) for name in names]}))
+          print('single=' + ('false' if selected == 'all' else 'true'))
+          PY
+
+  reproduce:
+    needs: select
+    name: ${{ matrix.wrapper }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     env:
       # Names this run on the results wall. Change them if your fork measures something else.
-      WALL_PRODUCT: LLM-Shield-Proxy
-      WALL_CONFIGURATION: request redaction on, response redaction on with an off-arm control
-      WALL_LICENSE: Apache-2.0
-      WALL_PROJECT_URL: https://github.com/ninadphalak/LLM-Shield-Proxy
-      VALID_VIRTUAL_KEYS: sk-shield-source-reproduction
-      OPENAI_API_KEY: sk-synthetic-no-model-call
-      UPSTREAM_API_KEY: sk-synthetic-no-model-call
-      CONFORMANCE_TARGET_API_KEY: sk-shield-source-reproduction
-      V2_GATEWAY_TOKEN: sk-shield-source-reproduction
-      V2_REQUEST_PATH_REDACTION: configured
-      UPSTREAM_BASE_URL: http://127.0.0.1:8799
-      ENABLE_EXT_PROC: 'false'
+      WALL_PRODUCT: ${{ matrix.product }}
+      WALL_CONFIGURATION: ${{ matrix.configuration }}
+      WALL_LICENSE: ${{ matrix.license }}
+      WALL_PROJECT_URL: ${{ matrix.project_url }}
+      WRAPPER: ${{ matrix.wrapper }}
+      WRAPPER_PACKAGE: ${{ matrix.package }}
+      WRAPPER_DISTRIBUTION: ${{ matrix.distribution }}
+      WRAPPER_GATEWAY: ${{ matrix.gateway }}
+      WRAPPER_PORT: ${{ matrix.port }}
+      RESPONSE_POLICY: ${{ matrix.policy }}
+      # The gateway reads its mode once, at start; blank for Guardrails AI.
+      LLMGUARD_MODE: ${{ matrix.mode }}
+      V2_REQUEST_PATH_REDACTION: ${{ matrix.request_path_redaction }}
+      CONFORMANCE_TARGET_API_KEY: sk-synthetic-no-model-call
+      V2_GATEWAY_TOKEN: sk-synthetic-no-model-call
+      # The intake reads the artifact named source-reproduction. A run of all three wrappers
+      # has three artifacts and one issue is one row, so those get their own names and the
+      # summary holds the submission link.
+      ARTIFACT_NAME: ${{ needs.select.outputs.single == 'true' && 'source-reproduction' || format('source-reproduction-{0}', matrix.wrapper) }}
+      SUBMISSION_HOLD_REASON: ${{ needs.select.outputs.single == 'true' && '' || 'This run measured every wrapper at once, and one issue is one row. To put this wrapper on the wall, run the workflow again with it chosen in the wrapper box and submit that run.' }}
     steps:
-      - name: Find the repository that has the selected source
-        id: where
-        env:
-          SOURCE_REF: ${{ inputs.source_ref }}
-        run: |
-          # A new fork copies only its default branch, so a release tag such as v1.6.6 may exist
-          # only in the original repository. Build it from there when this repository lacks it.
-          repository="$GITHUB_REPOSITORY"
-          if [ -n "$SOURCE_REF" ] && ! [[ "$SOURCE_REF" =~ ^[0-9a-f]{7,40}$ ]]               && ! git ls-remote --exit-code "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$SOURCE_REF" > /dev/null; then
-            repository=ninadphalak/LLM-Shield-Proxy
-            echo "$SOURCE_REF is not in $GITHUB_REPOSITORY; building it from $repository."
-          fi
-          echo "repository=$repository" >> "$GITHUB_OUTPUT"
-
-      - name: Check out selected proxy source
+      - name: Check out the wrapper gateways
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ steps.where.outputs.repository }}
-          # Pull requests exercise their source; manual runs use the selected tag or branch.
-          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Python
@@ -61,187 +139,227 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build and install the selected source
+      - name: Install the pinned library in its own environment
         id: build
-        run: python -m pip install . 'pii-leak-benchmark[validate]==0.2.1'
+        run: |
+          set -euo pipefail
+          # The library under test never shares an environment with the harness: LLM Guard
+          # pins torch and transformers, Guardrails AI pulls in LiteLLM.
+          python -m venv "$RUNNER_TEMP/venv-wrapper"
+          "$RUNNER_TEMP/venv-wrapper/bin/python" -m pip install --disable-pip-version-check --upgrade pip
+          "$RUNNER_TEMP/venv-wrapper/bin/python" -m pip install --disable-pip-version-check "$WRAPPER_PACKAGE"
 
       - name: Record source and environment
         id: source
-        env:
-          SOURCE_SELECTOR: ${{ inputs.source_ref || github.sha }}
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/source-reproduction"
-          git rev-parse HEAD > "$RUNNER_TEMP/source-reproduction/source-commit.txt"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          python -m pip freeze > "$RUNNER_TEMP/source-reproduction/installed-packages.txt"
-          python --version > "$RUNNER_TEMP/source-reproduction/python-version.txt" 2>&1
-          uname -a > "$RUNNER_TEMP/source-reproduction/runner.txt"
-          python - <<'PY'
+          out="$RUNNER_TEMP/wrappers-source-reproduction"
+          mkdir -p "$out"
+          git rev-parse HEAD > "$out/source-commit.txt"
+          "$RUNNER_TEMP/venv-wrapper/bin/python" -m pip freeze > "$out/installed-packages.txt"
+          "$RUNNER_TEMP/venv-wrapper/bin/python" --version > "$out/python-version.txt" 2>&1
+          uname -a > "$out/runner.txt"
+          python -m pip install 'pii-leak-benchmark[validate]==0.2.1'
+          python -m pip freeze > "$out/installed-harness-packages.txt"
+          "$RUNNER_TEMP/venv-wrapper/bin/python" - <<'PY'
           import importlib.metadata
           import json
           import os
           from pathlib import Path
 
-          root = Path(os.environ['RUNNER_TEMP']) / 'source-reproduction'
+          root = Path(os.environ['RUNNER_TEMP']) / 'wrappers-source-reproduction'
           identity = {
               'schema': 'pii-leak-benchmark/source-build/v1',
-              'source_selector': os.environ['SOURCE_SELECTOR'],
+              'source_repository': os.environ['GITHUB_REPOSITORY'],
+              'source_selector': os.environ['WRAPPER_PACKAGE'],
               'source_commit': (root / 'source-commit.txt').read_text(encoding='utf-8').strip(),
               'product': os.environ['WALL_PRODUCT'],
               'configuration': os.environ['WALL_CONFIGURATION'],
               'license': os.environ['WALL_LICENSE'],
               'project_url': os.environ['WALL_PROJECT_URL'],
-              'distribution_version': importlib.metadata.version('llm-shield-proxy'),
+              'distribution_version': importlib.metadata.version(os.environ['WRAPPER_DISTRIBUTION']),
+              'wrapper_gateway': os.environ['WRAPPER_GATEWAY'],
+              'wrapper_mode': os.environ.get('LLMGUARD_MODE', ''),
           }
           (root / 'source-identity.json').write_text(
               json.dumps(identity, sort_keys=True, indent=2) + '\n', encoding='utf-8'
           )
           PY
 
+      # The 0.2.1 instrument validates its report against spec/v2.0.0/http-profile.schema.json
+      # read from the working directory, so the response step runs from a checkout of the
+      # commit that released 0.2.1: the schema it validates against is the published one,
+      # whatever the branch this workflow runs from has changed.
+      - name: Check out the pinned response instrument
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ninadphalak/LLM-Shield-Proxy
+          ref: 74d744a72adb053ff4f4025bdd676bba0e5be03d # benchmark-v0.2.1
+          path: benchmark-instrument
+          persist-credentials: false
+
       - name: Check proxy startup before fixtures
         id: startup
-        env:
-          ENABLE_RESPONSE_PII_REDACTION: 'true'
         run: |
           set -euo pipefail
-          python -m uvicorn llm_shield_proxy.api.main:app \
-            --host 127.0.0.1 --port 8815 --no-access-log \
-            > "$RUNNER_TEMP/startup-preflight.log" 2>&1 &
-          proxy_pid=$!
-          trap 'kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true' EXIT
-          for _ in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8815/health > /dev/null; then
+          # The operator profile's capture listens on 8765. The gateway is started here rather
+          # than by the operator action because LLM Guard downloads its models on first start,
+          # which takes longer than the action waits for a port.
+          "$RUNNER_TEMP/venv-wrapper/bin/python" "$GITHUB_WORKSPACE/$WRAPPER_GATEWAY" \
+            --port "$WRAPPER_PORT" --upstream http://127.0.0.1:8765/v1/chat/completions \
+            > "$RUNNER_TEMP/request-gateway.log" 2>&1 &
+          gateway_pid=$!
+          echo "REQUEST_GATEWAY_PID=$gateway_pid" >> "$GITHUB_ENV"
+          for _ in $(seq 1 900); do
+            if python -c "import socket, sys; socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=1).close()" "$WRAPPER_PORT" 2> /dev/null; then
               exit 0
             fi
-            if ! kill -0 "$proxy_pid" 2>/dev/null; then
+            if ! kill -0 "$gateway_pid" 2> /dev/null; then
               break
             fi
             sleep 1
           done
-          echo 'Proxy startup failed before any fixtures were generated.'
-          sed -n '1,60p' "$RUNNER_TEMP/startup-preflight.log"
+          echo 'The wrapper gateway did not start before any fixtures were generated.'
+          tail -n 60 "$RUNNER_TEMP/request-gateway.log"
           exit 2
 
       - name: Measure request-path behavior
         id: operator
         continue-on-error: true
         uses: ninadphalak/LLM-Shield-Proxy@29a9932b085e5b063b8c366c3e6bfca2c4af4b06 # operator action; the recipe writes the submission
-        env:
-          ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
-          target-base-url: http://127.0.0.1:8815/v1
-          start-command: python -m uvicorn llm_shield_proxy.api.main:app --host 127.0.0.1 --port 8815 --no-access-log
-          upstream-env: UPSTREAM_BASE_URL
+          target-base-url: http://127.0.0.1:${{ matrix.port }}/v1
           target-model: capture
-          target-version: ${{ steps.source.outputs.sha }}
-          duty: restore
+          target-version: ${{ matrix.package }}
+          duty: ${{ matrix.duty }}
           artifact-name: ''
           submission-section: 'false'
 
-      - name: Stage operator reports with the response pair
+      - name: Stop the request-path gateway
+        if: always()
+        run: |
+          if [ -n "${REQUEST_GATEWAY_PID:-}" ]; then
+            kill "$REQUEST_GATEWAY_PID" 2> /dev/null || true
+            wait "$REQUEST_GATEWAY_PID" 2> /dev/null || true
+          fi
+
+      - name: Stage the operator result
         if: always() && steps.operator.outputs.report-directory != ''
         env:
           OPERATOR_REPORT_DIRECTORY: ${{ steps.operator.outputs.report-directory }}
         run: |
-          mkdir -p "$RUNNER_TEMP/source-reproduction"
+          out="$RUNNER_TEMP/wrappers-source-reproduction"
           for name in current.json summary.md; do
             if [ -f "$OPERATOR_REPORT_DIRECTORY/$name" ]; then
-              cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$RUNNER_TEMP/source-reproduction/$name"
+              cp -- "$OPERATOR_REPORT_DIRECTORY/$name" "$out/$name"
             fi
           done
 
-      - name: Measure response midpoint pair
+      - name: Measure response midpoint profile
         id: response
-        if: always() && steps.source.outcome == 'success'
+        if: always() && steps.operator.outcome != 'skipped'
         continue-on-error: true
+        working-directory: benchmark-instrument
+        env:
+          # The published rows were measured on a workstation under the instrument's
+          # default 10 s read deadline. The deadline decides only which cases become
+          # inconclusive, never what leaks, so it is generous here. Known limit: on a
+          # hosted runner LLM Guard leaves about half the cases without a complete
+          # response whatever the deadline (14 of 32 on 2026-09-30, at 900 s), and those
+          # are scored inconclusive; the LLM Guard rows are therefore reproduced on a
+          # workstation, and this job reports what the runner saw.
+          V2_CLIENT_READ_TIMEOUT: '900'
         run: |
           set -euo pipefail
-          out="$RUNNER_TEMP/source-reproduction"
-          proxy_pid=''
+          gateway_pid=''
           cleanup() {
-            if [ -n "$proxy_pid" ]; then
-              kill "$proxy_pid" 2>/dev/null || true
-              wait "$proxy_pid" 2>/dev/null || true
+            if [ -n "$gateway_pid" ]; then
+              kill "$gateway_pid" 2> /dev/null || true
+              wait "$gateway_pid" 2> /dev/null || true
             fi
           }
           trap cleanup EXIT
-          run_arm() {
-            local enabled="$1"
-            local label="$2"
-            ENABLE_RESPONSE_PII_REDACTION="$enabled" \
-              python -m uvicorn llm_shield_proxy.api.main:app \
-                --host 127.0.0.1 --port 8815 --no-access-log \
-                > "$RUNNER_TEMP/$label.log" 2>&1 &
-            proxy_pid=$!
-            local ready=false
-            for _ in {1..60}; do
-              if curl --fail --silent http://127.0.0.1:8815/health > /dev/null; then
-                ready=true
-                break
-              fi
-              if ! kill -0 "$proxy_pid" 2>/dev/null; then
-                break
-              fi
-              sleep 1
-            done
-            if [ "$ready" != true ]; then
-              echo "The $label proxy did not become ready."
-              return 2
+          # A second start, pointed at the response profile's capture on 8799. The models are
+          # cached from the first start.
+          "$RUNNER_TEMP/venv-wrapper/bin/python" "$GITHUB_WORKSPACE/$WRAPPER_GATEWAY" \
+            --port "$WRAPPER_PORT" --upstream http://127.0.0.1:8799/v1/chat/completions \
+            > "$RUNNER_TEMP/response-gateway.log" 2>&1 &
+          gateway_pid=$!
+          ready=false
+          for _ in $(seq 1 600); do
+            if python -c "import socket, sys; socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=1).close()" "$WRAPPER_PORT" 2> /dev/null; then
+              ready=true
+              break
             fi
-            python -m pii_leak_benchmark.v2_emitter \
-              --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
-              --only "$label" \
-              --gateway-url http://127.0.0.1:8815/v1/chat/completions \
-              --upstream-port 8799 --model capture --out "$out" \
-              > "$RUNNER_TEMP/$label-instrument.log" 2>&1 || {
-                echo "The $label instrument exited without a valid report."
-                return 2
-              }
-            cleanup
-            proxy_pid=''
-          }
-          run_arm true source-response-on
-          run_arm false source-response-off
-
-      - name: Summarize the response pair
-        if: always() && steps.response.outcome == 'success'
-        env:
-          REPORT_DIR: ${{ runner.temp }}/source-reproduction
-        run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ['REPORT_DIR'])
-          print('## Response midpoint pair')
-          print()
-          print('| Configuration | Fidelity | Single-chunk leak | Midpoint leak | Scored | Inconclusive |')
-          print('| :--- | ---: | ---: | ---: | ---: | ---: |')
-          for name in ('source-response-on', 'source-response-off'):
-              report = json.loads((root / f'{name}.json').read_text(encoding='utf-8'))
-              metrics = report['metrics']
-              leaks = metrics['leak_rate']
-              print(f"| {name} | {metrics['fidelity_rate']:.2f} | "
-                    f"{leaks['single_chunk']:.2f} | {leaks['adversarial']:.2f} | "
-                    f"{metrics['cases_scored']} | {metrics['cases_inconclusive']} |")
-          print()
-          print('Built from the selected source commit. This does not assert that the installed '
-                'files or dependencies match a published wheel.')
-          PY
+            if ! kill -0 "$gateway_pid" 2> /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo 'The wrapper gateway did not become ready for the response profile.'
+            tail -n 60 "$RUNNER_TEMP/response-gateway.log"
+            exit 2
+          fi
+          # One warm-up request so lazy scanner initialisation happens before the first
+          # measured case rather than inside its deadline. The capture on 8799 is not up yet,
+          # so the wrapper answers with an upstream error after scanning; that is expected.
+          curl -s -o /dev/null --max-time 900 -X POST \
+            "http://127.0.0.1:$WRAPPER_PORT/v1/chat/completions" \
+            -H "Authorization: Bearer $V2_GATEWAY_TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"capture","stream":true,"messages":[{"role":"user","content":"warm up: hello"}]}' \
+            || true
+          python -m pii_leak_benchmark.v2_emitter \
+            --validate --oracle midpoint --seed a1b2c3d4e5f60001 \
+            --only "$RESPONSE_POLICY" \
+            --gateway-url "http://127.0.0.1:$WRAPPER_PORT/v1/chat/completions" \
+            --upstream-port 8799 --model capture \
+            --out "$RUNNER_TEMP/wrappers-source-reproduction" \
+            > "$RUNNER_TEMP/wrapper-instrument.log" 2>&1 || {
+              echo 'The response instrument exited without a valid report.'
+              tail -n 40 "$RUNNER_TEMP/wrapper-instrument.log"
+              exit 2
+            }
+          grep -E "^$RESPONSE_POLICY " "$RUNNER_TEMP/wrapper-instrument.log" || true
+          # Logs stay on the runner: they can hold generated fixture values. What the job
+          # prints is a count of exception type names, and an exception type carries no value.
+          if grep -q '^gateway error: ' "$RUNNER_TEMP/response-gateway.log"; then
+            echo 'The wrapper gateway answered some cases with an error (those cases are inconclusive):'
+            grep -oE '^gateway error: [A-Za-z0-9_.]+' "$RUNNER_TEMP/response-gateway.log" | sort | uniq -c
+          fi
 
       - name: Verify publishable evidence
         id: verify
         if: always()
         continue-on-error: true
         env:
-          REPORT_DIR: ${{ runner.temp }}/source-reproduction
           BENCHMARK_PYTHON: ${{ steps.operator.outputs.python-path }}
         run: |
           set -euo pipefail
           export RESPONSE_PYTHON="$(command -v python)"
-          "$BENCHMARK_PYTHON" -m pip freeze > "$REPORT_DIR/operator-packages.txt"
+          "$BENCHMARK_PYTHON" -m pip freeze > "$RUNNER_TEMP/wrappers-source-reproduction/operator-packages.txt"
+          # The wall publishes schema-valid v2 reports only. The instrument prints
+          # schema=INVALID and still exits 0, so the check is repeated here against the
+          # pinned schema; only the failing path and rule are printed, never the value.
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          import jsonschema
+
+          report_path = Path(os.environ['RUNNER_TEMP']) / 'wrappers-source-reproduction' / (os.environ['RESPONSE_POLICY'] + '.json')
+          if not report_path.is_file():
+              raise SystemExit('Incomplete evidence: the response report is absent.')
+          schema = json.loads(Path('benchmark-instrument/spec/v2.0.0/http-profile.schema.json').read_text(encoding='utf-8'))
+          report = json.loads(report_path.read_text(encoding='utf-8'))
+          errors = sorted(jsonschema.Draft202012Validator(schema).iter_errors(report), key=lambda error: error.json_path)
+          for error in errors[:10]:
+              print(f'schema violation at {error.json_path}: {error.validator}={error.validator_value!r}')
+          if errors:
+              raise SystemExit('Incomplete evidence: the response report is not schema-valid.')
+          PY
           "$BENCHMARK_PYTHON" - <<'PY'
           import json
           import os
@@ -253,12 +371,11 @@ jobs:
 
           from pii_leak_benchmark.operator_profile import seeded_fixture
 
-          root = Path(os.environ['REPORT_DIR'])
-          names = ('current.json', 'summary.md', 'source-response-on.json', 'source-response-off.json', 'source-identity.json')
-          provenance = ('source-commit.txt', 'installed-packages.txt', 'operator-packages.txt',
-                        'python-version.txt', 'runner.txt')
-          if any(not (root / name).is_file() or not (root / name).stat().st_size for name in names + provenance):
-              raise SystemExit('Incomplete evidence: a required report or provenance file is absent.')
+          root = Path(os.environ['RUNNER_TEMP']) / 'wrappers-source-reproduction'
+          response_name = os.environ['RESPONSE_POLICY'] + '.json'
+          names = ('current.json', 'summary.md', response_name, 'source-identity.json')
+          if any(not (root / name).is_file() for name in names):
+              raise SystemExit('Incomplete evidence: a required report is absent.')
           operator = json.loads((root / 'current.json').read_text(encoding='utf-8'))
           if operator.get('schema') != 'pii-leak-benchmark/operator-run/v1' or operator.get('verdict') not in ('CLEAN', 'LEAK'):
               raise SystemExit('Incomplete evidence: the operator profile was not measured.')
@@ -266,6 +383,8 @@ jobs:
           if contract.get('profile') not in ('pii-v1', 'pii-secrets-v1') or not isinstance(contract.get('seed'), str):
               raise SystemExit('Incomplete evidence: the operator fixture contract is invalid.')
           fixture, marker = seeded_fixture(contract['seed'], contract['profile'] == 'pii-secrets-v1')
+          content = (root / response_name).read_text(encoding='utf-8')
+          report = json.loads(content)
           response = subprocess.run(
               [os.environ['RESPONSE_PYTHON'], '-c',
                'import json; from pii_leak_benchmark.v2_emitter import build_segments; '
@@ -297,35 +416,39 @@ jobs:
               fields = (content,) if name.endswith('.md') else strings(json.loads(content))
               if any(needle in field for field in fields for needle in needles):
                   raise SystemExit('Unsafe evidence: a generated fixture value reached a report.')
-          for name in ('source-response-on.json', 'source-response-off.json'):
-              content = (root / name).read_text(encoding='utf-8')
-              report = json.loads(content)
-              if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
-                      or (report.get('fixture') or {}).get('values_published') is not False
-                      or (report.get('corpus') or {}).get('values_published') is not False
-                      or (report.get('metrics') or {}).get('cases_scored') != 32):
-                  raise SystemExit('Incomplete evidence: response report contract failed.')
+          if (report.get('schema') != 'llm-shield.streaming-privacy-http-profile/v2.0.0'
+                  or (report.get('fixture') or {}).get('values_published') is not False
+                  or (report.get('corpus') or {}).get('values_published') is not False
+                  or (report.get('metrics') or {}).get('cases_scored') != 32
+                  or ((report.get('capture') or {}).get('self_probe') or {}).get('recorded') is not True):
+              raise SystemExit('Incomplete evidence: response report contract failed.')
+          rates = (report.get('metrics') or {}).get('leak_rate') or {}
+          measured_leak = operator['verdict'] == 'LEAK' or any(
+              rates.get(name, 0) > 0 for name in ('single_chunk', 'adversarial')
+          )
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'measured_leak={str(measured_leak).lower()}\n')
           (root / 'verification.txt').write_text('Required reports complete; generated fixture values absent.\n', encoding='utf-8')
           PY
 
-      - name: Upload source and response evidence
+      - name: Upload wrapper evidence
         id: upload
         if: always() && steps.verify.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: source-reproduction
+          name: ${{ env.ARTIFACT_NAME }}
           path: |
-            ${{ runner.temp }}/source-reproduction/current.json
-            ${{ runner.temp }}/source-reproduction/summary.md
-            ${{ runner.temp }}/source-reproduction/source-response-on.json
-            ${{ runner.temp }}/source-reproduction/source-response-off.json
-            ${{ runner.temp }}/source-reproduction/source-identity.json
-            ${{ runner.temp }}/source-reproduction/source-commit.txt
-            ${{ runner.temp }}/source-reproduction/installed-packages.txt
-            ${{ runner.temp }}/source-reproduction/operator-packages.txt
-            ${{ runner.temp }}/source-reproduction/python-version.txt
-            ${{ runner.temp }}/source-reproduction/runner.txt
-            ${{ runner.temp }}/source-reproduction/verification.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/current.json
+            ${{ runner.temp }}/wrappers-source-reproduction/summary.md
+            ${{ runner.temp }}/wrappers-source-reproduction/${{ env.RESPONSE_POLICY }}.json
+            ${{ runner.temp }}/wrappers-source-reproduction/source-identity.json
+            ${{ runner.temp }}/wrappers-source-reproduction/source-commit.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/installed-packages.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/installed-harness-packages.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/operator-packages.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/python-version.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/runner.txt
+            ${{ runner.temp }}/wrappers-source-reproduction/verification.txt
           if-no-files-found: warn
           retention-days: 90
 
@@ -334,14 +457,14 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          REPORT_DIR: ${{ runner.temp }}/source-reproduction
+          REPORT_DIR: ${{ runner.temp }}/wrappers-source-reproduction
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           RESPONSE_OUTCOME: ${{ steps.response.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           STARTUP_OUTCOME: ${{ steps.startup.outcome }}
-          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_REF: ${{ matrix.package }}
           STEP_OUTCOMES: request=${{ steps.operator.outcome }}, response=${{ steps.response.outcome }}, verification=${{ steps.verify.outcome }}, upload=${{ steps.upload.outcome }}
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"

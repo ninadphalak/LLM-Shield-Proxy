@@ -416,34 +416,42 @@ jobs:
               print('| :--- | :--- | :--- | ---: |')
               print('\n'.join(table))
               print()
-              identity = json.loads((root / 'source-identity.json').read_text(encoding='utf-8'))
-              commit, selector = identity['source_commit'], identity['source_selector']
-              where = f'commit {commit[:12]}' if selector in ('', commit) else f'{selector} (commit {commit[:12]})'
-              sections = {
-                  'Gateway': product,
-                  'Version and configuration': f"{where}, {os.environ['WALL_CONFIGURATION']}",
-                  'Project link': os.environ['WALL_PROJECT_URL'],
-                  'CI run link': run_url,
-                  'How it reads the stream': 'not stated',
-                  'License': os.environ['WALL_LICENSE'],
-                  'Outcome': status.upper(),
-              }
-              body = '\n\n'.join(f'### {heading}\n\n{value}' for heading, value in sections.items()) + '\n'
-              query = urlencode({'title': f'Result: {product}', 'labels': 'conformance-result', 'body': body})
-              print('### Put this run on the results wall')
-              print()
-              print(f'**[Submit this run to the results wall](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query})**: '
-                    'opens a prefilled issue. Press **Create**; nothing needs typing.')
-              print()
-              print('Or, from any terminal signed in to the GitHub CLI:')
-              print()
-              print('```')
-              print(f'gh issue create --repo ninadphalak/LLM-Shield-Proxy --title "Result: {product}" --body "{run_url}"')
-              print('```')
-              print()
-              print('Within a few minutes a bot answers on that issue. It either links your published row '
-                    'or says exactly what stopped it. The numbers on the wall are read from this run\'s '
-                    'artifact, not from the issue.')
+              # One issue is one row. A run that measured several configurations at once sets
+              # SUBMISSION_HOLD_REASON, and its summary says so in place of the submission link.
+              hold = ' '.join(os.environ.get('SUBMISSION_HOLD_REASON', '').split())
+              if hold:
+                  print('### Not offered to the results wall')
+                  print()
+                  print(hold)
+              else:
+                  identity = json.loads((root / 'source-identity.json').read_text(encoding='utf-8'))
+                  commit, selector = identity['source_commit'], identity['source_selector']
+                  where = f'commit {commit[:12]}' if selector in ('', commit) else f'{selector} (commit {commit[:12]})'
+                  sections = {
+                      'Gateway': product,
+                      'Version and configuration': f"{where}, {os.environ['WALL_CONFIGURATION']}",
+                      'Project link': os.environ['WALL_PROJECT_URL'],
+                      'CI run link': run_url,
+                      'How it reads the stream': 'not stated',
+                      'License': os.environ['WALL_LICENSE'],
+                      'Outcome': status.upper(),
+                  }
+                  body = '\n\n'.join(f'### {heading}\n\n{value}' for heading, value in sections.items()) + '\n'
+                  query = urlencode({'title': f'Result: {product}', 'labels': 'conformance-result', 'body': body})
+                  print('### Put this run on the results wall')
+                  print()
+                  print(f'**[Submit this run to the results wall](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query})**: '
+                        'opens a prefilled issue. Press **Create**; nothing needs typing.')
+                  print()
+                  print('Or, from any terminal signed in to the GitHub CLI:')
+                  print()
+                  print('```')
+                  print(f'gh issue create --repo ninadphalak/LLM-Shield-Proxy --title "Result: {product}" --body "{run_url}"')
+                  print('```')
+                  print()
+                  print('Within a few minutes a bot answers on that issue. It either links your published row '
+                        'or says exactly what stopped it. The numbers on the wall are read from this run\'s '
+                        'artifact, not from the issue.')
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write(f'status={status}\n')
               output.write(f'reason={reason}\n')

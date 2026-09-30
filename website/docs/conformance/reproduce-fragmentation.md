@@ -25,8 +25,46 @@ that was an overstatement and it is corrected here.
 and the only thing that changes between the two rows is whether a chunk boundary is allowed
 to fall inside a value.
 
-You do not need to read the paper, run any other gateway, or know anything about SOC 2 or
-HIPAA to do any of them.
+You do not need to read anything else, run any other gateway, or know anything about SOC 2
+or HIPAA to do any of them.
+
+## Run it in GitHub Actions, nothing to install
+
+Tracks 1 and 2 run as one job on a GitHub-hosted runner, from a fork of this repository.
+You need a GitHub account and nothing else: no Python, no Docker, no API key. The job takes
+about five minutes.
+
+1. Fork [ninadphalak/LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy):
+   click **Fork**, then **Create fork**. Everything you click from here on is in your fork,
+   at `github.com/YOUR-NAME/LLM-Shield-Proxy`.
+2. Open your fork's **Actions** tab and click **I understand my workflows, go ahead and
+   enable them**. GitHub switches workflows off in every new fork until you do.
+3. In the left column, click **Reproduce the fragmentation result**, then the
+   **Run workflow** button on the right, then the green **Run workflow** button in the panel
+   that opens. Leave **Use workflow from** on `main` to run the latest code. There are no
+   boxes to fill.
+4. Wait for the run to finish, then click it and read its summary. It shows the commit,
+   the runner and its Python version, both `RESULT:` lines and one table per policy. Green
+   means both tracks printed `RESULT: all 2 policies reproduced the published reports.`;
+   red means one did not, and the table shows which field differed.
+5. Click **Send this result back** at the bottom of the summary. It opens the
+   [independent reproduction form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=independent-reproduction.yml)
+   on this repository with the commit, the environment and both `RESULT:` lines already
+   filled in. Add your name and press **Create**. Send it whatever the result was.
+
+The run's uploaded reports expire 90 days after the run; the issue does not, so the issue
+is the public record. A reviewer can verify a run from the issue plus the run link in it:
+the job log shows the same `RESULT:` lines, and its artifact holds the regenerated reports
+while it lasts.
+
+The workflow installs exactly what Track 1 below installs, on Python 3.12, and runs the
+same two commands. The pinned Presidio image is started on the runner with Docker. This
+repository's own CI also runs Track 1 on every push, on three operating systems and two
+Python versions ([details below](#this-runs-in-ci-too)).
+
+## Run it on your machine
+
+The same two tracks on a laptop. Track 1 needs Python; Track 2 also needs Docker.
 
 ## Track 1 - Verify the instrument
 
@@ -110,23 +148,16 @@ or send the files directly.
 ### 6. Optional: run it in your own GitHub Actions
 
 If you would rather not trust a run on your own laptop either, run it on infrastructure
-neither of us controls.
-
-1. Fork [ninadphalak/LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy).
-2. In your fork, open the **Actions** tab and click **I understand my workflows, go ahead
-   and enable them**. GitHub disables workflows in new forks until you do this.
-3. Select **Reproducible Public Benchmark** in the left sidebar, then **Run workflow**.
-
-No secrets, tokens or configuration are needed. The job installs one dependency from PyPI
-and otherwise touches no network. Six runners report separately; each uploads its
-regenerated reports as a downloadable artifact.
+neither of us controls: [Run it in GitHub Actions](#run-it-in-github-actions-nothing-to-install)
+above does both tracks from your fork and sends the result back with one click. The
+six-runner matrix in **Reproducible Public Benchmark** runs Track 1 alone on three operating
+systems and two Python versions; each runner uploads its regenerated reports.
 
 ### What the controls are for
 
 Track 1 ships two of five reference policies. They are not findings and they are not
-products - Table I of the manuscript calls them "reference controls". They are the known
-standards you calibrate an instrument against, and each one fails the harness in a
-different, diagnostic way:
+products; they are reference controls. They are the known standards you calibrate an
+instrument against, and each one fails the harness in a different, diagnostic way:
 
 | Control | Known to be | If the harness disagrees, it |
 | :--- | :--- | :--- |
@@ -451,7 +482,7 @@ equality, so it cannot quietly grow to cover a real field.
 `benchmarks/results/v2-response-split/chunk-local.json` and `bounded-retention.json`,
 produced on 2026-09-09 at seed `a1b2c3d4e5f60001` under the midpoint partition oracle.
 Both files are byte-identical to the copies under the `v2-evidence-round-8` tag
-(commit `6cbfee3`), which is the evidence anchor the paper cites.
+(commit `6cbfee3`), which is the evidence anchor every published number cites.
 
 ### This runs in CI too
 

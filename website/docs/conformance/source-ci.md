@@ -6,13 +6,17 @@ sidebar_position: 4
 You can measure a privacy proxy yourself, from a fork, and put the result on the
 [results wall](./who-has-run-it.mdx). You need a GitHub account and about ten minutes of
 clicking; the run itself takes 15 to 40 minutes. No model provider account, API key or
-local install is needed. You fork the proxy you want to test, not this benchmark; the one
-exception is LLM-Shield-Proxy, where the proxy and the benchmark share a repository. LLM Guard and
-Guardrails AI are libraries rather than proxies, so they
-[run on your own machine](#llm-guard-and-guardrails-ai) instead.
+local install is needed. You fork the proxy you want to test, not this benchmark; the
+exceptions are LLM-Shield-Proxy, where the proxy and the benchmark share a repository, and the
+two libraries, LLM Guard and Guardrails AI, which have no proxy to fork and run from a fork of
+this repository through the small gateway each one was measured through.
 
 Running the workflow publishes nothing. Run it as often as you like, on any branch; a result
 reaches the wall only when you choose to submit it.
+
+Every published row that needs no account can be reproduced this way. The two cloud rows,
+Google Cloud DLP and Model Armor, need a Google Cloud project and its credentials, so no fork
+recipe exists for them.
 
 ## Pick a proxy
 
@@ -24,6 +28,8 @@ Choose one row of this table. The steps below send you back to it by column name
 | <span id="replicate-litellm"></span>[LiteLLM](https://github.com/BerriAI/litellm) | [litellm-source-reproduction.yml](https://raw.githubusercontent.com/ninadphalak/LLM-Shield-Proxy/main/.github/workflows/litellm-source-reproduction.yml) | Reproduce LiteLLM source with Presidio | Presidio `pre_call` guardrail with response restoration enabled. |
 | <span id="replicate-nemo-guardrails"></span>[NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) | [nemo-source-reproduction.yml](https://raw.githubusercontent.com/ninadphalak/LLM-Shield-Proxy/main/.github/workflows/nemo-source-reproduction.yml) | Reproduce NeMo Guardrails source with Presidio | Presidio-backed output detection. Refusals count as inconclusive, not clean. |
 | <span id="replicate-llm-shield-proxy"></span>[LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy) | None. It is already in the fork as [source-reproduction.yml](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/source-reproduction.yml). | Reproduce proxy source build | Response redaction on, with a redaction-off arm as a control. |
+| <span id="replicate-llm-guard"></span>LLM Guard 0.3.16, a library: fork [LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy) | None. It is already in the fork as [wrappers-source-reproduction.yml](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/wrappers-source-reproduction.yml). | Reproduce library wrappers | Its own scanners around each response, through [this gateway](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/llm-guard-v2-profile/gateway.py). Choose `llm-guard-chunk-local` (each chunk scanned alone) or `llm-guard-buffered` (the whole response scanned once). On a hosted runner about half the cases end without a complete response and are scored inconclusive, so the published LLM Guard rows are the workstation runs [below](#llm-guard-on-your-machine); the workflow still runs and reports what the runner saw. |
+| <span id="replicate-guardrails-ai"></span>Guardrails AI 0.10.2, a library: fork [LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy) | None. It is already in the fork as [wrappers-source-reproduction.yml](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/wrappers-source-reproduction.yml). | Reproduce library wrappers | Its streaming validator, which holds text to the end of a sentence, with this project's four patterns inside it, through [this gateway](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/guardrails-v2-profile/gateway.py). Choose `guardrails-ai`. |
 
 ## Run it
 
@@ -32,8 +38,8 @@ Keep this page open in another tab; the steps send you back to the table above.
 1. **Fork the proxy.** Click the link in the table's **Proxy repository to fork** column.
    On that GitHub page, click **Fork**, then **Create fork**. Everything you click from here
    on is in your fork, at `github.com/YOUR-NAME/...`, not in the original repository.
-2. **Add the workflow file.** Skip this step for LLM-Shield-Proxy: the file is already in
-   your fork. For the other three proxies:
+2. **Add the workflow file.** Skip this step for LLM-Shield-Proxy, LLM Guard and Guardrails
+   AI: the file is already in your fork. For the other three proxies:
    1. In the table's **Workflow file to add** column, click the file name that ends in
       `.yml`. A page of plain text opens. Select all of it and copy it (Ctrl+A, then
       Ctrl+C; on a Mac, Cmd+A, then Cmd+C).
@@ -63,6 +69,9 @@ Keep this page open in another tab; the steps send you back to the table above.
      instead.
    - **LLM-Shield-Proxy:** there is one box, already set to the release tag `v1.6.6`. Keep
      it, or change it to `main` to measure the latest code. Do not leave it empty.
+   - **LLM Guard, Guardrails AI:** there is one drop-down. Pick the wrapper from the table's
+     last column, for example `llm-guard-buffered`. Leaving it on `all` runs every wrapper
+     as its own job, but that run offers no submission link, because one issue is one row.
 
    Click the green **Run workflow** button at the bottom of the panel. The run appears in
    the list within a few seconds; refresh the page if it does not.
@@ -107,12 +116,13 @@ is all the wall needs. The one exception: if you change the **Gateway** or
 **Version and configuration** field in the issue before creating it, your text is shown
 instead.
 
-## LLM Guard and Guardrails AI {#llm-guard-and-guardrails-ai}
+## LLM Guard and Guardrails AI on your own machine {#llm-guard-and-guardrails-ai}
 
-These two are libraries, not proxies, so there is no fork to run. The results wall measured each
-one through a small gateway in this repository that calls the library around every response. You
-run the same gateway and the same check on your own machine. You need Python 3.10, 3.11 or 3.12
-for the library, and Git. No model provider account or API key is needed.
+These two are libraries, not proxies. The results wall measured each one through a small gateway
+in this repository that calls the library around every response. The table above runs that
+gateway on a GitHub runner from a fork of this repository; this section runs the same gateway and
+the same check on your own machine instead. You need Python 3.10, 3.11 or 3.12 for the library,
+and Git. No model provider account or API key is needed.
 
 The commands are for Linux and macOS. On Windows, use `py -3.12` for `python3.12`, and
 `Scripts\` for `bin/` in every path.
@@ -139,7 +149,7 @@ The commands are for Linux and macOS. On Windows, use `py -3.12` for `python3.12
    facts in [What a submission should contain](./submitting.md#what-a-submission-should-contain):
    the library version, your Python version and operating system, and the gateway mode you used.
 
-### LLM Guard {#replicate-llm-guard}
+### LLM Guard {#llm-guard-on-your-machine}
 
 LLM Guard 0.3.16 installs PyTorch and transformer models, a download of several gigabytes. The
 gateway has two modes, and the wall shows one configuration for each: `buffered` waits for the
@@ -165,7 +175,7 @@ The mode is read once, when the gateway starts. To measure the other one, stop t
 start it again with the other `LLMGUARD_MODE`. The gateway's own notes are in
 [`benchmarks/llm-guard-v2-profile/gateway.py`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/llm-guard-v2-profile/gateway.py).
 
-### Guardrails AI {#replicate-guardrails-ai}
+### Guardrails AI {#guardrails-ai-on-your-machine}
 
 The gateway feeds each response through Guardrails AI 0.10.2's own streaming validator, which
 holds text back until the end of a sentence, with this project's four detection patterns inside

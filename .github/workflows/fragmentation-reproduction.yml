@@ -1,0 +1,204 @@
+name: Reproduce the fragmentation result
+
+# Tracks 1 and 2 of website/docs/conformance/reproduce-fragmentation.md on a GitHub-hosted
+# runner, with nothing to install. Fork the repository, enable workflows, click Run workflow.
+# Track 1 re-runs the two reference policies and diffs every field against the published
+# reports; Track 2 does the same for the two Presidio wrappers against the pinned analyzer
+# image. The summary carries both RESULT lines and a link that opens the independent
+# reproduction form with the run's facts already filled in. The uploaded artifact expires;
+# the issue is the public record that does not.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/fragmentation-reproduction.yml
+      - benchmarks/reproduce_fragmentation.py
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: Tracks 1 and 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The digest the page pins. tests/conformance/test_fragmentation_reproduction_workflow.py
+      # holds it equal to the page, to benchmark.yml and to the checker.
+      PRESIDIO_IMAGE: mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+      EXPECTED_RESULT: "RESULT: all 2 policies reproduced the published reports."
+      ARTIFACT_NAME: fragmentation-reproduction
+    steps:
+      - name: Check out the dispatched ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Install what Track 1 installs
+        id: install
+        # The harness and its validator only. Not the proxy: the experiment does not use it.
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "./pii-leak-benchmark[validate]"
+          python --version
+
+      - name: Track 1, verify the instrument
+        id: track1
+        # No `-e`: Track 2 runs whatever Track 1 said, and the summary reports both.
+        run: |
+          set -uo pipefail
+          python -u benchmarks/reproduce_fragmentation.py --out reproduction 2>&1 | tee track1-output.txt
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Start the pinned Presidio analyzer
+        id: presidio
+        run: |
+          set -euo pipefail
+          docker run -d --name presidio-analyzer -p 127.0.0.1:5002:3000 \
+            -e GUNICORN_CMD_ARGS='--no-control-socket' "$PRESIDIO_IMAGE"
+          # Ready means /analyze answers, which is what the wrappers call; listening is not enough.
+          for _ in $(seq 1 90); do
+            if curl --silent --fail -X POST http://127.0.0.1:5002/analyze \
+                 -H 'Content-Type: application/json' \
+                 -d '{"text":"call me at 939-38-8264","language":"en"}' > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs presidio-analyzer
+          echo 'The Presidio analyzer did not answer /analyze within three minutes.'
+          exit 1
+
+      - name: Track 2, see it on real software
+        id: track2
+        run: |
+          set -uo pipefail
+          python -u benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio 2>&1 | tee track2-output.txt
+          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload both report directories and both outputs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            reproduction/
+            reproduction-presidio/
+            track1-output.txt
+            track2-output.txt
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Write the summary and the link that sends the result back
+        id: summary
+        if: always()
+        env:
+          TRACK1_EXIT: ${{ steps.track1.outputs.exit }}
+          TRACK2_EXIT: ${{ steps.track2.outputs.exit }}
+        run: |
+          RUNNER_DESCRIPTION="$(. /etc/os-release 2> /dev/null && printf '%s' "${PRETTY_NAME:-}")"
+          export RUNNER_DESCRIPTION="${RUNNER_DESCRIPTION:-$(uname -sr)}"
+          export PYTHON_VERSION="$(python --version 2>&1)"
+          # The same text goes to the job log, so a reviewer with the run link reads it there too.
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlencode
+
+          expected = os.environ['EXPECTED_RESULT']
+          commit = os.environ['GITHUB_SHA']
+          run_url = '{}/{}/actions/runs/{}'.format(
+              os.environ['GITHUB_SERVER_URL'], os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID'])
+          environment = f"{os.environ['RUNNER_DESCRIPTION']} (GitHub-hosted runner), {os.environ['PYTHON_VERSION']}"
+
+          def read(track):
+              """The RESULT line and one markdown table per policy, from the checker's output."""
+              path = Path(f'{track}-output.txt')
+              text = path.read_text(encoding='utf-8', errors='replace') if path.is_file() else ''
+              lines = text.splitlines()
+              results = [line.strip() for line in lines if line.startswith('RESULT:')]
+              exit_code = os.environ.get(f'{track.upper()}_EXIT') or 'not run'
+              result = results[-1] if results else f'no RESULT line (exit {exit_code})'
+              tables, current = [], None
+              for line in lines:
+                  if line.startswith('=== ') and not line.startswith('=== running') and ' finished in ' not in line:
+                      current = [line[4:].strip(), []]
+                      tables.append(current)
+                  elif current is not None and line.strip() and not line.startswith(' '):
+                      cells = re.split(r'\s{2,}', line.strip())
+                      if len(cells) == 4:
+                          current[1].append(cells)
+                  elif current is not None and not line.strip():
+                      current = None if current[1] else current
+              return result, [(name, rows) for name, rows in tables if rows]
+
+          track1, tables1 = read('track1')
+          track2, tables2 = read('track2')
+          reproduced = track1 == expected and track2 == expected
+
+          print('## ' + ('Both tracks reproduced the published reports' if reproduced
+                         else 'Not reproduced: read the RESULT lines below'))
+          print()
+          print(f'- Commit: `{commit}`')
+          print(f'- Environment: {environment}')
+          print(f'- Track 1, verify the instrument: `{track1}`')
+          print(f'- Track 2, see it on real software (Presidio `{os.environ["PRESIDIO_IMAGE"].split("@", 1)[1][:19]}`): `{track2}`')
+          print()
+          for title, tables in (('Track 1', tables1), ('Track 2', tables2)):
+              for name, rows in tables:
+                  print(f'### `{name}`')
+                  print()
+                  print('| Field | Published | This run | Match |')
+                  print('| :--- | ---: | ---: | :--- |')
+                  for row in rows:
+                      print('| ' + ' | '.join(cell.replace('|', ' ') for cell in row) + ' |')
+                  print()
+          if not tables1 and not tables2:
+              print('No comparison table was printed. Open the failed step for the error.')
+              print()
+
+          # The form's field ids, in the order the form shows them. GitHub fills a box from a
+          # query parameter of the same id; unknown ids are ignored, so a renamed field would
+          # silently empty a box, which is why the test pins these against the template.
+          files = (f'Run {run_url}, artifact `{os.environ["ARTIFACT_NAME"]}`, which expires 90 days after the run. '
+                   'It holds reproduction/, reproduction-presidio/, track1-output.txt and track2-output.txt.')
+          query = urlencode({
+              'template': 'independent-reproduction.yml',
+              'title': f'Independent reproduction: {commit[:12]} in GitHub Actions',
+              'commit': commit,
+              'environment': environment,
+              'track1': track1,
+              'track2': track2,
+              'files': files,
+          })
+          link = f'https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?{query}'
+          print('### Send this result back')
+          print()
+          print(f'**[Send this result back]({link})**: opens the independent reproduction form with the '
+                'commit, the environment and both RESULT lines filled in. Add your name and press '
+                '**Create**. Send it whatever the result was; a mismatch is as useful as a pass.')
+          print()
+          print('The uploaded reports expire 90 days after the run. The issue is the public, durable '
+                'record: a reviewer opens the run link in it, reads the same RESULT lines in the job log, '
+                'and can download the regenerated reports while the artifact lasts.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'reproduced={str(reproduced).lower()}\n')
+          PY
+
+      - name: Fail unless both tracks reproduced
+        if: always()
+        env:
+          REPRODUCED: ${{ steps.summary.outputs.reproduced }}
+        run: |
+          test "$REPRODUCED" = true || {
+            echo "::error::A RESULT line is not '$EXPECTED_RESULT'. The job summary shows which track and which field."
+            exit 1
+          }

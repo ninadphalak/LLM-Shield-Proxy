@@ -1,6 +1,10 @@
+import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,6 +60,10 @@ RESEARCH_ACTION_INPUTS = {
     "artifact-name": (False, "pii-leak-benchmark-report"),
     "fail-on-non-pass": (False, "true"),
     "attest-report": (False, "false"),
+    "profiles": (False, "operator"),
+    "response-seed": (False, "a1b2c3d4e5f60001"),
+    "response-capture-port": (False, "8799"),
+    "response-out": (False, "pii-leak-benchmark-response"),
 }
 
 
@@ -117,6 +125,30 @@ def test_public_action_input_and_output_contracts_are_pinned():
                 "attest-report is false."
             ),
             "value": "${{ steps.attest.outputs.attestation-url }}",
+        },
+        "response-report-path": {
+            "description": (
+                "Path to the response-split report; empty when profile is operator."
+            ),
+            "value": "${{ steps.response.outputs.report }}",
+        },
+        "response-leaked": {
+            "description": (
+                "true when the response profile saw a value reach the client, whole or split; "
+                "false when it did not; incomplete when no case was applicable, so nothing was "
+                "measured; empty when profile is operator."
+            ),
+            "value": "${{ steps.response.outputs.leaked }}",
+        },
+        "response-applicable": {
+            "description": "Cases the response profile scored; 0 means the run measured nothing.",
+            "value": "${{ steps.response.outputs.applicable }}",
+        },
+        "response-inconclusive": {
+            "description": (
+                "Cases the response profile could not score (timeout, error, or no complete response)."
+            ),
+            "value": "${{ steps.response.outputs.inconclusive }}",
         },
     }
 
@@ -221,6 +253,101 @@ def test_every_remote_action_is_pinned_to_an_immutable_commit():
                 offenders.append(f"{path.relative_to(ROOT)}:{line_number}: {match.group(1)}")
 
     assert not offenders, "remote actions with mutable refs:\n  " + "\n  ".join(offenders)
+
+
+def test_composite_action_runs_the_response_profile_only_when_asked():
+    """`profile` adds the response-split profile after the operator run; operator stays the default."""
+    document = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+    steps = document["runs"]["steps"]
+    run_step = next(step for step in steps if step.get("id") == "run")
+    response = next(step for step in steps if step.get("id") == "response")
+    response_summary = next(step for step in steps if step["name"] == "Summarise the response profile")
+    upload = next(step for step in steps if step["name"] == "Upload the raw report")
+    fail = next(step for step in steps if step["name"] == "Fail on a non-pass")
+
+    assert document["inputs"]["profiles"]["default"] == "operator"
+    assert run_step["if"] == "${{ inputs.profiles != 'response' }}"
+    assert response["if"] == "${{ inputs.profiles == 'response' || inputs.profiles == 'both' }}"
+    assert response_summary["if"] == response["if"]
+    # The operator run comes first: the response step is after it in the step list.
+    assert steps.index(response) > steps.index(run_step)
+
+    assert response["env"]["INPUT_TARGET_BASE_URL"] == "${{ inputs.target-base-url }}"
+    assert response["env"]["INPUT_TARGET_NAME"] == "${{ inputs.target-name }}"
+    assert response["env"]["INPUT_TARGET_MODEL"] == "${{ inputs.target-model }}"
+    assert response["env"]["INPUT_RESPONSE_SEED"] == "${{ inputs.response-seed }}"
+    assert response["env"]["INPUT_RESPONSE_CAPTURE_PORT"] == "${{ inputs.response-capture-port }}"
+    assert response["env"]["INPUT_RESPONSE_OUT"] == "${{ inputs.response-out }}"
+    assert response["env"]["INPUT_REDACTION_ENABLED"] == "${{ inputs.redaction-enabled }}"
+    # Credentials and headers reach the instrument through the environment, never argv.
+    assert response["env"]["V2_GATEWAY_TOKEN"] == "${{ inputs.target-api-key }}"
+    assert response["env"]["INPUT_TARGET_HEADERS"] == "${{ inputs.target-header }}"
+    assert "pii-leak-benchmark-v2" in response["run"]
+    for flag in ("--validate", "--json-out", "--oracle midpoint", "--seed", "--upstream-port", "--only"):
+        assert flag in response["run"], flag
+    assert "capture://self" in response["run"] and "passthrough" in response["run"]
+    assert "/chat/completions" in response["run"]
+
+    assert "DeltaFrag" in response_summary["run"]
+    assert response_summary["env"]["INPUT_RESPONSE_OUT"] == "${{ inputs.response-out }}"
+    paths = upload["with"]["path"].splitlines()
+    assert "${{ inputs.json-out }}" in paths
+    assert "${{ inputs.response-out }}" in paths
+    assert fail["env"]["OPERATOR_OUTCOME"] == "${{ steps.run.outcome }}"
+    assert fail["env"]["RESPONSE_LEAKED"] == "${{ steps.response.outputs.leaked }}"
+    # An all-inconclusive run is a non-pass, never a clean one.
+    assert '"$RESPONSE_LEAKED" = "incomplete"' in fail["run"]
+    assert document["outputs"]["response-applicable"]["value"] == "${{ steps.response.outputs.applicable }}"
+    assert document["outputs"]["response-inconclusive"]["value"] == "${{ steps.response.outputs.inconclusive }}"
+
+
+def _response_output_script() -> str:
+    """The Python the response step runs to derive its outputs, lifted from the heredoc."""
+    text = ACTION.read_text(encoding="utf-8")
+    start = text.index("        import json, sys\n        rows = json.load(open(sys.argv[1]")
+    end = text.index("        PY\n", start)
+    return "\n".join(line[8:] for line in text[start:end].splitlines())
+
+
+@pytest.mark.parametrize(
+    ("rows", "metrics", "expected"),
+    [
+        # Every case inconclusive: the rates are 0.0 by construction, which is not a measurement.
+        ([{"leak_single_chunk": 0.0, "leak_adversarial": 0.0}], {"cases_applicable": 0, "cases_inconclusive": 32}, "incomplete"),
+        ([], {"cases_applicable": 32, "cases_inconclusive": 0}, "incomplete"),
+        ([{"leak_single_chunk": 0.0, "leak_adversarial": 0.0}], {"cases_applicable": 32, "cases_inconclusive": 0}, "false"),
+        ([{"leak_single_chunk": 0.0, "leak_adversarial": 0.0625}], {"cases_applicable": 30, "cases_inconclusive": 2}, "true"),
+    ],
+)
+def test_response_profile_output_reads_incomplete_when_nothing_was_scored(tmp_path, rows, metrics, expected):
+    summary = tmp_path / "response-summary.json"
+    report = tmp_path / "policy.json"
+    summary.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+    report.write_text(json.dumps({"metrics": metrics}), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-", str(summary), str(report)],
+        input=_response_output_script(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    outputs = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    assert outputs["leaked"] == expected
+    assert outputs["applicable"] == str(metrics["cases_applicable"])
+    assert outputs["inconclusive"] == str(metrics["cases_inconclusive"])
+
+
+def test_main_ci_proves_the_response_profile_on_the_negative_control():
+    workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["benchmark-action"]
+    control = next(step for step in job["steps"] if step.get("id") == "control")
+    assert control["with"]["profiles"] == "both"
+    assert control["with"]["response-capture-port"] == "0"
+    proof = next(step for step in job["steps"] if step["name"].startswith("The response profile"))
+    assert proof["env"]["RESPONSE_REPORT"] == "${{ steps.control.outputs.response-report-path }}"
+    assert proof["env"]["RESPONSE_LEAKED"] == "${{ steps.control.outputs.response-leaked }}"
+    assert "spec/v2.0.0/http-profile.schema.json" in proof["run"]
+    assert "Draft202012Validator" in proof["run"]
 
 
 def test_main_ci_exercises_attestation_without_granting_write_tokens_to_pull_requests():
