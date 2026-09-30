@@ -135,9 +135,20 @@ def test_public_action_input_and_output_contracts_are_pinned():
         "response-leaked": {
             "description": (
                 "true when the response profile saw a value reach the client, whole or split; "
-                "empty when profile is operator."
+                "false when it did not; incomplete when no case was applicable, so nothing was "
+                "measured; empty when profile is operator."
             ),
             "value": "${{ steps.response.outputs.leaked }}",
+        },
+        "response-applicable": {
+            "description": "Cases the response profile scored; 0 means the run measured nothing.",
+            "value": "${{ steps.response.outputs.applicable }}",
+        },
+        "response-inconclusive": {
+            "description": (
+                "Cases the response profile could not score (timeout, error, or no complete response)."
+            ),
+            "value": "${{ steps.response.outputs.inconclusive }}",
         },
     }
 
