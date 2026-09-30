@@ -127,6 +127,10 @@ class Vault:
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
         self.max_token_length: int = 0
+        # Values redacted out of text the reply must never restore (tool definitions).
+        # Kept out of `token_to_original` entirely, so no rehydration path can find them.
+        self.one_way_original_to_token: Dict[str, str] = {}
+        self._one_way_tokens: set[str] = set()
         self._lock: threading.Lock = threading.Lock()
         self.save_callback: Optional[Callable[[Vault], None]] = save_callback
 
@@ -165,9 +169,52 @@ class Vault:
                 _faker_ctx.set(fake)
             fake.seed_instance(retry_seed)
             candidate = _synthetic_for(fake, entity_type, retry_seed)
-            if candidate not in self.token_to_original:
+            if not self._token_taken(candidate):
                 return candidate
         return f"[{entity_type}_{current_count}]"
+
+    def _token_taken(self, token: str) -> bool:
+        return token in self.token_to_original or token in self._one_way_tokens
+
+    def _mint_token(self, original_val: str, entity_type: str) -> str:
+        """A fresh token for `original_val`. Caller holds the lock."""
+        current_count = self.type_counters.get(entity_type, 0) + 1
+        self.type_counters[entity_type] = current_count
+
+        if self.synthetic:
+            seed = self._synthetic_seed(original_val, entity_type)
+            try:
+                fake = _faker_ctx.get()
+            except LookupError:
+                fake = Faker()
+                _faker_ctx.set(fake)
+
+            fake.seed_instance(seed)
+            token = _synthetic_for(fake, entity_type, seed)
+        else:
+            token = f"[{entity_type}_{current_count}]"
+
+        # A collision would overwrite the reverse map and restore the earlier
+        # value as the later one: two people become one. Faker draws from a
+        # finite list, so this happens with ordinary data, not just adversarial
+        # data -- 16 distinct names were enough. Re-seed until the stand-in is
+        # free, then give up and fall back to a tagged token, which is unique by
+        # construction.
+        if self._token_taken(token):
+            token = self._resolve_collision(original_val, entity_type, token, current_count)
+        return token
+
+    def _register_restorable(self, original_val: str, token: str) -> None:
+        self.original_to_token[original_val] = token
+        self.token_to_original[token] = original_val
+        self.max_token_length = max(self.max_token_length, len(token))
+
+    def _saved(self) -> None:
+        if self.save_callback:
+            try:
+                self.save_callback(self)
+            except Exception as exc:
+                logger.debug("Vault save_callback execution failed: %s", exc)
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         """Retrieves an existing token or generates a deterministic replacement.
@@ -183,42 +230,60 @@ class Vault:
             if original_val in self.original_to_token:
                 return self.original_to_token[original_val]
 
-            current_count = self.type_counters.get(entity_type, 0) + 1
-            self.type_counters[entity_type] = current_count
-
-            if self.synthetic:
-                seed = self._synthetic_seed(original_val, entity_type)
-                try:
-                    fake = _faker_ctx.get()
-                except LookupError:
-                    fake = Faker()
-                    _faker_ctx.set(fake)
-
-                fake.seed_instance(seed)
-                token = _synthetic_for(fake, entity_type, seed)
+            # Seen first in a tool definition, now sent by the caller: it becomes
+            # restorable under the token the model has already seen.
+            token = self.one_way_original_to_token.pop(original_val, None)
+            if token is not None:
+                self._one_way_tokens.discard(token)
             else:
-                token = f"[{entity_type}_{current_count}]"
+                token = self._mint_token(original_val, entity_type)
+            self._register_restorable(original_val, token)
 
-            # A collision would overwrite the reverse map and restore the earlier
-            # value as the later one: two people become one. Faker draws from a
-            # finite list, so this happens with ordinary data, not just adversarial
-            # data -- 16 distinct names were enough. Re-seed until the stand-in is
-            # free, then give up and fall back to a tagged token, which is unique by
-            # construction.
-            if token in self.token_to_original:
-                token = self._resolve_collision(original_val, entity_type, token, current_count)
+        self._saved()
+        return token
 
-            self.original_to_token[original_val] = token
-            self.token_to_original[token] = original_val
-            self.max_token_length = max(self.max_token_length, len(token))
+    def get_or_create_one_way_token(self, original_val: str, entity_type: str) -> str:
+        """A token for a value the reply must never get back.
 
-            if self.save_callback:
-                try:
-                    self.save_callback(self)
-                except Exception as exc:
-                    logger.debug("Vault save_callback execution failed: %s", exc)
+        Used for caller-authored static text such as tool descriptions. The token is
+        never entered into `token_to_original`, so rehydration cannot restore it; a
+        model that echoes it echoes a placeholder. A value the caller also sends on a
+        restorable path keeps its restorable token, since restoring it discloses nothing
+        the caller did not send themselves.
+        """
+        with self._lock:
+            if original_val in self.original_to_token:
+                return self.original_to_token[original_val]
+            if original_val in self.one_way_original_to_token:
+                return self.one_way_original_to_token[original_val]
 
-            return token
+            token = self._mint_token(original_val, entity_type)
+            self.one_way_original_to_token[original_val] = token
+            self._one_way_tokens.add(token)
+
+        self._saved()
+        return token
+
+    def dump_state(self) -> Dict[str, Any]:
+        """The vault's mappings as JSON-serialisable data, for a persistent store."""
+        with self._lock:
+            return {
+                "original_to_token": dict(self.original_to_token),
+                "token_to_original": dict(self.token_to_original),
+                "one_way_original_to_token": dict(self.one_way_original_to_token),
+                "type_counters": dict(self.type_counters),
+                "max_token_length": self.max_token_length,
+            }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        """Restores what `dump_state` produced."""
+        with self._lock:
+            self.original_to_token = state.get("original_to_token", {})
+            self.token_to_original = state.get("token_to_original", {})
+            self.one_way_original_to_token = state.get("one_way_original_to_token", {})
+            self._one_way_tokens = set(self.one_way_original_to_token.values())
+            self.type_counters = state.get("type_counters", {})
+            self.max_token_length = state.get("max_token_length", 0)
 
     def _is_word_char(self, c: str) -> bool:
         """Determines if character is an alphanumeric word character, including NFKC normalized Unicode."""
@@ -507,12 +572,7 @@ class RedisVaultStore:
         data = self.sync_client.get(vault_key)
 
         def save_callback(v: Vault) -> None:
-            payload = {
-                "original_to_token": v.original_to_token,
-                "token_to_original": v.token_to_original,
-                "type_counters": v.type_counters,
-                "max_token_length": v.max_token_length,
-            }
+            payload = v.dump_state()
             try:
                 import asyncio
 
@@ -524,12 +584,8 @@ class RedisVaultStore:
         vault = Vault(session_id=session_id, virtual_key_id=virtual_key_id, save_callback=save_callback)
         if data:
             try:
-                parsed = json.loads(data)
-                vault.original_to_token = parsed.get("original_to_token", {})
-                vault.token_to_original = parsed.get("token_to_original", {})
-                vault.type_counters = parsed.get("type_counters", {})
-                vault.max_token_length = parsed.get("max_token_length", 0)
-            except (json.JSONDecodeError, TypeError):
+                vault.load_state(json.loads(data))
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 pass
 
         self.sync_client.expire(vault_key, self.ttl)
@@ -544,12 +600,7 @@ class RedisVaultStore:
         data = await self.async_client.get(vault_key)
 
         def save_callback(v: Vault) -> None:
-            payload = {
-                "original_to_token": v.original_to_token,
-                "token_to_original": v.token_to_original,
-                "type_counters": v.type_counters,
-                "max_token_length": v.max_token_length,
-            }
+            payload = v.dump_state()
             try:
                 import asyncio
 
@@ -565,12 +616,8 @@ class RedisVaultStore:
         vault = Vault(session_id=session_id, virtual_key_id=virtual_key_id, save_callback=save_callback)
         if data:
             try:
-                parsed = json.loads(data)
-                vault.original_to_token = parsed.get("original_to_token", {})
-                vault.token_to_original = parsed.get("token_to_original", {})
-                vault.type_counters = parsed.get("type_counters", {})
-                vault.max_token_length = parsed.get("max_token_length", 0)
-            except (json.JSONDecodeError, TypeError):
+                vault.load_state(json.loads(data))
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 pass
 
         await self.async_client.expire(vault_key, self.ttl)

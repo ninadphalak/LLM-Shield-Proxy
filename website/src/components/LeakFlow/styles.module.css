@@ -23,6 +23,12 @@
   border-color: rgba(63, 185, 80, 0.4);
 }
 
+/* Amber, not red. Nothing escaped in this lane, so it must not read as a leak. */
+.broken {
+  color: #d29922;
+  border-color: rgba(210, 153, 34, 0.4);
+}
+
 .method {
   color: #00a8ff;
   border-color: rgba(0, 168, 255, 0.4);
@@ -60,8 +66,13 @@
   margin: 0.4rem 0 0.15rem;
 }
 
+/* Shrinkable, and the labels are allowed to wrap. The docs column is about 570px
+   wide once the sidebar and table of contents take their share, and at fixed width
+   the three nodes left the wires too narrow to hold a whole email address: both
+   ends of the LEAK lane elided to `ada@examp...`, which is exactly the comparison
+   the lane exists to make. Two-line nodes cost less than a clipped value. */
 .node {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -73,14 +84,24 @@
   color: #e6edf3;
   font-size: 0.86rem;
   font-weight: 600;
-  padding: 0.7rem 0.85rem;
-  min-width: 104px;
+  padding: 0.7rem 0.6rem;
+  min-width: 84px;
 }
 
 /* The endpoint is where the verdict lands, so it carries the lane colour. */
 .nodeEnd,
 .nodeCapture {
   border-color: currentColor;
+}
+
+/* The back row repeats the top row's nodes to hold the columns in line. Side by
+   side the label is already on screen directly above, so it is painted out rather
+   than shown twice. It stays in the accessibility tree: a screen reader has no
+   columns to follow and needs the return leg read out in full. */
+.nodeGhost {
+  background: transparent;
+  border-color: transparent;
+  color: transparent;
 }
 
 .nodeSub {
@@ -95,7 +116,7 @@
 .wire {
   position: relative;
   flex: 1 1 130px;
-  min-width: 96px;
+  min-width: 136px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -125,6 +146,56 @@
   border-top: 5px solid transparent;
   border-bottom: 5px solid transparent;
   opacity: 0.6;
+}
+
+/* The return leg. Same wire, arrowhead moved to the other end and turned around,
+   so the two rows read as one trip out and back rather than as two trips out. */
+.flowBack {
+  margin-top: 0.1rem;
+}
+
+.wireBack::before {
+  left: 2px;
+  right: 0;
+}
+
+.wireBack::after {
+  left: 0;
+  right: auto;
+  border-left: 0;
+  border-right: 7px solid currentColor;
+}
+
+/* A one-line return for the lanes, which do not need a second row of nodes: the
+   arrow reads right to left and the chip is what the caller ends up holding. */
+.returnStrip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.55rem 0 0;
+  padding-left: 0.9rem;
+  position: relative;
+}
+
+.returnStrip::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  border-right: 7px solid currentColor;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  opacity: 0.6;
+}
+
+.returnLabel {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8b949e;
+  white-space: nowrap;
 }
 
 /* Sits on top of the wire, with the page background punched through behind it. */
@@ -198,5 +269,39 @@
     top: auto;
     bottom: 0;
     transform: translateX(-50%) rotate(90deg);
+  }
+
+  /* Stacked, the back row reads Capture first and ends at the benchmark, so the
+     arrows keep pointing down the page and the horizontal flip above is undone. */
+  .flowBack {
+    flex-direction: column-reverse;
+  }
+
+  .wireBack::before {
+    left: 50%;
+    right: auto;
+  }
+
+  .wireBack::after {
+    left: 50%;
+    right: auto;
+    border-left: 7px solid currentColor;
+    border-right: 0;
+    transform: translateX(-50%) rotate(90deg);
+  }
+
+  /* Stacked, there is no column left to hold and no label directly above to read
+     instead, so the back row shows its own nodes rather than three blank gaps. */
+  .nodeGhost {
+    background: #161b22;
+    border-color: #30363d;
+    color: #e6edf3;
+  }
+
+  /* The turn. Reversed, this is the node the back row starts on, and the row above
+     has just ended on the same one, so showing it again prints Capture twice in a
+     row. Dropping it makes the two rows read as one chain that doubles back. */
+  .flowBack .nodeGhost:last-child {
+    display: none;
   }
 }

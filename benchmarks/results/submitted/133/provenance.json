@@ -1,0 +1,25 @@
+{
+  "schema": "llm-shield-proxy/submitted-row-archive/v1",
+  "issue": 133,
+  "submitter": "teg0011",
+  "ranIn": "teg0011/LLM-Shield-Proxy",
+  "ranInOwnerType": "User",
+  "runUrl": "https://github.com/teg0011/LLM-Shield-Proxy/actions/runs/36346200317",
+  "runId": 36346200317,
+  "headSha": "ae1d7ddc8c674165e4b67d235d5f00efdbfce82c",
+  "workflowPath": ".github/workflows/source-reproduction.yml",
+  "runCreatedAt": "2026-09-27T19:56:59Z",
+  "artifact": {
+    "name": "source-reproduction",
+    "id": 10941425021,
+    "bytes": 13859,
+    "sha256": "37903b30aa4292ab9091b1a766fbe6572fad022cdafb3096c9bec7dc52dfccbf"
+  },
+  "harness": "0.4.1 (operator), 0.2.1 (response)",
+  "redactedFields": [
+    "target.base_url",
+    "capture.target_must_be_preconfigured_for",
+    "capture.self_probe.advertised_url"
+  ],
+  "archivedAt": "2026-09-28T16:56:16Z"
+}

@@ -49,6 +49,9 @@ roles:
 ## Practical Effect
 This firewall ensures that tools executed via the proxy cannot be weaponized by the LLM to scan or exfiltrate data from your internal, private networks or cloud metadata endpoints.
 
+## Worked Example
+[MCP Egress Screening: A Worked Example](/docs/guides/mcp-egress-screening) goes through the ten properties this firewall holds, each with the test that holds it, and names what it does not do.
+
 ## Related Tests
 Tests: 
 - `tests/test_egress_guard.py`

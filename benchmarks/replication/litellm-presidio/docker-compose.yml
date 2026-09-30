@@ -1,0 +1,111 @@
+# Replication pack: LiteLLM 1.99 with its Presidio guardrail, the `litellm-presidio` row.
+#
+#   docker compose up --build --exit-code-from runner
+#
+# Four containers stand in for what the published run had on one machine: the two
+# Presidio services, the database LiteLLM's proxy needs for auth, and LiteLLM itself.
+# A fifth, `runner`, is the harness. It shares LiteLLM's network namespace, so the
+# capture the harness binds on 127.0.0.1:8799 is the address LiteLLM's config already
+# names through `host.docker.internal`, which `extra_hosts` points back at 127.0.0.1.
+# That keeps `config.docker.yaml` byte-identical to the file the published row used.
+#
+# Images are pinned by digest. The published recipe named `ghcr.io/berriai/litellm:main-latest`,
+# which resolved to 1.99.0 when the row was measured; the wall row says "1.99" and the
+# source-reproduction workflow pins the same digest. Presidio and Postgres are the digests
+# behind the `latest` and `16` tags on the machine that measured the row.
+services:
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+    environment:
+      # gunicorn 25 starts a control-socket thread before forking and the worker can
+      # freeze on a lock it inherits; without this the analyzer sometimes never answers.
+      GUNICORN_CMD_ARGS: --no-control-socket
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
+    environment:
+      GUNICORN_CMD_ARGS: --no-control-socket
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  db:
+    # LiteLLM's proxy requires a database for auth in 1.99: without one, every request is 400.
+    image: postgres@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "litellm", "-d", "litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  litellm:
+    image: ghcr.io/berriai/litellm@sha256:570a872d2fde8f1bc4a147634810941103c14697270f0f2918c5aa7d8201cac5
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      DATABASE_URL: postgresql://litellm:litellm@db:5432/litellm
+      LITELLM_MASTER_KEY: sk-v2-profile-local
+    extra_hosts:
+      # The config reaches the capture as host.docker.internal:8799. The runner shares
+      # this container's network namespace and binds the capture on 127.0.0.1:8799.
+      - "host.docker.internal:127.0.0.1"
+    volumes:
+      - ./config.docker.yaml:/app/config.yaml:ro
+    depends_on:
+      presidio-analyzer:
+        condition: service_healthy
+      presidio-anonymizer:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  runner:
+    build:
+      context: ../../../pii-leak-benchmark
+      dockerfile: ../benchmarks/replication/runner/Dockerfile
+    network_mode: "service:litellm"
+    depends_on:
+      litellm:
+        condition: service_healthy
+    environment:
+      # Part of the measured configuration, transcribed from the published run recipe.
+      V2_GATEWAY_TOKEN: sk-v2-profile-local
+      V2_REQUEST_PATH_REDACTION: configured
+    volumes:
+      - ../runner/replicate.py:/replicate.py:ro
+      - ../../results/v2-response-split/seed-sweep-litellm.json:/expected/seed-sweep.json:ro
+      - ../../results/v2-response-split/litellm-presidio.json:/expected/report.json:ro
+      - ./out:/out
+    command:
+      - --policy
+      - litellm-presidio
+      - --gateway-url
+      - http://127.0.0.1:4000/v1/chat/completions
+      - --model
+      - capture
+      - --upstream-port
+      - "8799"
+      - --expected
+      - /expected/seed-sweep.json
+      - --expected-report
+      - /expected/report.json
+      - --out
+      - /out

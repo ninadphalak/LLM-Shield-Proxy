@@ -436,7 +436,7 @@ def test_an_unattributed_finding_never_says_the_gateway_sent_it() -> None:
 
     block = " ".join(" ".join(explain.render(finding, reveal=False)).split())
     assert "The gateway forwarded" not in block
-    assert "not carry this run" in block or "not attributed" in block.lower()
+    assert "without this run's marker" in block or "cannot be attributed" in block.lower()
     # Still a finding, and still loud. Unattributed does not mean harmless.
     assert block.startswith("LEAK")
 

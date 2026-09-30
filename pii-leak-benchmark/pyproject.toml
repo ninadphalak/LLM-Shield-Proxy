@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pii-leak-benchmark"
-version = "0.3.1"
+version = "0.4.1"
 description = "Measure whether an LLM gateway sends raw personal data to its upstream, and whether it restores it in the response."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -69,9 +69,16 @@ Specification = "https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/spec/
 
 [project.scripts]
 pii-leak-benchmark = "pii_leak_benchmark.cli:main"
+# The v2 response-split profile (FidelityRate, LeakRate, DeltaFrag) under its own name.
+pii-leak-benchmark-v2 = "pii_leak_benchmark.v2_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["pii_leak_benchmark*"]
+
+[tool.setuptools.package-data]
+# The v2 report schema, so `--validate` works from any directory. A test pins it to
+# `spec/v2.0.0/http-profile.schema.json` byte for byte.
+pii_leak_benchmark = ["schemas/v2.0.0/*.json"]
 
 [tool.ruff]
 line-length = 120

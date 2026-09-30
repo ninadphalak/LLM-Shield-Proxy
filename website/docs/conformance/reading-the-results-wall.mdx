@@ -1,0 +1,212 @@
+---
+title: How to read the results wall
+sidebar_label: How to read the wall
+sidebar_position: 2.1
+description: What the three checks on the results wall measure, what a leak count can and cannot tell you, and why the wall is not a ranking.
+---
+
+import CorpusCredits from '@site/src/components/CorpusCredits';
+import {AnnotatedExample} from '@site/src/components/ResultsWall';
+import DefinedTerm from '@site/src/components/DefinedTerm';
+
+# How to read the results wall
+
+The [results wall](./who-has-run-it.mdx) has one card per proxy. Every configuration it was tested
+in, and every run of each, is inside that one card. Here is one, made from sample data, with each
+part labelled:
+
+<AnnotatedExample />
+
+The rest of this page explains what the numbers can and cannot tell you.
+
+## What the check asks
+
+An LLM gateway sits between your application and the model provider. This check asks whether
+yours does three things:
+
+1. **Keep the caller's data away from the provider.** If you configured it to redact an email
+   address, that address should not appear in the request it sends upstream.
+2. **Give the caller their own data back.** The response should still read correctly to the
+   person who sent it.
+3. **Keep out data the caller never sent.** If the model produces someone else's phone number, it
+   must not reach the client. Including when the stream splits it across two chunks.
+
+Do all three and you pass.
+
+## Reading a card {#reading-a-card}
+
+**One card is one proxy.** "Portkey" and "Portkey OSS Gateway" are one proxy, and so are
+"LLM-Shield-Proxy" and "LLM-Shield-Proxy (ours)". A proxy tested in more than one setup, for
+example LLM-Shield-Proxy with response scanning on and on its default settings, has one section per
+configuration inside its card. Runs share a section when the configuration they state is the same.
+A run that states no configuration only shares a section with other runs that state none, because
+"not stated" is not evidence of "the same".
+
+**The top of the card** speaks for the proxy's **latest complete run**: the newest run, in any of
+its configurations, that measured all three checks. The shield counts the checks it passed: gold
+for 3 of 3, silver 2, bronze 1, a plain shield 0. It is the same count, by the same rule, as the
+README badge a submitted run gets, so a run and its badge never disagree. The line under the
+proxy's name says the result in words and which run it came from.
+
+**Each check is a question**, and "yes" is the bad answer to all three. Every answer is given in
+words as well as a colour and a glyph:
+
+- **✓ passed.** Measured in full, and nothing leaked.
+- **✕ leaked.** Something got through. The answer says what, or how many of how many.
+- **! unclear.** Nothing leaked, but some cases produced no stream and could not be judged.
+  A check that was not shown clean is not counted as passed.
+- **– not tested.** The run did not look. A run from the operator check in a gateway's own CI
+  measures only what it sends upstream, so its two response checks are empty. They are never read
+  as zero.
+
+**Gave callers their own data back** answers the second question, so it sits under the three
+checks rather than in the shield. When it says **No**, see
+[read the checks together](#read-the-checks-together).
+
+**Independent runs** count toward calling a configuration **replicated**. The rule is the one in
+[submitting a result](./submitting.md): three different people have run the same proxy and
+configuration. Only verified runs from a fork count. Runs by the benchmark maintainers, runs in the
+proxy's own repository (its team's CI) and runs whose origin could not be checked do not. The wall
+cannot tell whether a fork belongs to someone on the proxy's team, so submitters are asked to say
+so, and a run that does is removed from the count by hand. Each configuration keeps its own count;
+the top of the card shows the one closest to three.
+
+**Disputed** marks a configuration where two runs of the same version disagree on a check. Both
+runs stay up: disagreements are published, not averaged, because they usually point at an
+undocumented default, version drift or a platform difference. **Changed between versions** is the
+quieter mark for different versions that came out differently, which is revision history rather
+than a dispute.
+
+**Full pass** marks a proxy whose latest complete run passed all three checks and gave every value
+back. **First independent pass** is the one mark worth wanting, and nobody holds it yet. See
+[Ours did not pass either, at first](#ours-did-not-pass-either-at-first). An arrow next to a leak
+count, such as `↓2`, compares a run with the same proxy's earlier version, never with another
+project. **Worth rerunning** appears when a proxy's newest run is more than six months old.
+
+**Replicate this result** goes straight to the instructions for running that proxy yourself.
+
+### The runs under a configuration {#the-runs-under-a-card}
+
+Each configuration lists its runs newest first, one line each: who ran it (a submitted run shows
+the submitter's GitHub avatar and handle), the date, the version or commit, its three small pips in
+the order request, whole, split, where it ran, and links: **CI run**, **details** (the reports the
+numbers were read from, kept in this repository) and the submission issue. **Open questions** appear on a run's line if anyone has disputed it; see
+[If you think a row is wrong](#if-you-think-a-row-is-wrong). Beyond three runs the rest fold behind
+**Show all N runs**.
+
+**Every run has its own link.** The `#` at the end of a run line links to that run, and the `#`
+next to a proxy's name to its card. The reply on a submission issue links straight to its run: the
+page opens the fold if the run is in it, scrolls there, rings the card in gold and marks the run
+**Linked run**.
+
+## Read the checks together {#read-the-checks-together}
+
+Read the checks together, because any one of them alone will mislead you. A gateway showing `0`
+leaked to the client may simply have returned nothing at all, and it may still have sent the
+caller's data straight to the provider. Every gateway on the wall was configured to redact, so a
+value reaching the provider is a control that was switched on and did not hold.
+
+None of these are product defects in the abstract. Each card is one version in one configuration.
+
+## Ours did not pass either, at first
+
+With its response scan on, 1.6.0 leaked 2 of the 16 values sent whole and 4 of the 16 sent
+split. We wrote the check and it caught us.
+
+**1.6.6 passes.** Nothing reaches the provider, every value comes back to the caller, and
+every injected value is caught both whole and split across two chunks. Both runs are on the
+wall, so the change is something you can see rather than take on trust, and the report behind
+it is on the [results page](./results.md).
+
+**On the default settings it still does not pass.** Response scanning is off unless you turn
+it on, because it changes what callers receive, so the out-of-the-box run leaks 16 of 16
+both ways. That run is on the wall too.
+
+A result from the people who built the instrument is the most conflicted one there, which is
+why none of our own runs count toward calling a configuration replicated, our own gateway's included.
+That does not change because the number improved.
+
+**No gateway other than ours has passed yet.** The first one that does gets the **First
+independent pass** trophy at the top of the wall and a mark on its card, and keeps them. It goes
+to any gateway we did not write, whether we measured it or its own maintainers did, as long as
+there is a run behind the numbers to open. It is computed from the published rows rather than
+handed out, which is not the same as saying it cannot be gamed: a project that fabricated a
+report could take it, and would be doing so in public under its own name.
+
+Find a case that trips either configuration and we will add it to the corpus and credit you.
+
+## Why there is no speed column
+
+The obvious missing number is latency, and it is missing on purpose. Every result here would be
+timed on whatever machine the submitter happened to use, so a fast gateway on a slow runner would
+look worse than a slow one on fast hardware. That is hardware noise published as a product
+characteristic.
+
+What you actually want from a speed number is the **design tradeoff**, and that is on every card
+already, under "Reads the reply". There are three ways to build this and each one costs
+something:
+
+- **Checks each chunk alone.** Fastest, and it cannot see a value split across two chunks.
+- **Waits for the whole response.** Sees everything, and the user waits for the entire answer
+  before any of it appears.
+- **Holds back a short tail.** Keeps the text streaming and still catches most splits. Leaks if
+  the tail is shorter than the value.
+
+There is no free option. That is why it is worth measuring, and why the label tells you more
+than a millisecond count would.
+
+## Two bugs that look identical in a leak count {#two-bugs}
+
+The same number in a leak count can mean two different defects, which need different fixes.
+This is the main reason the wall is not a ranking.
+
+| | Sent whole<br/>`user@example.com` | Split across two chunks<br/>`user@exa` + `mple.com` |
+| :--- | :--- | :--- |
+| <DefinedTerm term="Detector gap" definition="The gateway never spots the value, so it leaks whether the stream splits it or not." /> | leaks | leaks |
+| <DefinedTerm term="Boundary bug" definition="The gateway spots the whole value but not its halves, so it only leaks when the stream splits it." /> | caught | leaks |
+
+### Detector gap {#detector-gap}
+
+The gateway never recognises the value at all. Splitting the stream changes nothing, because it
+was not going to catch it either way. Usually a missing pattern, an encoding it does not decode,
+or a look-alike character it does not fold.
+
+### Boundary bug {#boundary-bug}
+
+The gateway recognises the whole value but not its halves. It is clean until the stream splits
+the value across two chunks, and then it leaks. This is the defect the split check exists to
+find, and it is invisible to any test that sends values whole.
+
+## Why we do not rank these
+
+The wall ships with the most recently run proxy first. You can reorder it for yourself, including
+by the number of checks passed, and that changes only your view. We do not publish it in a ranked order:
+
+- **Runs are not comparable.** Each result is one version, one configuration, one set of test
+  values.
+- **A ranking starts arguments about fairness instead of getting gateways tested.**
+- **The same leak count can mean two different bugs**, as [the table above](#two-bugs) shows.
+
+The shield is a count of what one run passed, the proxy's latest complete one, not a place in a
+league. The arrows are the one
+comparison we do draw, and they only ever compare a gateway with its own earlier version on the
+wall. That is revision history rather than a ranking: it says a team fixed something, which is
+the entire behaviour the wall exists to encourage.
+
+## If you think a row is wrong
+
+Ours included. [Open a question](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)
+and the count appears on that run's line, linking to what you wrote. Nothing is hidden or moved
+down the wall while it is open: the wall publishes disagreements rather than settling them
+quietly, which is the same reason two runs of the same gateway that disagree both stay up. The
+count clears when the question is closed.
+
+## Credit
+
+<CorpusCredits />
+
+Full numbers for every run on the wall, including the reference policies we use to calibrate the
+instrument, are on the [published results](./results.md) page, generated from the report files in
+the repository.
+
+Questions about any of this are welcome in the same issue tracker.

@@ -1,19 +1,7 @@
 """``pii-leak-benchmark cite`` -- turn a report into a citable block.
 
-A maintainer who runs the harness and says "it passed" has produced a claim nobody can
-check. The same maintainer pasting this block has produced a reference: it names the
-harness revision, the inspector and corpus digests, and the exact configuration the
-numbers came from, so a reader can rerun the same instrument against the same corpus
-and compare.
-
-Standard library only. Nothing here may import ``llm_shield_proxy``: the benchmark is
-the neutral measurer and the proxy is one of the things it measures.
-
-WHAT THIS IS NOT. Every value is copied from a report the caller supplies, and reports
-are produced by whoever ran the harness. This block is therefore SELF-REPORTED and
-forgeable by its author, exactly as ``provenance.build_attestation`` says of its own
-fields. It makes a result *checkable* -- a reader can rerun the named instrument -- not
-*attested*. Do not add language here implying verification that no verifier performed.
+Produces a self-reported, checkable reference (not an attested one) containing
+the configuration, harness revision, and corpus digests used for the measurement.
 """
 
 from __future__ import annotations
@@ -42,11 +30,7 @@ def _dig(report: dict[str, Any], *path: str, default: Any = None) -> Any:
 
 
 def _rate(value: Any) -> str:
-    """Render a rate the way the reports and the spec do: 1.00, not 1.
-
-    A bare ``1`` next to ``0.125`` reads as a count rather than a rate, and these
-    blocks get pasted straight into issues where nobody has the schema to hand.
-    """
+    """Format rates as decimals (e.g. 1.00) to distinguish them from counts."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return _MISSING
     text = f"{value:.4f}".rstrip("0")
@@ -59,38 +43,12 @@ def _flatten(value: str) -> str:
 
 
 def _cell(value: str) -> str:
-    """Make a report-supplied value safe to sit in a GFM table cell.
-
-    Every value here is free-form text from a report the caller supplied, and the
-    rendered block is pasted straight into issues and READMEs, so a value that can break
-    out of its cell turns a block meant to be CHECKABLE into one that merely looks
-    complete.
-
-    Only the pipe is escaped, and only because GFM splits table rows on unescaped pipes
-    BEFORE any inline parsing, which is why `\\|` works even inside a code span and is
-    the documented way to carry a literal pipe. Backslashes are deliberately NOT escaped:
-    inside a code span a backslash is literal, so doubling it would display two where the
-    report held one, and this block is evidence.
-    """
+    """Escape pipes to prevent breaking out of GFM table cells."""
     return _flatten(value).replace("|", "\\|")
 
 
 def _code_cell(value: str) -> str:
-    """Render a value as a code span it cannot break out of.
-
-    ESCAPING A BACKTICK DOES NOT WORK HERE, which is the whole reason this exists.
-    CommonMark does not process backslash escapes inside code spans, so `` \\` `` still
-    closes the span: the first version of this escaped backticks, and a value of
-    ``gw`x`` rendered as the span ``gw\\`` followed by ``x`` as ordinary prose, taking
-    the rest of the row with it. The test passed, because it asserted the escaped text
-    appeared rather than that the span survived.
-
-    The rule that does work is the delimiter rule: a code span may be opened with any
-    run of backticks and is closed only by a run of exactly the same length, so a fence
-    one longer than the longest run inside the value can never be terminated early. A
-    value that starts or ends with a backtick is padded with a space, which CommonMark
-    strips when both sides have one.
-    """
+    """Render a value as a code span using backtick fences sized to prevent breakouts."""
     flat = _cell(value)
     longest = max((len(run) for run in _BACKTICK_RUN.findall(flat)), default=0)
     fence = "`" * (longest + 1)
@@ -107,10 +65,7 @@ def _short(digest: Any, keep: int = 16) -> str:
 def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
     """Render a citation block for one conformance report."""
     metrics = _dig(report, "metrics", default={})
-    # Guard the TYPE, not just falsiness. `or {}` still lets a truthy non-object
-    # through -- `"metrics": "unavailable"` in a hand-edited report reached `.get`
-    # and raised, which breaks the documented contract that missing fields degrade
-    # to `unrecorded` rather than traceback at a caller who named any JSON file.
+    # Enforce type to prevent tracebacks from hand-edited reports containing strings.
     if not isinstance(metrics, dict):
         metrics = {}
     leak = metrics.get("leak_rate") if isinstance(metrics.get("leak_rate"), dict) else {}
@@ -122,16 +77,12 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
 
     rows: list[tuple[str, str]] = [
         ("Benchmark package", str(package_version)),
-        # Both report shapes, via the shared resolver. Reading only the research
-        # spelling printed "unrecorded" for every operator run, which is the file the
-        # results-wall page tells submitters to cite.
+        # Resolve harness revision from either report shape.
         ("Harness revision", fields.harness_revision(report)),
         ("Schema", str(_dig(report, "schema", default=_MISSING))),
     ]
 
-    # The research profiles (v2, FIDE) carry scorer and corpus digests. Operator runs
-    # do not, and padding their block with four "unrecorded" rows makes a usable
-    # result look like a broken one, so these appear only when the report has them.
+    # Only show inspector and corpus fields if present (they are absent in operator runs).
     instrument = fields.instrument_sha256(report)
     if instrument:
         rows.append(("Inspector digest", _short(instrument)))
@@ -150,12 +101,9 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
     rows.append(("Target version", fields.target_version(report)))
     model = fields.model(report)
     if model:
-        # Named as the model, never folded into "Target": an operator run records the
-        # alias it routed through, which is not the gateway under test.
+        # Keep model distinct from Target, as it represents the routed alias.
         rows.append(("Model", model))
-    # The operator shape files the verdict under `verdict`; the research shape uses
-    # `outcome`. This is the headline row, so a citation of a LEAK run must not
-    # print "unrecorded" merely because it was made by the other half of the tool.
+    # Extract outcome from either shape ('verdict' or 'outcome').
     rows.append(("Outcome", str(report.get("verdict") or report.get("outcome") or _MISSING)))
     if isinstance(report.get("passed"), bool):
         rows.append(("Checks passed", "yes" if report["passed"] else "no"))
@@ -194,8 +142,7 @@ def build_citation(report: dict[str, Any], *, style: str = "markdown") -> str:
     )
 
     if style == "text":
-        # Markdown escaping would be noise here, but a newline still breaks the block:
-        # it silently turns one field into what looks like two, so it is flattened.
+        # Flatten lines to prevent newline breaks in text format.
         flat = [(_flatten(label), _flatten(value)) for label, value in rows]
         width = max(len(label) for label, _ in flat)
         body = "\n".join(f"{label.ljust(width)}  {value}" for label, value in flat)

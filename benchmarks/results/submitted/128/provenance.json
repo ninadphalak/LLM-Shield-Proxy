@@ -1,0 +1,25 @@
+{
+  "schema": "llm-shield-proxy/submitted-row-archive/v1",
+  "issue": 128,
+  "submitter": "teg0011",
+  "ranIn": "teg0011/litellm",
+  "ranInOwnerType": "User",
+  "runUrl": "https://github.com/teg0011/litellm/actions/runs/36344664791",
+  "runId": 36344664791,
+  "headSha": "0351d284628605d4b1c891769d32b1f81c6813d3",
+  "workflowPath": ".github/workflows/litellm-source-reproduction.yml",
+  "runCreatedAt": "2026-09-27T19:31:32Z",
+  "artifact": {
+    "name": "source-reproduction",
+    "id": 10940655250,
+    "bytes": 12668,
+    "sha256": "4200a0191f495a418415f858415fd64f05864255147cabe783024c706ac79c6e"
+  },
+  "harness": "0.4.1 (operator), 0.2.1 (response)",
+  "redactedFields": [
+    "target.base_url",
+    "capture.target_must_be_preconfigured_for",
+    "capture.self_probe.advertised_url"
+  ],
+  "archivedAt": "2026-09-28T16:56:12Z"
+}

@@ -41,12 +41,18 @@ inputs:
     description: Path to a downloaded current.json from a compatible earlier run
     default: ''
   artifact-name:
-    description: Unique artifact name when invoking the action multiple times
+    description: Unique artifact name when invoking the action multiple times; empty skips upload
     default: pii-leak-benchmark
+  submission-section:
+    description: 'false omits the wall-submission section, for workflows that upload their own bundle and write their own'
+    default: 'true'
 outputs:
   report-directory:
     description: Directory with operator reports, raw measurements and summary.md
     value: ${{ steps.setup.outputs.out }}
+  python-path:
+    description: Python interpreter with the pinned operator harness installed
+    value: ${{ steps.setup.outputs.python }}
 runs:
   using: composite
   steps:
@@ -85,6 +91,7 @@ runs:
         BENCHMARK_BASELINE_START_COMMAND: ${{ inputs.baseline-start-command }}
         BENCHMARK_BASELINE_VERSION: ${{ inputs.baseline-version }}
         BENCHMARK_BASELINE_REPORT: ${{ inputs.baseline-report }}
+        BENCHMARK_SUBMISSION_SECTION: ${{ inputs.submission-section }}
       run: |
         "$BENCHMARK_PYTHON" - <<'PY'
         import os
@@ -127,7 +134,7 @@ runs:
           --out "$BENCHMARK_OUT/pii-leak-badge.json" || \
           echo "Badge rendering failed; the reports are unaffected."
     - name: Keep benchmark reports
-      if: always() && steps.setup.outputs.out != ''
+      if: always() && steps.setup.outputs.out != '' && inputs.artifact-name != ''
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: ${{ inputs.artifact-name }}

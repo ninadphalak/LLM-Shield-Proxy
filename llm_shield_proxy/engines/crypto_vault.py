@@ -128,11 +128,21 @@ class StatelessCryptoVault:
     def __init__(self) -> None:
         # Provide type_counters attribute to satisfy AuditLogger
         self.type_counters: dict[str, int] = {}
+        self._one_way: dict[str, str] = {}
 
     def get_or_create_token(self, original_val: str, entity_type: str) -> str:
         """Encrypts the original value to a token."""
         self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
         return encrypt_to_token(original_val)
+
+    def get_or_create_one_way_token(self, original_val: str, entity_type: str) -> str:
+        """A tag the reply cannot restore. An encrypted token would decrypt itself."""
+        token = self._one_way.get(original_val)
+        if token is None:
+            self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
+            token = f"[{entity_type}_REDACTED_{len(self._one_way) + 1}]"
+            self._one_way[original_val] = token
+        return token
 
     def rehydrate(self, text: str, retention_length: int = 0) -> str:
         """Rehydrates by finding and decrypting tokens.

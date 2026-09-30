@@ -3,17 +3,27 @@
 [![Build Status](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/workflows/ci.yml)
 [![PyPI: llm-shield-proxy](https://img.shields.io/pypi/v/llm-shield-proxy.svg?color=green&label=llm-shield-proxy)](https://pypi.org/project/llm-shield-proxy/)
 [![PyPI: pii-leak-benchmark](https://img.shields.io/pypi/v/pii-leak-benchmark.svg?color=green&label=pii-leak-benchmark)](https://pypi.org/project/pii-leak-benchmark/)
+[![PyPI: mcp-ssrf-check](https://img.shields.io/pypi/v/mcp-ssrf-check.svg?color=green&label=mcp-ssrf-check)](https://pypi.org/project/mcp-ssrf-check/)
+[![PyPI: chunk-invariance](https://img.shields.io/pypi/v/chunk-invariance.svg?color=green&label=chunk-invariance)](https://pypi.org/project/chunk-invariance/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://project-0039f5fd-ac66-4a1c-9e0.web.app)
 
-This repository contains two related packages:
+This repository contains four related packages:
 
 1. **[`pii-leak-benchmark`](pii-leak-benchmark/)** tests an OpenAI-compatible streaming gateway. It
    checks whether the gateway sends the test values to its model provider and whether the client
    gets the original values back.
 2. **LLM-Shield-Proxy** is a self-hosted streaming privacy gateway. The benchmark tests it by name
    and applies the same publication rules used for every other gateway.
+3. **[`mcp-ssrf-check`](mcp-ssrf-check/)** checks an MCP server you operate for missing `Host` and
+   `Origin` validation, unbound session ids, and URL-fetching tools that reach loopback. It talks
+   only to your server and to a listener it opens on your own machine. It also runs as a GitHub
+   Action that writes the result table to the job summary.
+4. **[`chunk-invariance`](chunk-invariance/)** turns the split-boundary rule into one test
+   assertion: every way of splitting an input into chunks must stream to the same output as
+   filtering it whole. Python on PyPI, and TypeScript on [npm](https://www.npmjs.com/package/chunk-invariance)
+   ([`chunk-invariance-js/`](chunk-invariance-js/)).
 
 ## What changed after the first benchmark run
 
@@ -101,10 +111,16 @@ pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
 `selfcheck` needs 0.2.0 or newer.
 
 To fail your own build on a leak, the complete workflow file and the three settings you have
-to change are in the [CI setup guide](website/docs/conformance/ci.md), with a shorter copy in
+to change are in the [CI setup guide](https://llmshieldproxy.com/docs/conformance/ci), with a
+shorter copy in
 [`examples/ci/gateway-pii-check.yml`](examples/ci/gateway-pii-check.yml). That path needs
 0.3.0 or newer, which adds the `ci` subcommand, the GitHub Action, and baseline comparison
 against your previous version.
+
+To build the proxy in its own fork and retain both request and 32-case response reports,
+use the [source-build CI recipes](website/docs/conformance/source-ci.md) for
+LLM-Shield-Proxy, Portkey, LiteLLM, or NeMo Guardrails. The workflow starts its own
+synthetic capture, so no model account is needed.
 
 It reports one row per data type, so you can see what your gateway handled and what it missed:
 
@@ -214,7 +230,7 @@ The maintained component map and deployment diagrams live in the
 
 | Area | What is implemented | Where the evidence stops |
 |---|---|---|
-| Detection | 10 native Tier 1 patterns, Tier 2 Shannon entropy, optional Tier 3 ONNX NER, BYOR rules | [Supported types](website/docs/features/data-protection-pii-redaction/supported-pii-types.md) · no recall guarantee on unlabeled traffic |
+| Detection | 11 native Tier 1 data types, Tier 2 Shannon entropy, optional Tier 3 ONNX NER, BYOR rules | [Supported types](website/docs/features/data-protection-pii-redaction/supported-pii-types.md) · no recall guarantee on unlabeled traffic |
 | Streaming privacy | Sliding-window SSE rehydration, bounded streaming JSON lexer | [Architecture](website/docs/architecture.md) · [conformance method](website/docs/conformance/index.md) |
 | Masking | Synthetic, structural-tag, scrub, operator-keyed stateless crypto | [Masking guide](website/docs/features/data-protection-pii-redaction/format-preserving-synthetic-masking-entropy.md) · plaintext still exists in process memory |
 | Security controls | SSRF/DNS-rebinding egress checks, request policy, rate and blast-radius limits, canary tripwires | [Security](website/docs/security.md) · not a substitute for network policy |

@@ -10,14 +10,14 @@ is typed by hand. CI rebuilds this page on every push and fails if it does not m
 reports, so a number here cannot outlive the run it came from.
 
 Want to check one yourself? [Reproduce the fragmentation
-result](./reproduce-fragmentation) re-derives two of the rows below in about two minutes,
+result](./reproduce-fragmentation.md) re-derives two of the rows below in about two minutes,
 offline.
 
 ## How to read the outcomes
 
 `fail` means one thing and nothing else: a value we asked the gateway to protect arrived at
 the capture server unmasked. It is not a score, and not every non-`pass` is a leak. The
-[outcome table](./reproducing#4-read-outcome) says what each value means.
+[outcome table](./reproducing.md#4-read-outcome) says what each value means.
 
 **Request path** is a separate result from the four response rates, and a row can be clean on
 one and not the other. It answers a single question: did unmasked test values go *out* to the
@@ -39,7 +39,7 @@ response leak columns, and why they do not mean the same thing: LiteLLM had reda
 on and all four data types left anyway. NeMo never switched it on.
 
 One of the products below is our own. Read the request-path column knowing that; the
-[benchmark readme](./benchmark_readme) sets out the conflict and the other limits in full.
+[benchmark readme](./benchmark_readme.md) sets out the conflict and the other limits in full.
 
 Two groups appear below, and you cannot compare one against the other:
 
@@ -51,7 +51,7 @@ Two groups appear below, and you cannot compare one against the other:
 
 Every result is **unreplicated** unless the table says otherwise. A result becomes
 `replicated` only after three unaffiliated people submit a run of the same target and
-configuration. See [submitting a result](./submitting).
+configuration. See [submitting a result](./submitting.md).
 
 <!-- BEGIN GENERATED: benchmarks/generate_results_page.py -->
 
@@ -89,10 +89,12 @@ Corpus `30efa2eb65888844...` at seed `a1b2c3d4e5f60001`, inspector `94262e29a492
 | `llm-guard-chunk-local` | 1 | 0.25 | 0.75 | 0.5 | configured, leaked: USPHONE | 0/32 | `fail` |
 | `llm-shield-proxy-1.6.0-response-off` | 1 | 1 | 1 | 0 | configured, clean | 0/32 | `fail` |
 | `llm-shield-proxy-1.6.0-response-on` | 1 | 0.125 | 0.25 | 0.125 | configured, clean | 0/32 | `fail` |
+| `llm-shield-proxy-1.6.6-response-off` | 1 | 1 | 1 | 0 | configured, clean | 0/32 | `fail` |
+| `llm-shield-proxy-1.6.6-response-on` | 1 | 0 | 0 | 0 | configured, clean | 0/32 | `pass` |
 | `nemo-guardrails-0.24.0` | 0 | 0 | 0 | 0 | not configured (4 types seen) | 8/32 | `fail` |
 | `portkey-gateway-oss` | 1 | 1 | 1 | 0 | not configured (4 types seen) | 0/32 | `fail` |
 
-**0 of 8 measured gateway and library configurations pass.** The only passing rows are reference policies: `retention-plus-decoding`.
+**1 of 10 measured gateway and library configurations pass.** 
 
 ### Seed sweeps
 
@@ -118,7 +120,7 @@ Mean across seeds, with minimum--maximum where the value varies.
 
 ### Evidence inventory
 
-- v2 response-split reports: **95**
+- v2 response-split reports: **97**
 - FIDE v2.1 reports (separate 64-case corpus): **73**
 - Seed-sweep aggregates: **9**
 
@@ -163,12 +165,12 @@ Scope: in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and mod
 
 None submitted yet. The six CI runners that reproduce the fragmentation rows on every push do
 not count as independent: they run the author's code from the author's repository. See
-[what a green Track 1 run proves, and what it does not](./reproduce-fragmentation#what-a-green-track-1-run-proves-and-what-it-does-not).
+[what a green Track 1 run proves, and what it does not](./reproduce-fragmentation.md#what-a-green-track-1-run-proves-and-what-it-does-not).
 
-To add yours, see [submitting a result](./submitting).
+To add yours, see [submitting a result](./submitting.md).
 
 ## Related
 
-- [Benchmark readme](./benchmark_readme) - what the v2 profile measures and the findings a reviewer should check.
-- [Reproduce the fragmentation result](./reproduce-fragmentation)
-- [Reproduce the conformance report](./reproducing)
+- [Benchmark readme](./benchmark_readme.md) - what the v2 profile measures and the findings a reviewer should check.
+- [Reproduce the fragmentation result](./reproduce-fragmentation.md)
+- [Reproduce the conformance report](./reproducing.md)

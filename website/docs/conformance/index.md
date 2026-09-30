@@ -1,6 +1,6 @@
 # Streaming Privacy Gateway Tests
 
-**Check your gateway on every pull request:** the [CI guide](./ci) provides a GitHub Action
+**Check your gateway on every pull request:** the [CI guide](./ci.mdx) provides a GitHub Action
 with automatic controls, actionable summaries, retained reports and baseline comparisons.
 
 The [specification governance process](/docs/conformance/governance) defines normative changes, independent review, conflicts, versioning, and result labels.
@@ -22,9 +22,9 @@ The lab is Apache-2.0 licensed. The specification, vectors, runner, report schem
 
 *Note: Latency is a publication requirement (SPG-LATENCY-1), not a scored check. Reports publish measured distributions under `microbenchmarks`.*
 
-Review the [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1), see the [published results table](./results), [reproduce the local and HTTP profiles](./reproducing), or [submit a run](./submitting).
+Review the [Streaming Privacy Gateway Conformance Specification v1.0.0](./specification-v1.md), see the [published results table](./results.md), [reproduce the local and HTTP profiles](./reproducing.md), or [submit a run](./submitting.md).
 
-**Reproducing the result:** [reproduce the fragmentation result](./reproduce-fragmentation) runs in three tracks. Track 1 is offline and takes about seventy seconds, with no gateway or account needed - but it runs two *reference controls* written by this project, one of which is deliberately boundary-blind, so it verifies your copy of the instrument rather than establishing anything about real software. Track 2 costs a Docker install and runs the same comparison around a real Microsoft Presidio analyzer; that is where the finding lives. Track 3 points the harness at your own gateway, including one in production.
+**Reproducing the result:** [reproduce the fragmentation result](./reproduce-fragmentation.md) runs in three tracks. Track 1 is offline and takes about seventy seconds, with no gateway or account needed - but it runs two *reference controls* written by this project, one of which is deliberately boundary-blind, so it verifies your copy of the instrument rather than establishing anything about real software. Track 2 costs a Docker install and runs the same comparison around a real Microsoft Presidio analyzer; that is where the finding lives. Track 3 points the harness at your own gateway, including one in production.
 
 ## Independent Harness
 
@@ -47,6 +47,6 @@ This profile focuses purely on network input/output. It does not measure interna
 - **Independent Run:** Someone unaffiliated with the gateway publishes a report for the same version.
 - **Production Profile:** A separate service test that includes HTTP/TLS, concurrent requests, network and model time, errors, and total process memory.
 
-A result becomes `replicated` only after three unaffiliated individuals submit a run of the same gateway and configuration. Until then, the table marks the result as `unreplicated` (including LLM-Shield-Proxy's own results). See [submitting a result](./submitting).
+A result becomes `replicated` only after three unaffiliated individuals submit a run of the same gateway and configuration. Until then, the table marks the result as `unreplicated` (including LLM-Shield-Proxy's own results). See [submitting a result](./submitting.md).
 
 Passing the local harness validates deterministic operations but does not establish population-level detector accuracy, a universal latency/memory ceiling, regulatory compliance, or immutable WORM retention.

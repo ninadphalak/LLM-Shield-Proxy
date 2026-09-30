@@ -7,9 +7,9 @@ title: Benchmark readme
 
 What the v2 response-split profile measures, and the findings a reviewer should check.
 
-The numbers themselves are on [published results](./results), generated from the committed
+The numbers themselves are on [published results](./results.md), generated from the committed
 JSON. This page explains what they mean. To re-derive two of them yourself in about two
-minutes, see [reproduce the fragmentation result](./reproduce-fragmentation).
+minutes, see [reproduce the fragmentation result](./reproduce-fragmentation.md).
 
 ## What is being tested
 
@@ -139,7 +139,7 @@ gateway that redacts nothing, score leak `0.33` instead of the true `1.00`.
 
 This history is not a footnote, and it is the main reason to distrust a clean number you
 did not produce yourself. It is recorded in full on the
-[benchmark revision history](./benchmark-revision-history).
+[benchmark revision history](./benchmark-revision-history.md).
 
 ## Verify it without trusting the numbers
 
@@ -195,7 +195,7 @@ directory.
 
 ## Related
 
-- [Published results](./results) - the generated tables.
-- [Reproduce the fragmentation result](./reproduce-fragmentation)
-- [Benchmark revision history](./benchmark-revision-history) - every instrument defect found and fixed.
-- [Submit a run](./submitting)
+- [Published results](./results.md) - the generated tables.
+- [Reproduce the fragmentation result](./reproduce-fragmentation.md)
+- [Benchmark revision history](./benchmark-revision-history.md) - every instrument defect found and fixed.
+- [Submit a run](./submitting.md)

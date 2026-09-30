@@ -25,8 +25,46 @@ that was an overstatement and it is corrected here.
 and the only thing that changes between the two rows is whether a chunk boundary is allowed
 to fall inside a value.
 
-You do not need to read the paper, run any other gateway, or know anything about SOC 2 or
-HIPAA to do any of them.
+You do not need to read anything else, run any other gateway, or know anything about SOC 2
+or HIPAA to do any of them.
+
+## Run it in GitHub Actions, nothing to install
+
+Tracks 1 and 2 run as one job on a GitHub-hosted runner, from a fork of this repository.
+You need a GitHub account and nothing else: no Python, no Docker, no API key. The job takes
+about five minutes.
+
+1. Fork [ninadphalak/LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy):
+   click **Fork**, then **Create fork**. Everything you click from here on is in your fork,
+   at `github.com/YOUR-NAME/LLM-Shield-Proxy`.
+2. Open your fork's **Actions** tab and click **I understand my workflows, go ahead and
+   enable them**. GitHub switches workflows off in every new fork until you do.
+3. In the left column, click **Reproduce the fragmentation result**, then the
+   **Run workflow** button on the right, then the green **Run workflow** button in the panel
+   that opens. Leave **Use workflow from** on `main` to run the latest code. There are no
+   boxes to fill.
+4. Wait for the run to finish, then click it and read its summary. It shows the commit,
+   the runner and its Python version, both `RESULT:` lines and one table per policy. Green
+   means both tracks printed `RESULT: all 2 policies reproduced the published reports.`;
+   red means one did not, and the table shows which field differed.
+5. Click **Send this result back** at the bottom of the summary. It opens the
+   [independent reproduction form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=independent-reproduction.yml)
+   on this repository with the commit, the environment and both `RESULT:` lines already
+   filled in. Add your name and press **Create**. Send it whatever the result was.
+
+The run's uploaded reports expire 90 days after the run; the issue does not, so the issue
+is the public record. A reviewer can verify a run from the issue plus the run link in it:
+the job log shows the same `RESULT:` lines, and its artifact holds the regenerated reports
+while it lasts.
+
+The workflow installs exactly what Track 1 below installs, on Python 3.12, and runs the
+same two commands. The pinned Presidio image is started on the runner with Docker. This
+repository's own CI also runs Track 1 on every push, on three operating systems and two
+Python versions ([details below](#this-runs-in-ci-too)).
+
+## Run it on your machine
+
+The same two tracks on a laptop. Track 1 needs Python; Track 2 also needs Docker.
 
 ## Track 1 - Verify the instrument
 
@@ -36,9 +74,12 @@ key, no model, no network egress. Two policies, about 35 seconds each.
 ### 1. Get the code
 
 ```bash
-git clone https://github.com/ninadphalak/LLM-Shield-Proxy.git
+git clone -c core.longpaths=true https://github.com/ninadphalak/LLM-Shield-Proxy.git
 cd LLM-Shield-Proxy
 ```
+
+`core.longpaths` stops Windows from failing the checkout with `Filename too long`; it
+changes nothing elsewhere.
 
 If you were given a specific commit, check it out now:
 
@@ -100,30 +141,23 @@ Both reports must also carry corpus digest
 
 Item 4 is not a formality. A run that fails, a step that does not work on your machine, a
 number that does not match, or a reading of the result you think is wrong is more useful
-than a clean pass. Open a
-[GitHub issue](https://github.com/ninadphalak/LLM-Shield-Proxy/issues) or send the files
-directly.
+than a clean pass. Send them with the
+[independent reproduction form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=independent-reproduction.yml),
+or send the files directly.
 
 ### 6. Optional: run it in your own GitHub Actions
 
 If you would rather not trust a run on your own laptop either, run it on infrastructure
-neither of us controls.
-
-1. Fork [ninadphalak/LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy).
-2. In your fork, open the **Actions** tab and click **I understand my workflows, go ahead
-   and enable them**. GitHub disables workflows in new forks until you do this.
-3. Select **Reproducible Public Benchmark** in the left sidebar, then **Run workflow**.
-
-No secrets, tokens or configuration are needed. The job installs one dependency from PyPI
-and otherwise touches no network. Six runners report separately; each uploads its
-regenerated reports as a downloadable artifact.
+neither of us controls: [Run it in GitHub Actions](#run-it-in-github-actions-nothing-to-install)
+above does both tracks from your fork and sends the result back with one click. The
+six-runner matrix in **Reproducible Public Benchmark** runs Track 1 alone on three operating
+systems and two Python versions; each runner uploads its regenerated reports.
 
 ### What the controls are for
 
 Track 1 ships two of five reference policies. They are not findings and they are not
-products - Table I of the manuscript calls them "reference controls". They are the known
-standards you calibrate an instrument against, and each one fails the harness in a
-different, diagnostic way:
+products; they are reference controls. They are the known standards you calibrate an
+instrument against, and each one fails the harness in a different, diagnostic way:
 
 | Control | Known to be | If the harness disagrees, it |
 | :--- | :--- | :--- |
@@ -139,7 +173,7 @@ identical rates in both arms is what demonstrates the 16-vs-16 pairing is sound;
 pairing would show a spurious gap.
 
 This is how ten instrument defects were caught, each recorded in the
-[revision history](./benchmark-revision-history). A control that should read 1.00 reading
+[revision history](./benchmark-revision-history.md). A control that should read 1.00 reading
 0.33 is how the Portkey socket-reuse bug surfaced.
 
 To run all five rather than the two:
@@ -180,21 +214,22 @@ curl -s -X POST http://127.0.0.1:5002/analyze \
 
 ### 2. Run the pair
 
+From the repository root, with the environment from Track 1 still active:
+
 ```bash
-PYTHONPATH=pii-leak-benchmark python -m pii_leak_benchmark.v2_emitter --validate \
-  --only presidio-chunk-local,presidio-retention \
-  --seed a1b2c3d4e5f60001 --out ./reproduction-presidio
+python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio
 ```
+
+It runs both wrappers against the analyzer and compares every field with the published
+reports, in the same format as Track 1. If it says `did NOT reproduce`, first check that
+the analyzer is still up (`docker ps` lists `presidio-analyzer`, and the `curl` above
+answers): with no analyzer running, every field differs.
 
 ### 3. Read the result
 
 The pinned image reproduced both stored reports on 2026-09-16, matching every compared
 field. CI now runs that pair too. This verifies the image as a reproduction target without
-rewriting historical target metadata. For the recursive comparison, run:
-
-```bash
-python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio-compared
-```
+rewriting historical target metadata.
 
 One seed, midpoint split oracle:
 
@@ -238,7 +273,7 @@ Use `selfcheck`. It answers one question - *does my deployment leak?* - and it d
 you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
 
 ```bash
-pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.3.1#subdirectory=pii-leak-benchmark"
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.4.1#subdirectory=pii-leak-benchmark"
 
 # Establish the floor FIRST. No gateway at all: this must report LEAK.
 pii-leak-benchmark selfcheck --target-base-url capture://self
@@ -289,7 +324,7 @@ its own exit code rather than being folded into either of the others.
 
 ### Running it in your own CI
 
-The [CI Action](./ci) handles controls, startup, summaries, artifacts and baseline comparisons. A short workflow example is in
+The [CI Action](./ci.mdx) handles controls, startup, summaries, artifacts and baseline comparisons. A short workflow example is in
 [`examples/ci/gateway-pii-check.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/examples/ci/gateway-pii-check.yml):
 it runs the floor first and fails unless every fixture type is detected, then checks your
 gateway and treats exit 2 as a failure rather than a pass.
@@ -336,7 +371,7 @@ For a hosted or production gateway that cannot reach your laptop, bind the captu
 your own tunnel with `--capture-public-url` and `--capture-token`; put credentials in
 `CONFORMANCE_CAPTURE_TOKEN` and `CONFORMANCE_TARGET_API_KEY` rather than argv, which is
 visible in process listings. See the
-[hosted-gateway runbook](./hosted-gateway-runbook).
+[hosted-gateway runbook](./hosted-gateway-runbook.md).
 
 Establish the floor first. The negative control has no gateway at all and **must** report
 `outcome=fail`; if it does not, your capture is not seeing traffic and no other row from
@@ -447,7 +482,7 @@ equality, so it cannot quietly grow to cover a real field.
 `benchmarks/results/v2-response-split/chunk-local.json` and `bounded-retention.json`,
 produced on 2026-09-09 at seed `a1b2c3d4e5f60001` under the midpoint partition oracle.
 Both files are byte-identical to the copies under the `v2-evidence-round-8` tag
-(commit `6cbfee3`), which is the evidence anchor the paper cites.
+(commit `6cbfee3`), which is the evidence anchor every published number cites.
 
 ### This runs in CI too
 
@@ -483,12 +518,15 @@ published the numbers. A rigged inspector would reproduce perfectly on six runne
 The part that needs a human reading the code rather than a green check is small, and it is
 worth naming exactly:
 
-| What to read | Where |
+All four are in `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py`. Search the file for
+the name in the second column; line numbers move as the file changes.
+
+| What to read | Search for |
 | :--- | :--- |
-| The chunk-local policy | `ChunkLocal` in `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py`, line 379 |
-| The retaining policy, including its boundary rule | `Retaining` (line 394) and `Retaining._cut` (line 414), same file |
-| What both share, so the only difference is retention | `_redact_then_rehydrate` (line 339) and the `Policy` base (line 321) |
-| How a leak is decided and tiered | `_leak_tier` (line 1973) |
+| The chunk-local policy | `class ChunkLocal` |
+| The retaining policy, including its boundary rule | `class Retaining` and its `def _cut` |
+| What both share, so the only difference is retention | `def _redact_then_rehydrate` and `class Policy` |
+| How a leak is decided and tiered | `def _leak_tier` |
 
 Those four are the whole argument. If the two policies differ anywhere except retention,
 the comparison is not measuring what it claims to measure, and that is a finding worth
@@ -512,9 +550,9 @@ reporting.
 
 ## Related
 
-- [Reproduce the conformance report](./reproducing) - the v1.0.0 local and HTTP profiles.
-- [Published results](./results)
-- [Submit a run](./submitting)
+- [Reproduce the conformance report](./reproducing.md) - the v1.0.0 local and HTTP profiles.
+- [Published results](./results.md)
+- [Submit a run](./submitting.md)
 
 Use a fresh output directory. The checker rejects existing artifacts and destinations inside
 published evidence. The historical `bounded-retention` name stays for compatibility, but its

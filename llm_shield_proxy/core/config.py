@@ -38,12 +38,16 @@ DEFAULT_BYOK_KEY_PREFIXES: tuple[str, ...] = (
 # protect anybody and can break the request: a tool stops routing, a schema stops
 # validating, a model name stops resolving. Operators extend this with
 # PAYLOAD_PROTECTED_KEYS rather than editing it here.
+#
+# `enum` is deliberately NOT here. An enum value can be an email, and skipping it sent
+# that to the provider in clear. Tokenising it keeps the schema consistent (the same
+# value always gets the same token within a vault), and the model's tool arguments are
+# rehydrated on every path, so the application still receives a value its enum allows.
 DEFAULT_PROTECTED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     {
         "model",
         "type",
         "role",
-        "enum",
         "format",
         "object",
         "index",
@@ -138,9 +142,9 @@ class Settings(BaseSettings):
     ENABLE_DEEP_PAYLOAD_REDACTION: bool = Field(
         default=True,
         description=(
-            "Redact strings in request fields outside the known chat shapes: metadata, user, "
-            "tools, response_format, and any provider-specific or unrecognised field. Turning "
-            "this off lets those fields reach the provider unredacted."
+            "Redact strings in request fields outside the known request shapes: metadata, user, "
+            "response_format, and any provider-specific or unrecognised field. Turning this off "
+            "lets those fields reach the provider unredacted. Tool definitions are redacted either way."
         ),
     )
     PAYLOAD_PROTECTED_KEYS: str = Field(
@@ -461,10 +465,19 @@ class Settings(BaseSettings):
     @property
     def payload_protected_keys_set(self) -> frozenset[str]:
         """Structural keys plus operator additions, never rewritten by deep redaction."""
+        return DEFAULT_PROTECTED_PAYLOAD_KEYS | self.payload_operator_protected_keys_set
+
+    @property
+    def payload_operator_protected_keys_set(self) -> frozenset[str]:
+        """Only the keys an operator added through PAYLOAD_PROTECTED_KEYS.
+
+        Kept apart from the built-in structural keys because the two mean different
+        things inside schema data (`enum`, `const`, ...): a built-in key there is just a
+        field name, while an operator's key is a promise that the value goes out unchanged.
+        """
         if not self.PAYLOAD_PROTECTED_KEYS:
-            return DEFAULT_PROTECTED_PAYLOAD_KEYS
-        extra = {key.strip() for key in self.PAYLOAD_PROTECTED_KEYS.split(",") if key.strip()}
-        return DEFAULT_PROTECTED_PAYLOAD_KEYS | frozenset(extra)
+            return frozenset()
+        return frozenset(key.strip() for key in self.PAYLOAD_PROTECTED_KEYS.split(",") if key.strip())
 
     @property
     def valid_virtual_keys_set(self) -> frozenset[str]:

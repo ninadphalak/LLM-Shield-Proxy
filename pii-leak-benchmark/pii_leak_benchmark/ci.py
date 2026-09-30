@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -19,6 +20,7 @@ from urllib.parse import urlsplit
 from . import __version__, explain
 from .artifact import write_json_artifact
 from .operator_profile import PROFILE_VERSION, coverage, seeded_fixture
+from .provenance import build_attestation
 from .selfcheck import (
     VERDICT_CHECK_FAILED,
     VERDICT_CLEAN,
@@ -78,7 +80,43 @@ def _cell(value: Any) -> str:
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
-def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) -> str:
+def render_submission(run: dict[str, Any]) -> list[str]:
+    """Render the publishable result section of the summary.
+    Link and headings are sourced from `submit` to ensure consistency.
+    """
+    from .cite import build_citation
+    from .submit import submission_url
+
+    citation = build_citation(run).rstrip("\n")
+    # Ensure Markdown fence length exceeds any internal backtick run.
+    longest = max((len(run_of) for run_of in re.findall(r"`+", citation)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [
+        "",
+        "## Publish this result",
+        "",
+        "The reports for this run were uploaded as a build artifact on this Actions run: "
+        "`summary.md`, `current.json`, `current.raw.json` and `pii-leak-badge.json`.",
+        "",
+        "<details><summary><b>Citation block, for pasting into a submission</b></summary>",
+        "",
+        fence,
+        citation,
+        fence,
+        "",
+        "</details>",
+        "",
+        f"[Add this result to the benchmark results wall]({submission_url(run)})",
+        "",
+        "That link opens a prefilled issue on the results wall. Paste the block above into "
+        "it and fill in the gateway name and licence, which a run cannot know. Send the "
+        "result whatever it says: a leak is as worth publishing as a pass, and a run from "
+        "a branch or a fork gets a row like any other.",
+    ]
+
+
+def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None, *,
+                   submission: bool = True) -> str:
     lines = ["# PII Leak Benchmark", "", f"**{run['verdict']}**", "", run["reason"], ""]
     if "contract" not in run:
         lines.extend(["Fix the setup error and rerun. An incomplete check cannot pass CI.", ""])
@@ -94,14 +132,8 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) 
         lines.append(f"| {_cell(entity)} | {_cell(before)} | {_cell(state)} | {next_step} |")
     findings = run.get("findings") or []
     if findings:
-        # In a fenced block, not a table. The two lines have to sit under each other with
-        # the arrow on the wrong one; a Markdown table would reflow them and the display
-        # would stop saying which side was supposed to differ.
-        #
-        # SHAPES, NOT VALUES. This summary is appended to GITHUB_STEP_SUMMARY and read by
-        # everyone who can see the pull request. `<EMAIL>` keeps the row actionable without
-        # handing a specimen to that audience; the operator running the check locally sees
-        # the values in their own terminal instead.
+        # Format as fenced text blocks to preserve alignment (tables would reflow).
+        # Shows placeholder shapes instead of actual specimens for privacy.
         lines.extend(["", "## What leaked, and why it matters", "", "```"])
         for item in findings:
             lines.extend(str(line) for line in item.get("display", []))
@@ -133,6 +165,9 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None) 
     if fixed:
         lines.append("Credential checks use fixed examples: " + ", ".join(fixed) + ". Passing these examples does not establish general credential detection.")
     lines.extend(["", "A no-regression result can still contain existing leaks. Current failures always fail this job.", ""])
+    if submission:
+        lines.extend(render_submission(run))
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -189,37 +224,20 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float) 
 
 
 EPILOG = """\
-Two one-time project inputs, then the checks run themselves:
+Key arguments:
+  --start-command   Command to start your gateway in the foreground.
+  --upstream-env    Environment variable for upstream URL (default: BENCHMARK_UPSTREAM_BASE_URL).
 
-  --start-command   how CI starts your gateway in the foreground
-  --upstream-env    the environment variable your gateway reads its upstream /v1 URL
-                    from, if it is not BENCHMARK_UPSTREAM_BASE_URL
+A negative control runs first. If it does not report LEAK, the run is not trusted.
 
-Both are passed to the gateway with the capture address already listening, so a
-gateway that checks or contacts its provider during startup finds it there. Without
---start-command the gateway must already be running and already be configured to send
-its upstream traffic to the capture (default http://127.0.0.1:8765/v1); nothing here
-reconfigures a gateway it did not start.
-
-A negative control runs first on every invocation. It measures the no-gateway floor
-and must report LEAK; if it does not, no verdict from this run is trusted.
-
-Comparing against the previous version, either way round:
-
-  --baseline-base-url URL [--baseline-start-command CMD]   measure both, this run
-  --baseline-report PATH                                   reuse a stored current.json
-
-A live baseline survives environment drift; a stored one is cheaper and weaker.
-Comparison never waives a current failure: an existing leak fails this job whether or
-not it is new.
+Baselines:
+  --baseline-base-url URL   Measure live previous version.
+  --baseline-report PATH    Reuse stored current.json.
 
 Exit status:
-  0  CLEAN        every required check passed and the run was attributable
-  1  LEAK / CHECK FAILED  observed leakage or a separate behavioural failure
-  2  NOT MEASURED nothing reached the capture, or the run could not be trusted
-
-Artifacts land in --out: summary.md, current.json, the raw report per measurement, and
-baseline.json when one was used. The summary is appended to GITHUB_STEP_SUMMARY.
+  0: CLEAN
+  1: LEAK / CHECK FAILED
+  2: NOT MEASURED
 """
 
 
@@ -229,8 +247,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_parser("pii-leak-benchmark ci")
     parser.description = "Check a gateway, compare an optional previous version, and write a CI summary."
-    # selfcheck's epilog tells the operator to configure their gateway's upstream
-    # themselves and promises nothing is started for them. Both are wrong here.
+    # Use CI-specific epilog since selfcheck assumes manual gateway config.
     parser.epilog = EPILOG
     parser.add_argument("--out", default="pii-check", help="Fresh artifact directory")
     parser.add_argument("--seed", default="gateway-ci-v1", help="Identical fixtures across baseline and current")
@@ -270,20 +287,15 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 2
 
     def measure(url: str, command: str | None, label: str, version: str) -> dict[str, Any]:
-        # Capture first, gateway second. A managed gateway is handed the capture URL
-        # as its upstream and a real one resolves, health-checks or lists models there
-        # BEFORE it opens its own port; with the capture bound only once measurement
-        # began, that gateway exited or timed out and the run blamed the operator.
-        # A fresh session per measurement also keeps the baseline's captured traffic
-        # out of the candidate's record.
+        # Start capture before gateway to handle gateways that check upstream on boot.
+        # Use fresh sessions to prevent cross-contamination.
         with capture_session(
             capture_host=args.capture_host, capture_port=args.capture_port,
             capture_public_url=args.capture_public_url,
             capture_token=os.getenv("CONFORMANCE_CAPTURE_TOKEN") or args.capture_token,
             timeout_seconds=args.timeout_seconds,
         ) as capture:
-            # The bound address, not the requested one, so the gateway is told where
-            # the capture actually is.
+            # Pass the actual bound capture address.
             env = dict(base_env)
             env["BENCHMARK_UPSTREAM_BASE_URL"] = capture.advertised_base_url
             if args.upstream_env:
@@ -298,16 +310,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
         write_json_artifact(out / f"{label}.raw.json", report, indent=2)
         verdict, reason = verdict_for(report, duty=args.duty)
-        # Deliberately built WITHOUT specimens. Everything this command writes is an
-        # artifact, so the values are never fetched here at all rather than fetched and
-        # then remembered not to print.
+        # Build findings without specimens to prevent accidental artifact leakage.
         findings = [
             explain.published_dict(f)
             for f in explain.findings_from_report(report, seed=args.seed, duty=args.duty)
         ]
         ignored = {"response_fidelity", "fragmentation_safety"} if args.duty == "anonymize" else set()
+        # Attestation is gathered centrally via `provenance`.
+        attestation = build_attestation()
         return {"schema": "pii-leak-benchmark/operator-run/v1", "contract": contract,
                 "verdict": verdict, "reason": reason, "target_version": version,
+                **({"attestation": attestation} if attestation else {}),
                 "generated_at": report["generated_at"], "entities": measured_entities(report),
                 "required_checks": {name: check["passed"] for name, check in report["checks"].items() if name not in ignored},
                 "findings": findings,
@@ -330,12 +343,14 @@ def main(argv: list[str] | None = None) -> int:
             run["comparison"] = compare(baseline, run)
         exit_code = 0 if run["verdict"] == VERDICT_CLEAN else 2 if run["verdict"] == VERDICT_NOT_MEASURED else 1
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
-        # Startup commands and credential-bearing URLs are deliberately not echoed.
+        # Suppress echoing of startup commands or credential-bearing URLs.
         run["verdict"] = VERDICT_NOT_MEASURED
         run["reason"] = "Setup or comparison failed: " + str(exc)
     try:
         write_json_artifact(out / "current.json", run, indent=2)
-        summary = render_summary(run, baseline)
+        # A workflow that uploads its own bundle writes its own submission section.
+        submission = os.getenv("BENCHMARK_SUBMISSION_SECTION", "true").strip().lower() != "false"
+        summary = render_summary(run, baseline, submission=submission)
         (out / "summary.md").write_text(summary, encoding="utf-8")
         if os.getenv("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:

@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # A published results-wall row is one line of JSON in a data file. Without this, every
+    # submission started eleven jobs here, including the container tests, ONNX inference,
+    # Helm rendering and the benchmark floor on five Python versions, to add a table row.
+    #
+    # Safe only because the check that DOES apply to a row moved earlier: the intake runs
+    # `tests/test_public_docs_style.py` itself before it commits, so banned text in a
+    # submitted row fails before the row is written rather than after it is merged. If that
+    # call is ever removed from `scripts/process_conformance_submission.py`, remove this
+    # filter with it or stranger-supplied text reaches the site unchecked.
+    paths-ignore:
+      - 'website/src/data/submitted-rows.json'
 
 permissions:
   contents: read
@@ -70,7 +81,7 @@ jobs:
 
       - name: Run Bandit Security Vulnerability Scanner
         run: |
-          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ -s B101,B104,B311
+          bandit -r llm_shield_proxy/ pii-leak-benchmark/pii_leak_benchmark/ mcp-ssrf-check/mcp_ssrf_check/ chunk-invariance/chunk_invariance/ -s B101,B104,B311
 
       - name: Run Pyright static type checking
         # The engine Pylance runs, so the editor, the pre-commit hook and this step are
@@ -349,6 +360,10 @@ jobs:
           attest-report: ${{ github.event_name == 'push' && 'true' || 'false' }}
           # A leak is the expected result here.
           fail-on-non-pass: "false"
+          # Both profiles: the response profile runs its pass-through policy against
+          # capture://self, on a free port, and must leave a schema-valid report.
+          profiles: both
+          response-capture-port: "0"
 
       - name: The action must surface the leak it measured
         run: |
@@ -357,6 +372,186 @@ jobs:
           test "${{ steps.control.outputs.passed }}" = "false"
           test -n "${{ steps.control.outputs.leaked-entity-types }}"
 
+      - name: The response profile must leave a schema-valid report that leaked
+        env:
+          RESPONSE_REPORT: ${{ steps.control.outputs.response-report-path }}
+          RESPONSE_LEAKED: ${{ steps.control.outputs.response-leaked }}
+        run: |
+          set -euo pipefail
+          test -s "$RESPONSE_REPORT"
+          test "$RESPONSE_LEAKED" = "true"
+          # Validated here against the published schema, not the action's own claim.
+          python - "$RESPONSE_REPORT" <<'PY'
+          import json
+          import sys
+
+          import jsonschema
+
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          schema = json.load(open("spec/v2.0.0/http-profile.schema.json", encoding="utf-8"))
+          jsonschema.Draft202012Validator(schema).validate(report)
+          rates = report["metrics"]["leak_rate"]
+          assert report["implementation"]["name"] == "reference-policy:passthrough", report["implementation"]
+          # With nothing in the loop every injected value reaches the client, whole or split.
+          assert rates["single_chunk"] == 1.0 and rates["adversarial"] == 1.0, rates
+          assert report["metrics"]["cases_scored"] == 32 and report["metrics"]["cases_inconclusive"] == 0
+          print("response report valid:", sys.argv[1], rates)
+          PY
+
       - name: A main-branch run must publish verifiable report provenance
         if: ${{ github.event_name == 'push' }}
         run: test -n "${{ steps.control.outputs.attestation-url }}"
+
+  chunk-invariance-python:
+    name: chunk-invariance on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    # Installed alone, as a user installs it: nothing may arrive with it but the optional
+    # Hypothesis extra, and its tests must run without the gateway's conftest.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the library alone
+        run: |
+          python -m pip install --upgrade pip
+          pip install ./chunk-invariance
+          python - <<'PY'
+          import subprocess, sys
+          frozen = subprocess.run([sys.executable, "-m", "pip", "list", "--format=freeze"],
+                                  capture_output=True, text=True, check=True).stdout
+          installed = {line.split("==")[0].strip().lower().replace("_", "-")
+                       for line in frozen.splitlines() if line.strip()}
+          extra = sorted(installed - {"chunk-invariance", "pip", "setuptools", "wheel"})
+          print("installed:", sorted(installed))
+          assert not extra, f"installing chunk-invariance pulled {extra}"
+          PY
+
+      - name: Run its tests with the Hypothesis extra
+        run: |
+          pip install "./chunk-invariance[hypothesis]" pytest
+          # --confcutdir keeps pytest from loading tests/conftest.py, which imports the gateway.
+          python -m pytest --confcutdir=tests/chunk_invariance tests/chunk_invariance -v -p no:cacheprovider
+
+  chunk-invariance-js:
+    name: chunk-invariance (TypeScript) on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22", "24"]
+    defaults:
+      run:
+        working-directory: chunk-invariance-js
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Build and test (ESM and CommonJS)
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      - name: The packed tarball holds the build and nothing else
+        run: |
+          npm pack --dry-run --json --ignore-scripts > pack.json
+          node scripts/check-pack.cjs pack.json
+
+  mcp-ssrf-check-action:
+    name: mcp-ssrf-check action (hardened passes, weak fails)
+    runs-on: ubuntu-latest
+    # The action is what a server maintainer puts in their own CI. It runs here from the
+    # working tree against the test double in both modes, so the job proves the action
+    # passes a server that validates and fails one that does not.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Start the hardened and the weak test double
+        run: |
+          python tests/mcp_ssrf_check/fake_server.py --mode hardened --port 18080 > hardened-server.log 2>&1 &
+          python tests/mcp_ssrf_check/fake_server.py --mode weak --port 18081 > weak-server.log 2>&1 &
+          python - <<'PY'
+          import socket, time
+          deadline = time.monotonic() + 30
+          for port in (18080, 18081):
+              while True:
+                  try:
+                      socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                      break
+                  except OSError:
+                      if time.monotonic() > deadline:
+                          raise SystemExit(f"test double on {port} did not start")
+                      time.sleep(0.2)
+          PY
+
+      - name: Hardened server must pass
+        id: hardened
+        uses: ./mcp-ssrf-check
+        with:
+          url: http://127.0.0.1:18080/mcp
+          fetch-tool: fetch
+          redirect-target: 127.0.0.1
+          fail-on: inconclusive
+          source: ./mcp-ssrf-check
+          json-out: hardened-report.json
+          artifact-name: mcp-ssrf-check-hardened
+
+      - name: Weak server must fail
+        id: weak
+        continue-on-error: true
+        uses: ./mcp-ssrf-check
+        with:
+          url: http://127.0.0.1:18081/mcp
+          fetch-tool: fetch
+          redirect-target: 127.0.0.1
+          source: ./mcp-ssrf-check
+          json-out: weak-report.json
+          artifact-name: mcp-ssrf-check-weak
+
+      - name: Assert both outcomes
+        env:
+          HARDENED_OUTCOME: ${{ steps.hardened.outputs.outcome }}
+          WEAK_STEP: ${{ steps.weak.outcome }}
+          WEAK_OUTCOME: ${{ steps.weak.outputs.outcome }}
+          WEAK_EXIT_CODE: ${{ steps.weak.outputs.exit-code }}
+        run: |
+          set -euo pipefail
+          echo "hardened=$HARDENED_OUTCOME weak step=$WEAK_STEP weak=$WEAK_OUTCOME exit=$WEAK_EXIT_CODE"
+          test "$HARDENED_OUTCOME" = "pass"
+          test "$WEAK_STEP" = "failure"
+          test "$WEAK_OUTCOME" = "fail"
+          test "$WEAK_EXIT_CODE" = "1"
+          python - <<'PY'
+          import json
+          hardened = {c["id"]: c["status"] for c in json.load(open("hardened-report.json"))["checks"]}
+          weak = {c["id"]: c["status"] for c in json.load(open("weak-report.json"))["checks"]}
+          print("hardened:", hardened)
+          print("weak:", weak)
+          assert "fail" not in hardened.values() and "inconclusive" not in hardened.values(), hardened
+          for check in ("host-header", "origin-header", "session-binding", "tool-url-ssrf"):
+              assert hardened[check] == "pass", (check, hardened[check])
+              assert weak[check] == "fail", (check, weak[check])
+          PY
+
+      - name: Server logs
+        if: always()
+        run: cat hardened-server.log weak-server.log

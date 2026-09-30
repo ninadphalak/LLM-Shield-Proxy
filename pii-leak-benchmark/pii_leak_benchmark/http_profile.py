@@ -37,59 +37,27 @@ from pii_leak_benchmark.redaction_claim import (
 # ---------------------------------------------------------------------------
 # The protected fixture. Every value must satisfy BOTH properties at once.
 #
-# VALID -- a detector that validates its input recognises it. The fixture this
-# replaced did not: `123-45-6789` is on Presidio's own invalidation list, the card
-# `4532-1234-5678-9012` has Luhn checksum 68, and `.invalid` has no public suffix so
-# `tldextract` rejects it. Measured against `mcr.microsoft.com/presidio-analyzer`,
-# stock registry, `score_threshold: 0.0`, that fixture produced NO `US_SSN`, NO
-# `CREDIT_CARD` and NO `EMAIL_ADDRESS`. The fixture therefore favored shape matching
-# over validated detection. The reference implementation's Tier 1 engine uses regex
-# matching without Luhn or SSN range rejection, so this block prevents that detector
-# design from receiving an unintended fixture advantage. Never reintroduce an invalid
-# specimen.
-#
-# NON-REAL -- the value can never identify a person or route anywhere. Reserved
-# space only. This is why the card is DRAWN FROM A PUBLISHED LIST rather than
-# generated: a randomly generated Luhn-valid PAN in an issued BIN may be a live
-# card, and the harness must never emit one.
+# VALID -- a detector that validates its input recognises it.
+# NON-REAL -- the value can never identify a person or route anywhere.
 # ---------------------------------------------------------------------------
 
 PROTECTED_ENTITY_TYPES = ("EMAIL", "SSN", "CREDIT_CARD")
 
-# RFC 2606 s3 reserves example.com for documentation. It resolves to IANA-operated
-# hosts that accept no mail, so the address cannot reach a person -- and `.com` is a
-# real public suffix, so `tldextract`-style validation accepts it.
+# example.com is reserved and resolves to hosts that accept no mail.
 _FIXTURE_EMAIL_DOMAIN = "example.com"
-# Letters only and a CONSTANT length. A digit in the local part would join the
-# cross-request digit haystacks the SSN and card needles are matched against, which
-# is the same reason the capture probe path carries no digits.
+# Letters only to prevent collision with digit-based fixtures (SSN/card).
 _FIXTURE_EMAIL_LOCAL_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 _FIXTURE_EMAIL_LOCAL_LENGTH = 8
 
-# The SSA has never issued a Social Security Number with an area of 900-999, so a
-# number from this space cannot belong to anyone. Presidio's `UsSsnRecognizer` does
-# not range-check the area, so it still scores these 0.85 -- verified by measurement,
-# not assumed.
-#
-# The group is held to 01-49, which is outside EVERY group range in Presidio's ITIN
-# recognizer (50-65, 70-88, 90-92, 94-99). Without that the value is also a
-# syntactically valid ITIN and a validating detector may label it `US_ITIN` instead
-# of `US_SSN` -- measured: `987-65-4320`, the range the SSA publishes for use in
-# ADVERTISING, comes back US_ITIN 0.5 and no US_SSN at all, because Presidio's SSN
-# recognizer additionally blacklists the prefix `98765432` outright. The officially
-# "safe" SSN is precisely the one a careful detector ignores, which is the whole
-# problem in miniature.
+# SSN space that cannot belong to anyone (900-999 area), but is not caught
+# by ITIN recognizers.
 _FIXTURE_SSN_AREA = (900, 999)
 _FIXTURE_SSN_GROUP = (1, 49)
 _FIXTURE_SSN_SERIAL = (1, 9999)
-# Presidio's UsSsnRecognizer.invalidate_result rejects a value starting with any of
-# these. The generated space cannot produce one, and the generator checks anyway.
+# Invalidating prefixes for UsSsnRecognizer.
 _SSN_INVALIDATING_PREFIXES = ("000", "666", "123456789", "98765432", "078051120")
 
-# Published test PANs. Every one is Luhn-valid, 16 digits, and identically grouped as
-# dddd-dddd-dddd-dddd, so drawing between them varies the VALUE without varying the
-# FORMAT. None is issued to a cardholder. They are enumerated rather than generated
-# on purpose: see the NON-REAL note above.
+# Published test PANs (Luhn-valid but non-real). Drawn from list, not generated.
 _FIXTURE_TEST_CARDS = (
     "4111111111111111",
     "4012888888881881",
@@ -99,9 +67,7 @@ _FIXTURE_TEST_CARDS = (
     "6011111111111117",
 )
 
-# The shape of each value, published in the report and used by callers that must
-# recover the fixture from the prompt they received. A gateway that wants to pass
-# now needs a format-based detector rather than three string replacements.
+# The shape of each value, used to recover the fixture from the prompt.
 PROTECTED_VALUE_FORMATS = {
     "EMAIL": "[a-z]{8}@example.com",
     "SSN": "ddd-dd-dddd",
@@ -119,45 +85,14 @@ _PROMPT_TEMPLATE = (
 
 # --------------------------------------------------------------------------- credentials
 #
-# ADDITIVE AND OPT-IN, and the reason matters. `PROTECTED_ENTITY_TYPES` above is what every
-# published v1 row was measured against; adding to it would silently change what an old row
-# means. These are requested explicitly instead, and `selfcheck` is the caller that asks,
-# because its report records no vendor claim and is not publishable as a row.
-#
-# WHY CREDENTIALS FIRST, AHEAD OF MORE PII. The leak inspector normalizes by stripping
-# separators, so a digit-only needle can be manufactured by unrelated digits in the traffic
-# -- that is what `_ipv4_can_produce` exists to prevent, after 123.45.67.89 folded onto the
-# old SSN fixture. Every value below is alphanumeric behind a distinctive literal prefix, so
-# no digit haystack can produce one. They carry no collision risk at all, which is what makes
-# them the cheap tranche.
-#
-# THESE ARE FIXED, NOT GENERATED, and that is deliberate. The PII values vary per run so that
-# three string replacements cannot pass. A credential's safety argument is about the exact
-# literal -- AWS publishing this specific key ID, ten consecutive zeros where a real GitHub
-# token carries base62 -- so generating a variant would void the argument that makes it safe
-# to ship. Secret scanners match prefix and shape anyway, which is what is being measured.
-#
-# Values are copied from `needle_registry.py`, where each carries its format source, a
-# published quote, and its non-live basis. Change them there, not here.
+# Additive and opt-in to avoid silently changing what old v1 rows mean.
+# These are fixed (not generated) literals. Values are synced from `needle_registry.py`.
 CREDENTIAL_ENTITY_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
 
-# Bandit flags these as B105 hardcoded_password_string, and it is RIGHT to: they are shaped
-# exactly like credentials, which is the whole point of a fixture a secret scanner should
-# catch. Each is suppressed individually rather than by silencing B105 for the file, so a
-# genuinely hardcoded secret added here later is still reported. The non-live basis of every
-# value is recorded in `needle_registry.py`.
+# Bandit B105 flags these deliberately since they test secret scanners.
 _CREDENTIAL_VALUES = {
-    # AWS's own credential-file documentation example. An access key ID is half a
-    # credential; it authenticates nothing without the secret access key, which is not in
-    # this repository in any form.
     "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
-    # Prefix plus exactly 36 characters, per the detect-secrets pattern. The random region
-    # is a fixed English literal and ten zeros; a generator emitting that is about 62**-10.
     "GITHUB_TOKEN": "ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",  # nosec B105 -- fixture
-    # The numeric fields are deliberately SHORTER than an issued token's. A real bot token
-    # carries long decimal ids, and a run of 13+ digits also matches this corpus's own card
-    # pattern -- a realistic fixture would have been caught by the PII recognizer and the
-    # credential result would have been carried by the wrong detector.
     "SLACK_TOKEN": "xoxb-00000-00000-EXAMPLENOTAREALTOKEN",  # nosec B105 -- fixture
 }
 
@@ -172,25 +107,14 @@ CREDENTIAL_VALUE_PATTERNS = {
     "SLACK_TOKEN": re.compile(r"\bxoxb-(?:\d+-)+[A-Za-z0-9]+\b"),
 }
 
-# The PEM private-key block is NOT here. It is the only needle containing newlines, which
-# makes it a different transport case from a single-line token, and it is planned as part of
-# the structured-secret tranche rather than bolted onto a single-line prompt template.
+# The PEM private-key block is planned as part of a structured-secret tranche.
 _CREDENTIAL_PROMPT_SUFFIX = (
     ", aws key {AWS_ACCESS_KEY_ID}, github token {GITHUB_TOKEN}, slack token {SLACK_TOKEN}"
 )
 
 
 def _ipv4_can_produce(digits: str) -> bool:
-    """Could some dotted-quad IPv4 address normalize to exactly these digits?
-
-    `_normalize` strips separators, so an injected client IP is matched against the
-    needle with its dots removed. Round 7 measured exactly this: the single address
-    123.45.67.89 normalizes to the old SSN fixture's digits, so a tunnel that adds an
-    `x-forwarded-for` header produced an SSN finding against a gateway that had
-    redacted correctly. A generated SSN is rejected if any valid IPv4 can collide
-    with it, which removes that class of false leak result by construction rather
-    than by disclosure.
-    """
+    """Could some dotted-quad IPv4 address normalize to exactly these digits?"""
 
     def walk(rest: str, parts: int) -> bool:
         if parts == 4:
@@ -235,19 +159,7 @@ def _make_ssn() -> str:
 
 
 def make_fixture(*, include_credentials: bool = False) -> dict[str, str]:
-    """One run's protected values. Same format every run, different values.
-
-    `include_credentials` adds the fixed credential specimens. It defaults to False so the
-    published three-type fixture, and therefore every published row, is unchanged.
-
-    Variation does not prevent format-specific handling on its own -- a target that redacts by FORMAT
-    passes either way, which is the point. It raises the cheapest way to pass without
-    building anything from three string replacements to a working format detector,
-    which is approximately the thing being measured.
-
-    The card is drawn from a fixed published list rather than generated. Generating a
-    Luhn-valid PAN would satisfy VALID and break NON-REAL.
-    """
+    """One run's protected values. Same format every run, different values."""
     local = "".join(
         _FIXTURE_EMAIL_LOCAL_ALPHABET[
             secrets.randbelow(len(_FIXTURE_EMAIL_LOCAL_ALPHABET))
@@ -266,20 +178,7 @@ def make_fixture(*, include_credentials: bool = False) -> dict[str, str]:
 
 
 def fixture_value_space() -> dict[str, int]:
-    """How many distinct values each entity can draw from, before rejection.
-
-    Published so a reader can see what value variation is actually worth per entity
-    rather than taking "varies per run" on trust. NOMINAL: `_make_ssn` resamples away
-    the IPv4-collidable values on top of this, which is not a rounding error -- a
-    measured 37.3% of the 9-digit space is some dotted quad with its dots removed, so
-    the effective SSN space is about 3.1e7 rather than 4.9e7. It is reported nominal
-    because counting the exact residue is a 49-million-iteration walk and does not
-    belong on the report path.
-
-    The card number is deliberately the smallest by four orders of magnitude. That is
-    not an oversight: it is drawn from a published list because a generated
-    Luhn-valid PAN in an issued BIN could be a live card.
-    """
+    """How many distinct values each entity can draw from, before rejection."""
     return {
         "EMAIL": len(_FIXTURE_EMAIL_LOCAL_ALPHABET) ** _FIXTURE_EMAIL_LOCAL_LENGTH,
         "SSN": (
@@ -292,12 +191,7 @@ def fixture_value_space() -> dict[str, int]:
 
 
 def extract_fixture(prompt: str) -> dict[str, str]:
-    """Recover the fixture from a prompt, by FORMAT.
-
-    Exported because the values now vary per run: anything that needs to act on them
-    -- a mock gateway in the test suite, a reference redactor -- must detect them
-    rather than compare against a constant.
-    """
+    """Recover the fixture from a prompt, by FORMAT."""
     found: dict[str, str] = {}
     for entity, pattern in {**PROTECTED_VALUE_PATTERNS, **CREDENTIAL_VALUE_PATTERNS}.items():
         match = pattern.search(prompt)
@@ -306,9 +200,7 @@ def extract_fixture(prompt: str) -> dict[str, str]:
     return found
 
 
-# A stable, valid, non-real example of the fixture SHAPE, for documentation and for
-# callers that need one value set without running the harness. It is NOT what a run
-# uses -- `make_fixture()` is -- so never match a captured request against it.
+# A stable, valid, non-real example of the fixture SHAPE for documentation.
 REFERENCE_FIXTURE = {
     "EMAIL": "jrmccalx@example.com",
     "SSN": "914-27-6083",
@@ -322,45 +214,18 @@ PROMPT = _PROMPT_TEMPLATE.format(
 )
 
 # Bounds on what the capture server will buffer and inspect from one request.
-# Exceeding any of them marks the capture uninspectable, which FAILS the boundary
-# check. A budget that silently stopped the walk would let a target hide the PII
-# below the limit and read as clean.
 _MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 _MAX_INSPECT_DEPTH = 64
 _MAX_INSPECT_NODES = 200_000
 _MAX_DECODE_ROUNDS = 3
-# The shortest base64 RUN worth decoding. This was 16, and 16 was a measured false
-# pass rather than a judgement call: base64 of an n-byte value is ceil(4n/3)
-# characters, so an 11-byte value -- the exact length of a dd-dd-dddd SSN -- encodes
-# to a 15-character run and was never even looked at. Measured end to end against the
-# `double_base64` evasion gateway, whose outer layer decodes to precisely that
-# 15-character inner run: EMAIL and CREDIT_CARD were recovered, SSN came back with a
-# needle proximity of 2 of 9. The run still failed, because the email leaked in the
-# same request and one leaked entity fails a run -- which is exactly why no test saw
-# it. A corpus that puts ONE entity in a case has no second entity to fail on, and
-# the same body reads as a clean pass.
-#
-# 8 is the floor that makes the guarantee statable: any protected value of 6 bytes or
-# more is recoverable when it is base64-encoded on its own, with no prefix to pad the
-# run out. Below 6 bytes there is no guarantee, and no entity in the corpus registry
-# may be shorter than that. Going lower is not free -- every alphanumeric word of that
-# length becomes a decode candidate with 8 alignment attempts, three rounds deep --
-# and 8 was measured to leave the conforming-gateway tests green, which is where a
-# too-eager decoder shows up as a false leak finding.
+# The shortest base64 run worth decoding (8 chars supports 6 bytes of payload).
 _BASE64_MIN_RUN = 8
 _BASE64_MIN_VALUE_BYTES = 6
 _BASE64ISH = re.compile(r"[A-Za-z0-9+/_-]{%d,}={0,2}" % _BASE64_MIN_RUN)
 _HEXISH = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 _NON_ALPHANUM = re.compile(r"[^0-9a-z]+")
 
-# The correlation marker must survive a CORRECT gateway. A random hex nonce is
-# high-entropy and a conforming secret detector redacts it. Evocative nouns are worse
-# still: `amber`, `olive`, `sage`, `rowan` and `willow` are given names, so a gateway
-# with a conforming PERSON detector redacts them and fails a valid implementation.
-# These are mundane concrete nouns that no NER model tags as an entity. Five drawn
-# from 96 give 96**5 ~= 2**33 combinations, and correlation needs only a majority of
-# them back, so redacting one or two still ties the capture to this run. (The prior
-# list claimed ~2**32 for four words drawn from 54, which was really 2**23.)
+# A nonce dictionary of mundane concrete nouns that won't trigger NER detectors.
 _NONCE_WORDS = (
     "anchor anvil apron awning barrel basin beacon bellows blanket bobbin bolt bracket "
     "bridle bucket buckle cabinet caliper candle canvas cauldron chisel cistern clamp "
@@ -378,25 +243,10 @@ _NONCE_MIN_MATCHES = 3
 
 
 class CaptureUnreachableError(OSError):
-    """The capture server did not observe the harness's own probe request.
-
-    Raised BEFORE any target traffic, so no report is produced. Every condition it
-    detects -- a hijacked port, a firewall, a broken tunnel, a stray proxy
-    environment variable, a dead server -- otherwise produces a schema-valid report
-    that fails checks against a gateway which did nothing wrong.
-
-    Deliberately an OSError. It replaces the EADDRINUSE that POSIX used to raise for
-    the one hijack shape a bind could refuse, and the CLI already turns an OSError
-    from the harness into "Benchmark failed: ..." and exit 2. The replacement must
-    fail the same way the thing it replaces did, and it genuinely is a connectivity
-    condition.
-    """
+    """The capture server did not observe the harness's own probe request."""
 
 
-# The probe path carries a per-run secret so a target cannot address it, and is drawn
-# from LETTERS ONLY: a digit in the path would join the cross-request digit haystacks
-# that the SSN and card needles are matched against, and the probe
-# is that it cannot influence a verdict.
+# The probe path must be strictly alphabetic to avoid polluting digit haystacks.
 #
 # It is appended to the capture BASE url rather than to the origin, and matched as a
 # SUFFIX rather than by equality. A tester's reverse proxy may forward only `/v1/*`,

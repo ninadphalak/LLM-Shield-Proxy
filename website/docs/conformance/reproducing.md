@@ -9,7 +9,55 @@ How to run the v1.0.0 conformance harness: the local in-process profile, and the
 profile against a gateway.
 
 Looking for the paper's fragmentation result instead? That is a different, smaller
-experiment: [reproduce the fragmentation result](./reproduce-fragmentation).
+experiment: [reproduce the fragmentation result](./reproduce-fragmentation.md).
+
+## Reproduce a published row in one command
+
+Each replication pack under
+[`benchmarks/replication/`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/benchmarks/replication)
+stands up one gateway, its detector and the harness, replays the seeds behind a published
+[results wall](./who-has-run-it.mdx) row, and compares every number to the committed
+sweep. You need Docker and a checkout of the repository; no API key, no model, nothing
+installed on the host.
+
+```bash
+git clone https://github.com/ninadphalak/LLM-Shield-Proxy.git
+cd LLM-Shield-Proxy/benchmarks/replication/litellm-presidio
+docker compose up --build --exit-code-from runner
+```
+
+The run ends with the reports in `./out/` and one line from the `runner` service, for
+example:
+
+```text
+litellm-presidio: 6 seeds, fidelity 0, leak(1chunk) 0.0625 [0-0.1875], leak(adv) 0.0625 [0-0.1875], DeltaFrag 0, request-path leak CARDPAN,EMAIL,SSN,USPHONE, outcome fail, inspector 94262e29a492ab6a: MATCHES the published row; wall seed a1b2c3d4e5f60001 matches
+```
+
+The exit code is 0 when every compared number matched, 1 when one did not (the
+differences are listed above the line and in `out/comparison.json`), and 2 when nothing
+was measured because the gateway never answered.
+
+What the pack holds, and what it does not change:
+
+- `docker-compose.yml` pins every image by digest.
+- The gateway configuration is the file the published row used, copied, not rewritten; a
+  test fails if the two ever differ.
+- The runner is built from the checkout's `pii-leak-benchmark/`, so it measures with the
+  harness revision you checked out. The line names the inspector digest so you can see
+  whether it is the one the row was scored with.
+- `out/` holds every report, the rebuilt `seed-sweep.json` and `comparison.json`. Nothing
+  in it is committed.
+
+Packs: `litellm-presidio` (LiteLLM 1.99 with its Presidio guardrail) and `nemo-guardrails`
+(NeMo Guardrails 0.24.0 with its Presidio output rail). Each pack's `README.md`
+states the published numbers it checks against. If your run differs, that is a finding:
+[open a dispute](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=result-dispute.yml)
+with `out/comparison.json` and it appears next to the row.
+
+To run the v2 profile by hand instead, against a gateway you already have, the same
+harness is the `pii-leak-benchmark-v2` command; the
+[package readme](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/pii-leak-benchmark/README.md#the-v2-response-split-profile)
+has the flags.
 
 ## Steps: local profile
 
@@ -121,7 +169,7 @@ actually found. A failed check is not by itself a leak.
 
 A hosted gateway cannot reach your loopback address, so the capture server needs a public
 address - a VPS, or a tunnel such as `ngrok` or `cloudflared`. See the
-[hosted-gateway runbook](./hosted-gateway-runbook) first.
+[hosted-gateway runbook](./hosted-gateway-runbook.md) first.
 
 ### 1. Expose the capture server
 
@@ -176,7 +224,7 @@ Open a GitHub Discussion or pull request with:
 3. The exact command you ran.
 4. Your relationship to the implementation you measured.
 
-Publish unsuccessful runs and deviations too. See [submitting a result](./submitting).
+Publish unsuccessful runs and deviations too. See [submitting a result](./submitting.md).
 
 ## Explanation
 
@@ -259,7 +307,7 @@ Listed in `limitations.method_limits`, and true of every run:
 
 ## Related
 
-- [Reproduce the fragmentation result](./reproduce-fragmentation)
-- [Hosted-gateway runbook](./hosted-gateway-runbook)
-- [Published results](./results)
-- [Submit a run](./submitting)
+- [Reproduce the fragmentation result](./reproduce-fragmentation.md)
+- [Hosted-gateway runbook](./hosted-gateway-runbook.md)
+- [Published results](./results.md)
+- [Submit a run](./submitting.md)

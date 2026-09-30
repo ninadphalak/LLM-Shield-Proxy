@@ -32,10 +32,12 @@ const sidebars: SidebarsConfig = {
         'glossary',
         'limitations',
         'research-publications',
+        'split-boundary-leaks',
         'design-partner-pilot',
         'integrations',
         'policies',
         'guides/mcp-tool-governance',
+        'guides/mcp-egress-screening',
         'guides/pilot-assessment',
         {
           type: 'category',
