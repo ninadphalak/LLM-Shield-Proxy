@@ -116,6 +116,30 @@ inputs:
       count toward the independent-replication floor.
     required: false
     default: "false"
+  profiles:
+    description: >-
+      Which profile to run against the target: operator (the request-path check, the
+      default), response (the response-split profile: FidelityRate, LeakRate with the value
+      whole and split across two chunks, and DeltaFrag), or both. The response profile needs
+      a harness that ships the pii-leak-benchmark-v2 command; with capture://self it runs
+      its own pass-through policy, the raw control.
+    required: false
+    default: "operator"
+  response-seed:
+    description: "Hex seed for the response profile. The default is the published seed."
+    required: false
+    default: "a1b2c3d4e5f60001"
+  response-capture-port:
+    description: >-
+      Bind port for the response profile's own capture. Your gateway must send upstream
+      traffic here while that profile runs. 0 picks a free port, which only works for
+      capture://self.
+    required: false
+    default: "8799"
+  response-out:
+    description: "Directory for the response report and its summary rows; uploaded with the raw report."
+    required: false
+    default: "pii-leak-benchmark-response"
 
 outputs:
   outcome:
@@ -133,6 +157,12 @@ outputs:
   attestation-url:
     description: "Verification page for the detached report attestation; empty when attest-report is false."
     value: ${{ steps.attest.outputs.attestation-url }}
+  response-report-path:
+    description: "Path to the response-split report; empty when profile is operator."
+    value: ${{ steps.response.outputs.report }}
+  response-leaked:
+    description: "true when the response profile saw a value reach the client, whole or split; empty when profile is operator."
+    value: ${{ steps.response.outputs.leaked }}
 
 runs:
   using: "composite"
@@ -146,15 +176,21 @@ runs:
       shell: bash
       env:
         HARNESS_SOURCE: ${{ inputs.source }}
+        INPUT_PROFILE: ${{ inputs.profiles }}
       run: |
         set -euo pipefail
         python -m pip install --upgrade pip
         # Standard library plus httpx. Installing this never installs a gateway.
         python -m pip install "$HARNESS_SOURCE"
+        if [ "$INPUT_PROFILE" != "operator" ]; then
+          # The response profile validates its report against the bundled v2 schema.
+          python -m pip install "jsonschema>=4.0"
+        fi
         python -m pip list --format=freeze
 
     - name: Run the profile
       id: run
+      if: ${{ inputs.profiles != 'response' }}
       shell: bash
       env:
         CONFORMANCE_CAPTURE_TOKEN: ${{ inputs.capture-token }}
@@ -236,6 +272,7 @@ runs:
         PY
 
     - name: Summarise
+      if: ${{ inputs.profiles != 'response' }}
       shell: bash
       env:
         INPUT_JSON_OUT: ${{ inputs.json-out }}
@@ -268,6 +305,107 @@ runs:
               "https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md")
         PY
 
+    - name: Run the response profile
+      id: response
+      if: ${{ inputs.profiles == 'response' || inputs.profiles == 'both' }}
+      shell: bash
+      env:
+        INPUT_TARGET_BASE_URL: ${{ inputs.target-base-url }}
+        INPUT_TARGET_NAME: ${{ inputs.target-name }}
+        INPUT_TARGET_MODEL: ${{ inputs.target-model }}
+        INPUT_TARGET_HEADERS: ${{ inputs.target-header }}
+        INPUT_REDACTION_ENABLED: ${{ inputs.redaction-enabled }}
+        INPUT_RESPONSE_SEED: ${{ inputs.response-seed }}
+        INPUT_RESPONSE_CAPTURE_PORT: ${{ inputs.response-capture-port }}
+        INPUT_RESPONSE_OUT: ${{ inputs.response-out }}
+        V2_GATEWAY_TOKEN: ${{ inputs.target-api-key }}
+      run: |
+        set -euo pipefail
+        if ! command -v pii-leak-benchmark-v2 > /dev/null; then
+          echo "::error::The installed pii-leak-benchmark has no pii-leak-benchmark-v2 command. The response profile needs a release later than 0.4.1, or source: ./pii-leak-benchmark from a checkout that has it."
+          exit 2
+        fi
+        mkdir -p "$INPUT_RESPONSE_OUT"
+        args=(
+          --validate --oracle midpoint
+          --seed "$INPUT_RESPONSE_SEED"
+          --upstream-port "$INPUT_RESPONSE_CAPTURE_PORT"
+          --model "$INPUT_TARGET_MODEL"
+          --out "$INPUT_RESPONSE_OUT"
+          --json-out "$INPUT_RESPONSE_OUT/response-summary.json"
+        )
+        if [ "$INPUT_TARGET_BASE_URL" = "capture://self" ]; then
+          # No gateway in the loop: the profile's own pass-through policy is the raw control.
+          policy=passthrough
+        else
+          # The report is named after the target, so the filename must be one.
+          policy="$(printf '%s' "$INPUT_TARGET_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+          args+=(--gateway-url "${INPUT_TARGET_BASE_URL%/}/chat/completions")
+        fi
+        args+=(--only "$policy")
+        # Headers reach the instrument through the environment, never argv.
+        if [ -n "$INPUT_TARGET_HEADERS" ]; then
+          V2_GATEWAY_HEADERS="$(python - <<'PY'
+        import json, os
+        headers = {}
+        for line in os.environ["INPUT_TARGET_HEADERS"].splitlines():
+            if "=" in line:
+                name, value = line.split("=", 1)
+                headers[name.strip()] = value.strip()
+        print(json.dumps(headers))
+        PY
+        )"
+          export V2_GATEWAY_HEADERS
+        fi
+        # The report records whether the request path was asked to redact. Only the caller
+        # knows; redaction-enabled says so, and an explicit V2_REQUEST_PATH_REDACTION wins.
+        if [ -z "${V2_REQUEST_PATH_REDACTION:-}" ] && [ "$INPUT_REDACTION_ENABLED" = "true" ]; then
+          export V2_REQUEST_PATH_REDACTION=configured
+        fi
+        set +e
+        pii-leak-benchmark-v2 "${args[@]}"
+        status=$?
+        set -e
+        if [ "$status" -ne 0 ]; then
+          echo "::error::The response profile did not produce a schema-valid report (exit $status)."
+          exit "$status"
+        fi
+        python - "$INPUT_RESPONSE_OUT/response-summary.json" "$INPUT_RESPONSE_OUT/$policy.json" <<'PY' >> "$GITHUB_OUTPUT"
+        import json, sys
+        rows = json.load(open(sys.argv[1], encoding="utf-8"))["rows"]
+        leaked = any(row["leak_single_chunk"] > 0 or row["leak_adversarial"] > 0 for row in rows)
+        print(f"report={sys.argv[2]}")
+        print(f"leaked={str(leaked).lower()}")
+        PY
+
+    - name: Summarise the response profile
+      if: ${{ inputs.profiles == 'response' || inputs.profiles == 'both' }}
+      shell: bash
+      env:
+        INPUT_RESPONSE_OUT: ${{ inputs.response-out }}
+      run: |
+        set -euo pipefail
+        python - "$INPUT_RESPONSE_OUT/response-summary.json" <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        import json, sys
+        summary = json.load(open(sys.argv[1], encoding="utf-8"))
+        print("# Response-split profile")
+        print()
+        print("| Policy | Fidelity | Leak, value whole | Leak, value split | DeltaFrag | Applicable | Inconclusive | Schema |")
+        print("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
+        for row in summary["rows"]:
+            schema = "valid" if row["schema_valid"] else "INVALID" if row["schema_valid"] is False else "not checked"
+            print(f"| `{row['policy']}` | {row['fidelity_rate']:.4f} | {row['leak_single_chunk']:.4f} | "
+                  f"{row['leak_adversarial']:.4f} | {row['delta_frag']:.4f} | {row['cases_applicable']} | "
+                  f"{row['inconclusive']} | {schema} |")
+        print()
+        print(f"- Seed: `{summary['rows'][0]['seed'] if summary['rows'] else ''}`; oracle: `{summary['oracle']}`")
+        print(f"- Instrument: `{summary['instrument'].get('inspector_sha256', '')[:16]}`")
+        print()
+        print("DeltaFrag is the split-chunk leak rate minus the whole-value leak rate: what "
+              "splitting a value across two chunks costs the gateway. A rate is a fraction of "
+              "the applicable cases; inconclusive cases are excluded from the denominator.")
+        PY
+
     - name: Attest the raw report
       id: attest
       if: ${{ inputs.attest-report == 'true' }}
@@ -280,18 +418,28 @@ runs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: ${{ inputs.artifact-name }}
-        path: ${{ inputs.json-out }}
+        # The response report sits beside the raw report, so a results-wall intake reading
+        # this artifact finds both.
+        path: |
+          ${{ inputs.json-out }}
+          ${{ inputs.response-out }}
         retention-days: 90
 
     - name: Fail on a non-pass
       if: ${{ inputs.fail-on-non-pass == 'true' }}
       shell: bash
       env:
+        OPERATOR_OUTCOME: ${{ steps.run.outcome }}
         RUN_OUTCOME: ${{ steps.run.outputs.outcome }}
         RUN_PASSED: ${{ steps.run.outputs.passed }}
+        RESPONSE_LEAKED: ${{ steps.response.outputs.leaked }}
       run: |
         set -euo pipefail
-        if [ "$RUN_PASSED" != "true" ]; then
+        if [ "$OPERATOR_OUTCOME" != "skipped" ] && [ "$RUN_PASSED" != "true" ]; then
           echo "::error::Outcome $RUN_OUTCOME - see the job summary."
+          exit 1
+        fi
+        if [ "$RESPONSE_LEAKED" = "true" ]; then
+          echo "::error::The response profile saw a value reach the client - see the job summary."
           exit 1
         fi

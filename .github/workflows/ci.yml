@@ -360,6 +360,10 @@ jobs:
           attest-report: ${{ github.event_name == 'push' && 'true' || 'false' }}
           # A leak is the expected result here.
           fail-on-non-pass: "false"
+          # Both profiles: the response profile runs its pass-through policy against
+          # capture://self, on a free port, and must leave a schema-valid report.
+          profiles: both
+          response-capture-port: "0"
 
       - name: The action must surface the leak it measured
         run: |
@@ -367,6 +371,32 @@ jobs:
           echo "leaked=${{ steps.control.outputs.leaked-entity-types }}"
           test "${{ steps.control.outputs.passed }}" = "false"
           test -n "${{ steps.control.outputs.leaked-entity-types }}"
+
+      - name: The response profile must leave a schema-valid report that leaked
+        env:
+          RESPONSE_REPORT: ${{ steps.control.outputs.response-report-path }}
+          RESPONSE_LEAKED: ${{ steps.control.outputs.response-leaked }}
+        run: |
+          set -euo pipefail
+          test -s "$RESPONSE_REPORT"
+          test "$RESPONSE_LEAKED" = "true"
+          # Validated here against the published schema, not the action's own claim.
+          python - "$RESPONSE_REPORT" <<'PY'
+          import json
+          import sys
+
+          import jsonschema
+
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          schema = json.load(open("spec/v2.0.0/http-profile.schema.json", encoding="utf-8"))
+          jsonschema.Draft202012Validator(schema).validate(report)
+          rates = report["metrics"]["leak_rate"]
+          assert report["implementation"]["name"] == "reference-policy:passthrough", report["implementation"]
+          # With nothing in the loop every injected value reaches the client, whole or split.
+          assert rates["single_chunk"] == 1.0 and rates["adversarial"] == 1.0, rates
+          assert report["metrics"]["cases_scored"] == 32 and report["metrics"]["cases_inconclusive"] == 0
+          print("response report valid:", sys.argv[1], rates)
+          PY
 
       - name: A main-branch run must publish verifiable report provenance
         if: ${{ github.event_name == 'push' }}
