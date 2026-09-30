@@ -56,6 +56,12 @@ POLICIES = ("chunk-local", "bounded-retention")
 SUPPORTED_POLICIES = (*POLICIES, "presidio-chunk-local", "presidio-retention")
 EVIDENCE_COMMIT = "6cbfee39af93909a0d3aba77622ea67af63f84c4"
 MANIFEST = ROOT / "benchmarks" / "evidence-round-8.manifest.json"
+# The analyzer image the two presidio-* policies were published against. The script does not
+# start it; the walkthrough and the Actions workflow do, and a test holds them to this digest.
+PRESIDIO_IMAGE = (
+    "mcr.microsoft.com/presidio-analyzer"
+    "@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9"
+)
 
 # Report paths that cannot reproduce because they record when, where and how fast the run
 # went, not what it measured. Every other leaf must match the published one exactly.
@@ -267,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
         },
         "comparisons": comparisons,
     }
+    if any(name.startswith("presidio-") for name in policies):
+        summary["presidio_image_expected"] = PRESIDIO_IMAGE
     summary_path = write_json_artifact(outdir / "reproduction-summary.json", summary, indent=2)
 
     print(f"\nSummary written to {summary_path}")
