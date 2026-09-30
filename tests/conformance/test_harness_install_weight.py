@@ -205,7 +205,10 @@ def test_benchmark_declares_httpx_and_nothing_else():
     assert manifest["project"]["name"] == "pii-leak-benchmark"
     assert _names(manifest["project"]["dependencies"]) == ["httpx"]
     scripts = manifest["project"]["scripts"]
-    assert scripts == {"pii-leak-benchmark": "pii_leak_benchmark.cli:main"}
+    assert scripts == {
+        "pii-leak-benchmark": "pii_leak_benchmark.cli:main",
+        "pii-leak-benchmark-v2": "pii_leak_benchmark.v2_cli:main",
+    }
 
 
 def test_the_benchmark_never_depends_on_the_thing_it_measures():

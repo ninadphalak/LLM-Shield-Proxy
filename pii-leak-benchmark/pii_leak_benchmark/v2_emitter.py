@@ -31,6 +31,7 @@ proxy that is already running. Two things make that mode honest:
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -3086,16 +3087,53 @@ def _write_report(path: Any, report: dict[str, Any]) -> None:
     write_json_artifact(path, report, indent=1)
 
 
-def main(argv: list[str] | None = None) -> int:
-    import argparse
+# The v2 report schema, bundled so `--validate` works from any directory. `spec/v2.0.0`
+# stays the published copy; `tests/conformance/test_v2_cli.py` pins this one to it byte
+# for byte, so there is still one schema, held in two places that cannot drift apart.
+SCHEMA_RESOURCE = ("schemas", "v2.0.0", "http-profile.schema.json")
 
-    parser = argparse.ArgumentParser(description=__doc__)
+# What `--json-out` writes: one row per policy, with the keys the published seed sweeps
+# record, plus the instrument that produced them. Never the report itself, and never the
+# gateway address: `submit` refuses to print `target.base_url`, and a summary file that
+# carried it would undo that.
+SUMMARY_SCHEMA_ID = "pii-leak-benchmark.v2-summary/1.0.0"
+
+
+def load_schema(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    """The v2 report schema: an explicit path, or the copy bundled with the package."""
+    if path is not None:
+        import pathlib
+
+        return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    from importlib.resources import files
+
+    return json.loads(files(__package__).joinpath(*SCHEMA_RESOURCE).read_text(encoding="utf-8"))
+
+
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    """The one parser behind `python -m pii_leak_benchmark.v2_emitter` and `pii-leak-benchmark-v2`."""
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     parser.add_argument(
         "--out",
         required=True,
         help="output directory (REQUIRED; use a scratch directory for verification runs)",
     )
-    parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--validate", action="store_true", help="validate each report against the v2 schema")
+    parser.add_argument(
+        "--schema",
+        default=None,
+        metavar="PATH",
+        help="schema to validate against (default: the copy bundled with the package)",
+    )
+    parser.add_argument(
+        "--json-out",
+        default=None,
+        metavar="PATH",
+        help=(
+            "machine-readable summary: one row per policy with the seed, the four rates, "
+            "the case counts, the outcome and the instrument digests. Never the report."
+        ),
+    )
     parser.add_argument("--only", default="", help="comma-separated policy names")
     parser.add_argument(
         "--seed",
@@ -3149,6 +3187,37 @@ def main(argv: list[str] | None = None) -> int:
             "leak rates or its instrument digest."
         ),
     )
+    return parser
+
+
+def summary_row(name: str, seed: str, report: dict[str, Any], errors: list[str] | None) -> dict[str, Any]:
+    """One `--json-out` row: the keys `benchmarks/v2_seed_sweep.py` records per seed.
+
+    `errors` is None when the report was not validated; `schema_valid` is then None too,
+    because "not checked" must never read as "valid".
+    """
+    metrics = report["metrics"]
+    return {
+        "policy": name,
+        "seed": seed,
+        "fidelity_rate": metrics["fidelity_rate"],
+        "leak_single_chunk": metrics["leak_rate"]["single_chunk"],
+        "leak_adversarial": metrics["leak_rate"]["adversarial"],
+        "delta_frag": metrics["delta_frag"],
+        "inconclusive": metrics["cases_inconclusive"],
+        "echo_observable": metrics["cases_echo_observable"],
+        "cases_applicable": metrics["cases_applicable"],
+        "cases_attempted": metrics["cases_scored"],
+        "outcome": report["outcome"],
+        "request_path_leak": report["checks"]["configured_upstream_boundary"]["leaked_entity_types"],
+        "report": f"{name}.json",
+        "schema_valid": None if errors is None else not errors,
+        "schema_errors": list(errors or []),
+    }
+
+
+def main(argv: list[str] | None = None, prog: str | None = None) -> int:
+    parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
 
     # The alias and the flag must not disagree silently. A recipe that says one thing and
@@ -3169,13 +3238,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate:
         import jsonschema
 
-        schema = json.loads(pathlib.Path("spec/v2.0.0/http-profile.schema.json").read_text(encoding="utf-8"))
+        schema = load_schema(args.schema)
 
         def validator(report: dict[str, Any]) -> list[str]:  # type: ignore[misc]
             v = jsonschema.Draft202012Validator(schema)
             return [f"{list(e.path)}: {e.message}" for e in v.iter_errors(report)]
 
     rows = []
+    summary_rows: list[dict[str, Any]] = []
     # Default to the LOCAL set. The cloud rows bill per delta against a real account,
     # so running them must be an explicit `--only`, never a side effect of running the
     # tool with no arguments.
@@ -3201,6 +3271,7 @@ def main(argv: list[str] | None = None) -> int:
         path = outdir / f"{name}.json"
         _write_report(path, report)
         rows.append((name, summary, report["outcome"], errors))
+        summary_rows.append(summary_row(name, report["corpus"]["seed"], report, errors if validator else None))
         status = "VALID" if validator and not errors else ("INVALID" if errors else "-")
         print(
             f"{name:20} fidelity={summary['fidelity_rate']:<6} "
@@ -3232,6 +3303,16 @@ def main(argv: list[str] | None = None) -> int:
                 f"n={metrics['cases_partial_emission']}/{metrics['cases_applicable']} "
                 f"oracle={sidecar['oracle']['name']} (own tier; not in leak rates)"
             )
+    if args.json_out:
+        _write_report(
+            pathlib.Path(args.json_out),
+            {
+                "schema": SUMMARY_SCHEMA_ID,
+                "oracle": oracle,
+                "instrument": instrument_block(),
+                "rows": summary_rows,
+            },
+        )
     return 0 if all(not r[3] for r in rows) else 1
 
 
