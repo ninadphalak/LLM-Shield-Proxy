@@ -1,10 +1,10 @@
-import pytest
-import sys
-import subprocess
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -293,12 +293,9 @@ def test_composite_action_runs_the_response_profile_only_when_asked():
 def _response_output_script() -> str:
     """The Python the response step runs to derive its outputs, lifted from the heredoc."""
     text = ACTION.read_text(encoding="utf-8")
-    start = text.index("        import json, sys
-        rows = json.load(open(sys.argv[1]")
-    end = text.index("        PY
-", start)
-    return "
-".join(line[8:] for line in text[start:end].splitlines())
+    start = text.index("        import json, sys\n        rows = json.load(open(sys.argv[1]")
+    end = text.index("        PY\n", start)
+    return "\n".join(line[8:] for line in text[start:end].splitlines())
 
 
 @pytest.mark.parametrize(
