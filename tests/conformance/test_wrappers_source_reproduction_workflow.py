@@ -115,7 +115,7 @@ def test_each_wrapper_job_runs_both_profiles_at_the_published_pins():
     assert env["V2_REQUEST_PATH_REDACTION"] == "${{ matrix.request_path_redaction }}"
     assert "source-reproduction" in env["ARTIFACT_NAME"]
     assert "needs.select.outputs.single == 'true'" in env["ARTIFACT_NAME"]
-    assert "needs.select.outputs.single == 'true'" in env["SUBMISSION_HOLD_REASON"]
+    assert "needs.select.outputs.single != 'true'" in env["SUBMISSION_HOLD_REASON"]
 
     steps = job["steps"]
     build = next(step for step in steps if step.get("id") == "build")

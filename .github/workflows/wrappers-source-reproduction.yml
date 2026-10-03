@@ -126,7 +126,7 @@ jobs:
       # has three artifacts and one issue is one row, so those get their own names and the
       # summary holds the submission link.
       ARTIFACT_NAME: ${{ needs.select.outputs.single == 'true' && 'source-reproduction' || format('source-reproduction-{0}', matrix.wrapper) }}
-      SUBMISSION_HOLD_REASON: ${{ needs.select.outputs.single == 'true' && '' || 'This run measured every wrapper at once, and one issue is one row. To put this wrapper on the wall, run the workflow again with it chosen in the wrapper box and submit that run.' }}
+      SUBMISSION_HOLD_REASON: ${{ needs.select.outputs.single != 'true' && 'This run measured every wrapper at once, and one issue is one row. To put this wrapper on the wall, run the workflow again with it chosen in the wrapper box and submit that run.' || '' }}
     steps:
       - name: Check out the wrapper gateways
         id: checkout
@@ -626,6 +626,6 @@ jobs:
           if [ "${RESULT:-incomplete}" = incomplete ]; then
             echo "::error title=Incomplete, do not submit::${REASON:-The run did not finish.} The run's summary says what to do next."
           else
-            echo "Result: $RESULT. The job summary explains it and how to submit it."
+            echo "Result: $RESULT. This is a complete measurement: the red mark means a value leaked, not that the run broke. The job summary has the submission link."
           fi
           exit 1
