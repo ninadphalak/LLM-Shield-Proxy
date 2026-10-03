@@ -583,6 +583,6 @@ jobs:
           if [ "${RESULT:-incomplete}" = incomplete ]; then
             echo "::error title=Incomplete, do not submit::${REASON:-The run did not finish.} The run's summary says what to do next."
           else
-            echo "Result: $RESULT. The job summary explains it and how to submit it."
+            echo "Result: $RESULT. This is a complete measurement: the red mark means a value leaked, not that the run broke. The job summary has the submission link."
           fi
           exit 1

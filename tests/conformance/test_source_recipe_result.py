@@ -283,3 +283,26 @@ def test_a_newline_in_the_ref_cannot_rewrite_the_status(tmp_path, name, monkeypa
     lines = (tmp_path / "output.txt").read_text().splitlines()
     assert status == "incomplete"
     assert [line.split("=", 1)[0] for line in lines] == ["status", "reason"]
+
+
+def test_no_workflow_expression_uses_an_empty_string_as_the_and_branch():
+    """`cond && '' || 'x'` is always 'x' in GitHub expressions: '' is falsy, so the `||` wins.
+
+    The wrapper recipe held every single-wrapper run from the wall this way (2026-10-03, a run
+    with guardrails-ai chosen still said it had measured every wrapper). Put the non-empty value
+    on the `&&` branch and negate the condition instead.
+    """
+    offenders = []
+    for path in sorted((ROOT / ".github").rglob("*.yml")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"&&\s*''\s*\|\|", line) or re.search(r'&&\s*""\s*\|\|', line):
+                offenders.append(f"{path.relative_to(ROOT)}:{number}")
+    assert not offenders, "empty string on the && branch is always falsy:\n  " + "\n  ".join(offenders)
+
+
+def test_a_single_wrapper_run_is_not_held():
+    """The hold message is set only when the run measured every wrapper."""
+    env = _job("wrappers-source-reproduction.yml")["env"]
+    hold = env["SUBMISSION_HOLD_REASON"]
+    assert hold.startswith("${{ needs.select.outputs.single != 'true' && 'This run measured every wrapper")
+    assert hold.endswith("|| '' }}")
