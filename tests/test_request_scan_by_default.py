@@ -166,3 +166,30 @@ def test_an_operator_protected_key_is_still_honoured(engine, deep, vault, monkey
     monkeypatch.setattr(settings, "PAYLOAD_PROTECTED_KEYS", "reasoning_content")
     message = {"role": "assistant", "content": "ok", "reasoning_content": f"User is {EMAIL}"}
     assert EMAIL in _sent(engine, vault, {"messages": [message]})
+
+
+def test_nested_text_in_a_privileged_turn_stays_one_way(engine, deep):
+    """A tool_result's blocks inside a system turn were walked restorably (review finding)."""
+    vault = Vault(synthetic=False)
+    nested = [{"type": "text", "text": f"cc {SSN}", "citations": [{"cited_text": f"to {EMAIL}"}]}]
+    engine.redact_payload(
+        {"messages": [{"role": "system", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": nested}]}]},
+        vault,
+    )
+    for value in (EMAIL, SSN):
+        assert value in vault.one_way_original_to_token
+        assert value not in vault.token_to_original.values()
+
+
+def test_an_object_under_an_opaque_key_name_is_still_walked(engine, deep, vault):
+    """Only a STRING under `data`, `id` or `name` is opaque; an object there is data (review finding)."""
+    message = {"role": "user", "content": "hi", "metadata": {"data": {"customer_email": EMAIL}, "name": {"full": EMAIL}}}
+    assert EMAIL not in _sent(engine, vault, {"messages": [message]})
+
+
+def test_an_inline_image_survives_the_block_policy(engine, deep, vault, monkeypatch):
+    """A data: URI is media. Under UNMAPPED_BLOB_POLICY=block the scan must not turn it into a 413."""
+    monkeypatch.setattr(settings, "UNMAPPED_BLOB_POLICY", "block")
+    uri = "data:image/png;base64," + base64.b64encode(bytes(range(256)) * 40).decode()
+    payload = {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": uri, "detail": "low"}}]}]}
+    assert uri in _sent(engine, vault, payload)

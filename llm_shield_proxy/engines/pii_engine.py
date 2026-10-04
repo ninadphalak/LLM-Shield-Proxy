@@ -407,7 +407,8 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 
 
 # Inside a message, content block or input item, every field the shape walk does not handle
-# is scanned (see _redact_remaining_fields), except these. They are not text: identifiers that
+# is scanned (see _redact_remaining_fields), except STRING values under these keys (an
+# object under the same name is ordinary data and is walked). They are not text: identifiers that
 # link a tool result to its call or name a tool, blobs the provider verifies byte for byte (a
 # thinking `signature`, `redacted_thinking` and audio `data`, `encrypted_content`), and media
 # references (`image_url`, an image block's `source`, `file_data`). Rewriting them breaks the
@@ -1057,7 +1058,7 @@ class PIIEngine:
                                 # string or as further blocks.
                                 if "content" in block_copy:
                                     block_copy["content"] = self._redact_nested_content(
-                                        block_copy["content"], vault, active_profile
+                                        block_copy["content"], vault, active_profile, restorable=restorable
                                     )
                                 self._redact_remaining_fields(
                                     block_copy, _block_handled_keys(block_copy), vault, active_profile,
@@ -1237,21 +1238,22 @@ class PIIEngine:
         _OPAQUE_MESSAGE_KEYS. Text under _REPLAYED_TEXT_KEYS is scanned whole; anything
         else past the blob ceiling gets the unmapped-blob treatment, as deep redaction does.
         """
-        skip = settings.payload_protected_keys_set | _policy_skip_keys() | _OPAQUE_MESSAGE_KEYS
+        protected = settings.payload_protected_keys_set | _policy_skip_keys()
         for key, value in node.items():
-            if key in handled or key in skip:
+            if key in handled or key in protected or (key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str)):
                 continue
             node[key] = self._deep_redact(
                 value,
                 vault,
                 active_profile,
-                skip,
+                protected,
                 None if key in _REPLAYED_TEXT_KEYS and isinstance(value, str) else settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
                 depth + 1,
                 max_depth,
                 f"{json_path}.{key}",
                 restorable=restorable,
                 text_keys=_REPLAYED_TEXT_KEYS,
+                opaque_string_keys=_OPAQUE_MESSAGE_KEYS,
             )
 
     def _deep_redact(
@@ -1268,6 +1270,7 @@ class PIIEngine:
         one_way_keys: frozenset[str] = frozenset(),
         restorable: bool = True,
         text_keys: frozenset[str] = frozenset(),
+        opaque_string_keys: frozenset[str] = frozenset(),
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
 
@@ -1283,12 +1286,16 @@ class PIIEngine:
         keyword, so none is one-way there.
 
         A string directly under a key in `text_keys` is scanned in full, past the blob
-        ceiling too.
+        ceiling too. A STRING directly under a key in `opaque_string_keys` goes out unchanged,
+        and so does any `data:` URI in such a walk (media, not text); an object under the
+        same key name is ordinary data and is walked.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
 
         if isinstance(node, str):
+            if opaque_string_keys and node.startswith("data:"):
+                return node
             if max_string_length is not None and (len(node) > max_string_length or node.startswith("data:")):
                 return self._handle_unmapped_blob(node, json_path, active_profile)
             return self.redact_text(node, vault, active_profile, restorable=restorable)
@@ -1297,7 +1304,8 @@ class PIIEngine:
             return {
                 key: (
                     value
-                    if key in protected and not keys_are_names
+                    if (key in protected and not keys_are_names)
+                    or (key in opaque_string_keys and isinstance(value, str))
                     else self._deep_redact(
                         value,
                         vault,
@@ -1319,6 +1327,7 @@ class PIIEngine:
                         ),
                         restorable=restorable and (keys_are_names or key not in one_way_keys),
                         text_keys=text_keys,
+                        opaque_string_keys=opaque_string_keys,
                     )
                 )
                 for key, value in node.items()
@@ -1338,6 +1347,7 @@ class PIIEngine:
                     one_way_keys=one_way_keys,
                     restorable=restorable,
                     text_keys=text_keys,
+                    opaque_string_keys=opaque_string_keys,
                 )
                 for index, item in enumerate(node)
             ]
@@ -1402,15 +1412,18 @@ class PIIEngine:
         vault: Vault,
         active_profile: Optional[CompiledProfile] = None,
         max_depth: int = 8,
+        restorable: bool = True,
     ) -> Any:
         """Redacts a tool_result's own content, a string or further blocks.
+
+        `restorable` is False inside a system or developer turn, for every level below it.
 
         Nesting past `max_depth` raises rather than stopping: the blocks below the bound
         would otherwise reach the provider unredacted. The error is the same one the
         payload walk raises, which the API turns into a 400.
         """
         if isinstance(content, str):
-            return self.redact_text(content, vault, active_profile)
+            return self.redact_text(content, vault, active_profile, restorable=restorable)
         if not isinstance(content, list):
             return content
 
@@ -1424,17 +1437,18 @@ class PIIEngine:
                 if not isinstance(block, dict):
                     continue
                 if isinstance(block.get("text"), str):
-                    block["text"] = self.redact_text(block["text"], vault, active_profile)
+                    block["text"] = self.redact_text(block["text"], vault, active_profile, restorable=restorable)
                 if block.get("type") == "document":
-                    self._redact_document_block(block, vault, active_profile)
+                    self._redact_document_block(block, vault, active_profile, restorable)
                 if block.get("type") == "tool_use" and "input" in block:
                     block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
                 self._redact_remaining_fields(
                     block, _block_handled_keys(block), vault, active_profile, 0, 20, "tool_result.content",
+                    restorable,
                 )
                 nested = block.get("content")
                 if isinstance(nested, str):
-                    block["content"] = self.redact_text(nested, vault, active_profile)
+                    block["content"] = self.redact_text(nested, vault, active_profile, restorable=restorable)
                 elif isinstance(nested, list) and nested:
                     if depth + 1 >= max_depth:
                         raise ValueError("Maximum payload nesting depth exceeded")
