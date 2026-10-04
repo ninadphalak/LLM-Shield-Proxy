@@ -48,6 +48,10 @@ spec:
               path: /healthz
               port: http
           env:
+            # This chart exposes no gRPC port and mounts the root filesystem read-only,
+            # so the Envoy ext_proc socket can neither be created nor reached.
+            - name: ENABLE_EXT_PROC
+              value: "false"
             - name: UPSTREAM_BASE_URL
               value: {{ .Values.env.UPSTREAM_BASE_URL | quote }}
             - name: UPSTREAM_API_KEY

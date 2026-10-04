@@ -19,9 +19,6 @@ from llm_shield_proxy.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-if not settings.K8S_WEBHOOK_AUTH_TOKEN:
-    logger.warning("K8s Mutating Webhook is exposed without authentication (K8S_WEBHOOK_AUTH_TOKEN is unset).")
-
 webhook_router = APIRouter(prefix="/v1/k8s", tags=["Kubernetes Webhook"])
 security = HTTPBearer(auto_error=False)
 

@@ -9,7 +9,10 @@ Configure your framework to use the proxy's OpenAI-compatible endpoint:
 - Local host: `http://localhost:8000/v1`
 
 ### Open WebUI
-Set the `OPENAI_API_BASE_URL` environment variable to the proxy address. Set the provider API key to a client credential accepted by the proxy.
+Set the `OPENAI_API_BASE_URL` environment variable to the proxy address. Set the provider API key to a client credential accepted by the proxy: one listed in the
+proxy's `VALID_VIRTUAL_KEYS`. The proxy holds the real provider key. The
+[example compose file](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/examples/integrations/openwebui)
+uses `OVERRIDE_CLIENT_AUTH=true` instead, which is for local evaluation only.
 
 *Note: Open WebUI uses `/v1/models`. If your upstream LLM provider does not support this endpoint, you must configure a hardcoded model allowlist in Open WebUI.*
 

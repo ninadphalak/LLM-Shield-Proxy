@@ -44,4 +44,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')" || exit 1
 
-ENTRYPOINT ["uvicorn", "llm_shield_proxy.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# The CLI, not uvicorn directly: it reads HOST, PORT, WORKERS, LOG_LEVEL and the TLS_*
+# settings. With uvicorn as the entrypoint those settings were silently ignored, so a
+# container configured with TLS_CERT_FILE served plain HTTP.
+ENTRYPOINT ["llm-shield-proxy"]

@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     AIR_GAPPED_MODE: bool = Field(default=False, description="Enable strict Zero-Internet egress gateway mode")
     EGRESS_GATEWAY_URL: Optional[str] = Field(default=None, description="Internal proxy/gateway URL for Air-Gapped mode")
     FORWARD_CLIENT_AUTH: bool = Field(default=False, description="Forward client auth headers in air-gapped mode")
+    ENABLE_K8S_WEBHOOK: bool = Field(
+        default=False,
+        description="Serve the Kubernetes mutating admission webhook at /v1/k8s/mutate. The Helm chart sets it when webhook.enabled is true.",
+    )
     K8S_WEBHOOK_AUTH_TOKEN: Optional[str] = Field(default=None, description="Optional bearer token for K8s admission webhook")
     K8S_SIDECAR_IMAGE: str = Field(
         default="ghcr.io/ninadphalak/llm-shield-proxy:latest",

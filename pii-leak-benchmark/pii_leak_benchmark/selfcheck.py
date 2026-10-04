@@ -83,7 +83,8 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
     )
     parser.add_argument(
         "--target-api-key",
-        default=os.getenv("CONFORMANCE_TARGET_API_KEY"),
+        # Same default as the flat command. With None the header went out as "Bearer None".
+        default=os.getenv("CONFORMANCE_TARGET_API_KEY", "conformance-key"),
         help="Bearer token for your gateway. Env: CONFORMANCE_TARGET_API_KEY, which is "
         "preferred because process listings expose argv.",
     )

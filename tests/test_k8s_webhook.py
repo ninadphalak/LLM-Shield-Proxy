@@ -119,3 +119,20 @@ def test_helm_webhook_contract_matches_fastapi_route_and_mounts_tls():
     assert '"--tls-cert-file"' in deployment_template
     assert '"--tls-key-file"' in deployment_template
     assert "secretName: {{ include \"llm-shield-proxy.fullname\" . }}-webhook-cert" in deployment_template
+
+
+def test_webhook_is_not_served_unless_enabled():
+    """It was mounted on every install and unauthenticated by default."""
+    from llm_shield_proxy.api.main import app as default_app
+
+    assert settings.ENABLE_K8S_WEBHOOK is False
+    paths = {getattr(route, "path", None) for route in default_app.routes}
+    assert "/v1/k8s/mutate" not in paths
+    response = TestClient(default_app).post("/v1/k8s/mutate", json=_admission_review())
+    assert response.status_code != 200 or "patch" not in response.text
+
+
+def test_helm_turns_the_webhook_route_on_with_the_webhook():
+    repo_root = Path(__file__).resolve().parents[1]
+    deployment_template = (repo_root / "deploy/helm/llm-shield-proxy/templates/deployment.yaml").read_text()
+    assert "- name: ENABLE_K8S_WEBHOOK\n              value: {{ .Values.webhook.enabled | quote }}" in deployment_template
