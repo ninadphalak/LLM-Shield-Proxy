@@ -124,9 +124,19 @@ def _run_documented_pair(proxy_env: dict[str, str], doc_port: int, selfcheck: li
 
     assert result.returncode == 0 and "CLEAN" in result.stdout, (
         f"the documented commands did not produce CLEAN (exit {result.returncode}).\n"
-        f"--- selfcheck ---\n{_without_specimens(result.stdout)}{result.stderr}\n"
-        f"--- proxy ---\n{proxy_log[-4000:]}"
+        f"--- selfcheck ---\n{_without_specimens(result.stdout)}{_without_specimens(result.stderr)}\n"
+        f"--- proxy (status lines only) ---\n{_status_lines(proxy_log)}"
     )
+
+
+def _status_lines(proxy_log: str) -> str:
+    """Access-log status lines and exception type names, nothing that can carry a value.
+
+    The proxy has just processed the run's synthetic values, so its free-text log is not
+    printed. A startup failure is printed whole above: no value has been sent by then.
+    """
+    keep = re.compile(r'^INFO: +\S+ - "[A-Z]+ \S+ HTTP/[\d.]+" \d{3}|^Unhandled exception on .*exception_type=\w+\)$')
+    return "\n".join(line for line in proxy_log.splitlines() if keep.search(line)) + "\n"
 
 
 def _without_specimens(report: str) -> str:
@@ -230,3 +240,14 @@ def test_a_failure_message_carries_no_specimen():
     trimmed = _without_specimens(report)
     assert "someone@example.org" not in trimmed
     assert "LEAK" in trimmed and "How it leaked" in trimmed and "sse_validity" in trimmed
+
+
+def test_a_failure_message_carries_only_proxy_status_lines():
+    log = (
+        'INFO:     127.0.0.1:5 - "POST /v1/chat/completions HTTP/1.1" 401 Unauthorized\n'
+        "PII Engine failure (FAIL_CLOSED): could not parse someone@example.org\n"
+        "Unhandled exception on POST /v1/chat/completions (request_id=r1, exception_type=ValueError)\n"
+    )
+    kept = _status_lines(log)
+    assert "someone@example.org" not in kept
+    assert '" 401 Unauthorized' in kept and "exception_type=ValueError" in kept
