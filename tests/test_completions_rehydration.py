@@ -26,11 +26,20 @@ from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
 EMAIL = "alice@example.com"
 
 
-@pytest.fixture
-def vault():
-    vault = Vault(synthetic=False)
-    assert vault.get_or_create_token(EMAIL, "EMAIL_ADDRESS") == "[EMAIL_ADDRESS_1]"
+@pytest.fixture(params=[True, False], ids=["synthetic", "tagged"])
+def vault(request):
+    """Synthetic stand-ins (a fake email) are the default; tagged placeholders the other mode."""
+    vault = Vault(synthetic=request.param)
+    vault.get_or_create_token(EMAIL, "EMAIL_ADDRESS")
     return vault
+
+
+@pytest.fixture
+def token(vault):
+    """What the provider saw in place of EMAIL, and may send back."""
+    placeholder = vault.original_to_token[EMAIL]
+    assert placeholder != EMAIL
+    return placeholder
 
 
 def _completion(text: str, finish_reason="stop") -> dict:
@@ -68,50 +77,52 @@ def _joined_text(events: list[dict]) -> str:
     )
 
 
-def test_non_streaming_completion_text_is_rehydrated(vault):
-    restored = _rehydrate_json_response(_completion("Mail [EMAIL_ADDRESS_1] now"), vault)
+def test_non_streaming_completion_text_is_rehydrated(vault, token):
+    restored = _rehydrate_json_response(_completion(f"Mail {token} now"), vault)
     assert restored["choices"][0]["text"] == f"Mail {EMAIL} now"
 
 
-def test_streaming_completion_text_is_rehydrated(vault):
+def test_streaming_completion_text_is_rehydrated(vault, token):
+    """The placeholder is split across two events."""
     events = _drive(
         vault,
         [
-            _completion("Mail [EMAIL_AD", finish_reason=None),
-            _completion("DRESS_1] now", finish_reason=None),
+            _completion(f"Mail {token[:5]}", finish_reason=None),
+            _completion(f"{token[5:]} now", finish_reason=None),
             _completion("", finish_reason="stop"),
         ],
     )
     assert _joined_text(events) == f"Mail {EMAIL} now"
-    assert "[EMAIL_ADDRESS_1]" not in json.dumps(events)
+    assert token not in json.dumps(events)
     # Held-back text leaves in the completions shape, never as a chat `delta`.
     assert all("delta" not in choice for event in events for choice in event["choices"])
 
 
 @pytest.mark.parametrize("done", [True, False], ids=["done", "connection-close"])
-def test_text_held_back_at_end_of_stream_is_emitted(vault, done):
+def test_text_held_back_at_end_of_stream_is_emitted(vault, token, done):
     """No finish_reason ever arrives; the tail still reaches the caller, restored."""
-    events = _drive(vault, [_completion("Mail [EMAIL_ADDRESS_1]", finish_reason=None)], done=done)
+    events = _drive(vault, [_completion(f"Mail {token}", finish_reason=None)], done=done)
     assert _joined_text(events) == f"Mail {EMAIL}"
 
 
-def test_a_finishing_event_carries_the_held_back_text(vault):
+def test_a_finishing_event_carries_the_held_back_text(vault, token):
     """The tail goes into the event that finishes the choice, before `[DONE]`."""
-    events = _drive(vault, [_completion("Mail [EMAIL_ADDRESS_1]", finish_reason="stop")])
+    events = _drive(vault, [_completion(f"Mail {token}", finish_reason="stop")])
     finishing = [e for e in events if e["choices"][0].get("finish_reason") == "stop"]
     assert finishing and finishing[-1]["choices"][0]["text"].endswith(EMAIL)
 
 
 @pytest.mark.parametrize(
-    "reply",
+    "shape",
     [
-        _completion("Mail [EMAIL_ADDRESS_1]"),
-        {"choices": [{"index": 0, "message": {"role": "assistant", "content": "Mail [EMAIL_ADDRESS_1]"}}]},
-        {"content": [{"type": "text", "text": "Mail [EMAIL_ADDRESS_1]"}], "role": "assistant"},
+        _completion("Mail TOKEN"),
+        {"choices": [{"index": 0, "message": {"role": "assistant", "content": "Mail TOKEN"}}]},
+        {"content": [{"type": "text", "text": "Mail TOKEN"}], "role": "assistant"},
     ],
     ids=["completions", "chat", "anthropic"],
 )
-def test_rehydration_leaves_the_upstream_reply_redacted(vault, reply):
+def test_rehydration_leaves_the_upstream_reply_redacted(vault, token, shape):
+    reply = json.loads(json.dumps(shape).replace("TOKEN", token))
     stored = copy.deepcopy(reply)
     restored = _rehydrate_json_response(reply, vault)
 
