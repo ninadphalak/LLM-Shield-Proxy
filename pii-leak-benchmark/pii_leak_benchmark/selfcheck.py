@@ -143,6 +143,40 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
     return parser
 
 
+def _why_nothing_arrived(report: dict[str, Any]) -> str:
+    """Say what the CLIENT side saw when nothing reached the capture.
+
+    The capture cannot tell the causes apart, but the client often can: a gateway that
+    answered 401 rejected the key, which is a one-flag fix, not a routing problem.
+    """
+    client = report["checks"].get("sse_validity", {})
+    failed = sorted(code for code in client.get("status_codes", []) if code >= 400)
+    if failed:
+        codes = ", ".join(str(code) for code in failed)
+        if any(code in (401, 403) for code in failed):
+            return (
+                f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
+                "It rejected the client key: pass the key it expects with --target-api-key "
+                "or CONFORMANCE_TARGET_API_KEY."
+            )
+        return (
+            f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
+            "Its own log says why; an error before forwarding is usually a missing setting, "
+            "such as the key it sends upstream."
+        )
+    if not client.get("status_codes") and client.get("errors"):
+        kinds = ", ".join(sorted(set(client["errors"])))
+        return (
+            f"The check got no HTTP answer from your gateway ({kinds}). Check that it is "
+            "running and listening at the target URL."
+        )
+    return (
+        "No request carrying this run's marker reached the capture. Your gateway is "
+        "not configured to use it as its upstream, could not reach it, or sent the "
+        "traffic elsewhere -- these are indistinguishable here."
+    )
+
+
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).
 
@@ -152,12 +186,7 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
     boundary = report["checks"][_BOUNDARY]
 
     if not boundary["correlated_requests"]:
-        return (
-            VERDICT_NOT_MEASURED,
-            "No request carrying this run's marker reached the capture. Your gateway is "
-            "not configured to use it as its upstream, could not reach it, or sent the "
-            "traffic elsewhere -- these are indistinguishable here.",
-        )
+        return VERDICT_NOT_MEASURED, _why_nothing_arrived(report)
 
     if boundary["uninspectable_requests"] or boundary["unattributed_uninspectable_requests"]:
         return (
@@ -306,9 +335,13 @@ def _print_report(
     # Print the synthetic specimens (`reveal=True`) above the matcher table. Showing the
     # actual generated values makes the failure actionable, whereas the matcher table
     # ("EMAIL / literal / body") only explains how the finding was produced.
-    explain.print_findings(
-        findings_for(report, specimens, duty=duty), reveal=specimens is not None
-    )
+    # Skipped when no request at all reached the capture: every value then reads "not
+    # restored" under a "What leaked" heading, burying the line above that says what to
+    # fix. Any captured request, attributable or not, keeps the findings.
+    if boundary["correlated_requests"] or boundary.get("captured_requests"):
+        explain.print_findings(
+            findings_for(report, specimens, duty=duty), reveal=specimens is not None
+        )
 
     _print_leak_evidence(
         boundary["leak_evidence"] + boundary["unattributed_leak_evidence"]

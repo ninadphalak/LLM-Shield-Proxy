@@ -78,6 +78,46 @@ def test_nothing_reaching_the_capture_is_not_clean() -> None:
     assert "marker" in reason
 
 
+@pytest.mark.parametrize(
+    "client, expected",
+    [
+        ({"status_codes": [401], "errors": ["HTTPStatusError"] * 3}, ("HTTP 401", "--target-api-key")),
+        ({"status_codes": [403], "errors": ["HTTPStatusError"]}, ("HTTP 403", "--target-api-key")),
+        ({"status_codes": [500], "errors": ["HTTPStatusError"]}, ("HTTP 500", "log")),
+        ({"status_codes": [], "errors": ["ConnectError"] * 3}, ("ConnectError", "running")),
+    ],
+)
+def test_nothing_arriving_names_what_the_gateway_answered(
+    client: dict[str, Any], expected: tuple[str, str]
+) -> None:
+    """A gateway that 401s the check's key was reported as an unknown routing problem.
+
+    The client side saw the status; the reason must carry it, or the operator debugs
+    upstream routing for what is a missing --target-api-key.
+    """
+    report = _report(correlated=0)
+    report["checks"]["sse_validity"].update(client)
+    verdict, reason = selfcheck.verdict_for(report)
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    for text in expected:
+        assert text in reason
+
+
+def test_nothing_arriving_prints_no_leak_findings(capsys) -> None:
+    """With no captured request, every value reads "not restored" under "What leaked"."""
+    report = _report(correlated=0)
+    report["checks"]["sse_validity"].update({"status_codes": [401], "errors": ["HTTPStatusError"]})
+    boundary = report["checks"]["configured_upstream_boundary"]
+    boundary.update({"captured_requests": 0, "leak_evidence": [], "unattributed_leak_evidence": []})
+    report.update({"implementation": {"name": "x"}, "capture": {"target_must_be_preconfigured_for": "y"},
+                   "outcome": "claim-unstated"})
+    verdict, reason = selfcheck.verdict_for(report)
+    selfcheck._print_report(report, verdict, reason, None)
+    out = capsys.readouterr().out
+    assert "HTTP 401" in out
+    assert "What leaked" not in out
+
+
 def test_attributability_is_decided_before_leakage() -> None:
     """Ordering, stated as its own test so a refactor cannot quietly invert it.
 
