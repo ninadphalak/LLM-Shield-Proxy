@@ -219,3 +219,27 @@ def test_a_media_url_is_not_rewritten(engine, deep, vault):
 def test_media_key_names_deeper_down_are_ordinary_data(engine, deep, vault):
     message = {"role": "user", "content": "hi", "metadata": {"source": {"author": EMAIL}, "image_url": EMAIL}}
     assert EMAIL not in _sent(engine, vault, {"messages": [message]})
+
+
+def test_opaque_key_names_below_the_direct_fields_are_scanned(engine, deep, vault):
+    """Round 3: `name`, `id` or `data` deeper down is ordinary data, a string included."""
+    message = {"role": "user", "content": "hi", "metadata": {"name": f"Mail {EMAIL}", "items": [{"id": SSN}]}}
+    sent = _sent(engine, vault, {"messages": [message]})
+    assert EMAIL not in sent
+    assert SSN not in sent
+
+
+def test_a_source_field_that_is_not_media_is_scanned(engine, deep, vault):
+    """Round 3: only a media-typed `source` object is skipped; a text block's `source` string is data."""
+    block = {"type": "text", "text": "see", "source": f"SSN {SSN}"}
+    other = {"type": "text", "text": "x", "source": {"type": "note", "body": f"to {EMAIL}"}}
+    sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [block, other]}]})
+    assert SSN not in sent
+    assert EMAIL not in sent
+
+
+def test_an_inline_file_part_survives_the_block_policy(engine, deep, vault, monkeypatch):
+    monkeypatch.setattr(settings, "UNMAPPED_BLOB_POLICY", "block")
+    file_data = "data:application/pdf;base64," + base64.b64encode(bytes(range(256)) * 40).decode()
+    part = {"type": "file", "file": {"file_data": file_data, "filename": "report.pdf"}}
+    assert file_data in _sent(engine, vault, {"messages": [{"role": "user", "content": [part]}]})

@@ -407,34 +407,31 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 
 
 # Inside a message, content block or input item, every field the shape walk does not handle
-# is scanned (see _redact_remaining_fields), with two exceptions.
+# is scanned (see _redact_remaining_fields). Two kinds of DIRECT field are not; anything deeper
+# is walked whatever its key is called, so `metadata.name` or `metadata.data` is ordinary data.
 #
-# A STRING under one of these keys, at any depth, goes out unchanged: identifiers that link a
-# tool result to its call or name a tool, and blobs the provider verifies byte for byte (a
-# thinking `signature`, `redacted_thinking` and audio `data`, `encrypted_content`, `file_data`).
-# Rewriting them breaks the request, and their high entropy is what Tier 2 flags. An object
-# under the same name is ordinary data and is walked.
+# A string under one of these keys: identifiers that link a tool result to its call or name a
+# tool, and blobs the provider verifies byte for byte (a thinking `signature`,
+# `redacted_thinking` `data`, `encrypted_content`). Rewriting them breaks the request, and
+# their high entropy is what Tier 2 flags.
 _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
-    {
-        "id",
-        "tool_call_id",
-        "tool_use_id",
-        "call_id",
-        "name",
-        "signature",
-        "data",
-        "encrypted_content",
-        "file_data",
-        "file_id",
-    }
+    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content"}
 )
 
-# Media references, skipped whole, but only as a DIRECT field of a message, block or input
-# item: an image or audio part's `image_url`, `input_audio` or `source`. Rewriting an image
-# URL breaks the reference, and an inline image is a data: URI the blob policy would reject.
-# A deeper key with the same name is ordinary data and is walked. A document block's `source`
-# is text and is handled by _redact_document_block.
-_MEDIA_KEYS: frozenset[str] = frozenset({"image_url", "input_audio", "source"})
+# Media references (see _is_media_field): an image, audio or file part's payload. Rewriting an
+# image URL breaks the reference, and an inline file is a data: URI the blob policy rejects.
+_MEDIA_KEYS: frozenset[str] = frozenset({"image_url", "input_audio", "file"})
+
+# Anthropic source types that hold media or a reference. A `text` or `content` source is a
+# document's text, handled by _redact_document_block.
+_MEDIA_SOURCE_TYPES: frozenset[str] = frozenset({"base64", "url", "file"})
+
+
+def _is_media_field(key: str, value: Any) -> bool:
+    """A direct field that is a media payload: skipped whole by the remaining-field scan."""
+    if key in _MEDIA_KEYS:
+        return True
+    return key == "source" and isinstance(value, dict) and value.get("type") in _MEDIA_SOURCE_TYPES
 
 # Replayed model and caller text found by that scan. Scanned whole whatever its length: past
 # the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
@@ -1239,14 +1236,15 @@ class PIIEngine:
 
         The default is to scan, like `redact_model_originated_tree` on the reply path: a walk
         that follows known shapes forwards whatever field a provider adds next. Skipped:
-        `handled`, operator- and policy-protected keys, the built-in structural keys,
-        _MEDIA_KEYS here, and strings under _OPAQUE_MESSAGE_KEYS at any depth. Text under
+        `handled`, operator- and policy-protected keys, the built-in structural keys, and
+        two kinds of direct field: media payloads (_is_media_field) and strings under
+        _OPAQUE_MESSAGE_KEYS. Below the direct fields every key is walked. Text under
         _REPLAYED_TEXT_KEYS is scanned whole; anything else past the blob ceiling gets the
         unmapped-blob treatment, as deep redaction does.
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         for key, value in node.items():
-            if key in handled or key in protected or key in _MEDIA_KEYS:
+            if key in handled or key in protected or _is_media_field(key, value):
                 continue
             if key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str):
                 continue
@@ -1261,7 +1259,6 @@ class PIIEngine:
                 f"{json_path}.{key}",
                 restorable=restorable,
                 text_keys=_REPLAYED_TEXT_KEYS,
-                opaque_string_keys=_OPAQUE_MESSAGE_KEYS,
             )
 
     def _deep_redact(
@@ -1278,7 +1275,6 @@ class PIIEngine:
         one_way_keys: frozenset[str] = frozenset(),
         restorable: bool = True,
         text_keys: frozenset[str] = frozenset(),
-        opaque_string_keys: frozenset[str] = frozenset(),
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
 
@@ -1294,8 +1290,7 @@ class PIIEngine:
         keyword, so none is one-way there.
 
         A string directly under a key in `text_keys` is scanned in full, past the blob
-        ceiling too. A STRING directly under a key in `opaque_string_keys` goes out
-        unchanged; an object under the same key name is ordinary data and is walked.
+        ceiling too.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
@@ -1309,8 +1304,7 @@ class PIIEngine:
             return {
                 key: (
                     value
-                    if (key in protected and not keys_are_names)
-                    or (key in opaque_string_keys and isinstance(value, str))
+                    if key in protected and not keys_are_names
                     else self._deep_redact(
                         value,
                         vault,
@@ -1332,7 +1326,6 @@ class PIIEngine:
                         ),
                         restorable=restorable and (keys_are_names or key not in one_way_keys),
                         text_keys=text_keys,
-                        opaque_string_keys=opaque_string_keys,
                     )
                 )
                 for key, value in node.items()
@@ -1352,7 +1345,6 @@ class PIIEngine:
                     one_way_keys=one_way_keys,
                     restorable=restorable,
                     text_keys=text_keys,
-                    opaque_string_keys=opaque_string_keys,
                 )
                 for index, item in enumerate(node)
             ]
