@@ -271,3 +271,34 @@ def test_a_file_parts_name_is_scanned_but_its_data_is_not(engine, deep, vault):
     sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [part]}]})
     assert file_data in sent
     assert EMAIL not in sent
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("source", {"type": "base64", "media_type": "image/png", "data": f"SSN {SSN} {EMAIL}"}),
+        ("input_audio", {"data": f"SSN {SSN} {EMAIL}", "format": "wav"}),
+        ("file", {"file_data": f"SSN {SSN} {EMAIL}", "filename": "a.pdf"}),
+    ],
+    ids=["source", "input_audio", "file"],
+)
+def test_text_in_a_media_bytes_field_is_scanned(engine, deep, vault, key, value):
+    """Round 5: a payload field holding text, not base64 or a data: URI, is not media."""
+    block = {"type": "image" if key == "source" else key, key: value}
+    sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [block]}]})
+    assert SSN not in sent
+    assert EMAIL not in sent
+
+
+def test_nested_file_references_go_out_unchanged(engine, deep, vault):
+    """Round 5: a provider file id below a direct field (annotations, search results)."""
+    file_id = "file-Zq81xPLmN0aBcR7tY2uVw9"
+    payload = {
+        "messages": [
+            {"role": "assistant", "content": "ok", "annotations": [{"type": "file_citation", "file_id": file_id}]}
+        ],
+        "input": [{"type": "file_search_call", "id": "fs_1", "results": [{"file_id": file_id, "text": f"by {EMAIL}"}]}],
+    }
+    sent = _sent(engine, vault, payload)
+    assert sent.count(file_id) == 2
+    assert EMAIL not in sent

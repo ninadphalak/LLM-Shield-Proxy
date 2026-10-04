@@ -415,7 +415,7 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 # `redacted_thinking` `data`, `encrypted_content`). Rewriting them breaks the request, and
 # their high entropy is what Tier 2 flags.
 _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
-    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content"}
+    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content", "file_id"}
 )
 
 # Media payloads, by shape (see _is_media_field): the exact fields an image, audio or file
@@ -435,6 +435,26 @@ _MEDIA_SOURCE_TYPES: frozenset[str] = frozenset({"base64", "url", "file"})
 
 _MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
 
+# What a media payload's bytes look like: standard base64, padded to a multiple of four, at
+# least 16 characters, line breaks allowed; or a data: URI. Text in a `data` field is not
+# media, whatever the field around it says.
+_BASE64_PAYLOAD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
+
+
+def _looks_like_media_bytes(payload: str) -> bool:
+    if payload.startswith("data:"):
+        return True
+    compact = payload.replace("\r", "").replace("\n", "")
+    return len(compact) >= 16 and len(compact) % 4 == 0 and bool(_BASE64_PAYLOAD.fullmatch(compact))
+
+# Media fields that hold the bytes themselves.
+_MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
+
+# Provider file references, protected wherever they sit below a direct field (annotations,
+# file_search results): rewriting one breaks the reference, and a high-entropy id is what
+# Tier 2 flags.
+_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"file_id"})
+
 
 def _is_media_field(key: str, value: Any) -> bool:
     """A direct field that is a media payload, judged by key AND shape."""
@@ -445,11 +465,17 @@ def _is_media_field(key: str, value: Any) -> bool:
         return value.startswith(_MEDIA_URL_PREFIXES)
     if not isinstance(value, dict) or not value or not set(value) <= shape:
         return False
+    if not all(isinstance(item, str) for item in value.values()):
+        return False
+    for bytes_key in _MEDIA_BYTES_KEYS & set(value):
+        payload = value[bytes_key]
+        if not _looks_like_media_bytes(payload):
+            return False
     if key == "source":
         return value.get("type") in _MEDIA_SOURCE_TYPES
     if key == "image_url":
-        return isinstance(value.get("url"), str) and value["url"].startswith(_MEDIA_URL_PREFIXES)
-    return all(isinstance(item, str) for item in value.values())
+        return value.get("url", "").startswith(_MEDIA_URL_PREFIXES)
+    return True
 
 # Replayed model and caller text found by that scan. Scanned whole whatever its length: past
 # the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
@@ -1261,6 +1287,7 @@ class PIIEngine:
         unmapped-blob treatment, as deep redaction does.
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
+        nested_protected = protected | _NESTED_REFERENCE_KEYS
         for key, value in node.items():
             if key in handled or key in protected:
                 continue
@@ -1278,7 +1305,7 @@ class PIIEngine:
                 value,
                 vault,
                 active_profile,
-                protected,
+                nested_protected,
                 None if key in _REPLAYED_TEXT_KEYS and isinstance(value, str) else settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
                 depth + 1,
                 max_depth,
