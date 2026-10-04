@@ -53,9 +53,12 @@ class StatelessASTVisitor:
 
             if isinstance(node, dict):
                 context_fields = {}
+                # Only the envelope is structural: the root object, or each request of a
+                # batch. Deeper down, a key called `id` or `method` is a tool argument
+                # like any other, and skipping it by name forwarded its value in clear.
+                is_envelope = depth == 0 or (depth == 1 and isinstance(data, list))
                 for k, v in list(node.items()):
-                    # Preserve JSON-RPC structural keys entirely
-                    if k in ("jsonrpc", "method", "id"):
+                    if is_envelope and k in ("jsonrpc", "method", "id"):
                         continue
 
                     if isinstance(v, (dict, list)):
