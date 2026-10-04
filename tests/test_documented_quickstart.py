@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 import httpx
+import pytest
 import yaml
 
 from llm_shield_proxy.core.config import Settings
@@ -26,6 +27,7 @@ from llm_shield_proxy.core.config import Settings
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_PAGE = REPO_ROOT / "website" / "docs" / "conformance" / "ci.mdx"
 FROM_SCRATCH_PAGE = REPO_ROOT / "website" / "docs" / "conformance" / "try-it-from-scratch.md"
+README = REPO_ROOT / "README.md"
 
 _PROXY_MAIN = "import sys; from llm_shield_proxy.cli import main; sys.argv[0] = 'llm-shield-proxy'; sys.exit(main())"
 _BENCH_MAIN = "import sys; from pii_leak_benchmark.cli import main; sys.argv[0] = 'pii-leak-benchmark'; sys.exit(main())"
@@ -156,9 +158,14 @@ def _without_specimens(report: str) -> str:
     return "\n".join(kept) + "\n"
 
 
-def test_ci_page_local_example_reports_clean(tmp_path):
-    """website/docs/conformance/ci.mdx, the LLM-Shield-Proxy block."""
-    block = _block_with(CI_PAGE, "bash", "llm-shield-proxy --port")
+@pytest.mark.parametrize(
+    "page, needle",
+    [(CI_PAGE, "llm-shield-proxy --port"), (README, "--target-api-key sk-demo")],
+    ids=["ci.mdx", "README.md"],
+)
+def test_one_line_start_and_check_reports_clean(page, needle, tmp_path):
+    """The ci.mdx LLM-Shield-Proxy block, and the README's "Try it in a minute"."""
+    block = _block_with(page, "bash", needle)
     proxy_line = next(w for w in _commands(block) if "llm-shield-proxy" in w and "pip" not in w)
     split = proxy_line.index("llm-shield-proxy")
     env = dict(word.split("=", 1) for word in proxy_line[:split])
