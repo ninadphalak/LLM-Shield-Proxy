@@ -104,7 +104,9 @@ def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONRespons
     if settings.OVERRIDE_CLIENT_AUTH:
         return "anonymous", None
 
-    return None, _error(401, "Invalid Proxy API Key", "authentication_error")
+    from llm_shield_proxy.api.main import INVALID_PROXY_KEY_MESSAGE
+
+    return None, _error(401, INVALID_PROXY_KEY_MESSAGE, "authentication_error")
 
 
 async def _resolve_vault(

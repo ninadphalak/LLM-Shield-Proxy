@@ -171,3 +171,51 @@ def test_missing_upstream_key_returns_clean_error(monkeypatch):
     assert "error" in res.json()
     assert res.json()["error"]["type"] == "proxy_misconfiguration"
     assert "Upstream provider API Key is missing in proxy configuration" in res.json()["error"]["message"]
+
+
+def test_missing_upstream_key_error_names_the_setting(monkeypatch):
+    """A 500 that does not say which variable to set sent people to the wrong one."""
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings._valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.OPENAI_API_KEY", None)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_API_KEY", None)
+    body = {"model": "gpt-4", "messages": []}
+    headers = {"Authorization": "Bearer sk-proxy-test"}
+
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "https://api.openai.com")
+    message = client.post("/v1/chat/completions", headers=headers, json=body).json()["error"]["message"]
+    assert message.endswith("Set OPENAI_API_KEY or UPSTREAM_API_KEY.")
+
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.UPSTREAM_BASE_URL", "http://127.0.0.1:8765/v1")
+    message = client.post("/v1/chat/completions", headers=headers, json=body).json()["error"]["message"]
+    assert message.endswith("Set UPSTREAM_API_KEY.")
+
+
+def test_rejected_client_key_error_names_the_setting(monkeypatch):
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings._valid_virtual_keys_set", frozenset(["sk-proxy-test"]))
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.ENABLE_OPEN_BYOK_PASSTHROUGH", False)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.OVERRIDE_CLIENT_AUTH", False)
+
+    res = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer not-a-listed-key"},
+        json={"model": "gpt-4", "messages": []},
+    )
+    assert res.status_code == 401
+    assert "VALID_VIRTUAL_KEYS" in res.json()["error"]["message"]
+
+
+def test_startup_warns_when_no_client_key_can_authenticate(monkeypatch, caplog):
+    from llm_shield_proxy.api.main import warn_if_no_client_can_authenticate
+
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings._valid_virtual_keys_set", frozenset())
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.ENABLE_OPEN_BYOK_PASSTHROUGH", False)
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings.OVERRIDE_CLIENT_AUTH", False)
+    with caplog.at_level("WARNING", logger="llm_shield_proxy.api.main"):
+        warn_if_no_client_can_authenticate()
+    assert "every proxied request will be rejected with 401" in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr("llm_shield_proxy.core.config.settings._valid_virtual_keys_set", frozenset(["k"]))
+    with caplog.at_level("WARNING", logger="llm_shield_proxy.api.main"):
+        warn_if_no_client_can_authenticate()
+    assert "rejected with 401" not in caplog.text

@@ -75,21 +75,27 @@ would be worthless, because a benchmark that cannot see a leak will call anythin
 Start ours, pointed at the benchmark's capture address as its upstream:
 
 ```bash
-docker run -d --name shield -p 8000:8000 \
+docker run -d --name shield -p 127.0.0.1:8000:8000 \
   --add-host=host.docker.internal:host-gateway \
   -e UPSTREAM_BASE_URL=http://host.docker.internal:8765/v1 \
-  -e OPENAI_API_KEY=sk-not-used-by-the-capture \
+  -e UPSTREAM_API_KEY=sk-not-used-by-the-capture \
+  -e VALID_VIRTUAL_KEYS=sk-local-shield \
   ghcr.io/ninadphalak/llm-shield-proxy:latest
 ```
 
 `UPSTREAM_BASE_URL` is the important line. It tells the gateway to send its traffic to the
 benchmark instead of to OpenAI, which is what lets the benchmark see what was forwarded.
-The key is never used by anything: the capture accepts whatever it is given.
 
-Wait for it to come up, then measure:
+The other two are keys. `VALID_VIRTUAL_KEYS` lists the keys a client may use to call the
+proxy; any other key gets a 401. `UPSTREAM_API_KEY` is the key the proxy sends on to its
+upstream. The capture accepts whatever it is given, so the value does not matter, but
+without one the proxy answers 500.
+
+Wait for it to come up, then measure, sending the client key:
 
 ```bash
 pii-leak-benchmark selfcheck --target-base-url http://localhost:8000/v1 \
+  --target-api-key sk-local-shield \
   --json-out shield.json
 ```
 

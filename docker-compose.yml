@@ -6,12 +6,16 @@ services:
     image: llm-shield-proxy:latest
     container_name: llm-shield-proxy
     ports:
-      - "8000:8000"
+      # Local only: the default client key below is public.
+      - "127.0.0.1:8000:8000"
     environment:
       - HOST=0.0.0.0
       - PORT=8000
       - UPSTREAM_BASE_URL=https://api.openai.com
+      # The key the proxy sends to OpenAI. Clients never see it.
       - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-mock-key}
+      # The key clients send to the proxy. examples/demo.py sends demo-key.
+      - VALID_VIRTUAL_KEYS=${SHIELD_VIRTUAL_KEY:-demo-key}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\" || exit 1"]

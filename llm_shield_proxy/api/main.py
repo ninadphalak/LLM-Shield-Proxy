@@ -201,6 +201,21 @@ def build_upstream_client() -> httpx.AsyncClient:
     )
 
 
+def warn_if_no_client_can_authenticate() -> None:
+    """Say at startup that every request will 401, instead of leaving it to the first caller."""
+    if (
+        settings.valid_virtual_keys_set
+        or settings.ENABLE_OPEN_BYOK_PASSTHROUGH
+        or settings.OVERRIDE_CLIENT_AUTH
+    ):
+        return
+    logger.warning(
+        "VALID_VIRTUAL_KEYS is empty, so every proxied request will be rejected with 401. "
+        "Set VALID_VIRTUAL_KEYS to a comma-separated list of client keys and send one as "
+        "the bearer token."
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage app lifecycle, HTTP pools, and background watchers."""
@@ -251,6 +266,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         f"  Failure Mode: {settings.SHIELD_FAILURE_MODE}\n"
         f"--------------------------------------------"
     )
+
+    warn_if_no_client_can_authenticate()
 
     if settings.SHIELD_FAILURE_MODE == "FAIL_OPEN":
         logger.warning(
@@ -571,6 +588,10 @@ async def get_policy_resolver(request: Request) -> BasePolicyResolver:
 # Proxy Catch-All Gateway Routing
 # -----------------------------------------------------------------------------
 
+INVALID_PROXY_KEY_MESSAGE = (
+    "Invalid Proxy API Key. Send a key listed in the proxy's VALID_VIRTUAL_KEYS setting."
+)
+
 PROVIDER_KEY_MAP: Dict[str, str] = {
     "api.openai.com": "OPENAI_API_KEY",
     "generativelanguage.googleapis.com": "GEMINI_API_KEY",
@@ -757,7 +778,7 @@ async def _proxy_catch_all_internal(
     else:
         return JSONResponse(
             status_code=401,
-            content={"error": {"message": "Invalid Proxy API Key", "type": "authentication_error"}},
+            content={"error": {"message": INVALID_PROXY_KEY_MESSAGE, "type": "authentication_error"}},
         )
 
     # Dynamic Virtual Key Resolution for FinOps & Tenant Scoping
@@ -783,7 +804,11 @@ async def _proxy_catch_all_internal(
                 status_code=500,
                 content={
                     "error": {
-                        "message": "Upstream provider API Key is missing in proxy configuration.",
+                        "message": (
+                            "Upstream provider API Key is missing in proxy configuration. Set "
+                            + (f"{PROVIDER_KEY_MAP[hostname]} or " if hostname in PROVIDER_KEY_MAP else "")
+                            + "UPSTREAM_API_KEY."
+                        ),
                         "type": "proxy_misconfiguration",
                     }
                 },
