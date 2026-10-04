@@ -72,12 +72,25 @@ would be worthless, because a benchmark that cannot see a leak will call anythin
 
 ## Step 3: Measure LLM-Shield-Proxy
 
-Start ours, pointed at the benchmark's capture address as its upstream:
+Start ours, pointed at the benchmark's capture address as its upstream. On Docker Desktop
+(macOS, Windows):
 
 ```bash
 docker run -d --name shield -p 127.0.0.1:8000:8000 \
   --add-host=host.docker.internal:host-gateway \
   -e UPSTREAM_BASE_URL=http://host.docker.internal:8765/v1 \
+  -e UPSTREAM_API_KEY=sk-not-used-by-the-capture \
+  -e VALID_VIRTUAL_KEYS=sk-local-shield \
+  ghcr.io/ninadphalak/llm-shield-proxy:latest
+```
+
+On Linux, the capture listens on `127.0.0.1`, which `host.docker.internal` does not reach
+there. Share the host's network instead, and keep the proxy on loopback with `HOST`:
+
+```bash
+docker run -d --name shield --network host \
+  -e HOST=127.0.0.1 \
+  -e UPSTREAM_BASE_URL=http://127.0.0.1:8765/v1 \
   -e UPSTREAM_API_KEY=sk-not-used-by-the-capture \
   -e VALID_VIRTUAL_KEYS=sk-local-shield \
   ghcr.io/ninadphalak/llm-shield-proxy:latest
@@ -115,6 +128,10 @@ not detect PII itself. It calls out to Microsoft Presidio, and its proxy wants a
 for authentication. So there are four containers rather than one. None of this is a
 criticism of the product, it is just what the thing needs to run with redaction switched
 on, and a run without redaction switched on measures nothing.
+
+These commands reach the capture through `host.docker.internal`, which works on Docker
+Desktop. On Linux the LiteLLM container needs the host-network change from step 3, and this
+page has not been tested that way.
 
 A shared network first, so the containers can find each other by name:
 

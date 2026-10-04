@@ -28,7 +28,6 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-APP_CHART = REPO_ROOT / "charts" / "llm-shield-proxy"
 DEPLOY_CHART = REPO_ROOT / "deploy" / "helm" / "llm-shield-proxy"
 REQUIRE_HELM = os.environ.get("SHIELD_REQUIRE_HELM") == "1"
 
@@ -77,7 +76,7 @@ def _by_kind(documents: Iterable[dict], kind: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("chart", [APP_CHART, DEPLOY_CHART], ids=["app-chart", "deploy-chart"])
+@pytest.mark.parametrize("chart", [DEPLOY_CHART], ids=["deploy-chart"])
 def test_chart_lints(chart):
     result = subprocess.run(
         ["helm", "lint", str(chart)], capture_output=True, text=True, encoding="utf-8", errors="replace"
@@ -88,12 +87,11 @@ def test_chart_lints(chart):
 @pytest.mark.parametrize(
     "chart,set_args",
     [
-        (APP_CHART, ()),
         (DEPLOY_CHART, ()),
         (DEPLOY_CHART, ("webhook.enabled=true",)),
         (DEPLOY_CHART, ("mTLS.enabled=true",)),
     ],
-    ids=["app-default", "deploy-default", "deploy-webhook", "deploy-mtls"],
+    ids=["deploy-default", "deploy-webhook", "deploy-mtls"],
 )
 def test_chart_renders_to_valid_manifests(chart, set_args):
     """Every rendered document must be parseable YAML with an apiVersion/kind."""
@@ -287,14 +285,6 @@ def _probe_paths(documents: Iterable[dict]) -> set[str]:
     return paths
 
 
-def test_app_chart_probe_paths_are_routes_the_application_serves():
-    paths = _probe_paths(_render(APP_CHART))
-    assert paths, "the app chart rendered no HTTP probes"
-
-    unknown = paths - _app_routes()
-    assert not unknown, f"probe paths with no matching route: {sorted(unknown)}"
-
-
 def test_deploy_chart_probe_paths_are_routes_the_application_serves():
     """The deploy chart's probes must hit routes the app actually serves.
 
@@ -311,7 +301,48 @@ def test_deploy_chart_probe_paths_are_routes_the_application_serves():
 
 
 def test_probe_paths_are_reported_for_diagnosis(record_property):
-    """Records both charts' probe paths and the real routes in the test report."""
-    record_property("app_chart_probes", json.dumps(sorted(_probe_paths(_render(APP_CHART)))))
+    """Records the chart's probe paths and the real routes in the test report."""
     record_property("deploy_chart_probes", json.dumps(sorted(_probe_paths(_render(DEPLOY_CHART)))))
     record_property("application_routes", json.dumps(sorted(_app_routes())))
+
+
+# ---------------------------------------------------------------------------
+# One chart: what the removed charts/llm-shield-proxy had, and pods that can start
+# ---------------------------------------------------------------------------
+
+
+def _deployment(*set_args: str) -> dict:
+    (deployment,) = _by_kind(_render(DEPLOY_CHART, *set_args), "Deployment")
+    return deployment
+
+
+def test_chart_carries_the_pdb_and_security_context_of_the_removed_chart():
+    documents = _render(DEPLOY_CHART)
+    assert _by_kind(documents, "PodDisruptionBudget")
+    pod = _deployment()["spec"]["template"]["spec"]
+    assert pod["securityContext"]["runAsNonRoot"] is True
+    assert pod["securityContext"]["runAsUser"] == 10001  # the image's own user
+    assert pod["containers"][0]["securityContext"]["allowPrivilegeEscalation"] is False
+
+
+def _mebibytes(quantity: str) -> float:
+    units = {"Ki": 1 / 1024, "Mi": 1, "Gi": 1024}
+    for suffix, factor in units.items():
+        if quantity.endswith(suffix):
+            return float(quantity[: -len(suffix)]) * factor
+    return float(quantity) / 1048576
+
+
+def test_memory_limit_fits_the_process():
+    """The proxy holds about 75-100 MiB idle. A 60Mi limit had the pod killed at start."""
+    limits = _deployment()["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
+    assert _mebibytes(limits["memory"]) >= 192
+
+
+def test_keys_secret_reaches_the_container_and_the_webhook():
+    container = _deployment(
+        "envFrom[0].secretRef.name=shield-keys", "webhook.sidecarSecretName=sidecar-keys"
+    )["spec"]["template"]["spec"]["containers"][0]
+    assert container["envFrom"] == [{"secretRef": {"name": "shield-keys"}}]
+    env = {item["name"]: item.get("value") for item in container["env"]}
+    assert env["K8S_SIDECAR_SECRET_NAME"] == "sidecar-keys"

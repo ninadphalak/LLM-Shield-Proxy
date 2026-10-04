@@ -189,24 +189,33 @@ def test_ci_page_powershell_example_sets_the_same_environment():
     assert _selfcheck_args(powershell.replace("`\n", " ")) == _selfcheck_args(bash)
 
 
-def test_from_scratch_page_shield_step_reports_clean(tmp_path):
-    """try-it-from-scratch.md step 3. The page runs the published image; this runs the same
-    code from the checkout with the same environment, since the setting names are what break."""
-    block = _block_with(FROM_SCRATCH_PAGE, "bash", "ghcr.io/ninadphalak/llm-shield-proxy")
-    words = _commands(block)[0]
-    env = {}
+def from_scratch_docker_run(needle: str) -> tuple[list[str], dict[str, str], int]:
+    """One of try-it-from-scratch.md's step 3 `docker run` blocks: (words, -e env, host port)."""
+    words = _commands(_block_with(FROM_SCRATCH_PAGE, "bash", needle))[0]
+    env, port = {}, 8000
     for flag, value in zip(words, words[1:]):
         if flag == "-e":
             key, _, val = value.partition("=")
-            env[key] = val.replace("host.docker.internal", "127.0.0.1")
+            env[key] = val
         if flag == "-p":
-            doc_port = int(value.split(":")[-2])
+            port = int(value.split(":")[-2])
+    return words, env, port
 
+
+def from_scratch_selfcheck() -> list[str]:
     check = _block_with(FROM_SCRATCH_PAGE, "bash", "selfcheck --target-base-url http://localhost:8000/v1")
     selfcheck = [a.replace("localhost", "127.0.0.1") for a in _selfcheck_args(check)]
-    selfcheck = [a for a in selfcheck if a not in ("--json-out", "shield.json")]
+    return [a for a in selfcheck if a not in ("--json-out", "shield.json")]
 
-    _run_documented_pair(env, doc_port, selfcheck, tmp_path)
+
+@pytest.mark.parametrize("needle", ["--name shield -p", "--name shield --network host"], ids=["docker-desktop", "linux"])
+def test_from_scratch_page_shield_step_reports_clean(needle, tmp_path):
+    """try-it-from-scratch.md step 3. The page runs the published image; this runs the same
+    code from the checkout with the same environment, since the setting names are what break.
+    tests/ootb/test_documented_docker.py runs the Linux form in a real container."""
+    _, env, doc_port = from_scratch_docker_run(needle)
+    env = {key: value.replace("host.docker.internal", "127.0.0.1") for key, value in env.items()}
+    _run_documented_pair(env, doc_port, from_scratch_selfcheck(), tmp_path)
 
 
 def test_compose_demo_key_is_accepted_by_the_compose_proxy():

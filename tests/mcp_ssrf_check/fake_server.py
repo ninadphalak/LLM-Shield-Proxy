@@ -140,6 +140,13 @@ class FakeMcpServer:
                 self.wfile.write(body)
 
             def _gate(self) -> bool:
+                # Read the body before any early rejection. Closing a socket with request
+                # bytes still unread makes the OS send a reset instead of a clean close, and
+                # if the reset beats the client to the response, the client sees a read error
+                # instead of the 403/421. That race made the header checks INCONCLUSIVE now
+                # and then in full-suite runs, failing tests that expect a clean exit.
+                length = int(self.headers.get("Content-Length") or 0)
+                self._body = self.rfile.read(length) if length else b""
                 with owner._lock:
                     owner.authorization_headers.append(self.headers.get("Authorization"))
                 allowed_hosts = {f"127.0.0.1:{owner.port}", f"localhost:{owner.port}", f"[::1]:{owner.port}"}
@@ -179,9 +186,8 @@ class FakeMcpServer:
             def do_POST(self) -> None:  # noqa: N802
                 if not self._gate():
                     return
-                length = int(self.headers.get("Content-Length") or 0)
                 try:
-                    body = json.loads(self.rfile.read(length) or b"null")
+                    body = json.loads(self._body or b"null")
                 except ValueError:
                     self._error(400, None, -32700, "parse error")
                     return

@@ -140,6 +140,14 @@ class Settings(BaseSettings):
         default="ghcr.io/ninadphalak/llm-shield-proxy:latest",
         description="Container image appended by the Kubernetes admission webhook",
     )
+    K8S_SIDECAR_SECRET_NAME: Optional[str] = Field(
+        default=None,
+        description=(
+            "Secret the injected sidecar loads its environment from (envFrom), for example "
+            "VALID_VIRTUAL_KEYS and a provider key. A pod's llm-shield.io/keys-secret "
+            "annotation overrides it. Without one the sidecar rejects every request."
+        ),
+    )
 
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
