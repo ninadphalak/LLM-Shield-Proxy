@@ -34,10 +34,20 @@ def deep(request, monkeypatch):
     return request.param
 
 
-def _redact(engine, payload):
-    vault = Vault(synthetic=False)
-    redacted = engine.redact_payload(payload, vault)
-    return redacted, vault
+# Synthetic stand-ins (a fake email in place of the real one) are the default; tagged
+# placeholders are the other mode. Every test runs in both.
+@pytest.fixture(autouse=True, params=[True, False], ids=["synthetic", "tagged"])
+def synthetic(request):
+    return request.param
+
+
+@pytest.fixture
+def _redact(synthetic):
+    def run(engine, payload):
+        vault = Vault(synthetic=synthetic)
+        return engine.redact_payload(payload, vault), vault
+
+    return run
 
 
 def _assert_one_way(vault, value):
@@ -57,7 +67,7 @@ def _assert_restorable(vault, value):
 
 
 @pytest.mark.parametrize("role", ["system", "developer"])
-def test_responses_input_system_and_developer_items_are_one_way(engine, deep, role):
+def test_responses_input_system_and_developer_items_are_one_way(engine, deep, role, _redact):
     payload = {
         "input": [
             {"role": role, "content": f"Escalate to {SECRET}"},
@@ -73,7 +83,7 @@ def test_responses_input_system_and_developer_items_are_one_way(engine, deep, ro
 
 
 @pytest.mark.parametrize("role", ["system", "developer"])
-def test_chat_system_and_developer_messages_are_one_way(engine, deep, role):
+def test_chat_system_and_developer_messages_are_one_way(engine, deep, role, _redact):
     payload = {
         "messages": [
             {"role": role, "content": f"Escalate to {SECRET}"},
@@ -88,7 +98,7 @@ def test_chat_system_and_developer_messages_are_one_way(engine, deep, role):
     _assert_restorable(vault, CALLER)
 
 
-def test_top_level_system_and_instructions_are_one_way(engine, deep):
+def test_top_level_system_and_instructions_are_one_way(engine, deep, _redact):
     for payload in (
         {"system": f"Escalate to {SECRET}", "messages": []},
         {"system": [{"type": "text", "text": f"Escalate to {SECRET}"}], "messages": []},
@@ -99,7 +109,7 @@ def test_top_level_system_and_instructions_are_one_way(engine, deep):
         _assert_one_way(vault, SECRET)
 
 
-def test_a_value_the_caller_also_sent_stays_restorable(engine, deep):
+def test_a_value_the_caller_also_sent_stays_restorable(engine, deep, _redact):
     """The caller already knows a value they sent, so restoring it discloses nothing."""
     payload = {
         "instructions": f"The user is {CALLER}",
@@ -110,7 +120,7 @@ def test_a_value_the_caller_also_sent_stays_restorable(engine, deep):
 
 
 @pytest.mark.parametrize("system_first", [True, False], ids=["system-first", "user-first"])
-def test_a_caller_typing_the_applications_value_cannot_unlock_it(engine, system_first):
+def test_a_caller_typing_the_applications_value_cannot_unlock_it(engine, system_first, _redact):
     """One shared token would make the system prompt's placeholder restorable as soon as
     the caller typed the same value, so asking the model to repeat its instructions would
     confirm a guess. The two occurrences get different tokens instead."""
@@ -127,8 +137,8 @@ def test_a_caller_typing_the_applications_value_cannot_unlock_it(engine, system_
     assert vault.rehydrate(user_token) == SECRET
 
 
-def test_a_later_turn_cannot_unlock_an_earlier_system_value(engine):
-    vault = Vault(synthetic=False)
+def test_a_later_turn_cannot_unlock_an_earlier_system_value(engine, synthetic):
+    vault = Vault(synthetic=synthetic)
     first = engine.redact_payload({"messages": [{"role": "system", "content": f"Escalate to {SECRET}"}]}, vault)
     system_token = first["messages"][0]["content"].removeprefix("Escalate to ")
 
@@ -136,7 +146,7 @@ def test_a_later_turn_cannot_unlock_an_earlier_system_value(engine):
     assert vault.rehydrate(system_token) == system_token
 
 
-def test_a_system_message_name_is_one_way(engine):
+def test_a_system_message_name_is_one_way(engine, _redact):
     payload = {"messages": [{"role": "system", "name": "Jane_Officer", "content": "hi"}]}
     redacted, vault = _redact(engine, payload)
 
@@ -146,7 +156,7 @@ def test_a_system_message_name_is_one_way(engine):
 
 
 @pytest.mark.parametrize("field", ["user", "safety_identifier"])
-def test_end_user_identifiers_are_one_way(engine, deep, field):
+def test_end_user_identifiers_are_one_way(engine, deep, field, _redact):
     """The application sets these to identify its end user. A reply that echoes the
     placeholder must not hand that identifier to whoever is reading the reply."""
     redacted, vault = _redact(engine, {"messages": [{"role": "user", "content": "hi"}], field: SECRET})
@@ -156,7 +166,7 @@ def test_end_user_identifiers_are_one_way(engine, deep, field):
 
 
 @pytest.mark.parametrize("shape", [{"email": SECRET}, [SECRET]], ids=["object", "list"])
-def test_end_user_identifiers_of_any_shape_are_one_way(engine, deep, shape):
+def test_end_user_identifiers_of_any_shape_are_one_way(engine, deep, shape, _redact):
     """Nothing upstream checks the field's type, so an object or list must not fall back
     to the restorable deep walk, or out in clear with deep redaction off."""
     redacted, vault = _redact(engine, {"messages": [], "user": shape})
@@ -165,7 +175,7 @@ def test_end_user_identifiers_of_any_shape_are_one_way(engine, deep, shape):
     _assert_one_way(vault, SECRET)
 
 
-def test_an_operator_protected_user_field_is_left_alone(engine, monkeypatch):
+def test_an_operator_protected_user_field_is_left_alone(engine, monkeypatch, _redact):
     monkeypatch.setattr(settings, "PAYLOAD_PROTECTED_KEYS", "user")
     redacted, _ = _redact(engine, {"messages": [], "user": SECRET})
     assert redacted["user"] == SECRET
@@ -174,7 +184,7 @@ def test_an_operator_protected_user_field_is_left_alone(engine, monkeypatch):
 # 2. function_call_output with a list of parts.
 
 
-def test_function_call_output_parts_are_redacted(engine, deep):
+def test_function_call_output_parts_are_redacted(engine, deep, _redact):
     payload = {
         "input": [
             {
@@ -198,7 +208,7 @@ def test_function_call_output_parts_are_redacted(engine, deep):
 # 3. Replayed custom_tool_call input and code_interpreter_call code.
 
 
-def test_replayed_custom_tool_and_code_interpreter_calls_are_redacted(engine, deep):
+def test_replayed_custom_tool_and_code_interpreter_calls_are_redacted(engine, deep, _redact):
     payload = {
         "input": [
             {"type": "custom_tool_call", "call_id": "c1", "name": "shell", "input": f"mail {CALLER}"},
@@ -220,7 +230,7 @@ def test_replayed_custom_tool_and_code_interpreter_calls_are_redacted(engine, de
 # 4. Typed prompt variables.
 
 
-def test_prompt_object_variables_are_redacted(engine, deep):
+def test_prompt_object_variables_are_redacted(engine, deep, _redact):
     payload = {
         "prompt": {
             "id": "pmpt_123",
@@ -247,7 +257,7 @@ def _document_message(source, **extra):
     return {"messages": [{"role": "user", "content": [{"type": "document", "source": source, **extra}]}]}
 
 
-def test_document_text_source_title_and_context_are_redacted(engine, deep):
+def test_document_text_source_title_and_context_are_redacted(engine, deep, _redact):
     payload = _document_message(
         {"type": "text", "media_type": "text/plain", "data": f"Contract for {CALLER}"},
         title=f"Notes from {CALLER}",
@@ -264,7 +274,7 @@ def test_document_text_source_title_and_context_are_redacted(engine, deep):
     [f"Contract for {CALLER}", [{"type": "text", "text": f"Contract for {CALLER}"}]],
     ids=["string", "blocks"],
 )
-def test_document_content_source_is_redacted(engine, deep, content):
+def test_document_content_source_is_redacted(engine, deep, content, _redact):
     redacted, _ = _redact(engine, _document_message({"type": "content", "content": content}))
     assert CALLER not in json.dumps(redacted)
 
@@ -278,7 +288,7 @@ def test_document_content_source_is_redacted(engine, deep, content):
     ],
     ids=["base64", "url", "file"],
 )
-def test_document_binary_sources_are_untouched(engine, deep, source):
+def test_document_binary_sources_are_untouched(engine, deep, source, _redact):
     redacted, _ = _redact(engine, _document_message(source))
     assert redacted["messages"][0]["content"][0]["source"] == source
 
@@ -286,7 +296,7 @@ def test_document_binary_sources_are_untouched(engine, deep, source):
 # 6. extra_body.
 
 
-def test_extra_body_is_redacted_and_its_application_fields_are_one_way(engine, monkeypatch):
+def test_extra_body_is_redacted_and_its_application_fields_are_one_way(engine, monkeypatch, _redact):
     monkeypatch.setattr(settings, "ENABLE_DEEP_PAYLOAD_REDACTION", True)
     payload = {
         "messages": [{"role": "user", "content": "hi"}],
