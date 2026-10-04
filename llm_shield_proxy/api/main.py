@@ -201,6 +201,28 @@ def build_upstream_client() -> httpx.AsyncClient:
     )
 
 
+async def _start_ext_proc(serve_ext_proc: Any, sock_path: str) -> Any:
+    import os
+
+    if os.name == "nt":
+        return await serve_ext_proc(sock_path)
+
+    sock_dir = os.path.dirname(sock_path)
+    # SECURITY: Restrict socket parent dir to proxy/envoy group with sticky bit (1770)
+    os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
+    os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
+
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+
+    # SECURITY: Use umask to prevent TOCTOU privilege escalation during socket creation.
+    old_umask = os.umask(0o117)  # Inverts to 0o660
+    try:
+        return await serve_ext_proc(sock_path)
+    finally:
+        os.umask(old_umask)
+
+
 def warn_if_no_client_can_authenticate() -> None:
     """Say at startup that every request will 401, instead of leaving it to the first caller."""
     if (
@@ -333,23 +355,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             raise RuntimeError(
                 "ENABLE_EXT_PROC is set but the ext-proc service could not be imported"
             )
-        if os.name != "nt":
-            sock_dir = os.path.dirname(sock_path)
-            # SECURITY: Restrict socket parent dir to proxy/envoy group with sticky bit (1770)
-            os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
-            os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
-
-            if os.path.exists(sock_path):
-                os.unlink(sock_path)
-
-            # SECURITY: Use umask to prevent TOCTOU privilege escalation during socket creation.
-            old_umask = os.umask(0o117)  # Inverts to 0o660
-            try:
-                grpc_server = await serve_ext_proc(sock_path)
-            finally:
-                os.umask(old_umask)
-        else:
-            grpc_server = await serve_ext_proc(sock_path)
+        try:
+            grpc_server = await _start_ext_proc(serve_ext_proc, sock_path)
+        except OSError as exc:
+            # The default is on, and its socket lives in /var/run, which only the container
+            # image creates. A plain `pip install` run as a normal user died here before
+            # serving a request. An operator who set ENABLE_EXT_PROC still gets the error.
+            if "ENABLE_EXT_PROC" in settings.model_fields_set:
+                raise
+            logger.warning(
+                "Envoy ext_proc listener not started (%s at %s). The HTTP proxy is unaffected. "
+                "Set EXT_PROC_SOCK_PATH to a writable path to use it, or ENABLE_EXT_PROC=false "
+                "to silence this.",
+                type(exc).__name__,
+                sock_path,
+            )
 
     yield
 

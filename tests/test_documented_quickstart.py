@@ -124,9 +124,26 @@ def _run_documented_pair(proxy_env: dict[str, str], doc_port: int, selfcheck: li
 
     assert result.returncode == 0 and "CLEAN" in result.stdout, (
         f"the documented commands did not produce CLEAN (exit {result.returncode}).\n"
-        f"--- selfcheck ---\n{result.stdout}{result.stderr}\n"
+        f"--- selfcheck ---\n{_without_specimens(result.stdout)}{result.stderr}\n"
         f"--- proxy ---\n{proxy_log[-4000:]}"
     )
+
+
+def _without_specimens(report: str) -> str:
+    """Drop the "What leaked" section, which prints the run's synthetic values.
+
+    Those belong in an operator's terminal, not in a public CI log. The verdict, the
+    per-type table and the checks are enough to see what failed.
+    """
+    kept, skipping = [], False
+    for line in report.splitlines():
+        if line.strip() == "What leaked, and why it matters":
+            skipping = True
+        elif skipping and line.strip() in ("How it leaked", "Checks"):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept) + "\n"
 
 
 def test_ci_page_local_example_reports_clean(tmp_path):
@@ -202,3 +219,14 @@ def test_compose_demo_key_is_accepted_by_the_compose_proxy():
         "the demo key is public, so the compose proxy must not listen beyond this machine"
     )
 
+
+
+def test_a_failure_message_carries_no_specimen():
+    report = (
+        "  LEAK\n\n  What leaked, and why it matters\n\nLEAK  EMAIL reached the model provider\n"
+        "      you sent:         someone@example.org\n\n  How it leaked\n    EMAIL  literal\n"
+        "\n  Checks\n    sse_validity  pass\n"
+    )
+    trimmed = _without_specimens(report)
+    assert "someone@example.org" not in trimmed
+    assert "LEAK" in trimmed and "How it leaked" in trimmed and "sse_validity" in trimmed
