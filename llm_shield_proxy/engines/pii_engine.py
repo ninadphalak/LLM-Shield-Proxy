@@ -407,12 +407,13 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 
 
 # Inside a message, content block or input item, every field the shape walk does not handle
-# is scanned (see _redact_remaining_fields), except STRING values under these keys (an
-# object under the same name is ordinary data and is walked). They are not text: identifiers that
-# link a tool result to its call or name a tool, blobs the provider verifies byte for byte (a
-# thinking `signature`, `redacted_thinking` and audio `data`, `encrypted_content`), and media
-# references (`image_url`, an image block's `source`, `file_data`). Rewriting them breaks the
-# request for no privacy gain, and their high entropy is exactly what Tier 2 flags.
+# is scanned (see _redact_remaining_fields), with two exceptions.
+#
+# A STRING under one of these keys, at any depth, goes out unchanged: identifiers that link a
+# tool result to its call or name a tool, and blobs the provider verifies byte for byte (a
+# thinking `signature`, `redacted_thinking` and audio `data`, `encrypted_content`, `file_data`).
+# Rewriting them breaks the request, and their high entropy is what Tier 2 flags. An object
+# under the same name is ordinary data and is walked.
 _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
     {
         "id",
@@ -423,13 +424,17 @@ _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
         "signature",
         "data",
         "encrypted_content",
-        "image_url",
-        "input_audio",
         "file_data",
         "file_id",
-        "source",
     }
 )
+
+# Media references, skipped whole, but only as a DIRECT field of a message, block or input
+# item: an image or audio part's `image_url`, `input_audio` or `source`. Rewriting an image
+# URL breaks the reference, and an inline image is a data: URI the blob policy would reject.
+# A deeper key with the same name is ordinary data and is walked. A document block's `source`
+# is text and is handled by _redact_document_block.
+_MEDIA_KEYS: frozenset[str] = frozenset({"image_url", "input_audio", "source"})
 
 # Replayed model and caller text found by that scan. Scanned whole whatever its length: past
 # the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
@@ -459,7 +464,7 @@ _INPUT_ITEM_HANDLED_KEYS: frozenset[str] = frozenset(
 def _block_handled_keys(block: Dict[str, Any]) -> frozenset[str]:
     """The keys of one content block the shape walk handled."""
     if block.get("type") == "document":
-        return _BLOCK_HANDLED_KEYS | {"title", "context"}
+        return _BLOCK_HANDLED_KEYS | {"title", "context", "source"}
     return _BLOCK_HANDLED_KEYS
 
 
@@ -1234,13 +1239,16 @@ class PIIEngine:
 
         The default is to scan, like `redact_model_originated_tree` on the reply path: a walk
         that follows known shapes forwards whatever field a provider adds next. Skipped:
-        `handled`, operator- and policy-protected keys, the built-in structural keys, and
-        _OPAQUE_MESSAGE_KEYS. Text under _REPLAYED_TEXT_KEYS is scanned whole; anything
-        else past the blob ceiling gets the unmapped-blob treatment, as deep redaction does.
+        `handled`, operator- and policy-protected keys, the built-in structural keys,
+        _MEDIA_KEYS here, and strings under _OPAQUE_MESSAGE_KEYS at any depth. Text under
+        _REPLAYED_TEXT_KEYS is scanned whole; anything else past the blob ceiling gets the
+        unmapped-blob treatment, as deep redaction does.
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         for key, value in node.items():
-            if key in handled or key in protected or (key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str)):
+            if key in handled or key in protected or key in _MEDIA_KEYS:
+                continue
+            if key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str):
                 continue
             node[key] = self._deep_redact(
                 value,
@@ -1286,16 +1294,13 @@ class PIIEngine:
         keyword, so none is one-way there.
 
         A string directly under a key in `text_keys` is scanned in full, past the blob
-        ceiling too. A STRING directly under a key in `opaque_string_keys` goes out unchanged,
-        and so does any `data:` URI in such a walk (media, not text); an object under the
-        same key name is ordinary data and is walked.
+        ceiling too. A STRING directly under a key in `opaque_string_keys` goes out
+        unchanged; an object under the same key name is ordinary data and is walked.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
 
         if isinstance(node, str):
-            if opaque_string_keys and node.startswith("data:"):
-                return node
             if max_string_length is not None and (len(node) > max_string_length or node.startswith("data:")):
                 return self._handle_unmapped_blob(node, json_path, active_profile)
             return self.redact_text(node, vault, active_profile, restorable=restorable)
@@ -1510,7 +1515,7 @@ class PIIEngine:
         # A replayed reasoning item quotes the conversation in its summary parts.
         summary = item_copy.get("summary")
         if isinstance(summary, list):
-            item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile)
+            item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile, restorable)
 
         # function_call / mcp_call hold `arguments`, their outputs `output`, a
         # custom_tool_call holds its free-form `input`, and a code_interpreter_call its
@@ -1521,7 +1526,7 @@ class PIIEngine:
 
         # A function_call_output can return a list of input_text / input_image parts.
         if isinstance(item_copy.get("output"), list):
-            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile)
+            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile, restorable)
 
         # A replayed code_interpreter_call carries what its code printed.
         outputs = item_copy.get("outputs")

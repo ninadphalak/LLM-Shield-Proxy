@@ -193,3 +193,29 @@ def test_an_inline_image_survives_the_block_policy(engine, deep, vault, monkeypa
     uri = "data:image/png;base64," + base64.b64encode(bytes(range(256)) * 40).decode()
     payload = {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": uri, "detail": "low"}}]}]}
     assert uri in _sent(engine, vault, payload)
+
+
+def test_replayed_text_that_starts_like_a_data_uri_is_still_scanned(engine, deep, vault):
+    """Round 2: a blanket data: pass-through let `data:,SSN ...` in reasoning go out in clear.
+
+    Replayed text keys are scanned whole whatever the prefix. An unknown field holding a
+    data: URI follows the unmapped-blob rule deep redaction already applies to unknown
+    top-level fields (forwarded, as media, under the default policy; #72).
+    """
+    for key in ("reasoning_content", "refusal", "thinking"):
+        message = {"role": "assistant", "content": "ok", key: f"data:,SSN {SSN} mail {EMAIL}"}
+        sent = _sent(engine, vault, {"messages": [message]})
+        assert SSN not in sent
+        assert EMAIL not in sent
+
+
+def test_a_media_url_is_not_rewritten(engine, deep, vault):
+    """An image part's URL is a reference; rewriting an email-shaped path breaks it."""
+    url = f"https://cdn.example.com/{EMAIL}.png"
+    payload = {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]}]}
+    assert url in _sent(engine, vault, payload)
+
+
+def test_media_key_names_deeper_down_are_ordinary_data(engine, deep, vault):
+    message = {"role": "user", "content": "hi", "metadata": {"source": {"author": EMAIL}, "image_url": EMAIL}}
+    assert EMAIL not in _sent(engine, vault, {"messages": [message]})
