@@ -164,6 +164,11 @@ helm install llm-shield deploy/helm/llm-shield-proxy \
 ```
 
 Any other setting goes in `extraEnv` as a `name`/`value` list. `webhook.enabled=true` also
-serves the [mutating webhook](features/secure-infrastructure-service-mesh/zero-dependency-kubernetes-mutating-webhook.md).
-The smaller chart in `charts/llm-shield-proxy` takes `env.UPSTREAM_API_KEY` and
-`config.VALID_VIRTUAL_KEYS` as values instead.
+serves the [mutating webhook](features/secure-infrastructure-service-mesh/zero-dependency-kubernetes-mutating-webhook.md);
+set `webhook.sidecarSecretName` to the Secret each injected sidecar should load its keys
+from. The chart runs as the image's non-root user, adds a PodDisruptionBudget, and requests
+128Mi of memory with a 256Mi limit: the proxy holds about 75-100 MiB idle.
+
+This is the only chart. The second one that lived in `charts/llm-shield-proxy` was removed in
+1.6.8; its values map to this one as `env.UPSTREAM_API_KEY` and `config.VALID_VIRTUAL_KEYS`
+to keys in the Secret above.

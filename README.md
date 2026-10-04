@@ -350,12 +350,9 @@ Contributions are welcome through [issues](https://github.com/ninadphalak/LLM-Sh
 [CONTRIBUTING.md](CONTRIBUTING.md). The most valuable contribution is an independent benchmark run
 against a gateway you operate, whether it matches or differs from a row above.
 
-Source code is Apache 2.0; documentation and diagrams may carry CC BY 4.0 terms. See
-[LICENSE](LICENSE).
-
-The author identifies U.S. application numbers **64/126,730** and **64/139,263** as pending filings
-related to streaming transformation and structured stateless masking. Pending applications are not
-issued patents; verify status with counsel and official records before relying on them.
+Source code is Apache 2.0, which includes a patent license for using this code;
+documentation and diagrams may carry CC BY 4.0 terms. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE).
 
 If you reference the architecture or benchmark methodology, use [CITATION.cff](CITATION.cff) or:
 

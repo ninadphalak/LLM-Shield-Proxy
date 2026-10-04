@@ -66,8 +66,8 @@ def test_matching_label_appends_only_the_configured_sidecar(webhook_client):
                     {"name": "ENABLE_TIER3_ONNX_NER", "value": "false"},
                 ],
                 "resources": {
-                    "limits": {"memory": "60Mi", "cpu": "200m"},
-                    "requests": {"memory": "25Mi", "cpu": "50m"},
+                    "limits": {"memory": "256Mi", "cpu": "500m"},
+                    "requests": {"memory": "128Mi", "cpu": "100m"},
                 },
             },
         }
@@ -136,3 +136,29 @@ def test_helm_turns_the_webhook_route_on_with_the_webhook():
     repo_root = Path(__file__).resolve().parents[1]
     deployment_template = (repo_root / "deploy/helm/llm-shield-proxy/templates/deployment.yaml").read_text()
     assert "- name: ENABLE_K8S_WEBHOOK\n              value: {{ .Values.webhook.enabled | quote }}" in deployment_template
+
+
+def _injected_container(client, annotations=None):
+    review = _admission_review(labels={"llm-shield.io/inject": "true"})
+    if annotations is not None:
+        review["request"]["object"]["metadata"]["annotations"] = annotations
+    response = client.post("/v1/k8s/mutate", json=review)
+    return json.loads(base64.b64decode(response.json()["response"]["patch"]))[0]["value"]
+
+
+def test_sidecar_loads_its_keys_from_the_configured_secret(webhook_client, monkeypatch):
+    """Without keys the injected sidecar answered every request with a 401."""
+    monkeypatch.setattr(settings, "K8S_SIDECAR_SECRET_NAME", "shield-keys")
+    assert _injected_container(webhook_client)["envFrom"] == [{"secretRef": {"name": "shield-keys"}}]
+
+
+def test_pod_annotation_chooses_the_keys_secret(webhook_client, monkeypatch):
+    monkeypatch.setattr(settings, "K8S_SIDECAR_SECRET_NAME", "shield-keys")
+    container = _injected_container(webhook_client, {"llm-shield.io/keys-secret": "team-a-keys"})
+    assert container["envFrom"] == [{"secretRef": {"name": "team-a-keys"}}]
+
+
+def test_an_invalid_secret_name_is_not_copied_into_the_patch(webhook_client, monkeypatch):
+    monkeypatch.setattr(settings, "K8S_SIDECAR_SECRET_NAME", None)
+    container = _injected_container(webhook_client, {"llm-shield.io/keys-secret": "x\"}], \"y"})
+    assert "envFrom" not in container
