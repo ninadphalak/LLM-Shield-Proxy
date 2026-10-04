@@ -104,8 +104,7 @@ async def mutate_webhook(request: Request) -> JSONResponse:
             if keys_secret is None:
                 logger.warning(
                     "Injected sidecar has no keys Secret; it will reject every request. Set "
-                    "K8S_SIDECAR_SECRET_NAME or the pod annotation %s.",
-                    KEYS_SECRET_ANNOTATION,
+                    "K8S_SIDECAR_SECRET_NAME or the pod annotation llm-shield.io/keys-secret."
                 )
             patch = _build_sidecar_patch(keys_secret)
             patch_b64 = base64.b64encode(json.dumps(patch).encode("utf-8")).decode("utf-8")
