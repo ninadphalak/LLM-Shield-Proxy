@@ -127,7 +127,8 @@ class Vault:
         self.token_to_original: Dict[str, str] = {}
         self.type_counters: Dict[str, int] = {}
         self.max_token_length: int = 0
-        # Values redacted out of text the reply must never restore (tool definitions).
+        # Values redacted out of text the reply must never restore (tool definitions,
+        # system and developer turns).
         # Kept out of `token_to_original` entirely, so no rehydration path can find them.
         self.one_way_original_to_token: Dict[str, str] = {}
         self._one_way_tokens: set[str] = set()
@@ -230,13 +231,11 @@ class Vault:
             if original_val in self.original_to_token:
                 return self.original_to_token[original_val]
 
-            # Seen first in a tool definition, now sent by the caller: it becomes
-            # restorable under the token the model has already seen.
-            token = self.one_way_original_to_token.pop(original_val, None)
-            if token is not None:
-                self._one_way_tokens.discard(token)
-            else:
-                token = self._mint_token(original_val, entity_type)
+            # A value already redacted one-way gets a SECOND, restorable token rather
+            # than unlocking the first. Sharing one token let a caller type a value they
+            # guessed, ask the model to repeat the system prompt, and see the guess
+            # restored there: a confirmation of the application's text.
+            token = self._mint_token(original_val, entity_type)
             self._register_restorable(original_val, token)
 
         self._saved()
@@ -245,15 +244,13 @@ class Vault:
     def get_or_create_one_way_token(self, original_val: str, entity_type: str) -> str:
         """A token for a value the reply must never get back.
 
-        Used for caller-authored static text such as tool descriptions. The token is
-        never entered into `token_to_original`, so rehydration cannot restore it; a
-        model that echoes it echoes a placeholder. A value the caller also sends on a
-        restorable path keeps its restorable token, since restoring it discloses nothing
-        the caller did not send themselves.
+        Used for application-authored text: tool descriptions, system and developer
+        turns. The token is never entered into `token_to_original`, so rehydration
+        cannot restore it; a model that echoes it echoes a placeholder. A value the
+        caller also sends on a restorable path gets a separate restorable token, never
+        this one, so typing the value cannot unlock this occurrence.
         """
         with self._lock:
-            if original_val in self.original_to_token:
-                return self.original_to_token[original_val]
             if original_val in self.one_way_original_to_token:
                 return self.one_way_original_to_token[original_val]
 

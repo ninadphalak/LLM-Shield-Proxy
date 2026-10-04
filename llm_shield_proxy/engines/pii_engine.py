@@ -17,7 +17,7 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote
 
 import yaml
@@ -366,6 +366,15 @@ _TARGETED_PAYLOAD_KEYS: frozenset[str] = frozenset(
     {"messages", "prompt", "system", "input", "instructions", "tools", "functions"}
 )
 
+# Turns the application writes, not the caller. Their values are redacted one-way, like a
+# tool description: a caller who gets the model to echo the placeholder must receive the
+# placeholder, not the application's value.
+_PRIVILEGED_ROLES: frozenset[str] = frozenset({"system", "developer"})
+
+# Anthropic document sources that hold text. Base64, url and file sources hold binary or a
+# reference and pass through.
+_TEXT_DOCUMENT_SOURCES: frozenset[str] = frozenset({"text", "content"})
+
 # Tool definitions: redacted whatever ENABLE_DEEP_PAYLOAD_REDACTION says, because they are
 # a known request shape, not an unrecognised field.
 _TOOL_DEFINITION_KEYS: tuple[str, ...] = ("tools", "functions")
@@ -400,6 +409,17 @@ def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
     """
     explicit = settings.payload_operator_protected_keys_set | _policy_skip_keys()
     return protected - (DEFAULT_PROTECTED_PAYLOAD_KEYS - explicit)
+
+
+def _token_minter(vault: Any, restorable: bool) -> Callable[[str, str], str]:
+    """The vault method that mints a token, restorable or one-way.
+
+    A vault that cannot mint one-way tokens gets a fixed marker rather than a
+    restorable token.
+    """
+    if restorable:
+        return vault.get_or_create_token
+    return getattr(vault, "get_or_create_one_way_token", None) or (lambda _value, _type: "[REDACTED]")
 
 
 class UnmappedBlobError(ValueError):
@@ -886,10 +906,7 @@ class PIIEngine:
         if not spans:
             return working_text
 
-        if restorable:
-            mint = vault.get_or_create_token
-        else:
-            mint = getattr(vault, "get_or_create_one_way_token", None) or (lambda _value, _type: "[REDACTED]")
+        mint = _token_minter(vault, restorable)
 
         # Replace spans from right to left to preserve preceding string indices
         result = list(working_text)
@@ -940,6 +957,7 @@ class PIIEngine:
 
                     msg_copy = msg.copy()
                     role = msg_copy.get("role", "")
+                    restorable = role not in _PRIVILEGED_ROLES
 
                     # 1. Redact message content (string or multi-part content blocks)
                     if "content" in msg_copy and isinstance(msg_copy["content"], str):
@@ -949,7 +967,9 @@ class PIIEngine:
                             content_str = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
                                 "[SYSTEM_OVERRIDE_BLOCKED]", content_str
                             )
-                        msg_copy["content"] = self.redact_text(content_str, vault, active_profile)
+                        msg_copy["content"] = self.redact_text(
+                            content_str, vault, active_profile, restorable=restorable
+                        )
                     elif "content" in msg_copy and isinstance(msg_copy["content"], list):
                         new_content_blocks = []
                         for block in msg_copy["content"]:
@@ -961,7 +981,11 @@ class PIIEngine:
                                         text_val = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
                                             "[SYSTEM_OVERRIDE_BLOCKED]", text_val
                                         )
-                                    block_copy["text"] = self.redact_text(text_val, vault, active_profile)
+                                    block_copy["text"] = self.redact_text(
+                                        text_val, vault, active_profile, restorable=restorable
+                                    )
+                                if block_copy.get("type") == "document":
+                                    self._redact_document_block(block_copy, vault, active_profile, restorable)
                                 # A replayed Anthropic tool call carries its arguments as a
                                 # JSON object in `input`, not as a string.
                                 if block_copy.get("type") == "tool_use" and "input" in block_copy:
@@ -983,11 +1007,14 @@ class PIIEngine:
                     if "name" in msg_copy and isinstance(msg_copy["name"], str):
                         raw_name = msg_copy["name"]
                         spaced_name = raw_name.replace("_", " ")
-                        redacted_spaced = self.redact_text(spaced_name, vault, active_profile)
+                        redacted_spaced = self.redact_text(
+                            spaced_name, vault, active_profile, restorable=restorable
+                        )
                         if redacted_spaced != spaced_name:
                             msg_copy["name"] = redacted_spaced.replace(" ", "_")
                         elif raw_name and raw_name[0].isupper():
-                            msg_copy["name"] = vault.get_or_create_token(raw_name, "PERSON").replace(" ", "_")
+                            mint = _token_minter(vault, restorable)
+                            msg_copy["name"] = mint(raw_name, "PERSON").replace(" ", "_")
 
                     # 3. Redact OpenAI tool_calls function arguments in multi-turn agent history
                     if "tool_calls" in msg_copy and isinstance(msg_copy["tool_calls"], list):
@@ -1028,21 +1055,31 @@ class PIIEngine:
                     self.redact_text(p, vault, active_profile) if isinstance(p, str) else p
                     for p in new_payload["prompt"]
                 ]
+            elif isinstance(new_payload["prompt"], dict):
+                new_payload["prompt"] = self._redact_prompt_object(new_payload["prompt"], vault, active_profile)
 
-        # Redact system prompt if separated at top level.
+        # Redact system prompt if separated at top level. One-way: see _PRIVILEGED_ROLES.
         if "system" in new_payload:
             if isinstance(new_payload["system"], str):
-                new_payload["system"] = self.redact_text(new_payload["system"], vault, active_profile)
+                new_payload["system"] = self.redact_text(
+                    new_payload["system"], vault, active_profile, restorable=False
+                )
             elif isinstance(new_payload["system"], list):
                 new_payload["system"] = self._redact_text_blocks(
-                    new_payload["system"], vault, active_profile
+                    new_payload["system"], vault, active_profile, restorable=False
                 )
 
-        # Redact the Responses API instructions field.
-        if "instructions" in new_payload and isinstance(new_payload["instructions"], str):
-            new_payload["instructions"] = self.redact_text(
-                new_payload["instructions"], vault, active_profile
-            )
+        # Redact the Responses API instructions field, one-way like `system`.
+        if "instructions" in new_payload:
+            if isinstance(new_payload["instructions"], str):
+                new_payload["instructions"] = self.redact_text(
+                    new_payload["instructions"], vault, active_profile, restorable=False
+                )
+            elif isinstance(new_payload["instructions"], list):
+                new_payload["instructions"] = [
+                    self._redact_input_item(item, vault, active_profile, restorable=False)
+                    for item in new_payload["instructions"]
+                ]
 
         # Redact embeddings / moderation / responses input field
         if "input" in new_payload:
@@ -1077,10 +1114,19 @@ class PIIEngine:
                     one_way_keys=_TOOL_PROSE_KEYS,
                 )
 
+        # A gateway such as LiteLLM merges `extra_body` into the provider request, so it
+        # can carry the same fields as the top level, `system` and `tools` included. Walk
+        # it as a request of its own, or deep redaction would put that application text
+        # into the restorable vault.
+        if isinstance(new_payload.get("extra_body"), dict) and "extra_body" not in protected:
+            new_payload["extra_body"] = self.redact_payload(
+                new_payload["extra_body"], vault, active_profile, depth=depth + 1, max_depth=max_depth
+            )
+
         # Everything else still reaches the provider verbatim. Walk those too.
         if settings.ENABLE_DEEP_PAYLOAD_REDACTION:
             for key in list(new_payload):
-                if key in _TARGETED_PAYLOAD_KEYS or key in protected:
+                if key in _TARGETED_PAYLOAD_KEYS or key in protected or key == "extra_body":
                     continue
                 new_payload[key] = self._deep_redact(
                     new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key
@@ -1253,6 +1299,8 @@ class PIIEngine:
                     continue
                 if isinstance(block.get("text"), str):
                     block["text"] = self.redact_text(block["text"], vault, active_profile)
+                if block.get("type") == "document":
+                    self._redact_document_block(block, vault, active_profile)
                 if block.get("type") == "tool_use" and "input" in block:
                     block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
                 nested = block.get("content")
@@ -1272,13 +1320,16 @@ class PIIEngine:
         blocks: List[Any],
         vault: Vault,
         active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
     ) -> List[Any]:
         """Redacts the `text` of every content block, leaving other block types alone."""
         redacted: List[Any] = []
         for block in blocks:
             if isinstance(block, dict) and isinstance(block.get("text"), str):
                 block_copy = block.copy()
-                block_copy["text"] = self.redact_text(block_copy["text"], vault, active_profile)
+                block_copy["text"] = self.redact_text(
+                    block_copy["text"], vault, active_profile, restorable=restorable
+                )
                 redacted.append(block_copy)
             else:
                 redacted.append(block)
@@ -1289,30 +1340,105 @@ class PIIEngine:
         item: Any,
         vault: Vault,
         active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
     ) -> Any:
-        """Redacts one Responses API input item."""
+        """Redacts one Responses API input item.
+
+        A system or developer item is one-way whatever `restorable` says; see
+        _PRIVILEGED_ROLES.
+        """
+        if isinstance(item, str):
+            return self.redact_text(item, vault, active_profile, restorable=restorable)
         if not isinstance(item, dict):
             return item
 
         item_copy = item.copy()
+        restorable = restorable and item_copy.get("role") not in _PRIVILEGED_ROLES
         content = item_copy.get("content")
         if isinstance(content, str):
-            item_copy["content"] = self.redact_text(content, vault, active_profile)
+            item_copy["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
         elif isinstance(content, list):
-            item_copy["content"] = self._redact_text_blocks(content, vault, active_profile)
+            item_copy["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
 
         # A replayed reasoning item quotes the conversation in its summary parts.
         summary = item_copy.get("summary")
         if isinstance(summary, list):
             item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile)
 
-        # function_call / mcp_call hold `arguments`, their outputs `output`, and a
-        # custom_tool_call holds its free-form `input`.
-        for tool_field in ("arguments", "output", "input"):
+        # function_call / mcp_call hold `arguments`, their outputs `output`, a
+        # custom_tool_call holds its free-form `input`, and a code_interpreter_call its
+        # `code`.
+        for tool_field in ("arguments", "output", "input", "code"):
             if isinstance(item_copy.get(tool_field), str):
                 item_copy[tool_field] = self.redact_text(item_copy[tool_field], vault, active_profile)
 
+        # A function_call_output can return a list of input_text / input_image parts.
+        if isinstance(item_copy.get("output"), list):
+            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile)
+
+        # A replayed code_interpreter_call carries what its code printed.
+        outputs = item_copy.get("outputs")
+        if isinstance(outputs, list):
+            item_copy["outputs"] = [
+                {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile)}
+                if isinstance(entry, dict) and isinstance(entry.get("logs"), str)
+                else entry
+                for entry in outputs
+            ]
+
         return item_copy
+
+    def _redact_prompt_object(
+        self,
+        prompt: Dict[str, Any],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+    ) -> Dict[str, Any]:
+        """Redacts a Responses API prompt object's `variables`, which are the caller's values.
+
+        A variable is a string or a typed part; only `input_text` parts carry text. The
+        stored prompt's `id` and `version` pass through.
+        """
+        variables = prompt.get("variables")
+        if not isinstance(variables, dict):
+            return prompt
+        redacted: Dict[str, Any] = {}
+        for name, value in variables.items():
+            if isinstance(value, str):
+                value = self.redact_text(value, vault, active_profile)
+            elif isinstance(value, dict) and isinstance(value.get("text"), str):
+                value = {**value, "text": self.redact_text(value["text"], vault, active_profile)}
+            redacted[name] = value
+        return {**prompt, "variables": redacted}
+
+    def _redact_document_block(
+        self,
+        block: Dict[str, Any],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> None:
+        """Redacts an Anthropic document block in place: its text source, `title` and `context`.
+
+        A `text` source holds its text in `data`; a `content` source holds a string or
+        text blocks. Other sources pass through; see _TEXT_DOCUMENT_SOURCES.
+        """
+        for prose_key in ("title", "context"):
+            if isinstance(block.get(prose_key), str):
+                block[prose_key] = self.redact_text(block[prose_key], vault, active_profile, restorable=restorable)
+
+        source = block.get("source")
+        if not isinstance(source, dict) or source.get("type") not in _TEXT_DOCUMENT_SOURCES:
+            return
+        source = source.copy()
+        if isinstance(source.get("data"), str):
+            source["data"] = self.redact_text(source["data"], vault, active_profile, restorable=restorable)
+        content = source.get("content")
+        if isinstance(content, str):
+            source["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
+        elif isinstance(content, list):
+            source["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
+        block["source"] = source
 
     def _redact_tool_input(
         self,

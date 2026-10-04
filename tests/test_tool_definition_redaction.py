@@ -94,20 +94,23 @@ def test_one_value_gets_one_placeholder_across_a_tool_definition(engine):
 
 @pytest.mark.parametrize("message_first", [True, False])
 def test_a_value_the_caller_also_sent_as_a_message_stays_restorable(engine, message_first):
-    """If the caller typed the value themselves, restoring it discloses nothing new. It
-    must also be one token, not two, whichever field is walked first."""
+    """If the caller typed the value themselves, restoring THEIR occurrence discloses
+    nothing new. The tool's occurrence keeps its own one-way token, whichever field is
+    walked first: one shared token would let typing a guessed value unlock the tool's."""
     payload = _payload([{"role": "user", "content": f"Is {OWNER} on call?"}])
     if not message_first:
         payload = {"tools": payload["tools"], "messages": payload["messages"]}
     vault = Vault(synthetic=False)
     redacted = engine.redact_payload(payload, vault)
 
-    token = redacted["tools"][0]["function"]["description"].removeprefix("Escalate to ")
-    assert token in redacted["messages"][0]["content"]
-    assert vault.rehydrate(f"Ask {token}") == f"Ask {OWNER}"
+    tool_token = redacted["tools"][0]["function"]["description"].removeprefix("Escalate to ")
+    caller_token = redacted["messages"][0]["content"].removeprefix("Is ").removesuffix(" on call?")
+    assert tool_token != caller_token
+    assert vault.rehydrate(f"Ask {caller_token}") == f"Ask {OWNER}"
+    assert vault.rehydrate(tool_token) == tool_token
 
 
-def test_a_later_turn_that_sends_the_value_promotes_it(engine):
+def test_a_later_turn_that_sends_the_value_does_not_unlock_it(engine):
     """Order across turns: tool first (one-way), the caller's own message later."""
     vault = Vault(synthetic=False)
     first = engine.redact_payload(_payload(), vault)
@@ -115,8 +118,10 @@ def test_a_later_turn_that_sends_the_value_promotes_it(engine):
     assert vault.rehydrate(token) == token
 
     second = engine.redact_payload({"messages": [{"role": "user", "content": f"mail {OWNER}"}]}, vault)
-    assert second["messages"][0]["content"] == f"mail {token}"
-    assert vault.rehydrate(token) == OWNER
+    caller_token = second["messages"][0]["content"].removeprefix("mail ")
+    assert caller_token != token
+    assert vault.rehydrate(caller_token) == OWNER
+    assert vault.rehydrate(token) == token
 
 
 def test_one_way_placeholders_never_collide_with_restorable_ones(engine):
