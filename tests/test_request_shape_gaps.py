@@ -155,6 +155,16 @@ def test_end_user_identifiers_are_one_way(engine, deep, field):
     _assert_one_way(vault, SECRET)
 
 
+@pytest.mark.parametrize("shape", [{"email": SECRET}, [SECRET]], ids=["object", "list"])
+def test_end_user_identifiers_of_any_shape_are_one_way(engine, deep, shape):
+    """Nothing upstream checks the field's type, so an object or list must not fall back
+    to the restorable deep walk, or out in clear with deep redaction off."""
+    redacted, vault = _redact(engine, {"messages": [], "user": shape})
+
+    assert SECRET not in json.dumps(redacted)
+    _assert_one_way(vault, SECRET)
+
+
 def test_an_operator_protected_user_field_is_left_alone(engine, monkeypatch):
     monkeypatch.setattr(settings, "PAYLOAD_PROTECTED_KEYS", "user")
     redacted, _ = _redact(engine, {"messages": [], "user": SECRET})

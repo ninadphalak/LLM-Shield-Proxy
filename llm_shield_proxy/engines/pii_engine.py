@@ -1120,10 +1120,14 @@ class PIIEngine:
                 )
 
         # End-user identifiers; see _END_USER_ID_KEYS. Only a detected value is replaced,
-        # so an opaque id such as "user-123" goes through as sent.
+        # so an opaque id such as "user-123" goes through as sent. Nothing checks the
+        # field's type, so an object or list is walked one-way too.
         for key in _END_USER_ID_KEYS:
-            if isinstance(new_payload.get(key), str) and key not in protected:
-                new_payload[key] = self.redact_text(new_payload[key], vault, active_profile, restorable=False)
+            if key in new_payload and key not in protected:
+                new_payload[key] = self._deep_redact(
+                    new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key,
+                    restorable=False,
+                )
 
         # A gateway such as LiteLLM merges `extra_body` into the provider request, so it
         # can carry the same fields as the top level, `system` and `tools` included. Walk
@@ -1139,7 +1143,7 @@ class PIIEngine:
             for key in list(new_payload):
                 if key in _TARGETED_PAYLOAD_KEYS or key in protected or key == "extra_body":
                     continue
-                if key in _END_USER_ID_KEYS and isinstance(new_payload[key], str):
+                if key in _END_USER_ID_KEYS:
                     continue
                 new_payload[key] = self._deep_redact(
                     new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key
