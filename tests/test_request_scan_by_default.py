@@ -344,3 +344,16 @@ def test_every_sub_field_of_a_media_payload_must_look_like_media(engine, deep, v
     sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [block]}]})
     assert SSN not in sent
     assert EMAIL not in sent
+
+
+@pytest.mark.parametrize("payload", ["4111111111111111", "ABCDABCDABCDABCD", "abcdabcdabcdabcd"])
+def test_a_digit_or_single_case_run_in_a_bytes_field_is_not_media(engine, deep, vault, payload):
+    """Round 8: a card number is in the base64 alphabet. Real encoded bytes mix cases."""
+    block = {"type": "input_audio", "input_audio": {"data": payload, "format": "wav"}, "note": "x"}
+    redacted = engine.redact_payload({"messages": [{"role": "user", "content": [block]}]}, vault)
+    if payload.isdigit():
+        assert payload not in json.dumps(redacted)
+    # Not classified as media either way: the object is walked like any other field.
+    from llm_shield_proxy.engines.pii_engine import _is_media_field
+
+    assert not _is_media_field("input_audio", {"data": payload, "format": "wav"})

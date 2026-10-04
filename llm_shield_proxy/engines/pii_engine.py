@@ -436,8 +436,8 @@ _MEDIA_SOURCE_TYPES: frozenset[str] = frozenset({"base64", "url", "file"})
 _MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
 
 # What a media payload's bytes look like: standard base64, padded to a multiple of four, at
-# least 16 characters, line breaks allowed; or a data: URI. Text in a `data` field is not
-# media, whatever the field around it says.
+# least 16 characters, mixing upper and lower case, line breaks allowed; or a data: URI. Text
+# in a `data` field is not media, whatever the field around it says.
 _BASE64_PAYLOAD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
 
 
@@ -445,7 +445,11 @@ def _looks_like_media_bytes(payload: str) -> bool:
     if payload.startswith("data:"):
         return True
     compact = payload.replace("\r", "").replace("\n", "")
-    return len(compact) >= 16 and len(compact) % 4 == 0 and bool(_BASE64_PAYLOAD.fullmatch(compact))
+    if len(compact) < 16 or len(compact) % 4 or not _BASE64_PAYLOAD.fullmatch(compact):
+        return False
+    # Encoded bytes mix upper and lower case. A run of digits (a card number) or of one case
+    # is in the base64 alphabet too, and is text, not media.
+    return any(ch.isupper() for ch in compact) and any(ch.islower() for ch in compact)
 
 # Media fields that hold the bytes themselves.
 _MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
