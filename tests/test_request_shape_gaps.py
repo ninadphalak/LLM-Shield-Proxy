@@ -145,6 +145,22 @@ def test_a_system_message_name_is_one_way(engine):
     assert "Jane" not in vault.rehydrate(token)
 
 
+@pytest.mark.parametrize("field", ["user", "safety_identifier"])
+def test_end_user_identifiers_are_one_way(engine, deep, field):
+    """The application sets these to identify its end user. A reply that echoes the
+    placeholder must not hand that identifier to whoever is reading the reply."""
+    redacted, vault = _redact(engine, {"messages": [{"role": "user", "content": "hi"}], field: SECRET})
+
+    assert SECRET not in json.dumps(redacted)
+    _assert_one_way(vault, SECRET)
+
+
+def test_an_operator_protected_user_field_is_left_alone(engine, monkeypatch):
+    monkeypatch.setattr(settings, "PAYLOAD_PROTECTED_KEYS", "user")
+    redacted, _ = _redact(engine, {"messages": [], "user": SECRET})
+    assert redacted["user"] == SECRET
+
+
 # 2. function_call_output with a list of parts.
 
 

@@ -379,6 +379,11 @@ _TEXT_DOCUMENT_SOURCES: frozenset[str] = frozenset({"text", "content"})
 # a known request shape, not an unrecognised field.
 _TOOL_DEFINITION_KEYS: tuple[str, ...] = ("tools", "functions")
 
+# Identifiers the application sets for its end user. Redacted one-way whatever the deep
+# switch says: a reply that echoes the placeholder must not hand the identifier to its
+# reader.
+_END_USER_ID_KEYS: tuple[str, ...] = ("user", "safety_identifier")
+
 # Inside a tool definition, the keywords that hold caller-authored prose. Values redacted
 # out of them are one-way: the reply never gets them back. Everything else in a definition
 # stays restorable, because `enum`, `const`, `default` and `examples` hold values the model
@@ -1114,6 +1119,12 @@ class PIIEngine:
                     one_way_keys=_TOOL_PROSE_KEYS,
                 )
 
+        # End-user identifiers; see _END_USER_ID_KEYS. Only a detected value is replaced,
+        # so an opaque id such as "user-123" goes through as sent.
+        for key in _END_USER_ID_KEYS:
+            if isinstance(new_payload.get(key), str) and key not in protected:
+                new_payload[key] = self.redact_text(new_payload[key], vault, active_profile, restorable=False)
+
         # A gateway such as LiteLLM merges `extra_body` into the provider request, so it
         # can carry the same fields as the top level, `system` and `tools` included. Walk
         # it as a request of its own, or deep redaction would put that application text
@@ -1127,6 +1138,8 @@ class PIIEngine:
         if settings.ENABLE_DEEP_PAYLOAD_REDACTION:
             for key in list(new_payload):
                 if key in _TARGETED_PAYLOAD_KEYS or key in protected or key == "extra_body":
+                    continue
+                if key in _END_USER_ID_KEYS and isinstance(new_payload[key], str):
                     continue
                 new_payload[key] = self._deep_redact(
                     new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key
