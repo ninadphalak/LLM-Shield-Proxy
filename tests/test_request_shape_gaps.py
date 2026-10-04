@@ -109,6 +109,42 @@ def test_a_value_the_caller_also_sent_stays_restorable(engine, deep):
     _assert_restorable(vault, CALLER)
 
 
+@pytest.mark.parametrize("system_first", [True, False], ids=["system-first", "user-first"])
+def test_a_caller_typing_the_applications_value_cannot_unlock_it(engine, system_first):
+    """One shared token would make the system prompt's placeholder restorable as soon as
+    the caller typed the same value, so asking the model to repeat its instructions would
+    confirm a guess. The two occurrences get different tokens instead."""
+    turns = [{"role": "system", "content": f"Escalate to {SECRET}"}, {"role": "user", "content": f"cc {SECRET}"}]
+    if not system_first:
+        turns.reverse()
+    redacted, vault = _redact(engine, {"messages": turns})
+
+    by_role = {m["role"]: m["content"] for m in redacted["messages"]}
+    system_token = by_role["system"].removeprefix("Escalate to ")
+    user_token = by_role["user"].removeprefix("cc ")
+    assert system_token != user_token
+    assert vault.rehydrate(system_token) == system_token
+    assert vault.rehydrate(user_token) == SECRET
+
+
+def test_a_later_turn_cannot_unlock_an_earlier_system_value(engine):
+    vault = Vault(synthetic=False)
+    first = engine.redact_payload({"messages": [{"role": "system", "content": f"Escalate to {SECRET}"}]}, vault)
+    system_token = first["messages"][0]["content"].removeprefix("Escalate to ")
+
+    engine.redact_payload({"messages": [{"role": "user", "content": f"cc {SECRET}"}]}, vault)
+    assert vault.rehydrate(system_token) == system_token
+
+
+def test_a_system_message_name_is_one_way(engine):
+    payload = {"messages": [{"role": "system", "name": "Jane_Officer", "content": "hi"}]}
+    redacted, vault = _redact(engine, payload)
+
+    token = redacted["messages"][0]["name"]
+    assert token != "Jane_Officer"
+    assert "Jane" not in vault.rehydrate(token)
+
+
 # 2. function_call_output with a list of parts.
 
 

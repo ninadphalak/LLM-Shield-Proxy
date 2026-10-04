@@ -17,7 +17,7 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote
 
 import yaml
@@ -409,6 +409,17 @@ def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
     """
     explicit = settings.payload_operator_protected_keys_set | _policy_skip_keys()
     return protected - (DEFAULT_PROTECTED_PAYLOAD_KEYS - explicit)
+
+
+def _token_minter(vault: Any, restorable: bool) -> Callable[[str, str], str]:
+    """The vault method that mints a token, restorable or one-way.
+
+    A vault that cannot mint one-way tokens gets a fixed marker rather than a
+    restorable token.
+    """
+    if restorable:
+        return vault.get_or_create_token
+    return getattr(vault, "get_or_create_one_way_token", None) or (lambda _value, _type: "[REDACTED]")
 
 
 class UnmappedBlobError(ValueError):
@@ -895,10 +906,7 @@ class PIIEngine:
         if not spans:
             return working_text
 
-        if restorable:
-            mint = vault.get_or_create_token
-        else:
-            mint = getattr(vault, "get_or_create_one_way_token", None) or (lambda _value, _type: "[REDACTED]")
+        mint = _token_minter(vault, restorable)
 
         # Replace spans from right to left to preserve preceding string indices
         result = list(working_text)
@@ -999,11 +1007,14 @@ class PIIEngine:
                     if "name" in msg_copy and isinstance(msg_copy["name"], str):
                         raw_name = msg_copy["name"]
                         spaced_name = raw_name.replace("_", " ")
-                        redacted_spaced = self.redact_text(spaced_name, vault, active_profile)
+                        redacted_spaced = self.redact_text(
+                            spaced_name, vault, active_profile, restorable=restorable
+                        )
                         if redacted_spaced != spaced_name:
                             msg_copy["name"] = redacted_spaced.replace(" ", "_")
                         elif raw_name and raw_name[0].isupper():
-                            msg_copy["name"] = vault.get_or_create_token(raw_name, "PERSON").replace(" ", "_")
+                            mint = _token_minter(vault, restorable)
+                            msg_copy["name"] = mint(raw_name, "PERSON").replace(" ", "_")
 
                     # 3. Redact OpenAI tool_calls function arguments in multi-turn agent history
                     if "tool_calls" in msg_copy and isinstance(msg_copy["tool_calls"], list):
