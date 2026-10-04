@@ -450,10 +450,12 @@ def _looks_like_media_bytes(payload: str) -> bool:
 # Media fields that hold the bytes themselves.
 _MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
 
-# Provider file references, protected wherever they sit below a direct field (annotations,
-# file_search results): rewriting one breaks the reference, and a high-entropy id is what
-# Tier 2 flags.
-_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"file_id"})
+# Identifier keys whose STRING values go out unchanged at any depth of the scan, not only as a
+# direct field: an `audio.id`, an annotation's `file_id`, a nested tool `call_id`. Rewriting
+# one breaks the reference, a high-entropy id is what Tier 2 flags, and these names hold ids,
+# not personal data. `name` and `data` are not here: below a direct field they are ordinary
+# data (`metadata.name`), so they are only skipped as direct fields.
+_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"id", "call_id", "tool_call_id", "tool_use_id", "file_id"})
 
 
 def _is_media_field(key: str, value: Any) -> bool:
@@ -1287,7 +1289,6 @@ class PIIEngine:
         unmapped-blob treatment, as deep redaction does.
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
-        nested_protected = protected | _NESTED_REFERENCE_KEYS
         for key, value in node.items():
             if key in handled or key in protected:
                 continue
@@ -1305,13 +1306,14 @@ class PIIEngine:
                 value,
                 vault,
                 active_profile,
-                nested_protected,
+                protected,
                 None if key in _REPLAYED_TEXT_KEYS and isinstance(value, str) else settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
                 depth + 1,
                 max_depth,
                 f"{json_path}.{key}",
                 restorable=restorable,
                 text_keys=_REPLAYED_TEXT_KEYS,
+                reference_keys=_NESTED_REFERENCE_KEYS,
             )
 
     def _deep_redact(
@@ -1328,6 +1330,7 @@ class PIIEngine:
         one_way_keys: frozenset[str] = frozenset(),
         restorable: bool = True,
         text_keys: frozenset[str] = frozenset(),
+        reference_keys: frozenset[str] = frozenset(),
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
 
@@ -1343,7 +1346,8 @@ class PIIEngine:
         keyword, so none is one-way there.
 
         A string directly under a key in `text_keys` is scanned in full, past the blob
-        ceiling too.
+        ceiling too. A string directly under a key in `reference_keys` goes out unchanged;
+        an object under the same name is walked.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
@@ -1357,7 +1361,8 @@ class PIIEngine:
             return {
                 key: (
                     value
-                    if key in protected and not keys_are_names
+                    if (key in protected and not keys_are_names)
+                    or (key in reference_keys and isinstance(value, str))
                     else self._deep_redact(
                         value,
                         vault,
@@ -1379,6 +1384,7 @@ class PIIEngine:
                         ),
                         restorable=restorable and (keys_are_names or key not in one_way_keys),
                         text_keys=text_keys,
+                        reference_keys=reference_keys,
                     )
                 )
                 for key, value in node.items()
@@ -1398,6 +1404,7 @@ class PIIEngine:
                     one_way_keys=one_way_keys,
                     restorable=restorable,
                     text_keys=text_keys,
+                    reference_keys=reference_keys,
                 )
                 for index, item in enumerate(node)
             ]

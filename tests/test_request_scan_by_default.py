@@ -222,8 +222,9 @@ def test_media_key_names_deeper_down_are_ordinary_data(engine, deep, vault):
 
 
 def test_opaque_key_names_below_the_direct_fields_are_scanned(engine, deep, vault):
-    """Round 3: `name`, `id` or `data` deeper down is ordinary data, a string included."""
-    message = {"role": "user", "content": "hi", "metadata": {"name": f"Mail {EMAIL}", "items": [{"id": SSN}]}}
+    """Round 3: `name` or `data` deeper down is ordinary data, a string included. (Id-only keys
+    keep their strings at any depth; see the round 6 test.)"""
+    message = {"role": "user", "content": "hi", "metadata": {"name": f"Mail {EMAIL}", "items": [{"data": SSN}]}}
     sent = _sent(engine, vault, {"messages": [message]})
     assert EMAIL not in sent
     assert SSN not in sent
@@ -302,3 +303,22 @@ def test_nested_file_references_go_out_unchanged(engine, deep, vault):
     sent = _sent(engine, vault, payload)
     assert sent.count(file_id) == 2
     assert EMAIL not in sent
+
+
+def test_nested_identifiers_go_out_unchanged_but_nested_names_are_scanned(engine, deep, vault):
+    """Round 6: id-only keys keep their string values at any depth; `name` and `data` only
+    as direct fields, because deeper down they hold ordinary data."""
+    audio_id = "audio_Zx81qPLmN0aBcR7t"
+    call_id = "call_Q81zLmPx7Yt2WvB9"
+    message = {
+        "role": "assistant",
+        "content": "ok",
+        "audio": {"id": audio_id, "transcript": f"mail {EMAIL}"},
+        "x_trace": {"steps": [{"call_id": call_id, "tool_use_id": call_id}]},
+        "metadata": {"name": f"Mail {EMAIL}", "data": f"SSN {SSN}", "id": {"owner": EMAIL}},
+    }
+    sent = _sent(engine, vault, {"messages": [message]})
+    assert audio_id in sent
+    assert sent.count(call_id) == 2
+    assert EMAIL not in sent
+    assert SSN not in sent
