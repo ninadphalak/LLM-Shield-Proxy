@@ -100,3 +100,16 @@ async def test_stream_digest_receipt_memory_footprint(monkeypatch):
 
     # Target < 25MB for pure generator + hash footprint.
     assert peak < 25 * 1024 * 1024, f"Peak memory exceeded 25MB limit: {peak_mb:.2f} MB"
+
+
+@pytest.mark.asyncio
+async def test_unkeyed_stream_finishes_without_a_receipt(capture_audit_logs, monkeypatch):
+    """The default configuration has no SHIELD_ENCRYPTION_KEY. The receipt raised at the
+    end of every stream, after the client had every byte, and aborted the connection."""
+    monkeypatch.setattr(settings, "SHIELD_ENCRYPTION_KEY", None)
+    vault = Vault(session_id="test_session_unkeyed")
+
+    chunks = [chunk async for chunk in rehydrate_sse_stream(generate_mock_stream(3), vault)]
+
+    assert b"".join(chunks).rstrip().endswith(b"data: [DONE]")
+    assert not any('"stream_digest_receipt"' in record for record in capture_audit_logs.records)

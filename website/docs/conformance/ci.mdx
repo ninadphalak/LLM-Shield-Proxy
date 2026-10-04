@@ -102,7 +102,7 @@ there is nothing else to fetch.
 ```bash
 pip install llm-shield-proxy
 
-UPSTREAM_BASE_URL=http://127.0.0.1:8765 VALID_VIRTUAL_KEYS=sk-demo llm-shield-proxy --port 4000 &
+UPSTREAM_BASE_URL=http://127.0.0.1:8765 UPSTREAM_API_KEY=unused VALID_VIRTUAL_KEYS=sk-demo llm-shield-proxy --port 4000 &
 
 pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
 ```
@@ -112,14 +112,18 @@ On Windows PowerShell, where per-command environment variables and `&` do not wo
 ```powershell
 pip install llm-shield-proxy
 
-$env:UPSTREAM_BASE_URL = "http://127.0.0.1:8765"; $env:VALID_VIRTUAL_KEYS = "sk-demo"
+$env:UPSTREAM_BASE_URL = "http://127.0.0.1:8765"; $env:UPSTREAM_API_KEY = "unused"; $env:VALID_VIRTUAL_KEYS = "sk-demo"
 Start-Process -NoNewWindow llm-shield-proxy -ArgumentList "--port 4000"
-Remove-Item Env:UPSTREAM_BASE_URL, Env:VALID_VIRTUAL_KEYS
+Remove-Item Env:UPSTREAM_BASE_URL, Env:UPSTREAM_API_KEY, Env:VALID_VIRTUAL_KEYS
 
 pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1 --target-api-key sk-demo
 ```
 
-The started process keeps both settings, and the third line takes them back out of your shell.
+`VALID_VIRTUAL_KEYS` is the key your client must send, and `UPSTREAM_API_KEY` is the key the
+proxy sends on to the capture, which ignores it. Without the first every request gets a 401;
+without the second every request gets a 500.
+
+The started process keeps the settings, and the third line takes them back out of your shell.
 Without it they last as long as the window, and the next gateway you start in it would be
 pointed at the capture without saying so. The POSIX form scopes them to the one command already.
 
