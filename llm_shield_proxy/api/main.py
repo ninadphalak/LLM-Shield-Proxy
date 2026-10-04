@@ -1684,6 +1684,10 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
                 if isinstance(delta, dict) and "content" in delta and isinstance(delta["content"], str):
                     delta["content"] = vault.rehydrate(delta["content"])
 
+                # Legacy /v1/completions carries the reply in `choice.text`.
+                if isinstance(choice.get("text"), str):
+                    choice["text"] = vault.rehydrate(choice["text"])
+
     # 2. Anthropic Claude top-level content blocks
     if "content" in res_copy and isinstance(res_copy["content"], list):
         for block in res_copy["content"]:

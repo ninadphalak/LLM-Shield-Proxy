@@ -657,6 +657,9 @@ async def rehydrate_sse_stream(
         max_output_piece_bytes = settings.MAX_PAYLOAD_SIZE_BYTES + max_line_length
         # One retention window PER CHANNEL, not one per stream.
         buffers: Dict[_WindowKey, SSERehydrationBuffer] = {}
+        # Choice indices that stream legacy completions (`choice.text`, no `delta`), so their
+        # held-back text is flushed in that shape rather than as a chat delta.
+        completion_choices: set = set()
         # Per-path memory for the sibling scan.
         sibling_tails = _SiblingPathTails()
         # One escaping view for the whole stream.
@@ -724,6 +727,10 @@ async def rehydrate_sse_stream(
                 if not remaining:
                     continue
                 choice_index, tool_index = key
+                if tool_index is None and choice_index in completion_choices:
+                    flush_obj: dict = {"choices": [{"index": choice_index, "text": remaining}]}
+                    yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                    continue
                 if tool_index is None:
                     delta: dict = {"content": remaining}
                 else:
@@ -928,6 +935,19 @@ async def rehydrate_sse_stream(
                                     sibling_buffer = None
                                     for choice in choices:
                                         if not isinstance(choice, dict):
+                                            continue
+                                        # Legacy /v1/completions: the text is the choice's own
+                                        # channel, and a finished choice takes its tail with it.
+                                        if "delta" not in choice and isinstance(choice.get("text"), str):
+                                            scanned_line = True
+                                            choice_index = _entry_index(choice)
+                                            completion_choices.add(choice_index)
+                                            text_window = _buffer_for((choice_index, None))
+                                            text = text_window.process_delta_text(choice["text"])
+                                            if choice.get("finish_reason") is not None:
+                                                text += _flush_window((choice_index, None))
+                                            choice["text"] = text
+                                            sibling_buffer = text_window
                                             continue
                                         delta = choice.get("delta")
                                         if not isinstance(delta, dict):
