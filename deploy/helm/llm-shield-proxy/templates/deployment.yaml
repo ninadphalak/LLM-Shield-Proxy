@@ -59,6 +59,15 @@ spec:
               value: {{ .Values.mTLS.clientKeyPath | quote }}
             - name: K8S_SIDECAR_IMAGE
               value: {{ default (printf "%s:%s" .Values.image.repository .Values.image.tag) .Values.webhook.sidecarImage | quote }}
+            - name: ENABLE_K8S_WEBHOOK
+              value: {{ .Values.webhook.enabled | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           lifecycle:

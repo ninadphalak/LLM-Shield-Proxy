@@ -4,6 +4,25 @@
 
 LLM-Shield-Proxy is configured entirely via environment variables, following 12-factor app principles. Configuration governs upstream routing, cryptographic keys, performance thresholds, and security policies.
 
+## Minimum configuration
+
+The proxy answers every request with a 401 until it has both of these:
+
+1. **A client key.** `VALID_VIRTUAL_KEYS` lists the keys your clients send as their bearer
+   token. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+2. **A provider key.** The proxy replaces the client key with the provider key for the
+   request's destination: `OPENAI_API_KEY` for `api.openai.com`, `ANTHROPIC_API_KEY`,
+   `GEMINI_API_KEY` and `DEEPSEEK_API_KEY` for theirs, and `UPSTREAM_API_KEY` for any other
+   host or when the provider's own key is unset. With no provider key the proxy answers 500.
+
+```bash
+export VALID_VIRTUAL_KEYS=<client key>
+export OPENAI_API_KEY=<provider key>
+llm-shield-proxy --host 127.0.0.1 --port 8000
+```
+
+At startup the proxy warns if no client could authenticate. Every other setting below is optional.
+
 ## Complete Configuration Reference
 
 ### Core Proxy Settings
@@ -15,10 +34,15 @@ LLM-Shield-Proxy is configured entirely via environment variables, following 12-
 | `LOG_LEVEL` | `INFO` | Application log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `UPSTREAM_BASE_URL` | `https://api.openai.com` | The base URL of the target LLM provider. |
 
+`HOST`, `PORT`, `WORKERS`, `LOG_LEVEL` and the `TLS_*` settings are read by the
+`llm-shield-proxy` command, which is also the container image's entrypoint. Starting the app
+with `uvicorn` directly ignores them.
+
 ### API Keys
 Provide the central API keys the proxy will use to authenticate with upstream providers.
 | Environment Variable | Description |
 | :--- | :--- |
+| `UPSTREAM_API_KEY` | Key for any upstream host not listed below, and the fallback when a listed provider's key is unset. |
 | `OPENAI_API_KEY` | OpenAI API key. |
 | `ANTHROPIC_API_KEY` | Anthropic API key. |
 | `GEMINI_API_KEY` | Google Gemini API key. |
@@ -27,7 +51,7 @@ Provide the central API keys the proxy will use to authenticate with upstream pr
 ### Security & Authentication
 | Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `VALID_VIRTUAL_KEYS` | `""` | Comma-separated list of authorized client tokens. |
+| `VALID_VIRTUAL_KEYS` | `""` | Comma-separated list of authorized client tokens. Required: with it empty, and neither setting below on, every request gets a 401. |
 | `ENABLE_OPEN_BYOK_PASSTHROUGH` | `False` | Allow unrecognized provider-formatted keys (e.g. `sk-proj-...`) to pass through to the upstream provider. |
 | `OVERRIDE_CLIENT_AUTH` | `False` | Strip the client's API key and replace it with the proxy's configured upstream API key. |
 | `CORS_ALLOWED_ORIGINS` | `""` | Comma-separated list of allowed browser origins for CORS. Leave empty for strict isolation. |
@@ -76,7 +100,7 @@ settings against each other rather than as an end-to-end latency figure.
 ### Cryptography & Auditing
 | Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SHIELD_ENCRYPTION_KEY` | `None` | 256-bit AES-GCM key used for `STATELESS_CRYPTO` masking and stream digest receipts. |
+| `SHIELD_ENCRYPTION_KEY` | `None` | 256-bit AES-GCM key used for `STATELESS_CRYPTO` masking and stream digest receipts. Without it no stream digest receipt is written (one warning at the first stream). |
 | `AUDIT_DURABILITY` | `best_effort` | Durability mode (`best_effort`, `durable`, `required`). |
 | `AUDIT_DURABLE_PATH` | `None` | File path for append-only JSONL logs (required for durable modes). |
 | `AUDIT_SIGNING_KEY_FILE` | `None` | Path to Ed25519 private key for signing audit logs. |
@@ -95,10 +119,11 @@ settings against each other rather than as an end-to-end latency figure.
 | Environment Variable | Default | Description |
 | :--- | :--- | :--- |
 | `POLICIES_FILE_PATH` | `policies.yaml` | Path to the YAML file containing RBAC roles and tool policies. |
-| `ENABLE_EXT_PROC` | `True` | Enable the Envoy gRPC External Processing listener. |
+| `ENABLE_EXT_PROC` | `True` | Enable the Envoy gRPC External Processing listener. If the listener cannot start (for example, no write access to the socket directory outside the container image), the proxy logs a warning and serves HTTP; set this explicitly to make that a startup error. |
 | `EXT_PROC_SOCK_PATH` | `/var/run/llm-shield/ext_proc.sock`| Unix Domain Socket path for Envoy `ext_proc`. |
 | `TELEMETRY_ENABLED` | `False` | Enable OpenTelemetry (OTLP) tracing exports. |
 | `ENABLE_VAULT_SECRETS` | `False` | Enable HashiCorp Vault integration for dynamic secrets. |
+| `ENABLE_K8S_WEBHOOK` | `False` | Serve the Kubernetes mutating admission webhook at `/v1/k8s/mutate`. |
 
 ## TLS/HTTPS Deployment
 
@@ -112,14 +137,33 @@ llm-shield-proxy --tls-cert-file /etc/ssl/certs/server.crt --tls-key-file /etc/s
 ```yaml
 services:
   llm-shield:
-    image: llm-shield-proxy:latest
+    image: ghcr.io/ninadphalak/llm-shield-proxy:latest
     ports:
       - "8443:8000"
     environment:
       - UPSTREAM_BASE_URL=https://api.openai.com
+      - VALID_VIRTUAL_KEYS=${SHIELD_CLIENT_KEYS}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - TLS_CERT_FILE=/certs/server.crt
       - TLS_KEY_FILE=/certs/server.key
     volumes:
       - ./certs:/certs:ro
 ```
+
+## Kubernetes (Helm)
+
+The chart in `deploy/helm/llm-shield-proxy` takes the keys from a Secret:
+
+```bash
+kubectl create secret generic llm-shield-keys \
+  --from-literal=VALID_VIRTUAL_KEYS=<client key> \
+  --from-literal=OPENAI_API_KEY=<provider key>
+
+helm install llm-shield deploy/helm/llm-shield-proxy \
+  --set "envFrom[0].secretRef.name=llm-shield-keys"
+```
+
+Any other setting goes in `extraEnv` as a `name`/`value` list. `webhook.enabled=true` also
+serves the [mutating webhook](features/secure-infrastructure-service-mesh/zero-dependency-kubernetes-mutating-webhook.md).
+The smaller chart in `charts/llm-shield-proxy` takes `env.UPSTREAM_API_KEY` and
+`config.VALID_VIRTUAL_KEYS` as values instead.

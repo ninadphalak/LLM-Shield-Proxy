@@ -12,7 +12,8 @@ services:
     build:
       context: ../../..
     ports:
-      - "8000:8000"
+      # Local only: OVERRIDE_CLIENT_AUTH accepts any caller and spends the upstream key.
+      - "127.0.0.1:8000:8000"
     environment:
       UPSTREAM_BASE_URL: http://litellm:4000
       UPSTREAM_API_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-demo}

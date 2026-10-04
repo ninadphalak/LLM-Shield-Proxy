@@ -27,6 +27,19 @@ service:
   httpPort: 8000
   grpcPort: 50051
 
+# The proxy rejects every request until it knows its client keys and has a provider key.
+# Put both in a Secret and reference it here, for example:
+#   kubectl create secret generic llm-shield-keys \
+#     --from-literal=VALID_VIRTUAL_KEYS=<client key> --from-literal=OPENAI_API_KEY=<provider key>
+envFrom: []
+#  - secretRef:
+#      name: llm-shield-keys
+
+# Any other setting from the deployment guide, as plain env entries.
+extraEnv: []
+#  - name: UPSTREAM_BASE_URL
+#    value: https://api.openai.com
+
 config:
   redisUrl: ""
   vaultAddr: ""

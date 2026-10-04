@@ -474,3 +474,10 @@ def test_a_long_entity_name_does_not_run_into_the_next_column(capsys) -> None:
         # The name must end before MATCH begins, and every row must start MATCH at
         # the same offset as the header - a wider name may not shove the column.
         assert row.index("literal") == match_column, row
+
+
+def test_no_target_key_sends_the_synthetic_default_not_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no key the header went out as the literal string "Bearer None"."""
+    monkeypatch.delenv("CONFORMANCE_TARGET_API_KEY", raising=False)
+    args = selfcheck.build_parser().parse_args(["--target-base-url", "http://x/v1"])
+    assert args.target_api_key == "conformance-key"

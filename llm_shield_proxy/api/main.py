@@ -422,7 +422,15 @@ app = FastAPI(
 
 
 app.include_router(health_router)
-app.include_router(webhook_router)
+# Off unless asked for. It used to be mounted on every install, unauthenticated unless
+# K8S_WEBHOOK_AUTH_TOKEN was set, on a proxy that binds 0.0.0.0 by default.
+if settings.ENABLE_K8S_WEBHOOK:
+    app.include_router(webhook_router)
+    if not settings.K8S_WEBHOOK_AUTH_TOKEN:
+        logger.warning(
+            "K8s mutating webhook is enabled without K8S_WEBHOOK_AUTH_TOKEN; restrict "
+            "/v1/k8s/mutate to the API server with network policy or set the token."
+        )
 app.include_router(audit_router)
 app.include_router(mcp_router)
 # Must precede the catch-all `/{path:path}` below to avoid swallowing routes.
