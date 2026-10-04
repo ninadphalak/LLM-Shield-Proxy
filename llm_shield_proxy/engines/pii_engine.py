@@ -406,6 +406,62 @@ _SCHEMA_NAME_MAPS: frozenset[str] = frozenset(
 _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples", "default"})
 
 
+# Inside a message, content block or input item, every field the shape walk does not handle
+# is scanned (see _redact_remaining_fields), except these. They are not text: identifiers that
+# link a tool result to its call or name a tool, blobs the provider verifies byte for byte (a
+# thinking `signature`, `redacted_thinking` and audio `data`, `encrypted_content`), and media
+# references (`image_url`, an image block's `source`, `file_data`). Rewriting them breaks the
+# request for no privacy gain, and their high entropy is exactly what Tier 2 flags.
+_OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
+    {
+        "id",
+        "tool_call_id",
+        "tool_use_id",
+        "call_id",
+        "name",
+        "signature",
+        "data",
+        "encrypted_content",
+        "image_url",
+        "input_audio",
+        "file_data",
+        "file_id",
+        "source",
+    }
+)
+
+# Replayed model and caller text found by that scan. Scanned whole whatever its length: past
+# the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
+# not an attachment.
+_REPLAYED_TEXT_KEYS: frozenset[str] = frozenset(
+    {"reasoning_content", "reasoning", "refusal", "thinking", "transcript", "cited_text", "text"}
+)
+
+# What the message walk in redact_payload handles by shape.
+_MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
+    {"role", "content", "name", "tool_calls", "function_call", "messages"}
+)
+
+# What the content-block walks handle by shape. A document's `title` and `context` belong
+# here too; they are added for document blocks only.
+_BLOCK_HANDLED_KEYS: frozenset[str] = frozenset({"type", "text", "input", "content"})
+
+# What _redact_text_blocks handles by shape: only the text.
+_TEXT_BLOCK_HANDLED_KEYS: frozenset[str] = frozenset({"type", "text"})
+
+# What _redact_input_item handles by shape.
+_INPUT_ITEM_HANDLED_KEYS: frozenset[str] = frozenset(
+    {"role", "type", "content", "summary", "arguments", "output", "input", "code", "outputs"}
+)
+
+
+def _block_handled_keys(block: Dict[str, Any]) -> frozenset[str]:
+    """The keys of one content block the shape walk handled."""
+    if block.get("type") == "document":
+        return _BLOCK_HANDLED_KEYS | {"title", "context"}
+    return _BLOCK_HANDLED_KEYS
+
+
 def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
     """`protected` minus the built-in structural keys nobody also listed explicitly.
 
@@ -1003,6 +1059,10 @@ class PIIEngine:
                                     block_copy["content"] = self._redact_nested_content(
                                         block_copy["content"], vault, active_profile
                                     )
+                                self._redact_remaining_fields(
+                                    block_copy, _block_handled_keys(block_copy), vault, active_profile,
+                                    depth + 2, max_depth, "messages.content", restorable,
+                                )
                                 new_content_blocks.append(block_copy)
                             else:
                                 new_content_blocks.append(block)
@@ -1045,6 +1105,13 @@ class PIIEngine:
                         if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
                             fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
                         msg_copy["function_call"] = fn_copy
+
+                    # 5. Everything else a client replays: `reasoning_content`, `refusal`,
+                    # `audio.transcript` and whatever a provider adds next.
+                    self._redact_remaining_fields(
+                        msg_copy, _MESSAGE_HANDLED_KEYS, vault, active_profile,
+                        depth + 1, max_depth, "messages", restorable,
+                    )
 
                     redacted_messages.append(msg_copy)
                 else:
@@ -1151,6 +1218,42 @@ class PIIEngine:
 
         return new_payload
 
+    def _redact_remaining_fields(
+        self,
+        node: Dict[str, Any],
+        handled: frozenset[str],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+        json_path: str,
+        restorable: bool = True,
+    ) -> None:
+        """Scans, in place, every field of `node` the shape walk did not handle.
+
+        The default is to scan, like `redact_model_originated_tree` on the reply path: a walk
+        that follows known shapes forwards whatever field a provider adds next. Skipped:
+        `handled`, operator- and policy-protected keys, the built-in structural keys, and
+        _OPAQUE_MESSAGE_KEYS. Text under _REPLAYED_TEXT_KEYS is scanned whole; anything
+        else past the blob ceiling gets the unmapped-blob treatment, as deep redaction does.
+        """
+        skip = settings.payload_protected_keys_set | _policy_skip_keys() | _OPAQUE_MESSAGE_KEYS
+        for key, value in node.items():
+            if key in handled or key in skip:
+                continue
+            node[key] = self._deep_redact(
+                value,
+                vault,
+                active_profile,
+                skip,
+                None if key in _REPLAYED_TEXT_KEYS and isinstance(value, str) else settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
+                depth + 1,
+                max_depth,
+                f"{json_path}.{key}",
+                restorable=restorable,
+                text_keys=_REPLAYED_TEXT_KEYS,
+            )
+
     def _deep_redact(
         self,
         node: Any,
@@ -1164,6 +1267,7 @@ class PIIEngine:
         keys_are_names: bool = False,
         one_way_keys: frozenset[str] = frozenset(),
         restorable: bool = True,
+        text_keys: frozenset[str] = frozenset(),
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
 
@@ -1177,6 +1281,9 @@ class PIIEngine:
         Strings under a keyword in `one_way_keys` are redacted one-way (`restorable` is
         False below it). Inside schema data (`_SCHEMA_VALUE_KEYWORDS`) no key is a
         keyword, so none is one-way there.
+
+        A string directly under a key in `text_keys` is scanned in full, past the blob
+        ceiling too.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
@@ -1200,7 +1307,7 @@ class PIIEngine:
                             if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS
                             else protected
                         ),
-                        max_string_length,
+                        None if key in text_keys and isinstance(value, str) else max_string_length,
                         depth + 1,
                         max_depth,
                         f"{json_path}.{key}" if json_path else key,
@@ -1211,6 +1318,7 @@ class PIIEngine:
                             else one_way_keys
                         ),
                         restorable=restorable and (keys_are_names or key not in one_way_keys),
+                        text_keys=text_keys,
                     )
                 )
                 for key, value in node.items()
@@ -1229,6 +1337,7 @@ class PIIEngine:
                     f"{json_path}[{index}]",
                     one_way_keys=one_way_keys,
                     restorable=restorable,
+                    text_keys=text_keys,
                 )
                 for index, item in enumerate(node)
             ]
@@ -1320,6 +1429,9 @@ class PIIEngine:
                     self._redact_document_block(block, vault, active_profile)
                 if block.get("type") == "tool_use" and "input" in block:
                     block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
+                self._redact_remaining_fields(
+                    block, _block_handled_keys(block), vault, active_profile, 0, 20, "tool_result.content",
+                )
                 nested = block.get("content")
                 if isinstance(nested, str):
                     block["content"] = self.redact_text(nested, vault, active_profile)
@@ -1339,17 +1451,21 @@ class PIIEngine:
         active_profile: Optional[CompiledProfile] = None,
         restorable: bool = True,
     ) -> List[Any]:
-        """Redacts the `text` of every content block, leaving other block types alone."""
+        """Redacts the `text` of every content block, then the block's other fields."""
         redacted: List[Any] = []
         for block in blocks:
-            if isinstance(block, dict) and isinstance(block.get("text"), str):
-                block_copy = block.copy()
+            if not isinstance(block, dict):
+                redacted.append(block)
+                continue
+            block_copy = block.copy()
+            if isinstance(block_copy.get("text"), str):
                 block_copy["text"] = self.redact_text(
                     block_copy["text"], vault, active_profile, restorable=restorable
                 )
-                redacted.append(block_copy)
-            else:
-                redacted.append(block)
+            self._redact_remaining_fields(
+                block_copy, _TEXT_BLOCK_HANDLED_KEYS, vault, active_profile, 0, 20, "content", restorable
+            )
+            redacted.append(block_copy)
         return redacted
 
     def _redact_input_item(
@@ -1403,6 +1519,9 @@ class PIIEngine:
                 for entry in outputs
             ]
 
+        self._redact_remaining_fields(
+            item_copy, _INPUT_ITEM_HANDLED_KEYS, vault, active_profile, 0, 20, "input", restorable
+        )
         return item_copy
 
     def _redact_prompt_object(
