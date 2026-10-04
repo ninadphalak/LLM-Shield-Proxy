@@ -1,64 +1,163 @@
-/**
- * CSS files with the .module.css suffix will be treated as CSS modules
- * and scoped locally.
- */
-
 .heroBanner {
-  padding: 4rem 0;
+  padding: 4.5rem 0 3.5rem;
   text-align: center;
   position: relative;
   overflow: hidden;
-}
-
-@media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
-}
-
-.buttons {
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .heroEyebrow {
   display: inline-block;
   color: var(--ifm-color-primary);
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   font-size: 0.8rem;
   margin-bottom: 1rem;
 }
 
-.heroMeta {
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.section {
+  padding: 3.5rem 0;
+}
+
+.section h2 {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.alt {
+  background: #11161d;
+  border-top: 1px solid #21262d;
+  border-bottom: 1px solid #21262d;
+}
+
+.lead {
+  max-width: 760px;
+  margin: 0 auto 1.5rem;
+  text-align: center;
+  color: #c9d1d9;
+}
+
+.note {
+  text-align: center;
+  color: #8b949e;
+  font-size: 0.95rem;
+  margin-top: 1rem;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 0;
+  counter-reset: step;
+}
+
+.steps li {
+  counter-increment: step;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.25rem;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #0d1117;
+}
+
+.steps li::before {
+  content: counter(step);
+  color: var(--ifm-color-primary);
+  font-weight: 800;
+  font-size: 1.4rem;
+}
+
+.steps span {
+  color: #8b949e;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
   margin-top: 1.5rem;
-  color: #6e7681;
-  font-size: 0.85rem;
 }
 
-.heroSubMeta {
-  margin: -1rem auto 2rem;
-  max-width: 700px;
-  color: #6e7681;
-  font-size: 0.85rem;
-  font-style: italic;
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #0d1117;
+  color: inherit;
+  transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
-@media screen and (max-width: 480px) {
-  .heroSubMeta {
-    font-size: 0.78rem;
+.card:hover {
+  border-color: var(--ifm-color-primary);
+  text-decoration: none;
+  color: inherit;
+  transform: translateY(-2px);
+}
+
+.card h3 {
+  margin: 0;
+}
+
+.card p {
+  color: #8b949e;
+  margin: 0;
+  flex-grow: 1;
+}
+
+.card code {
+  align-self: flex-start;
+}
+
+.cardFor {
+  color: var(--ifm-color-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.faq {
+  max-width: 760px;
+  margin: 0 auto 0.75rem;
+  padding: 0.9rem 1.2rem;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+}
+
+.faq summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.faq p {
+  margin: 0.75rem 0 0;
+  color: #c9d1d9;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 2.5rem 1rem;
   }
 
-  .buttons {
-    flex-direction: column;
-    gap: 0.75rem;
-    width: 100%;
-  }
-
-  .buttons a {
-    width: 100%;
-    text-align: center;
+  .steps,
+  .grid {
+    grid-template-columns: 1fr;
   }
 }

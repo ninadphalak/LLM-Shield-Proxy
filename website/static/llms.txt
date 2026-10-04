@@ -1,0 +1,25 @@
+# LLM-Shield-Proxy
+
+> Open-source (Apache 2.0) tools for keeping personal data out of LLM requests: a self-hosted proxy that hides personal data and secrets from the model provider and restores them in streamed replies, a benchmark that tests whether any LLM gateway leaks personal data, an MCP server security checker, and a test library for streaming filters.
+
+All four are Python packages on PyPI; chunk-invariance is also on npm. Source: https://github.com/ninadphalak/LLM-Shield-Proxy
+
+## Packages
+
+- [LLM-Shield-Proxy quick start](https://llmshieldproxy.com/docs/proxy): `pip install llm-shield-proxy`. Self-hosted proxy for OpenAI-compatible APIs. Replaces emails, card numbers, SSNs, API keys and other detected values before a request reaches the provider, and restores them in the streamed reply. Try it in a minute with no API key.
+- [Leak benchmark (pii-leak-benchmark)](https://llmshieldproxy.com/docs/conformance): `pip install pii-leak-benchmark`. Tests whether any OpenAI-compatible gateway sends personal data to its provider. Reports per data type. Only dependency: httpx.
+- [mcp-ssrf-check](https://llmshieldproxy.com/docs/mcp-ssrf-check): `pip install mcp-ssrf-check`. Checks an MCP server you operate for missing Host and Origin validation, forged sessions, and URL-fetching tools that reach loopback. Also a GitHub Action.
+- [chunk-invariance](https://llmshieldproxy.com/docs/chunk-invariance): `pip install chunk-invariance` or `npm install chunk-invariance`. One test assertion that fails when a value split across stream chunks slips through a redactor or guardrail.
+
+## Docs
+
+- [Deployment and configuration](https://llmshieldproxy.com/docs/deployment): the two required keys, every setting, Docker and Helm.
+- [Architecture](https://llmshieldproxy.com/docs/architecture): how requests are redacted and streamed replies restored.
+- [Limitations](https://llmshieldproxy.com/docs/limitations): what the proxy does not detect or guarantee.
+- [Published benchmark results](https://llmshieldproxy.com/docs/conformance/results): gateways tested, with the evidence for each result.
+- [Split-boundary leaks](https://llmshieldproxy.com/docs/split-boundary-leaks): why streaming filters leak values cut across chunks.
+
+## Optional
+
+- [Browser playground](https://llmshieldproxy.com/playground): try redaction in the browser.
+- [Research and citation](https://llmshieldproxy.com/docs/research-publications)

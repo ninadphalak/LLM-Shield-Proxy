@@ -28,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_PAGE = REPO_ROOT / "website" / "docs" / "conformance" / "ci.mdx"
 FROM_SCRATCH_PAGE = REPO_ROOT / "website" / "docs" / "conformance" / "try-it-from-scratch.md"
 README = REPO_ROOT / "README.md"
+PROXY_PAGE = REPO_ROOT / "website" / "docs" / "proxy.md"
 
 _PROXY_MAIN = "import sys; from llm_shield_proxy.cli import main; sys.argv[0] = 'llm-shield-proxy'; sys.exit(main())"
 _BENCH_MAIN = "import sys; from pii_leak_benchmark.cli import main; sys.argv[0] = 'pii-leak-benchmark'; sys.exit(main())"
@@ -160,11 +161,13 @@ def _without_specimens(report: str) -> str:
 
 @pytest.mark.parametrize(
     "page, needle",
-    [(CI_PAGE, "llm-shield-proxy --port"), (README, "--target-api-key sk-demo")],
-    ids=["ci.mdx", "README.md"],
+    [(CI_PAGE, "llm-shield-proxy --port"), (README, "--target-api-key sk-demo"), (PROXY_PAGE, "--target-api-key sk-demo")],
+    ids=["ci.mdx", "README.md", "docs/proxy.md"],
 )
 def test_one_line_start_and_check_reports_clean(page, needle, tmp_path):
-    """The ci.mdx LLM-Shield-Proxy block, and the README's "Try it in a minute"."""
+    """The ci.mdx LLM-Shield-Proxy block, and "Try it in a minute" in the README and docs/proxy.md.
+
+    The home page's block is the same text in src/pages/index.tsx; see the test below."""
     block = _block_with(page, "bash", needle)
     proxy_line = next(w for w in _commands(block) if "llm-shield-proxy" in w and "pip" not in w)
     split = proxy_line.index("llm-shield-proxy")
@@ -267,3 +270,10 @@ def test_a_failure_message_carries_only_proxy_status_lines():
     kept = _status_lines(log)
     assert "someone@example.org" not in kept
     assert '" 401 Unauthorized' in kept and "exception_type=ValueError" in kept
+
+
+def test_home_page_trial_block_matches_the_tested_one():
+    """The home page renders its trial block from a string, not a Markdown fence."""
+    home = (REPO_ROOT / "website" / "src" / "pages" / "index.tsx").read_text(encoding="utf-8")
+    readme_block = _block_with(README, "bash", "--target-api-key sk-demo").strip()
+    assert f"const TRY_IT = `{readme_block}`;" in home

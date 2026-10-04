@@ -6,7 +6,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'LLM-Shield-Proxy',
-  tagline: 'Open, reproducible streaming privacy and audit evidence for enterprise LLM infrastructure',
+  tagline: 'Keep personal data out of LLM requests: a self-hosted redacting proxy, a leak benchmark for any gateway, and two small security test tools.',
   favicon: 'img/favicon.svg',
 
   // The CUSTOM domain, not the Firebase project's default `.web.app` address. Docusaurus
@@ -80,7 +80,7 @@ const config: Config = {
       {
         name: 'keywords',
         content:
-          'streaming privacy gateway, PII redaction, LLM proxy, AI gateway, open conformance specification, audit evidence, OSCAL 1.2, MCP governance, SSE rehydration, Apache 2.0',
+          'PII redaction proxy, LLM privacy gateway, OpenAI-compatible proxy, LLM data leak test, streaming guardrail testing, MCP security checker, SSRF, Apache 2.0',
       },
     ],
     colorMode: {
@@ -91,30 +91,43 @@ const config: Config = {
     navbar: {
       title: 'LLM-Shield-Proxy',
       logo: {
-        alt: 'LLM-Shield-Proxy Logo',
+        alt: 'LLM-Shield-Proxy logo',
         src: 'img/logo.svg',
       },
+      // One tab per package. `data-tip` is shown as a hover box by custom.css, on mouse hover
+      // and on keyboard focus. No `title`: the browser would show the same text a second time.
       items: [
         {
           type: 'docSidebar',
-          sidebarId: 'tutorialSidebar',
+          sidebarId: 'proxySidebar',
           position: 'left',
-          label: 'Documentation',
+          label: 'Proxy',
+          className: 'navTip',
+          'data-tip': 'Self-hosted proxy that hides personal data from your LLM provider and restores it in the reply',
         },
         {
-          to: '/docs/conformance',
-          label: 'Conformance Lab',
+          type: 'docSidebar',
+          sidebarId: 'benchmarkSidebar',
           position: 'left',
+          label: 'Leak Benchmark',
+          className: 'navTip',
+          'data-tip': 'Test whether any LLM gateway sends personal data to the provider, in about a minute',
         },
         {
-          to: '/docs/research-publications',
-          label: 'Research',
+          type: 'docSidebar',
+          sidebarId: 'mcpCheckSidebar',
           position: 'left',
+          label: 'MCP Check',
+          className: 'navTip',
+          'data-tip': 'Check your own MCP server for SSRF and missing Host and Origin checks',
         },
         {
-          to: '/docs/design-partner-pilot',
-          label: 'Pilot Program',
+          type: 'docSidebar',
+          sidebarId: 'chunkInvarianceSidebar',
           position: 'left',
+          label: 'Chunk Invariance',
+          className: 'navTip',
+          'data-tip': 'A one-line test that catches values split across stream chunks',
         },
         {
           href: 'https://github.com/ninadphalak/LLM-Shield-Proxy',
@@ -127,44 +140,24 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Docs',
+          title: 'Packages',
           items: [
-            {
-              label: 'Conformance Specification',
-              to: '/docs/conformance/specification-v1',
-            },
-            {
-              label: 'Published Results',
-              to: '/docs/conformance/results',
-            },
-            {
-              label: 'Architecture',
-              to: '/docs/architecture',
-            },
-            {
-              label: 'Security',
-              to: '/docs/security',
-            },
-            {
-              label: 'Compliance',
-              to: '/docs/compliance-overview',
-            },
-            {
-              label: 'Evidence Plane Status',
-              to: '/docs/evidence-plane-status',
-            },
-            {
-              label: 'Deployment',
-              to: '/docs/deployment',
-            },
-            {
-              label: 'Features Overview',
-              to: '/docs/features-overview',
-            },
-            {
-              label: 'Policies',
-              to: '/docs/policies',
-            },
+            {label: 'LLM-Shield-Proxy', to: '/docs/proxy'},
+            {label: 'Leak Benchmark', to: '/docs/conformance'},
+            {label: 'Published results', to: '/docs/conformance/results'},
+            {label: 'mcp-ssrf-check', to: '/docs/mcp-ssrf-check'},
+            {label: 'chunk-invariance', to: '/docs/chunk-invariance'},
+            {label: 'Browser playground', to: '/playground'},
+          ],
+        },
+        {
+          title: 'Learn',
+          items: [
+            {label: 'Architecture', to: '/docs/architecture'},
+            {label: 'Security', to: '/docs/security'},
+            {label: 'Limitations', to: '/docs/limitations'},
+            {label: 'Compliance', to: '/docs/compliance-overview'},
+            {label: 'Research', to: '/docs/research-publications'},
           ],
         },
         {
