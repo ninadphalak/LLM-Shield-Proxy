@@ -243,3 +243,31 @@ def test_an_inline_file_part_survives_the_block_policy(engine, deep, vault, monk
     file_data = "data:application/pdf;base64," + base64.b64encode(bytes(range(256)) * 40).decode()
     part = {"type": "file", "file": {"file_data": file_data, "filename": "report.pdf"}}
     assert file_data in _sent(engine, vault, {"messages": [{"role": "user", "content": [part]}]})
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("image_url", f"{EMAIL}, SSN {SSN}"),
+        ("image_url", {"url": "https://cdn.example.com/a.png", "alt": f"photo of {EMAIL}"}),
+        ("input_audio", f"SSN {SSN} {EMAIL}"),
+        ("input_audio", {"data": "UklGRg==", "format": "wav", "transcript": f"SSN {SSN} {EMAIL}"}),
+        ("file", {"file_id": "file-1", "note": f"SSN {SSN} {EMAIL}"}),
+        ("source", {"type": "base64", "data": "UklGRg==", "caption": f"SSN {SSN} {EMAIL}"}),
+    ],
+    ids=["image_url-text", "image_url-extra-field", "input_audio-text", "input_audio-extra", "file-extra", "source-extra"],
+)
+def test_a_media_key_with_a_non_media_shape_is_scanned(engine, deep, vault, key, value):
+    """Round 4: media is judged by shape, not by key name alone."""
+    block = {"type": "text", "text": "hi", key: value}
+    sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [block]}]})
+    assert SSN not in sent
+    assert EMAIL not in sent
+
+
+def test_a_file_parts_name_is_scanned_but_its_data_is_not(engine, deep, vault):
+    file_data = "data:application/pdf;base64,JVBERi0xLjQK"
+    part = {"type": "file", "file": {"file_data": file_data, "filename": f"{EMAIL}-statement.pdf"}}
+    sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [part]}]})
+    assert file_data in sent
+    assert EMAIL not in sent

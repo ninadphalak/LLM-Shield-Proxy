@@ -418,20 +418,38 @@ _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
     {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content"}
 )
 
-# Media references (see _is_media_field): an image, audio or file part's payload. Rewriting an
-# image URL breaks the reference, and an inline file is a data: URI the blob policy rejects.
-_MEDIA_KEYS: frozenset[str] = frozenset({"image_url", "input_audio", "file"})
+# Media payloads, by shape (see _is_media_field): the exact fields an image, audio or file
+# part's payload has. Rewriting an image URL breaks the reference, and an inline file is a
+# data: URI the blob policy rejects. A value with any other field, or a string that is not a
+# URL, is not media and is walked like everything else.
+_MEDIA_SHAPES: Dict[str, frozenset[str]] = {
+    "image_url": frozenset({"url", "detail"}),
+    "input_audio": frozenset({"data", "format"}),
+    "file": frozenset({"file_data", "file_id", "filename"}),
+    "source": frozenset({"type", "media_type", "data", "url", "file_id"}),
+}
 
 # Anthropic source types that hold media or a reference. A `text` or `content` source is a
 # document's text, handled by _redact_document_block.
 _MEDIA_SOURCE_TYPES: frozenset[str] = frozenset({"base64", "url", "file"})
 
+_MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
+
 
 def _is_media_field(key: str, value: Any) -> bool:
-    """A direct field that is a media payload: skipped whole by the remaining-field scan."""
-    if key in _MEDIA_KEYS:
-        return True
-    return key == "source" and isinstance(value, dict) and value.get("type") in _MEDIA_SOURCE_TYPES
+    """A direct field that is a media payload, judged by key AND shape."""
+    shape = _MEDIA_SHAPES.get(key)
+    if shape is None:
+        return False
+    if key == "image_url" and isinstance(value, str):
+        return value.startswith(_MEDIA_URL_PREFIXES)
+    if not isinstance(value, dict) or not value or not set(value) <= shape:
+        return False
+    if key == "source":
+        return value.get("type") in _MEDIA_SOURCE_TYPES
+    if key == "image_url":
+        return isinstance(value.get("url"), str) and value["url"].startswith(_MEDIA_URL_PREFIXES)
+    return all(isinstance(item, str) for item in value.values())
 
 # Replayed model and caller text found by that scan. Scanned whole whatever its length: past
 # the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
@@ -1237,14 +1255,22 @@ class PIIEngine:
         The default is to scan, like `redact_model_originated_tree` on the reply path: a walk
         that follows known shapes forwards whatever field a provider adds next. Skipped:
         `handled`, operator- and policy-protected keys, the built-in structural keys, and
-        two kinds of direct field: media payloads (_is_media_field) and strings under
+        two kinds of direct field: media payloads by shape (_is_media_field) and strings under
         _OPAQUE_MESSAGE_KEYS. Below the direct fields every key is walked. Text under
         _REPLAYED_TEXT_KEYS is scanned whole; anything else past the blob ceiling gets the
         unmapped-blob treatment, as deep redaction does.
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         for key, value in node.items():
-            if key in handled or key in protected or _is_media_field(key, value):
+            if key in handled or key in protected:
+                continue
+            if _is_media_field(key, value):
+                # A file's name is the one text field in a media payload.
+                if key == "file" and isinstance(value.get("filename"), str):
+                    node[key] = {
+                        **value,
+                        "filename": self.redact_text(value["filename"], vault, active_profile, restorable=restorable),
+                    }
                 continue
             if key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str):
                 continue
