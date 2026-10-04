@@ -357,3 +357,22 @@ def test_a_digit_or_single_case_run_in_a_bytes_field_is_not_media(engine, deep, 
     from llm_shield_proxy.engines.pii_engine import _is_media_field
 
     assert not _is_media_field("input_audio", {"data": payload, "format": "wav"})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [{"file_id": "123-45-6789"}, {"media_type": "image/png", "data": "QUJDRGFiY2RBQkNEYWJjZA=="}, {"type": "url"}],
+    ids=["file_id-only", "no-type", "url-without-url"],
+)
+def test_a_source_must_declare_its_kind_and_carry_it(value):
+    """Round 9: a `source` with no media type, or missing what its type needs, is not media."""
+    from llm_shield_proxy.engines.pii_engine import _is_media_field
+
+    assert not _is_media_field("source", value)
+
+
+def test_a_source_file_id_only_object_is_walked(engine, deep, vault):
+    block = {"type": "text", "text": "hi", "source": {"file_id": "123-45-6789", "media_type": f"{SSN}"}}
+    assert SSN not in _sent(engine, vault, {"messages": [{"role": "user", "content": [block]}]}).replace(
+        '"file_id": "123-45-6789"', ""
+    )

@@ -429,9 +429,9 @@ _MEDIA_SHAPES: Dict[str, frozenset[str]] = {
     "source": frozenset({"type", "media_type", "data", "url", "file_id"}),
 }
 
-# Anthropic source types that hold media or a reference. A `text` or `content` source is a
-# document's text, handled by _redact_document_block.
-_MEDIA_SOURCE_TYPES: frozenset[str] = frozenset({"base64", "url", "file"})
+# Anthropic source types that hold media or a reference, and the field each must carry. A
+# `text` or `content` source is a document's text, handled by _redact_document_block.
+_MEDIA_SOURCE_NEEDS: Dict[str, str] = {"base64": "data", "url": "url", "file": "file_id"}
 
 _MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
 
@@ -496,7 +496,13 @@ def _is_media_field(key: str, value: Any) -> bool:
         return False
     if key == "image_url":
         return "url" in value
-    return True
+    if key == "source":
+        # A source declares its kind and carries what that kind needs.
+        needs = _MEDIA_SOURCE_NEEDS.get(value.get("type", ""))
+        return needs is not None and needs in value
+    if key == "input_audio":
+        return "data" in value
+    return "file_data" in value or "file_id" in value
 
 
 # Replayed model and caller text found by that scan. Scanned whole whatever its length: past
