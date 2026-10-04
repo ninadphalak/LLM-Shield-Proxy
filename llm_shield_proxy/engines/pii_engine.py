@@ -406,6 +406,140 @@ _SCHEMA_NAME_MAPS: frozenset[str] = frozenset(
 _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples", "default"})
 
 
+# Inside a message, content block or input item, every field the shape walk does not handle
+# is scanned (see _redact_remaining_fields). Two kinds of DIRECT field are not; anything deeper
+# is walked whatever its key is called, so `metadata.name` or `metadata.data` is ordinary data.
+#
+# A string under one of these keys: identifiers that link a tool result to its call or name a
+# tool, and blobs the provider verifies byte for byte (a thinking `signature`,
+# `redacted_thinking` `data`, `encrypted_content`). Rewriting them breaks the request, and
+# their high entropy is what Tier 2 flags.
+_OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
+    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content", "file_id"}
+)
+
+# Media payloads, by shape (see _is_media_field): the exact fields an image, audio or file
+# part's payload has. Rewriting an image URL breaks the reference, and an inline file is a
+# data: URI the blob policy rejects. A value with any other field, or a string that is not a
+# URL, is not media and is walked like everything else.
+_MEDIA_SHAPES: Dict[str, frozenset[str]] = {
+    "image_url": frozenset({"url", "detail"}),
+    "input_audio": frozenset({"data", "format"}),
+    "file": frozenset({"file_data", "file_id", "filename"}),
+    "source": frozenset({"type", "media_type", "data", "url", "file_id"}),
+}
+
+# Anthropic source types that hold media or a reference, and the field each must carry. A
+# `text` or `content` source is a document's text, handled by _redact_document_block.
+_MEDIA_SOURCE_NEEDS: Dict[str, str] = {"base64": "data", "url": "url", "file": "file_id"}
+
+_MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
+
+# What a media payload's bytes look like: standard base64, padded to a multiple of four, at
+# least 16 characters, mixing upper and lower case, line breaks allowed; or a data: URI. Text
+# in a `data` field is not media, whatever the field around it says.
+_BASE64_PAYLOAD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
+
+
+def _looks_like_media_bytes(payload: str, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
+    if payload.startswith("data:"):
+        return True
+    compact = payload.replace("\r", "").replace("\n", "")
+    if len(compact) < 16 or len(compact) % 4 or not _BASE64_PAYLOAD.fullmatch(compact):
+        return False
+    # Encoded bytes nearly always mix upper and lower case. A run of digits or of one case is
+    # in the base64 alphabet too: it may be a card number, or short single-case media. Ask
+    # the detectors: if they find nothing, it is media and goes out unchanged.
+    if any(ch.isupper() for ch in compact) and any(ch.islower() for ch in compact):
+        return True
+    return has_pii is not None and not has_pii(compact)
+
+# Media fields that hold the bytes themselves.
+_MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
+
+# Identifier keys whose STRING values go out unchanged at any depth of the scan, not only as a
+# direct field: an `audio.id`, an annotation's `file_id`, a nested tool `call_id`. Rewriting
+# one breaks the reference, a high-entropy id is what Tier 2 flags, and these names hold ids,
+# not personal data. `name` and `data` are not here: below a direct field they are ordinary
+# data (`metadata.name`), so they are only skipped as direct fields.
+_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"id", "call_id", "tool_call_id", "tool_use_id", "file_id"})
+
+
+_MEDIA_FIELD_PATTERNS: Dict[str, "re.Pattern[str]"] = {
+    "format": re.compile(r"[A-Za-z0-9]{1,10}"),
+    "media_type": re.compile(r"[A-Za-z0-9.+-]{1,40}/[A-Za-z0-9.+-]{1,60}"),
+    "detail": re.compile(r"auto|low|high"),
+    "file_id": re.compile(r"[A-Za-z0-9_-]{1,100}"),
+    "type": re.compile(r"base64|url|file"),
+}
+
+
+def _is_media_value(field: str, item: str, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
+    """Every sub-field of a media payload must look like what it is, or the object is walked."""
+    if field in _MEDIA_BYTES_KEYS:
+        return _looks_like_media_bytes(item, has_pii)
+    if field == "url":
+        return item.startswith(_MEDIA_URL_PREFIXES) and not any(ch.isspace() for ch in item)
+    if field == "filename":
+        return True  # scanned separately by _redact_remaining_fields
+    pattern = _MEDIA_FIELD_PATTERNS.get(field)
+    return bool(pattern and pattern.fullmatch(item))
+
+
+def _is_media_field(key: str, value: Any, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
+    """A direct field that is a media payload, judged by key AND the shape of every value."""
+    shape = _MEDIA_SHAPES.get(key)
+    if shape is None:
+        return False
+    if key == "image_url" and isinstance(value, str):
+        return _is_media_value("url", value)
+    if not isinstance(value, dict) or not value or not set(value) <= shape:
+        return False
+    if not all(isinstance(item, str) and _is_media_value(field, item, has_pii) for field, item in value.items()):
+        return False
+    if key == "image_url":
+        return "url" in value
+    if key == "source":
+        # A source declares its kind and carries what that kind needs.
+        needs = _MEDIA_SOURCE_NEEDS.get(value.get("type", ""))
+        return needs is not None and needs in value
+    if key == "input_audio":
+        return "data" in value
+    return "file_data" in value or "file_id" in value
+
+
+# Replayed model and caller text found by that scan. Scanned whole whatever its length: past
+# the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
+# not an attachment.
+_REPLAYED_TEXT_KEYS: frozenset[str] = frozenset(
+    {"reasoning_content", "reasoning", "refusal", "thinking", "transcript", "cited_text", "text"}
+)
+
+# What the message walk in redact_payload handles by shape.
+_MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
+    {"role", "content", "name", "tool_calls", "function_call", "messages"}
+)
+
+# What the content-block walks handle by shape. A document's `title` and `context` belong
+# here too; they are added for document blocks only.
+_BLOCK_HANDLED_KEYS: frozenset[str] = frozenset({"type", "text", "input", "content"})
+
+# What _redact_text_blocks handles by shape: only the text.
+_TEXT_BLOCK_HANDLED_KEYS: frozenset[str] = frozenset({"type", "text"})
+
+# What _redact_input_item handles by shape.
+_INPUT_ITEM_HANDLED_KEYS: frozenset[str] = frozenset(
+    {"role", "type", "content", "summary", "arguments", "output", "input", "code", "outputs"}
+)
+
+
+def _block_handled_keys(block: Dict[str, Any]) -> frozenset[str]:
+    """The keys of one content block the shape walk handled."""
+    if block.get("type") == "document":
+        return _BLOCK_HANDLED_KEYS | {"title", "context", "source"}
+    return _BLOCK_HANDLED_KEYS
+
+
 def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
     """`protected` minus the built-in structural keys nobody also listed explicitly.
 
@@ -1001,8 +1135,12 @@ class PIIEngine:
                                 # string or as further blocks.
                                 if "content" in block_copy:
                                     block_copy["content"] = self._redact_nested_content(
-                                        block_copy["content"], vault, active_profile
+                                        block_copy["content"], vault, active_profile, restorable=restorable
                                     )
+                                self._redact_remaining_fields(
+                                    block_copy, _block_handled_keys(block_copy), vault, active_profile,
+                                    depth + 2, max_depth, "messages.content", restorable,
+                                )
                                 new_content_blocks.append(block_copy)
                             else:
                                 new_content_blocks.append(block)
@@ -1045,6 +1183,13 @@ class PIIEngine:
                         if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
                             fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
                         msg_copy["function_call"] = fn_copy
+
+                    # 5. Everything else a client replays: `reasoning_content`, `refusal`,
+                    # `audio.transcript` and whatever a provider adds next.
+                    self._redact_remaining_fields(
+                        msg_copy, _MESSAGE_HANDLED_KEYS, vault, active_profile,
+                        depth + 1, max_depth, "messages", restorable,
+                    )
 
                     redacted_messages.append(msg_copy)
                 else:
@@ -1151,6 +1296,55 @@ class PIIEngine:
 
         return new_payload
 
+    def _redact_remaining_fields(
+        self,
+        node: Dict[str, Any],
+        handled: frozenset[str],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+        json_path: str,
+        restorable: bool = True,
+    ) -> None:
+        """Scans, in place, every field of `node` the shape walk did not handle.
+
+        The default is to scan, like `redact_model_originated_tree` on the reply path: a walk
+        that follows known shapes forwards whatever field a provider adds next. Skipped:
+        `handled`, operator- and policy-protected keys, the built-in structural keys, and
+        two kinds of direct field: media payloads by shape (_is_media_field) and strings under
+        _OPAQUE_MESSAGE_KEYS. Below the direct fields every key is walked. Text under
+        _REPLAYED_TEXT_KEYS is scanned whole; anything else past the blob ceiling gets the
+        unmapped-blob treatment, as deep redaction does.
+        """
+        protected = settings.payload_protected_keys_set | _policy_skip_keys()
+        for key, value in node.items():
+            if key in handled or key in protected:
+                continue
+            if _is_media_field(key, value, lambda text: bool(self.detect_spans(text, active_profile))):
+                # A file's name is the one text field in a media payload.
+                if key == "file" and isinstance(value.get("filename"), str):
+                    node[key] = {
+                        **value,
+                        "filename": self.redact_text(value["filename"], vault, active_profile, restorable=restorable),
+                    }
+                continue
+            if key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str):
+                continue
+            node[key] = self._deep_redact(
+                value,
+                vault,
+                active_profile,
+                protected,
+                None if key in _REPLAYED_TEXT_KEYS and isinstance(value, str) else settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
+                depth + 1,
+                max_depth,
+                f"{json_path}.{key}",
+                restorable=restorable,
+                text_keys=_REPLAYED_TEXT_KEYS,
+                reference_keys=_NESTED_REFERENCE_KEYS,
+            )
+
     def _deep_redact(
         self,
         node: Any,
@@ -1164,6 +1358,8 @@ class PIIEngine:
         keys_are_names: bool = False,
         one_way_keys: frozenset[str] = frozenset(),
         restorable: bool = True,
+        text_keys: frozenset[str] = frozenset(),
+        reference_keys: frozenset[str] = frozenset(),
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
 
@@ -1177,6 +1373,10 @@ class PIIEngine:
         Strings under a keyword in `one_way_keys` are redacted one-way (`restorable` is
         False below it). Inside schema data (`_SCHEMA_VALUE_KEYWORDS`) no key is a
         keyword, so none is one-way there.
+
+        A string directly under a key in `text_keys` is scanned in full, past the blob
+        ceiling too. A string directly under a key in `reference_keys` goes out unchanged;
+        an object under the same name is walked.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
@@ -1190,7 +1390,8 @@ class PIIEngine:
             return {
                 key: (
                     value
-                    if key in protected and not keys_are_names
+                    if (key in protected and not keys_are_names)
+                    or (key in reference_keys and isinstance(value, str))
                     else self._deep_redact(
                         value,
                         vault,
@@ -1200,7 +1401,7 @@ class PIIEngine:
                             if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS
                             else protected
                         ),
-                        max_string_length,
+                        None if key in text_keys and isinstance(value, str) else max_string_length,
                         depth + 1,
                         max_depth,
                         f"{json_path}.{key}" if json_path else key,
@@ -1211,6 +1412,8 @@ class PIIEngine:
                             else one_way_keys
                         ),
                         restorable=restorable and (keys_are_names or key not in one_way_keys),
+                        text_keys=text_keys,
+                        reference_keys=reference_keys,
                     )
                 )
                 for key, value in node.items()
@@ -1229,6 +1432,8 @@ class PIIEngine:
                     f"{json_path}[{index}]",
                     one_way_keys=one_way_keys,
                     restorable=restorable,
+                    text_keys=text_keys,
+                    reference_keys=reference_keys,
                 )
                 for index, item in enumerate(node)
             ]
@@ -1293,15 +1498,18 @@ class PIIEngine:
         vault: Vault,
         active_profile: Optional[CompiledProfile] = None,
         max_depth: int = 8,
+        restorable: bool = True,
     ) -> Any:
         """Redacts a tool_result's own content, a string or further blocks.
+
+        `restorable` is False inside a system or developer turn, for every level below it.
 
         Nesting past `max_depth` raises rather than stopping: the blocks below the bound
         would otherwise reach the provider unredacted. The error is the same one the
         payload walk raises, which the API turns into a 400.
         """
         if isinstance(content, str):
-            return self.redact_text(content, vault, active_profile)
+            return self.redact_text(content, vault, active_profile, restorable=restorable)
         if not isinstance(content, list):
             return content
 
@@ -1315,14 +1523,18 @@ class PIIEngine:
                 if not isinstance(block, dict):
                     continue
                 if isinstance(block.get("text"), str):
-                    block["text"] = self.redact_text(block["text"], vault, active_profile)
+                    block["text"] = self.redact_text(block["text"], vault, active_profile, restorable=restorable)
                 if block.get("type") == "document":
-                    self._redact_document_block(block, vault, active_profile)
+                    self._redact_document_block(block, vault, active_profile, restorable)
                 if block.get("type") == "tool_use" and "input" in block:
                     block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
+                self._redact_remaining_fields(
+                    block, _block_handled_keys(block), vault, active_profile, 0, 20, "tool_result.content",
+                    restorable,
+                )
                 nested = block.get("content")
                 if isinstance(nested, str):
-                    block["content"] = self.redact_text(nested, vault, active_profile)
+                    block["content"] = self.redact_text(nested, vault, active_profile, restorable=restorable)
                 elif isinstance(nested, list) and nested:
                     if depth + 1 >= max_depth:
                         raise ValueError("Maximum payload nesting depth exceeded")
@@ -1339,17 +1551,21 @@ class PIIEngine:
         active_profile: Optional[CompiledProfile] = None,
         restorable: bool = True,
     ) -> List[Any]:
-        """Redacts the `text` of every content block, leaving other block types alone."""
+        """Redacts the `text` of every content block, then the block's other fields."""
         redacted: List[Any] = []
         for block in blocks:
-            if isinstance(block, dict) and isinstance(block.get("text"), str):
-                block_copy = block.copy()
+            if not isinstance(block, dict):
+                redacted.append(block)
+                continue
+            block_copy = block.copy()
+            if isinstance(block_copy.get("text"), str):
                 block_copy["text"] = self.redact_text(
                     block_copy["text"], vault, active_profile, restorable=restorable
                 )
-                redacted.append(block_copy)
-            else:
-                redacted.append(block)
+            self._redact_remaining_fields(
+                block_copy, _TEXT_BLOCK_HANDLED_KEYS, vault, active_profile, 0, 20, "content", restorable
+            )
+            redacted.append(block_copy)
         return redacted
 
     def _redact_input_item(
@@ -1380,7 +1596,7 @@ class PIIEngine:
         # A replayed reasoning item quotes the conversation in its summary parts.
         summary = item_copy.get("summary")
         if isinstance(summary, list):
-            item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile)
+            item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile, restorable)
 
         # function_call / mcp_call hold `arguments`, their outputs `output`, a
         # custom_tool_call holds its free-form `input`, and a code_interpreter_call its
@@ -1391,7 +1607,7 @@ class PIIEngine:
 
         # A function_call_output can return a list of input_text / input_image parts.
         if isinstance(item_copy.get("output"), list):
-            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile)
+            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile, restorable)
 
         # A replayed code_interpreter_call carries what its code printed.
         outputs = item_copy.get("outputs")
@@ -1403,6 +1619,9 @@ class PIIEngine:
                 for entry in outputs
             ]
 
+        self._redact_remaining_fields(
+            item_copy, _INPUT_ITEM_HANDLED_KEYS, vault, active_profile, 0, 20, "input", restorable
+        )
         return item_copy
 
     def _redact_prompt_object(
