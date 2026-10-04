@@ -458,26 +458,42 @@ _MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
 _NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"id", "call_id", "tool_call_id", "tool_use_id", "file_id"})
 
 
+_MEDIA_FIELD_PATTERNS: Dict[str, "re.Pattern[str]"] = {
+    "format": re.compile(r"[A-Za-z0-9]{1,10}"),
+    "media_type": re.compile(r"[A-Za-z0-9.+-]{1,40}/[A-Za-z0-9.+-]{1,60}"),
+    "detail": re.compile(r"auto|low|high"),
+    "file_id": re.compile(r"[A-Za-z0-9_-]{1,100}"),
+    "type": re.compile(r"base64|url|file"),
+}
+
+
+def _is_media_value(field: str, item: str) -> bool:
+    """Every sub-field of a media payload must look like what it is, or the object is walked."""
+    if field in _MEDIA_BYTES_KEYS:
+        return _looks_like_media_bytes(item)
+    if field == "url":
+        return item.startswith(_MEDIA_URL_PREFIXES) and not any(ch.isspace() for ch in item)
+    if field == "filename":
+        return True  # scanned separately by _redact_remaining_fields
+    pattern = _MEDIA_FIELD_PATTERNS.get(field)
+    return bool(pattern and pattern.fullmatch(item))
+
+
 def _is_media_field(key: str, value: Any) -> bool:
-    """A direct field that is a media payload, judged by key AND shape."""
+    """A direct field that is a media payload, judged by key AND the shape of every value."""
     shape = _MEDIA_SHAPES.get(key)
     if shape is None:
         return False
     if key == "image_url" and isinstance(value, str):
-        return value.startswith(_MEDIA_URL_PREFIXES)
+        return _is_media_value("url", value)
     if not isinstance(value, dict) or not value or not set(value) <= shape:
         return False
-    if not all(isinstance(item, str) for item in value.values()):
+    if not all(isinstance(item, str) and _is_media_value(field, item) for field, item in value.items()):
         return False
-    for bytes_key in _MEDIA_BYTES_KEYS & set(value):
-        payload = value[bytes_key]
-        if not _looks_like_media_bytes(payload):
-            return False
-    if key == "source":
-        return value.get("type") in _MEDIA_SOURCE_TYPES
     if key == "image_url":
-        return value.get("url", "").startswith(_MEDIA_URL_PREFIXES)
+        return "url" in value
     return True
+
 
 # Replayed model and caller text found by that scan. Scanned whole whatever its length: past
 # the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,

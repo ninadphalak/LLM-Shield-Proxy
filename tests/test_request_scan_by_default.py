@@ -322,3 +322,25 @@ def test_nested_identifiers_go_out_unchanged_but_nested_names_are_scanned(engine
     assert sent.count(call_id) == 2
     assert EMAIL not in sent
     assert SSN not in sent
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("source", {"type": "url", "url": f"Contact {EMAIL} SSN {SSN}"}),
+        ("source", {"type": "base64", "media_type": f"{EMAIL}", "data": "AAAAAAAAAAAAAAAA"}),
+        ("input_audio", {"data": "AAAAAAAAAAAAAAAA", "format": "wav", "x": f"SSN {SSN} {EMAIL}"}),
+        ("image_url", {"url": "https://cdn.example.com/a.png", "detail": f"{EMAIL} {SSN}"}),
+    ],
+    ids=["source-url", "source-media_type", "input_audio-extra", "image_url-detail"],
+)
+def test_every_sub_field_of_a_media_payload_must_look_like_media(engine, deep, vault, key, value):
+    """Round 7: a valid shape with text in its url, media_type or detail is not media.
+
+    Text under `format` and `file_id` is not covered here on purpose: `format` is a built-in
+    structural key that deep redaction never rewrites, and `file_id` is an identifier key whose
+    string goes out unchanged at any depth (the owner's round 6 decision)."""
+    block = {"type": "image", key: value}
+    sent = _sent(engine, vault, {"messages": [{"role": "user", "content": [block]}]})
+    assert SSN not in sent
+    assert EMAIL not in sent
