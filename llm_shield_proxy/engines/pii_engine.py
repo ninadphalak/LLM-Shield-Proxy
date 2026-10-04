@@ -441,15 +441,18 @@ _MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
 _BASE64_PAYLOAD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
 
 
-def _looks_like_media_bytes(payload: str) -> bool:
+def _looks_like_media_bytes(payload: str, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
     if payload.startswith("data:"):
         return True
     compact = payload.replace("\r", "").replace("\n", "")
     if len(compact) < 16 or len(compact) % 4 or not _BASE64_PAYLOAD.fullmatch(compact):
         return False
-    # Encoded bytes mix upper and lower case. A run of digits (a card number) or of one case
-    # is in the base64 alphabet too, and is text, not media.
-    return any(ch.isupper() for ch in compact) and any(ch.islower() for ch in compact)
+    # Encoded bytes nearly always mix upper and lower case. A run of digits or of one case is
+    # in the base64 alphabet too: it may be a card number, or short single-case media. Ask
+    # the detectors: if they find nothing, it is media and goes out unchanged.
+    if any(ch.isupper() for ch in compact) and any(ch.islower() for ch in compact):
+        return True
+    return has_pii is not None and not has_pii(compact)
 
 # Media fields that hold the bytes themselves.
 _MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
@@ -471,10 +474,10 @@ _MEDIA_FIELD_PATTERNS: Dict[str, "re.Pattern[str]"] = {
 }
 
 
-def _is_media_value(field: str, item: str) -> bool:
+def _is_media_value(field: str, item: str, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
     """Every sub-field of a media payload must look like what it is, or the object is walked."""
     if field in _MEDIA_BYTES_KEYS:
-        return _looks_like_media_bytes(item)
+        return _looks_like_media_bytes(item, has_pii)
     if field == "url":
         return item.startswith(_MEDIA_URL_PREFIXES) and not any(ch.isspace() for ch in item)
     if field == "filename":
@@ -483,7 +486,7 @@ def _is_media_value(field: str, item: str) -> bool:
     return bool(pattern and pattern.fullmatch(item))
 
 
-def _is_media_field(key: str, value: Any) -> bool:
+def _is_media_field(key: str, value: Any, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
     """A direct field that is a media payload, judged by key AND the shape of every value."""
     shape = _MEDIA_SHAPES.get(key)
     if shape is None:
@@ -492,7 +495,7 @@ def _is_media_field(key: str, value: Any) -> bool:
         return _is_media_value("url", value)
     if not isinstance(value, dict) or not value or not set(value) <= shape:
         return False
-    if not all(isinstance(item, str) and _is_media_value(field, item) for field, item in value.items()):
+    if not all(isinstance(item, str) and _is_media_value(field, item, has_pii) for field, item in value.items()):
         return False
     if key == "image_url":
         return "url" in value
@@ -1318,7 +1321,7 @@ class PIIEngine:
         for key, value in node.items():
             if key in handled or key in protected:
                 continue
-            if _is_media_field(key, value):
+            if _is_media_field(key, value, lambda text: bool(self.detect_spans(text, active_profile))):
                 # A file's name is the one text field in a media payload.
                 if key == "file" and isinstance(value.get("filename"), str):
                     node[key] = {

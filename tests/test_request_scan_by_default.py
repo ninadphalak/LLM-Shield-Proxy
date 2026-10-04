@@ -353,10 +353,21 @@ def test_a_digit_or_single_case_run_in_a_bytes_field_is_not_media(engine, deep, 
     redacted = engine.redact_payload({"messages": [{"role": "user", "content": [block]}]}, vault)
     if payload.isdigit():
         assert payload not in json.dumps(redacted)
-    # Not classified as media either way: the object is walked like any other field.
+    # Without a detector to ask, an ambiguous run is never assumed to be media.
     from llm_shield_proxy.engines.pii_engine import _is_media_field
 
     assert not _is_media_field("input_audio", {"data": payload, "format": "wav"})
+
+
+def test_single_case_media_with_nothing_detected_is_kept(engine, deep, vault, monkeypatch):
+    """Round 10: valid base64 of one case is media when the detectors find nothing in it.
+
+    Before, it was walked as text: past the blob ceiling under the block policy that was a
+    413 for a valid audio payload."""
+    monkeypatch.setattr(settings, "UNMAPPED_BLOB_POLICY", "block")
+    payload = "QUFB" * 3000  # base64 of "AAA..." repeated: upper case only, 12000 characters
+    block = {"type": "input_audio", "input_audio": {"data": payload, "format": "wav"}}
+    assert payload in _sent(engine, vault, {"messages": [{"role": "user", "content": [block]}]})
 
 
 @pytest.mark.parametrize(
