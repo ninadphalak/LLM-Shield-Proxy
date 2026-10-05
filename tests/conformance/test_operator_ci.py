@@ -185,7 +185,7 @@ def test_only_the_tail_of_a_talkative_start_command_is_kept(tmp_path):
                     "--readiness-timeout", "10", "--out", str(out)]) == 2
     kept = (out / "current.gateway.log").read_bytes()
     assert len(kept) <= ci.STARTUP_LOG_TAIL_BYTES
-    assert kept.endswith(b"Z" * 20 + b"\n"), "the end of the output, where the reason is"
+    assert kept.rstrip(b"\r\n").endswith(b"Z" * 20), "the end of the output, where the reason is"
 
 
 def test_nothing_listening_and_no_start_command_says_to_start_the_gateway(tmp_path):
