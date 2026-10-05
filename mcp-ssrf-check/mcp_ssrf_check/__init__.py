@@ -4,4 +4,4 @@ Standard library plus httpx. Nothing else, so a maintainer can run it without in
 gateway's dependency tree, and so it cannot be read as one vendor's product testing another's.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

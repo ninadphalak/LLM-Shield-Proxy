@@ -71,7 +71,7 @@ inputs:
   source:
     description: "What pip installs. The default is the version this tag was released with; a path such as ./mcp-ssrf-check runs a working tree."
     required: false
-    default: "mcp-ssrf-check==0.2.0"
+    default: "mcp-ssrf-check==0.2.1"
 
 outputs:
   outcome:

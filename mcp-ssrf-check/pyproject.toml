@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-ssrf-check"
-version = "0.2.0"
+version = "0.2.1"
 description = "Check your own MCP server for missing Host and Origin validation, unbound session ids, and URL-fetching tools that reach loopback."
 readme = "README.md"
 requires-python = ">=3.9"
