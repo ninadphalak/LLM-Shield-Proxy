@@ -245,6 +245,16 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
             "/v1, add it: the check posts to <base>/chat/completions. Otherwise the gateway's own "
             "log says why it answered that.",
         )
+    if not answered and client.get("errors"):
+        # Forwarded, then no status line ever came back (a read timeout, a dropped
+        # connection). The response path was not measured either (review).
+        kinds = ", ".join(sorted(set(str(e) for e in client["errors"])))
+        return (
+            VERDICT_NOT_MEASURED,
+            f"Your gateway forwarded the request to the capture but the check got no HTTP answer "
+            f"back ({kinds}), so the response checks could not run. The gateway's own log says "
+            "what happened to the forwarded request; --timeout-seconds lengthens the wait.",
+        )
 
     ignored = {"response_fidelity", "fragmentation_safety"} if duty == "anonymize" else set()
     if duty not in {"restore", "anonymize"}:

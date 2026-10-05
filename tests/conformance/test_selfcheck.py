@@ -102,6 +102,17 @@ def test_a_gateway_that_forwards_and_then_answers_an_error_is_not_measured() -> 
     assert "masks without restoring" not in reason
 
 
+def test_a_gateway_that_forwards_and_then_never_answers_is_not_measured() -> None:
+    """Review: a read timeout after the request was forwarded leaves `status_codes` empty
+    and `errors` set; that is no more a measured response path than a 404 is."""
+    report = _report(correlated=3, failing_checks=("response_fidelity", "sse_validity"), status_codes=[])
+    report["checks"]["sse_validity"]["errors"] = ["ReadTimeout"]
+    verdict, reason = selfcheck.verdict_for(report)
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "no HTTP answer back (ReadTimeout)" in reason
+    assert "masks without restoring" not in reason
+
+
 def test_a_leak_still_outranks_an_error_answer() -> None:
     verdict, _ = selfcheck.verdict_for(_report(leaked=["SSN"], status_codes=[404]))
     assert verdict == selfcheck.VERDICT_LEAK
