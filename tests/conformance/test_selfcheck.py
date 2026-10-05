@@ -41,6 +41,8 @@ def _report(
     unattributed_uninspectable: int = 0,
     passed: bool = True,
     failing_checks: tuple[str, ...] = (),
+    unattributed_requests: int = 0,
+    status_codes: list[int] | None = None,
 ) -> dict[str, Any]:
     """The smallest report shape `verdict_for` reads, with everything else healthy."""
     checks: dict[str, Any] = {
@@ -48,6 +50,7 @@ def _report(
             "correlated_requests": correlated,
             "uninspectable_requests": uninspectable,
             "unattributed_uninspectable_requests": unattributed_uninspectable,
+            "unattributed_requests": unattributed_requests,
             "leaked_entity_types": leaked or [],
             "unattributed_leaked_entity_types": unattributed_leaked or [],
             "passed": not (leaked or unattributed_leaked),
@@ -55,7 +58,82 @@ def _report(
         "response_fidelity": {"passed": "response_fidelity" not in failing_checks},
         "sse_validity": {"passed": "sse_validity" not in failing_checks},
     }
+    if status_codes is not None:
+        checks["sse_validity"]["status_codes"] = status_codes
     return {"passed": passed, "checks": checks}
+
+
+# Two readings found by pointing the published 0.5.0 at real gateways.
+
+
+def test_requests_that_arrived_without_the_capture_token_are_named_not_denied() -> None:
+    """Portkey forwards the caller's key, not the capture token, so in public capture mode
+    every request is unattributed. The old reason said no request had reached the capture,
+    printed above a table of literal matches from exactly those requests."""
+    verdict, reason = selfcheck.verdict_for(
+        _report(correlated=0, unattributed_requests=3, unattributed_leaked=["EMAIL"], status_codes=[200])
+    )
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "3 request(s) carrying this run's values reached the capture without the capture token" in reason
+    assert "CONFORMANCE_CAPTURE_TOKEN" in reason
+    assert "No request carrying this run's marker" not in reason
+
+
+def test_token_less_requests_without_this_runs_values_are_called_unrelated_traffic() -> None:
+    """Review: a public capture receives scanners and other people's misconfiguration.
+    Without this run's values in them, those requests establish nothing about the gateway,
+    so the message must not tell the operator their gateway sent them."""
+    verdict, reason = selfcheck.verdict_for(_report(correlated=0, unattributed_requests=3, status_codes=[200]))
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "No request carrying this run's marker" in reason
+    assert "3 request(s) reached the capture without the capture token and carried none of this run's values" in reason
+    assert "provider key" not in reason
+
+
+def test_a_gateway_that_forwards_and_then_answers_an_error_is_not_measured() -> None:
+    """A target URL without `/v1`: the proxy forwarded to the capture (so the request was
+    inspected and contained), the capture answered 404 for `/chat/completions`, the proxy
+    relayed it. The old reading was CHECK FAILED, "masks without restoring"."""
+    verdict, reason = selfcheck.verdict_for(
+        _report(correlated=12, failing_checks=("response_fidelity", "sse_validity"), status_codes=[404])
+    )
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "HTTP 404" in reason and "/v1" in reason
+    assert "masks without restoring" not in reason
+
+
+def test_a_gateway_that_forwards_and_then_never_answers_is_not_measured() -> None:
+    """Review: a read timeout after the request was forwarded leaves `status_codes` empty
+    and `errors` set; that is no more a measured response path than a 404 is."""
+    report = _report(correlated=3, failing_checks=("response_fidelity", "sse_validity"), status_codes=[])
+    report["checks"]["sse_validity"]["errors"] = ["ReadTimeout"]
+    verdict, reason = selfcheck.verdict_for(report)
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "no HTTP answer back (ReadTimeout)" in reason
+    assert "masks without restoring" not in reason
+
+
+def test_mixed_iterations_state_the_two_counts_without_joining_them() -> None:
+    """Review: two of three requests rejected locally (403, never forwarded), one forwarded
+    and answered 500. The run recorded one request at the capture and two error codes; it
+    did not record which answer belongs to which request, so the message must not say
+    "forwarded, then answered"."""
+    verdict, reason = selfcheck.verdict_for(_report(correlated=1, failing_checks=("sse_validity",), status_codes=[403, 500]))
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "1 request(s) reached the capture" in reason
+    assert "HTTP 403, 500" in reason
+    assert "forwarded the request" not in reason
+
+
+def test_a_leak_still_outranks_an_error_answer() -> None:
+    verdict, _ = selfcheck.verdict_for(_report(leaked=["SSN"], status_codes=[404]))
+    assert verdict == selfcheck.VERDICT_LEAK
+
+
+def test_a_mixed_answer_keeps_the_check_failed_reading() -> None:
+    """One 200 among the answers means the response path was measured at least once."""
+    verdict, _ = selfcheck.verdict_for(_report(failing_checks=("sse_validity",), status_codes=[200, 500]))
+    assert verdict == selfcheck.VERDICT_CHECK_FAILED
 
 
 # --------------------------------------------------------------------------- unit

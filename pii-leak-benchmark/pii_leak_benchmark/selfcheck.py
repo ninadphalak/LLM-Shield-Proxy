@@ -154,6 +154,30 @@ def _why_nothing_arrived(report: dict[str, Any]) -> str:
     The capture cannot tell the causes apart, but the client often can: a gateway that
     answered 401 rejected the key, which is a one-flag fix, not a routing problem.
     """
+    boundary = report["checks"][_BOUNDARY]
+    without_token = boundary.get("unattributed_requests", 0)
+    if without_token and boundary.get("unattributed_leaked_entity_types"):
+        # Public capture mode, and the requests that arrived without the token carried
+        # this run's own synthetic values. Nobody but the harness and the gateway under
+        # test had those values, so the requests came through that gateway: it presented
+        # its own upstream key rather than the capture token. Seen with Portkey, which
+        # forwards the caller's key; the old message said no request had arrived, under a
+        # table of literal matches from exactly those requests.
+        return (
+            f"{without_token} request(s) carrying this run's values reached the capture without "
+            "the capture token, so they are not attributed to your gateway (public capture "
+            "mode). Only your gateway had those values: it is sending its own provider key "
+            "instead of the token. Set that key to the capture token "
+            "(CONFORMANCE_CAPTURE_TOKEN) so the capture can attribute its requests."
+        )
+    noise = ""
+    if without_token:
+        # Requests without the token and without this run's values say nothing about the
+        # gateway: a public capture receives scanners and other people's misconfiguration.
+        noise = (
+            f" {without_token} request(s) reached the capture without the capture token and "
+            "carried none of this run's values; on a public capture that is unrelated traffic."
+        )
     client = report["checks"].get("sse_validity", {})
     failed = sorted(code for code in client.get("status_codes", []) if code >= 400)
     if failed:
@@ -162,23 +186,23 @@ def _why_nothing_arrived(report: dict[str, Any]) -> str:
             return (
                 f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
                 "It rejected the client key: pass the key it expects with --target-api-key "
-                "or CONFORMANCE_TARGET_API_KEY."
+                "or CONFORMANCE_TARGET_API_KEY." + noise
             )
         return (
             f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
             "Its own log says why; an error before forwarding is usually a missing setting, "
-            "such as the key it sends upstream."
+            "such as the key it sends upstream." + noise
         )
     if not client.get("status_codes") and client.get("errors"):
         kinds = ", ".join(sorted(set(client["errors"])))
         return (
             f"The check got no HTTP answer from your gateway ({kinds}). Check that it is "
-            "running and listening at the target URL."
+            "running and listening at the target URL." + noise
         )
     return (
         "No request carrying this run's marker reached the capture. Your gateway is "
         "not configured to use it as its upstream, could not reach it, or sent the "
-        "traffic elsewhere -- these are indistinguishable here."
+        "traffic elsewhere -- these are indistinguishable here." + noise
     )
 
 
@@ -208,6 +232,37 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
         return (
             VERDICT_LEAK,
             "Raw fixture values reached the upstream: " + ", ".join(leaked) + ".",
+        )
+
+    # The gateway forwarded (so nothing above fired) and then answered the client with an
+    # error on every iteration: the response path was never measured. Seen with a target
+    # URL missing `/v1`: the proxy relayed the capture's 404 for `/chat/completions`, and
+    # the old reading was CHECK FAILED, "masks without restoring", which is not what happened.
+    client = report["checks"].get("sse_validity", {})
+    answered = [int(code) for code in client.get("status_codes", []) if int(code) != 0]
+    if answered and all(code >= 400 for code in answered):
+        codes = ", ".join(str(code) for code in sorted(set(answered)))
+        # Two facts the run recorded, stated side by side and not joined: how many requests
+        # the capture saw, and what every client answer was. Which answer belongs to which
+        # request is not recorded, so the message does not say "forwarded, then answered".
+        reached = boundary["correlated_requests"]
+        return (
+            VERDICT_NOT_MEASURED,
+            f"{reached} request(s) reached the capture, and every answer the client got was an "
+            f"error (HTTP {codes}), so the response checks could not run. If --target-base-url "
+            "does not end in /v1, add it: the check posts to <base>/chat/completions. Otherwise "
+            "the gateway's own log says why it answered that.",
+        )
+    if not answered and client.get("errors"):
+        # No status line ever came back (a read timeout, a dropped connection). The
+        # response path was not measured either (review).
+        kinds = ", ".join(sorted(set(str(e) for e in client["errors"])))
+        reached = boundary["correlated_requests"]
+        return (
+            VERDICT_NOT_MEASURED,
+            f"{reached} request(s) reached the capture, and the check got no HTTP answer back "
+            f"({kinds}), so the response checks could not run. The gateway's own log says what "
+            "happened after it forwarded; --timeout-seconds lengthens the wait.",
         )
 
     ignored = {"response_fidelity", "fragmentation_safety"} if duty == "anonymize" else set()
@@ -328,10 +383,12 @@ def _print_report(
     for line in _wrap(reason, 76):
         print(f"  {line}")
     print()
+    without_token = boundary.get("unattributed_requests", 0)
     print(
         f"  Requests to capture: {boundary['captured_requests']}"
         f"  |  correlated to this run: {boundary['correlated_requests']}"
         f"  |  uninspectable: {boundary['uninspectable_requests']}"
+        + (f"  |  without the capture token: {without_token}" if without_token else "")
     )
     print()
 
