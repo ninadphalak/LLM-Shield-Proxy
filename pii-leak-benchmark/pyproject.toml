@@ -78,7 +78,9 @@ include = ["pii_leak_benchmark*"]
 [tool.setuptools.package-data]
 # The v2 report schema, so `--validate` works from any directory. A test pins it to
 # `spec/v2.0.0/http-profile.schema.json` byte for byte.
-pii_leak_benchmark = ["schemas/v2.0.0/*.json"]
+# The scorer source as the pinned interpreter renders it, so `inspector_digest()` gives one
+# value on every interpreter for unchanged code (`v2_emitter.INSPECTOR_SOURCE_RESOURCE`).
+pii_leak_benchmark = ["schemas/v2.0.0/*.json", "schemas/inspector-source-*.txt"]
 
 [tool.ruff]
 line-length = 120

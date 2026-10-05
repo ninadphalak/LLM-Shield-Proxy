@@ -2649,8 +2649,21 @@ def _behaviour_source(function: Any) -> str:
     return ast.unparse(ast.fix_missing_locations(tree))
 
 
-def inspector_digest() -> str:
-    """Fingerprint the enumerated scorer source; return 16 SHA-256 hex characters."""
+# The scorer source as the pinned interpreter renders it, shipped with the package. The
+# digest is a hash of `ast.unparse` output, and `ast.unparse` is not identical across
+# interpreter patch releases: 3.12.3 renders a nested f-string with single quotes where
+# 3.12.14 and 3.14 use double quotes, so the same code hashed to a different value and
+# every digest-pinned test failed for a contributor on an older 3.12. When the live
+# rendering differs from this text but parses to the same program, the text is hashed,
+# so unchanged code has one digest on every interpreter. Changed code still moves it.
+# Regenerate after a deliberate scorer change, with the interpreter CI uses:
+#   python -c "from pii_leak_benchmark import v2_emitter as v; print(v.inspector_source())" > <new file>
+# and rename the file to the new digest.
+INSPECTOR_SOURCE_RESOURCE = ("schemas", "inspector-source-94262e29a492ab6a.txt")
+
+
+def inspector_source() -> str:
+    """The enumerated scorer source, normalised, as this interpreter renders it."""
     from pii_leak_benchmark import http_profile
 
     parts = [_behaviour_source(globals()[name]) for name in _INSTRUMENTED]
@@ -2659,7 +2672,36 @@ def inspector_digest() -> str:
         _behaviour_source(getattr(http_profile, name))
         for name in ("_collect", "_normalize", "_normalize_confusable_digits")
     ]
-    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+    return "\n".join(parts)
+
+
+def pinned_inspector_source() -> str | None:
+    """The shipped rendering, or None when the package carries none."""
+    from importlib.resources import files
+
+    try:
+        return files(__package__).joinpath(*INSPECTOR_SOURCE_RESOURCE).read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def same_program(a: str, b: str) -> bool:
+    """Two renderings of Python source describe the same program."""
+    import ast
+
+    try:
+        return ast.dump(ast.parse(a)) == ast.dump(ast.parse(b))
+    except SyntaxError:
+        return False
+
+
+def inspector_digest() -> str:
+    """Fingerprint the enumerated scorer source; return 16 SHA-256 hex characters."""
+    text = inspector_source()
+    pinned = pinned_inspector_source()
+    if pinned is not None and pinned != text and same_program(pinned, text):
+        text = pinned
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def instrument_block() -> dict[str, str]:

@@ -8,6 +8,7 @@ package and a test here pins the bundled copy to the published one byte for byte
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -37,6 +38,50 @@ def test_the_console_script_is_declared() -> None:
     # The schema is data, and setuptools ships no data it is not told about.
     package_data = pyproject["tool"]["setuptools"]["package-data"]["pii_leak_benchmark"]
     assert any("schemas" in pattern for pattern in package_data)
+
+
+# --- The inspector digest does not depend on the interpreter ------------------------------
+#
+# `ast.unparse` renders a nested f-string with single quotes on Python 3.12.3 and double
+# quotes on 3.12.14 and 3.14. The digest hashed that text, so the same scorers gave
+# `bef56f47c69f49df` on one machine and the pinned `94262e29a492ab6a` on another.
+
+PINNED_INSPECTOR = "94262e29a492ab6a"
+
+
+def test_the_shipped_scorer_source_hashes_to_the_pinned_digest() -> None:
+    pinned = v2_emitter.pinned_inspector_source()
+    assert pinned is not None, "the package ships the pinned rendering"
+    assert hashlib.sha256(pinned.encode()).hexdigest()[:16] == PINNED_INSPECTOR
+    assert v2_emitter.INSPECTOR_SOURCE_RESOURCE[-1] == f"inspector-source-{PINNED_INSPECTOR}.txt"
+
+
+def test_the_live_scorers_are_the_shipped_program() -> None:
+    """A deliberate scorer change fails here first, with the instruction, before the digest
+    pins elsewhere fail without one."""
+    assert v2_emitter.same_program(v2_emitter.pinned_inspector_source(), v2_emitter.inspector_source()), (
+        "a scorer changed: regenerate the shipped rendering with the interpreter CI uses "
+        "(see INSPECTOR_SOURCE_RESOURCE) and re-pin the digest deliberately"
+    )
+
+
+def test_the_digest_is_the_pinned_one_on_this_interpreter() -> None:
+    assert v2_emitter.inspector_digest() == PINNED_INSPECTOR
+
+
+def test_a_changed_program_still_moves_the_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shipped text may stand in for a different RENDERING, never for different code."""
+    live = v2_emitter.inspector_source()
+    monkeypatch.setattr(v2_emitter, "pinned_inspector_source", lambda: live.replace("return", "return 1 or", 1))
+    assert v2_emitter.inspector_digest() == hashlib.sha256(live.encode()).hexdigest()[:16]
+
+
+def test_a_different_rendering_of_the_same_program_does_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    live = v2_emitter.inspector_source()
+    rendering = live.replace("    return ", "    return  ", 1)  # whitespace only; same program
+    assert rendering != live and v2_emitter.same_program(live, rendering)
+    monkeypatch.setattr(v2_emitter, "pinned_inspector_source", lambda: rendering)
+    assert v2_emitter.inspector_digest() == hashlib.sha256(rendering.encode()).hexdigest()[:16]
 
 
 def test_the_bundled_schema_is_the_published_schema() -> None:

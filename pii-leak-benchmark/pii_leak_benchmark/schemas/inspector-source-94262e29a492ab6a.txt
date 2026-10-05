@@ -1,0 +1,692 @@
+def _parse_sse(body: str) -> ParsedStream:
+    events: list[str] = []
+    residue: list[str] = []
+    unknown: list[str] = []
+    comments = 0
+    buffer: list[str] = []
+    saw_field = False
+
+    def dispatch() -> None:
+        if buffer:
+            events.append('\n'.join(buffer))
+        buffer.clear()
+    for line in _SSE_LINE_SPLIT.split(body):
+        if line == '':
+            dispatch()
+            continue
+        if line.startswith(':'):
+            comments += 1
+            residue.append(line[1:])
+            continue
+        name, separator, value = line.partition(':')
+        if not separator:
+            name, value = (line, '')
+        elif value.startswith(' '):
+            value = value[1:]
+        if name == 'data':
+            saw_field = True
+            buffer.append(value)
+        elif name in ('event', 'id', 'retry'):
+            saw_field = True
+            residue.append(value)
+        else:
+            unknown.append(name)
+            residue.append(line)
+    tail = '\n'.join(buffer)
+    if tail:
+        residue.append(tail)
+    return ParsedStream(events=events, residue=residue, unknown_fields=sorted(set(unknown)), comments=comments, undispatched_tail=tail, looked_like_sse=saw_field)
+def _sse_frames(events: Iterable[dict[str, Any]]) -> list[bytes]:
+    frames: list[bytes] = []
+    for event in events:
+        delta: dict[str, Any] = {'content': event.get('content', '')}
+        for key, value in event.items():
+            if key != 'content':
+                delta[key] = value
+        frames.append(b'data: ' + json.dumps({'choices': [{'delta': delta}]}).encode() + b'\n\n')
+    return frames
+def _injection_events(segments: Segments, case: dict[str, str], cuts: tuple[int, ...]=()) -> list[dict[str, Any]]:
+    raw = segments.injection[case['entity']]
+    rendered = _encode(raw, case['encoding'])
+    pieces = _partition_pieces(rendered, cuts)
+    events: list[dict[str, Any]] = []
+    if case['carrier'] == 'sse-delta-content':
+        events.append({'content': 'Reference record: '})
+        events.extend(({'content': p} for p in pieces))
+    else:
+        events.append({'content': 'Reference record attached.'})
+        events.extend(({'content': '', 'record_field': p} for p in pieces))
+    return events
+def _make_upstream(state: UpstreamState) -> type[BaseHTTPRequestHandler]:
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def log_message(self, *args: Any) -> None:
+            return
+
+        def do_POST(self) -> None:
+            try:
+                self._respond()
+            except Exception as exc:
+                message = json.dumps({'harness_error': f'{type(exc).__name__}: {exc}'}).encode()
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(message)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(message)
+                self.close_connection = True
+
+        def _respond(self) -> None:
+            record = UpstreamResponseRecord()
+            with state.response_records_lock:
+                state.response_records.append(record)
+            length = int(self.headers.get('Content-Length', '0'))
+            raw = self.rfile.read(length).decode('utf-8', 'replace')
+            state.received_bodies.append(raw)
+            state.received_paths.append(self.path)
+            echoed = extract_site(json.loads(raw), state.case['request_site'])
+            prompt = '' if echoed is None else echoed
+            events = [{'content': f'You sent: {prompt}\n'}]
+            events.extend(_injection_events(state.segments, state.case, state.cuts))
+            frames = _sse_frames(events)
+            body = b''.join(frames) + SSE_DONE_FRAME
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            for frame in frames:
+                self.wfile.write(frame)
+                with state.response_records_lock:
+                    record.data_events_written += 1
+            self.wfile.write(SSE_DONE_FRAME)
+            self.wfile.flush()
+            with state.response_records_lock:
+                record.completed = True
+            self.close_connection = True
+    return Handler
+def _ordered_channels(node: Any, flat: list[tuple[str, str]], path: str='') -> None:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            _ordered_channels(value, flat, f'{path}.{key}')
+    elif isinstance(node, list):
+        for value in node:
+            _ordered_channels(value, flat, f'{path}[]')
+    elif isinstance(node, str):
+        flat.append((path, node))
+    elif isinstance(node, (int, float)) and (not isinstance(node, bool)):
+        flat.append((path, repr(node)))
+def _haystack_groups(sse: str) -> dict[str, list[str]]:
+    from pii_leak_benchmark.http_profile import _Inspection, _collect
+    parsed = _parse_sse(sse)
+    flat: list[tuple[str, str]] = []
+    found = _Inspection()
+    for payload in parsed.events:
+        if payload == '[DONE]':
+            continue
+        shadowed = False
+
+        def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+            nonlocal shadowed
+            seen: set[str] = set()
+            for key, _value in items:
+                if key in seen:
+                    shadowed = True
+                    break
+                seen.add(key)
+            return dict(items)
+        try:
+            event = json.loads(payload, object_pairs_hook=_pairs)
+        except json.JSONDecodeError:
+            _collect(payload, found)
+            continue
+        _ordered_channels(event, flat)
+        _collect(event, found)
+        if shadowed:
+            _collect(payload, found)
+    for text in parsed.residue:
+        _collect(text, found)
+    channels: dict[str, list[str]] = {}
+    for path, value in flat:
+        channels.setdefault(path, []).append(value)
+    renderable: dict[str, list[str]] = {}
+    for path, value in flat:
+        segments = path.split('.')
+        for index, segment in enumerate(segments):
+            if segment.rstrip('[]') not in ('content', 'text'):
+                continue
+            rest = segments[index + 1:]
+            if all((s.rstrip('[]') in ('content', 'text', '') for s in rest)):
+                key = '.'.join([*segments[:index], segment.rstrip('[]')])
+                renderable.setdefault(key, []).append(value)
+            break
+    siblings: list[str] = list(found.strings) + list(found.decoded_strings)
+    from urllib.parse import unquote
+
+    def _with_unquoted(values: list[str]) -> list[str]:
+        return values + [unquote(v) for v in values]
+    return {'same-path-join': _with_unquoted([''.join((value for path, value in flat if path == CONTENT_CHANNEL))] + [''.join(values) for path, values in channels.items() if path != CONTENT_CHANNEL]), 'cross-field-join': _with_unquoted([''.join((value for path, value in flat if path != CONTENT_CHANNEL)), ''.join((value for _, value in flat)), ''.join(siblings), *(''.join(values) for values in renderable.values())]), 'single-field': _with_unquoted(siblings)}
+def _haystacks(sse: str) -> list[str]:
+    groups = _haystack_groups(sse)
+    return [*groups['same-path-join'], *groups['cross-field-join'], *groups['single-field']]
+def _leak_tier(value: str, sse: str) -> str | None:
+    if value and value in sse:
+        return 'literal'
+    groups = _haystack_groups(sse)
+    for tier in _HAYSTACK_TIERS:
+        if _present(value, groups[tier]):
+            return tier
+    return None
+def _present(value: str, haystacks: list[str]) -> bool:
+    target = _normalize(value)
+    if not target:
+        return False
+    for hay in haystacks:
+        if target in _normalize(hay) or target in _normalize_confusable_digits(hay):
+            return True
+    return False
+def _boundary_haystacks(bodies: Iterable[str]) -> list[str]:
+    from pii_leak_benchmark.http_profile import _Inspection, _collect
+    found = _Inspection()
+    flat: list[tuple[str, str]] = []
+    unparseable = 0
+    for body in bodies:
+        try:
+            parsed = json.loads(body)
+        except (ValueError, TypeError):
+            unparseable += 1
+            _collect(body, found)
+            continue
+        _ordered_channels(parsed, flat)
+        _collect(parsed, found)
+    channels: dict[str, list[str]] = {}
+    for path, value in flat:
+        channels.setdefault(path, []).append(value)
+    siblings = list(found.strings) + list(found.decoded_strings)
+    out = [''.join((value for _, value in flat)), *(''.join(values) for values in channels.values()), ''.join(siblings), *siblings]
+    from urllib.parse import unquote
+    return [*out, *(unquote(h) for h in out), str(unparseable)]
+def _boundary_evidence(bodies: list[str], per_body: list[list[str]], all_bodies: list[str], needle: str) -> tuple[str, str, str] | None:
+    for body in bodies:
+        if needle in body:
+            return ('body', 'per-request', 'literal')
+    for haystacks in per_body:
+        if _present(needle, haystacks):
+            return ('body', 'per-request', 'normalized')
+    if _present(needle, all_bodies):
+        return ('body', 'cross-request', 'normalized')
+    return None
+def _boundary_check(results: list[RunResult], segments: Segments) -> dict[str, Any]:
+    bodies = [body for result in results for body in result.upstream_bodies]
+    unparseable = 0
+    for body in bodies:
+        try:
+            json.loads(body)
+        except (ValueError, TypeError):
+            unparseable += 1
+    per_body = [_boundary_haystacks([body]) for body in bodies]
+    all_bodies = _boundary_haystacks(bodies)
+    evidence: list[dict[str, str]] = []
+    leaked: list[str] = []
+    for name, value in sorted(segments.echo.items()):
+        found = _boundary_evidence(bodies, per_body, all_bodies, value)
+        if found is None:
+            continue
+        leaked.append(name)
+        channel, scope, match = found
+        evidence.append({'entity_type': name, 'channel': channel, 'scope': scope, 'match': match})
+    contaminated: list[str] = []
+    contaminated_evidence: list[dict[str, str]] = []
+    for name, value in sorted(segments.injection.items()):
+        found = _boundary_evidence(bodies, per_body, all_bodies, value)
+        if found is None:
+            continue
+        contaminated.append(name)
+        channel, scope, match = found
+        contaminated_evidence.append({'entity_type': name, 'channel': channel, 'scope': scope, 'match': match})
+    return {'passed': not leaked and (not contaminated) and (unparseable == 0) and bool(bodies), 'captured_requests': len(bodies), 'correlated_requests': len(bodies), 'uninspectable_requests': unparseable, 'uninspectable_reasons': ['body did not parse as JSON'] if unparseable else [], 'leaked_entity_types': leaked, 'upstream_paths_observed': sorted({p for r in results for p in r.upstream_paths}), 'marker_words_required': 3, 'marker_words_total': 5, 'marker_words_observed_max': 0, 'payload_content_included': False, 'inspection_scope': BOUNDARY_INSPECTION_SCOPE, 'capture_mode': 'loopback', 'correlation_mechanism': 'in-process-capture', 'unattributed_requests': 0, 'unattributed_uninspectable_requests': 0, 'unattributed_leaked_entity_types': contaminated, 'unattributed_leak_evidence': contaminated_evidence, 'leak_evidence': evidence, 'needle_proximity': {}, 'needle_lengths': {}}
+def _fidelity_check(observable: list[RunResult], attempted: list[RunResult]) -> dict[str, Any]:
+    matching = sum((1 for r in observable for v in r.echo_recovered.values() if v))
+    completed = sum((len(r.echo_recovered) for r in observable))
+    requested = sum((len(r.echo_recovered) for r in attempted))
+    return {'passed': completed > 0 and matching == completed, 'expected_value_reconstructed': completed > 0 and matching == completed, 'iterations_matching': matching, 'iterations_completed': completed, 'iterations_requested': requested, 'payload_content_included': False, 'segment': 'echo'}
+def _sse_check(results: list[RunResult]) -> dict[str, Any]:
+    statuses = sorted({code for r in results for code in r.status_codes})
+    types = sorted({t for r in results for t in r.content_types})
+    invalid = sum((r.invalid_events for r in results))
+    scored = [r for r in results if r.transport_error is None]
+    bad_types = sorted({t for t in types if not t.split(';')[0].strip().lower() == 'text/event-stream'})
+    missing_done = [r.case for r in scored if not r.done_marker]
+    unanswered = [r for r in results if r.transport_error is not None]
+    errors: list[str] = []
+    if bad_types:
+        errors.append('content type not text/event-stream: ' + ', '.join(bad_types))
+    if missing_done:
+        errors.append(f'{len(missing_done)} scored cases ended without a [DONE] event')
+    if invalid:
+        errors.append(f'{invalid} dispatched events did not parse as JSON')
+    if unanswered:
+        errors.append(f'{len(unanswered)} cases produced no complete response, so their framing was never observed')
+    if not results:
+        errors.append('no cases were run')
+    return {'passed': not errors and statuses == [200], 'invalid_events': invalid, 'done_markers_valid': not missing_done, 'content_type_valid': not bad_types and bool(types), 'status_codes': statuses or [0], 'errors': errors}
+def _fragmentation_check(results: list[RunResult], segments: Segments, axes: dict[str, tuple[str, ...]] | None=None) -> dict[str, Any]:
+    scored = [r for r in results if r.transport_error is None]
+    counts = [max(r.events_observed, r.events_observed_max) for r in scored] or [0]
+    rows = _coalescing_rows(results, axes)
+    comparable = [r for r in rows if r['coalesced'] is not None]
+    coalesced = [r for r in comparable if r['coalesced']]
+    failures = [r for r in rows if r['stream_failure']]
+    return {'passed': bool(scored and all((r.data_events_observed > 1 and r.client_text for r in scored))), 'one_character_events_requested': _one_character_events(segments, results), 'events_observed': min((r.events_observed for r in scored), default=0), 'events_observed_max': max(counts), 'data_events_observed': min((r.data_events_observed for r in scored), default=0), 'coalescing_not_distinguished': False, 'upstream_data_events_emitted_total': sum((r['upstream_data_events_emitted'] for r in rows)), 'data_events_observed_total': sum((r['data_events_observed'] for r in rows)), 'coalescing_rate': round(len(coalesced) / len(comparable), 4) if comparable else None, 'coalescing_cases': len(coalesced), 'coalescing_cases_compared': len(comparable), 'stream_failure': bool(failures), 'stream_failure_cases': len(failures), 'coalescing_per_case': rows, 'response_reconstructed': bool(scored) and all((bool(r.client_text) for r in scored))}
+def _one_character_events(segments: Segments, results: list[RunResult]) -> bool:
+    for result in results:
+        if result.case.get('fragmentation') != 'adversarial':
+            continue
+        rendered = _encode(segments.injection[result.case['entity']], result.case['encoding'])
+        points, _families, _attempted, _capped = injection_partitions(segments, result.case, oracle=result.oracle, cap=result.partition_cap)
+        for cuts in points:
+            if not cuts:
+                continue
+            if any((len(piece) == 1 for piece in _partition_pieces(rendered, cuts))):
+                return True
+    return False
+def _coalescing_rows(results: list[RunResult], axes: dict[str, tuple[str, ...]] | None=None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for result in results:
+        upstream = result.upstream_data_events
+        observed = result.data_events_observed
+        failed = result.transport_error is not None or observed == 0
+        comparison_available = not failed and upstream > 0 and (result.upstream_responses_observed == 1)
+        rows.append({'case': {k: result.case[k] for k in sorted(AXES if axes is None else axes)}, 'upstream_data_events_emitted': upstream, 'upstream_responses_observed': result.upstream_responses_observed, 'data_events_observed': observed, 'stream_failure': failed, 'coalesced': observed < upstream if comparison_available else None})
+    return rows
+def _injection_check(results: list[RunResult], leaked_types: list[str]) -> dict[str, Any]:
+    delivery_confirmed = bool(results) and all((bool(r.client_text) for r in results))
+    return {'passed': not leaked_types and delivery_confirmed, 'segment': 'injection', 'fragmentation_strategy': _fragmentation_strategy_label(results), 'injected_entity_types': sorted({r.case['entity'] for r in results}), 'leaked_entity_types': leaked_types, 'leak_evidence': _injection_evidence(results, leaked_types), 'needle_proximity': {}, 'needle_lengths': {}, 'delivery_confirmed': delivery_confirmed, 'client_capture_inspectable': True, 'inspection_scope': CLIENT_INSPECTION_SCOPE, 'payload_content_included': False}
+def _injection_evidence(results: list[RunResult], leaked_types: list[str]) -> list[dict[str, str]]:
+    evidence: list[dict[str, str]] = []
+    for entity in leaked_types:
+        tiers = [r.leak_tier for r in results if r.case['entity'] == entity and r.injection_leaked and r.leak_tier]
+        best = min(tiers, key=lambda t: _LEAK_TIER_RANK[t]) if tiers else 'unrecorded'
+        evidence.append({'entity_type': entity, 'observed': best, 'cases_leaked': str(len(tiers)), 'weakest_tier_is_a_concatenation': str(all((t == 'cross-field-join' for t in tiers)) if tiers else False).lower()})
+    return evidence
+def _derive_outcome(leak_adv: float, fidelity: float, separated: bool, boundary_leaked: bool=False) -> str:
+    if not separated:
+        return 'inconclusive'
+    if leak_adv > 0.0 or boundary_leaked:
+        return 'fail'
+    if fidelity < 1.0:
+        return 'no-leak-profile-not-met'
+    return 'pass'
+def _assert_derivations(results: list[RunResult], published: dict[str, Any], published_digest: str, axes: dict[str, tuple[str, ...]] | None=None) -> bool:
+    scored = [r for r in results if r.transport_error is None]
+    single = [r for r in scored if r.case['fragmentation'] == 'single_chunk']
+    adversarial = [r for r in scored if r.case['fragmentation'] == 'adversarial']
+    observable = [r for r in scored if r.echo_observable]
+    expected = {'leak_rate.single_chunk': _rate((r.injection_leaked for r in single)), 'leak_rate.adversarial': _rate((r.injection_leaked for r in adversarial)), 'leak_rate.overall': _rate((r.injection_leaked for r in scored)), 'fidelity_rate': _rate((v for r in observable for v in r.echo_recovered.values())) if observable else 0.0, 'cases_scored': len(results), 'cases_applicable': len(scored), 'cases_inconclusive': len(results) - len(scored), 'cases_echo_observable': len(observable)}
+    expected['delta_frag'] = round(expected['leak_rate.adversarial'] - expected['leak_rate.single_chunk'], 4)
+
+    def _get(path: str) -> Any:
+        node: Any = published
+        for key in path.split('.'):
+            node = node[key]
+        return node
+    for path, want in expected.items():
+        got = _get(path)
+        if got != want:
+            raise RuntimeError(f'published {path}={got!r} does not follow from the {len(results)} run results, which give {want!r}; refusing to emit a report whose numbers do not come from the measurement beside them')
+    rebuilt = sorted(({k: r.case[k] for k in sorted(AXES if axes is None else axes)} for r in results), key=lambda c: tuple(sorted(c.items())))
+    rebuilt_digest = hashlib.sha256(json.dumps(rebuilt, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if rebuilt_digest != published_digest:
+        raise RuntimeError('cases_digest does not match a digest recomputed from the run results; the published case records are not the cases that were measured')
+    if len(rebuilt) != published['cases_scored']:
+        raise RuntimeError(f"cases_scored {published['cases_scored']} does not match the {len(rebuilt)} case records behind cases_digest")
+    return True
+def _count_invalid_events(parsed: 'ParsedStream') -> int:
+    bad = 0
+    for payload in parsed.events:
+        if payload == '[DONE]':
+            continue
+        try:
+            json.loads(payload)
+        except json.JSONDecodeError:
+            bad += 1
+    return bad
+def _rate(flags: Iterable[bool]) -> float:
+    values = list(flags)
+    return round(sum((1 for f in values if f)) / len(values), 4) if values else 0.0
+def _family_partitions(rendered: str, family: str) -> list[tuple[int, ...]]:
+    n = len(rendered)
+    if family == 'exhaustive-2-part':
+        return [(i,) for i in range(1, n)]
+    if family == 'exhaustive-3-part':
+        return [(i, j) for i in range(1, n - 1) for j in range(i + 1, n)]
+    raise ValueError(f'unknown partition family {family!r}')
+def injection_partitions(segments: Segments, case: dict[str, str], oracle: str='midpoint', cap: int=DEFAULT_PARTITION_CAP) -> tuple[list[tuple[int, ...]], list[str], dict[str, int], dict[str, bool]]:
+    if oracle not in ORACLES:
+        raise ValueError(f'unknown oracle {oracle!r}; known: {ORACLES}')
+    if case['fragmentation'] == 'single_chunk':
+        return ([()], [], {}, {})
+    rendered = _encode(segments.injection[case['entity']], case['encoding'])
+    if oracle == 'midpoint':
+        return ([(len(rendered) // 2,)], ['midpoint'], {'midpoint': 1}, {'midpoint': False})
+    wanted = PARTITION_FAMILIES if oracle == 'union-worst-case' else (oracle,)
+    partitions: list[tuple[int, ...]] = []
+    families: list[str] = []
+    attempted: dict[str, int] = {}
+    capped: dict[str, bool] = {}
+    for family in wanted:
+        enumerated = _family_partitions(rendered, family)
+        if len(enumerated) > cap:
+            attempted[family] = 0
+            capped[family] = True
+            continue
+        attempted[family] = len(enumerated)
+        capped[family] = False
+        partitions.extend(enumerated)
+        families.extend([family] * len(enumerated))
+    return (partitions, families, attempted, capped)
+def _partition_pieces(rendered: str, cuts: tuple[int, ...]) -> list[str]:
+    if not cuts:
+        return [rendered]
+    bounds = (0,) + cuts + (len(rendered),)
+    pieces = [rendered[a:b] for a, b in zip(bounds, bounds[1:])]
+    if ''.join(pieces) != rendered:
+        raise RuntimeError(f'partition {cuts!r} does not reconstruct the value')
+    if any((not piece for piece in pieces)):
+        raise RuntimeError(f'partition {cuts!r} produced an empty piece')
+    if any((rendered in piece for piece in pieces)):
+        raise RuntimeError(f'partition {cuts!r} left the complete value in one piece')
+    return pieces
+def _partition_oracle_block(results: list[RunResult]) -> dict[str, Any]:
+    scored = [r for r in results if r.transport_error is None]
+    adversarial = [r for r in scored if r.case['fragmentation'] == 'adversarial']
+    single = {_twin_key(r.case): r for r in scored if r.case['fragmentation'] == 'single_chunk'}
+    oracles = {r.oracle for r in results} or {'midpoint'}
+    oracle = oracles.pop() if len(oracles) == 1 else 'mixed'
+    caps = {r.partition_cap for r in results}
+
+    def _arm(rows: list[RunResult], leaked: list[bool]) -> dict[str, Any]:
+        twins = [single[_twin_key(r.case)] for r in rows if _twin_key(r.case) in single]
+        adv_rate = _rate(leaked)
+        base_rate = _rate((t.injection_leaked for t in twins))
+        return {'cases_enumerated': len(rows), 'cases_leaked': sum((1 for f in leaked if f)), 'paired_single_chunk_cases': len(twins), 'leak_rate_adversarial': adv_rate, 'leak_rate_single_chunk_paired': base_rate, 'delta_frag': round(adv_rate - base_rate, 4)}
+    families: dict[str, dict[str, Any]] = {}
+    for family in PARTITION_FAMILIES:
+        enumerated = [r for r in adversarial if r.partitions_attempted.get(family)]
+        capped = [r for r in adversarial if r.partitions_capped.get(family)]
+        too_short = [r for r in adversarial if family in r.partitions_attempted and (not r.partitions_attempted[family]) and (not r.partitions_capped.get(family))]
+        if not enumerated and (not capped) and (not too_short):
+            continue
+        block = _arm(enumerated, [r.partitions_leaked.get(family, 0) > 0 for r in enumerated])
+        block.update({'enumerated': bool(enumerated), 'partitions_attempted': sum((r.partitions_attempted.get(family, 0) for r in enumerated)), 'partitions_leaked': sum((r.partitions_leaked.get(family, 0) for r in enumerated)), 'cases_capped': len(capped), 'cases_value_too_short': len(too_short)})
+        families[family] = block
+    union_families = sorted((f for f in families if families[f]['enumerated']))
+    union_rows = [r for r in adversarial if any((r.partitions_attempted.get(f) for f in union_families)) and (not any((r.partitions_capped.get(f) for f in union_families)))]
+    if union_families:
+        worst = _arm(union_rows, [r.injection_leaked for r in union_rows])
+        on_union = {family: _rate((r.partitions_leaked.get(family, 0) > 0 for r in union_rows)) for family in union_families}
+        worst['component_leak_rates_on_union_denominator'] = on_union
+        worst['never_below_components'] = all((worst['leak_rate_adversarial'] >= rate for rate in on_union.values()))
+    else:
+        worst = {'cases_enumerated': 0, 'cases_leaked': 0, 'paired_single_chunk_cases': 0, 'leak_rate_adversarial': None, 'leak_rate_single_chunk_paired': None, 'delta_frag': None, 'component_leak_rates_on_union_denominator': {}, 'never_below_components': True}
+    worst.update({'definition': 'case rate under the union of the enumerated partition families over the measured corpus values; NOT a worst case over arbitrary streams, values, interleavings, or partitions into more than three pieces' if union_families else 'no partition family was enumerated by this oracle, so no union-based worst-case statistic is defined for this run; the rates are null rather than zero because they were not measured, and NOT a worst case over arbitrary streams', 'families_in_union': union_families, 'cases_excluded_by_cap': len(adversarial) - len(union_rows) if union_families else 0})
+    adversarial_partitions = sum((r.split_points_tried for r in results if r.case['fragmentation'] == 'adversarial'))
+    uncut = sum((1 for r in results if r.case['fragmentation'] == 'single_chunk'))
+    total = sum((r.split_points_tried for r in results))
+    if oracle == 'midpoint':
+        sentence = 'Fragmentation is a two-part split at the value midpoint, not every split point (' + str(adversarial_partitions) + ' midpoint partitions over ' + str(uncut) + ' uncut single-chunk requests; ' + str(total) + ' captured requests total).'
+    else:
+        what = {'exhaustive-2-part': 'every internal two-part split of the value', 'exhaustive-3-part': 'every internal three-part partition of the value', 'union-worst-case': 'the union of every internal two-part split and every internal three-part partition of the value'}[oracle]
+        sentence = 'Fragmentation is ' + what + ' (' + str(adversarial_partitions) + ' internal adversarial partitions over ' + str(len([r for r in results if r.case['fragmentation'] == 'adversarial'])) + ' adversarial cases, plus ' + str(uncut) + ' uncut single-chunk requests = ' + str(total) + ' captured requests total); a case leaks if any enumerated partition leaks. Bounded to these corpus values and these partition families, not to arbitrary streams.'
+    return {'oracle': oracle, 'resource_cap_per_case_per_family': caps.pop() if len(caps) == 1 else max(caps, default=DEFAULT_PARTITION_CAP), 'families': families, 'worst_case': worst, 'adversarial_partitions': adversarial_partitions, 'uncut_single_chunk_requests': uncut, 'captured_requests_total': total, 'partition_seconds_total': round(sum((r.partition_seconds for r in results)), 4), 'cases_inconclusive_by_cap': sum((1 for r in adversarial if any(r.partitions_capped.values()))), 'cases_inconclusive_in_transport': sum((1 for r in results if r.transport_error is not None)), 'method_limit_sentence': sentence}
+def _fragmentation_strategy_label(results: list[RunResult]) -> str:
+    oracles = {r.oracle for r in results}
+    if len(oracles) != 1:
+        return 'across-sse-events'
+    oracle = oracles.pop()
+    return {'midpoint': 'across-sse-events', 'exhaustive-2-part': 'exhaustive-2-part', 'exhaustive-3-part': 'exhaustive-3-part', 'union-worst-case': 'union-worst-case'}[oracle]
+def _twin_key(case: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(((k, v) for k, v in case.items() if k != 'fragmentation')))
+def _axis_arms(results: list[RunResult], axes: dict[str, tuple[str, ...]]) -> dict[str, dict[str, Any]]:
+    scored = [r for r in results if r.transport_error is None]
+    out: dict[str, dict[str, Any]] = {}
+    for axis in axes:
+        if axis == 'fragmentation':
+            continue
+        slice_out: dict[str, Any] = {}
+        for value in axes[axis]:
+            rows = [r for r in scored if r.case[axis] == value]
+            if not rows:
+                continue
+            single = [r for r in rows if r.case['fragmentation'] == 'single_chunk']
+            adv = [r for r in rows if r.case['fragmentation'] == 'adversarial']
+            paired = len({_twin_key(r.case) for r in single} & {_twin_key(r.case) for r in adv})
+            s_rate = _rate((r.injection_leaked for r in single))
+            a_rate = _rate((r.injection_leaked for r in adv))
+            slice_out[value] = {'single_chunk': {'applicable': len(single), 'leaked': sum((1 for r in single if r.injection_leaked)), 'leak_rate': s_rate}, 'adversarial': {'applicable': len(adv), 'leaked': sum((1 for r in adv if r.injection_leaked)), 'leak_rate': a_rate}, 'paired_cases': paired, 'delta_frag': round(a_rate - s_rate, 4)}
+        if slice_out:
+            out[axis] = slice_out
+    return out
+def _discordance(results: list[RunResult]) -> dict[str, Any]:
+    scored = {(_twin_key(r.case), r.case['fragmentation']): r for r in results if r.transport_error is None}
+    keys = sorted({k for k, arm in scored if (k, 'single_chunk') in scored and (k, 'adversarial') in scored})
+    both = adv_only = single_only = neither = 0
+    for key in keys:
+        s = scored[key, 'single_chunk'].injection_leaked
+        a = scored[key, 'adversarial'].injection_leaked
+        if s and a:
+            both += 1
+        elif a:
+            adv_only += 1
+        elif s:
+            single_only += 1
+        else:
+            neither += 1
+    pairs = len(keys)
+    return {'pairs_complete': pairs, 'pairs_incomplete': len({k for k, _arm in scored}) - pairs, 'both_arms_leaked': both, 'adversarial_only': adv_only, 'single_chunk_only': single_only, 'neither_arm_leaked': neither, 'delta_frag_from_discordance': round((adv_only - single_only) / pairs, 4) if pairs else 0.0}
+def _value_space() -> dict[str, int]:
+    from .http_profile import fixture_value_space
+    space = fixture_value_space()
+    out: dict[str, int] = {}
+    for key, value in space.items():
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        if count >= 1:
+            out[_v2_id(key)] = count
+    out['USPHONE'] = 8 * 100 * 100
+    return out or {'EMAIL': 1}
+def run_case(segments: Segments, policy_name: str, case: dict[str, str], iterations: int=3, gateway_url: str | None=None, upstream_port: int=0, model: str='test', oracle: str='midpoint', partition_cap: int=DEFAULT_PARTITION_CAP) -> RunResult:
+    points, families, attempted, capped = injection_partitions(segments, case, oracle=oracle, cap=partition_cap)
+    leaked_by_family: dict[str, int] = {f: 0 for f in attempted}
+    state = UpstreamState(segments=segments, case=case)
+    upstream, upstream_url = _serve(_make_upstream(state), port=upstream_port)
+    probe_ms = 0.0
+    try:
+        probe_ms = _self_probe(upstream_url, state)
+    except Exception:
+        _stop(upstream)
+        raise
+    gateway = None
+    if gateway_url is None:
+        gateway, gateway_url = _serve(_make_gateway(upstream_url, policy_name))
+    latencies: list[float] = []
+    first_sse = ''
+    leaked_points = 0
+    events_first = 0
+    events_max = 0
+    upstream_events_first = 0
+    upstream_responses_first = 0
+    invalid_events = 0
+    done_marker = True
+    done_marker_first = False
+    leak_tier: str | None = None
+    statuses: list[int] = []
+    content_types: list[str] = []
+    transport_error: str | None = None
+    needle = segments.injection[case['entity']]
+    body = json.dumps(build_request(segments, case, model=model)).encode()
+    client = httpx.Client(timeout=_client_timeout(), trust_env=False)
+    try:
+        partitions_started = time.perf_counter()
+        for index, cuts in enumerate(points):
+            state.cuts = cuts
+            sse = ''
+            for _ in range(iterations):
+                with state.response_records_lock:
+                    response_record_start = len(state.response_records)
+                started = time.perf_counter()
+                headers = {'Content-Type': 'application/json'}
+                token = os.environ.get('V2_GATEWAY_TOKEN')
+                if token:
+                    headers['Authorization'] = f'Bearer {token}'
+                headers.update(_extra_gateway_headers())
+                headers['Connection'] = 'close'
+                try:
+                    response = client.post(gateway_url, content=body, headers=headers)
+                    statuses.append(int(response.status_code))
+                    if response.status_code >= 400:
+                        raise httpx.HTTPStatusError(f'{response.status_code} {response.reason_phrase}', request=response.request, response=response)
+                    sse = response.content.decode('utf-8', 'replace')
+                    content_types.append(response.headers.get('Content-Type', '') or '')
+                except Exception as exc:
+                    transport_error = f'{type(exc).__name__}: {exc}'
+                    sse = ''
+                with state.response_records_lock:
+                    attempt_records = list(state.response_records[response_record_start:])
+                    attempt_upstream_events = sum((record.data_events_written for record in attempt_records))
+                if index == 0:
+                    upstream_events_first = attempt_upstream_events
+                    upstream_responses_first = len(attempt_records)
+                if transport_error is not None:
+                    break
+                latencies.append((time.perf_counter() - started) * 1000.0)
+            if transport_error is not None:
+                break
+            parsed = _parse_sse(sse)
+            observed = len(parsed.events)
+            events_max = max(events_max, observed)
+            done_marker = done_marker and '[DONE]' in parsed.events
+            invalid_events += _count_invalid_events(parsed)
+            if index == 0:
+                first_sse = sse
+                events_first = observed
+                done_marker_first = '[DONE]' in parsed.events
+            tier = _leak_tier(needle, sse)
+            if tier is not None:
+                leaked_points += 1
+                if families:
+                    leaked_by_family[families[index]] += 1
+                if leak_tier is None or _LEAK_TIER_RANK[tier] < _LEAK_TIER_RANK[leak_tier]:
+                    leak_tier = tier
+    finally:
+        client.close()
+        _stop(upstream)
+        if gateway is not None:
+            _stop(gateway)
+    if not state.received_bodies and transport_error is None:
+        transport_error = "capture recorded no request: the response did not come from this run's upstream, so nothing about the gateway was measured"
+    hay = _haystacks(first_sse)
+    site_text = None
+    if state.received_bodies:
+        try:
+            site_text = extract_site(json.loads(state.received_bodies[0]), case['request_site'])
+        except (ValueError, json.JSONDecodeError):
+            site_text = None
+    return RunResult(policy=policy_name, case=case, client_text=hay[0], echo_recovered={k: _present(v, hay) for k, v in segments.echo.items()}, echo_observable=bool(site_text) and transport_error is None, transport_error=transport_error, injection_leaked=leaked_points > 0, leak_tier=leak_tier, events_observed=events_first, events_observed_max=events_max, data_events_observed=max(0, events_first - (1 if done_marker_first else 0)), upstream_data_events=upstream_events_first, upstream_responses_observed=upstream_responses_first, upstream_bodies=list(state.received_bodies), upstream_paths=sorted(set(state.received_paths)), latency_ms=latencies, status_codes=statuses, content_types=content_types, invalid_events=invalid_events, done_marker=done_marker, split_points_tried=len(points), split_points_leaked=leaked_points, oracle=oracle, partitions_attempted=dict(attempted), partitions_leaked=dict(leaked_by_family), partitions_capped=dict(capped), partition_cap=partition_cap, partition_seconds=round(time.perf_counter() - partitions_started, 4), self_probe_ms=round(probe_ms, 4), self_probe_url=upstream_url)
+def build_report(segments: Segments, results: list[RunResult], separation: dict[str, Any], seed: str, context: dict[str, Any] | None=None, axes: dict[str, tuple[str, ...]] | None=None, corpus: dict[str, Any] | None=None, scope: dict[str, Any] | None=None, fixture: dict[str, Any] | None=None, claim: dict[str, Any] | None=None, schema_id: str=SCHEMA_ID) -> dict[str, Any]:
+    context = context or {}
+    axes = AXES if axes is None else axes
+    by_frag: dict[str, list[RunResult]] = {'single_chunk': [], 'adversarial': []}
+    for r in results:
+        by_frag[r.case['fragmentation']].append(r)
+    scored = [r for r in results if r.transport_error is None]
+    inconclusive = [r for r in results if r.transport_error is not None]
+    by_frag = {k: [r for r in v if r.transport_error is None] for k, v in by_frag.items()}
+    leak_single = _rate((r.injection_leaked for r in by_frag['single_chunk']))
+    leak_adv = _rate((r.injection_leaked for r in by_frag['adversarial']))
+    leak_overall = _rate((r.injection_leaked for r in scored))
+    observable = [r for r in scored if r.echo_observable]
+    fidelity = _rate((v for r in observable for v in r.echo_recovered.values())) if observable else 0.0
+    delta_frag = round(leak_adv - leak_single, 4)
+    case_defs = sorted(({k: r.case[k] for k in sorted(axes)} for r in results), key=lambda c: tuple(sorted(c.items())))
+    digest = hashlib.sha256(json.dumps(case_defs, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    covered: set[tuple[str, str, str, str]] = set()
+    for r in results:
+        covered |= _pairs_of(r.case, axes)
+    required = _all_pairs(axes, context.get('feasible'))
+    detector_blind = {}
+    for entity in axes['entity']:
+        baseline = [r for r in scored if r.case['entity'] == entity and r.case['fragmentation'] == 'single_chunk']
+        detector_blind[entity] = bool(baseline) and all((r.injection_leaked for r in baseline))
+    leaked_types = sorted({r.case['entity'] for r in results if r.injection_leaked})
+    latencies = [ms for r in results for ms in r.latency_ms]
+    boundary = _boundary_check(results, segments)
+    partition_oracle = _partition_oracle_block(results)
+    boundary_leaked = bool(boundary['leaked_entity_types'] or boundary['unattributed_leaked_entity_types'])
+
+    def _axis_slice(axis: str) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for value in axes[axis]:
+            rows = [r for r in scored if r.case[axis] == value]
+            if not rows:
+                continue
+            visible = [r for r in rows if r.echo_observable]
+            out[value] = {'leak_rate': _rate((r.injection_leaked for r in rows)), 'detector_blind': bool(axis == 'entity' and detector_blind.get(value)), 'fidelity_rate': _rate((v for r in visible for v in r.echo_recovered.values())) if visible else 0.0, 'applicable': len(rows), 'echo_observable': len(visible), 'leaked': sum((1 for r in rows if r.injection_leaked))}
+        return out
+    report = {'schema': schema_id, 'generated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'profile': {'name': 'OpenAI-compatible HTTP gateway profile', 'scope': 'client-to-gateway request, controlled configured-upstream capture, and SSE response'}, 'implementation': {'name': 'reference-policy:' + results[0].policy if results[0].policy in POLICIES else 'external-gateway:' + results[0].policy, 'version': EMITTER_VERSION, 'labels_are_operator_supplied': True}, 'target': {'base_url': context.get('base_url', 'http://127.0.0.1/v1 (ephemeral loopback)'), 'model': context.get('model', 'test'), 'raw_pass_through_baseline': results[0].policy == 'passthrough'}, 'harness_revision': EMITTER_VERSION, 'environment': {'python': sys.version.split()[0], 'implementation': platform.python_implementation(), 'platform': platform.platform()}, 'capture': {'mode': 'loopback', 'bind_host': '127.0.0.1', 'port': context.get('capture_port', 0), 'authentication_required': CAPTURE_REQUIRES_AUTHENTICATION, 'target_must_be_preconfigured_for': 'the ephemeral loopback upstream started by this module', 'self_probe': {'performed': True, 'url': results[0].self_probe_url or 'http://127.0.0.1/__probe__', 'recorded': True, 'round_trip_ms': max((r.self_probe_ms for r in results))}}, 'checks': {'configured_upstream_boundary': boundary, 'fragmentation_safety': _fragmentation_check(results, segments, axes), 'sse_validity': _sse_check(results), 'response_fidelity': _fidelity_check(observable, results), 'response_injection_containment': _injection_check(scored, leaked_types), 'segment_separation': separation, 'client_observed_latency': {'passed': True, 'threshold_enforced': False, 'unit': 'milliseconds', 'iterations': len(latencies), 'iterations_measured': len(latencies), 'mean': round(sum(latencies) / len(latencies), 4) if latencies else 0.0, 'p50': _percentile(latencies, 0.5), 'p95': _percentile(latencies, 0.95), 'p99': _percentile(latencies, 0.99)}}, 'passed': bool(leak_overall == 0.0 and fidelity == 1.0 and separation['passed'] and (not boundary_leaked)), 'limitations': {'run_validity': ['Reference response-path policies, not products. No third-party gateway is measured here.', 'Loopback transport on a single machine; project-run and unreplicated.'], 'method_limits': [str(len(results)) + ' cases: a pairwise covering array over the five axes, not exhaustive.', 'Every rate is over cases_applicable=' + str(len(scored)) + ' of the ' + str(len(results)) + ' cases attempted; ' + str(len(inconclusive)) + ' were inconclusive and are excluded from the denominator rather than counted as no-leak.', ', '.join((f'{len(values)} {axis}' for axis, values in axes.items())) + '.', 'Request sites are four shapes, not a survey of real client payloads.', partition_oracle['method_limit_sentence'], 'Latency is loopback and in-process; it is not gateway overhead on a network.']}, 'redaction_claim': claim or {'vendor_claims_pii_redaction': 'claimed', 'claim_citation': 'pii_leak_benchmark.v2_emitter policy docstrings' if results[0].policy in POLICIES else "operator-supplied; see the run recipe in the target's profile directory", 'configured_for_this_run': True, 'configuration_reference': 'POLICIES[' + repr(results[0].policy) + ']' if results[0].policy in POLICIES else 'external gateway configured by the operator; see the run script', 'recorded_by': 'operator', 'request_path_redaction_configured': os.environ.get('V2_REQUEST_PATH_REDACTION', 'unknown')}, 'outcome': _derive_outcome(leak_overall, fidelity, separation['passed'], boundary_leaked), 'outcome_rationale': 'FidelityRate=' + str(fidelity) + ' over ' + str(len(observable)) + ' echo-observable' + ', LeakRate(single_chunk)=' + str(leak_single) + ' over ' + str(len(by_frag['single_chunk'])) + ', LeakRate(adversarial)=' + str(leak_adv) + ' over ' + str(len(by_frag['adversarial'])) + ', DeltaFrag=' + str(delta_frag) + ', request-path leak=' + (','.join(boundary['leaked_entity_types']) or 'none') + '. Rates are over cases_applicable=' + str(len(scored)) + ' of ' + str(len(results)) + ' attempted (' + str(len(inconclusive)) + ' inconclusive, excluded from every denominator rather than counted as no-leak).', 'fixture': fixture or {'varies_per_run': True, 'values_published': False, 'formats': {'EMAIL': 'local@example.com', 'SSN': 'AAA-GG-SSSS', 'CARDPAN': 'published test-range PAN'}, 'value_space_nominal': _value_space(), 'specimens_are_valid': 'Luhn and SSA-range constraints enforced by make_fixture', 'specimens_are_non_real': 'SSN area 900-999 and published test-card ranges only'}, 'corpus': {'id': (corpus or {}).get('id', 'minimal-response-split'), 'version': (corpus or {}).get('version', '0.1.0'), 'sha256': digest, 'case_count': len(results), 'seed': seed, 'coverage': {'strategy': 'pairwise', 'axes': sorted(axes), 'pairs_required': len(required), 'pairs_covered': len(required & covered), 'proof_complete': required <= covered}, 'values_published': False}, 'metrics': {'leak_rate': {'single_chunk': leak_single, 'adversarial': leak_adv, 'overall': leak_overall}, 'fidelity_rate': fidelity, 'delta_frag': delta_frag, 'cases_by_condition': {'single_chunk': len(by_frag['single_chunk']), 'adversarial': len(by_frag['adversarial'])}, 'cases_scored': len(results), 'cases_echo_observable': len(observable), 'detector_blind_entities': sorted((k for k, v in detector_blind.items() if v)), 'cases_applicable': len(scored), 'cases_inconclusive': len(inconclusive), 'derivation_recomputed': False, 'sidecar_case_count_matches': False, 'by_axis': {axis: _axis_slice(axis) for axis in axes}, 'partition_oracle': partition_oracle, 'by_axis_arm': _axis_arms(results, axes), 'discordance': _discordance(results)}, 'entity_scope': scope or {'mechanism': 'reference-policy detector set', 'enabled': [name for name, _ in _DETECTORS], 'not_enabled': [], 'unknown': [], 'partitions_corpus': True, 'recorded_by': 'operator', 'source': 'pii_leak_benchmark.v2_emitter._DETECTORS'}, 'cases_digest': digest, 'instrument': instrument_block()}
+    verified = _assert_derivations(results, report['metrics'], digest, axes)
+    report['metrics']['derivation_recomputed'] = verified
+    report['metrics']['sidecar_case_count_matches'] = verified
+    return report
+def _collect(value: Any, found: _Inspection, depth: int=0, rounds: int=0, is_key: bool=False) -> None:
+    if not found.budget():
+        return
+    if depth > _MAX_INSPECT_DEPTH:
+        found.truncated = True
+        return
+    into_strings = found.decoded_strings if rounds else found.strings
+    into_values = found.decoded_values if rounds else found.values
+    if isinstance(value, str):
+        into_strings.append(value)
+        if not is_key:
+            into_values.append(value)
+        if rounds < _MAX_DECODE_ROUNDS:
+            for decoded in _decode_candidates(value):
+                _collect(decoded, found, depth, rounds + 1)
+        return
+    if isinstance(value, bool) or value is None:
+        return
+    if isinstance(value, (int, float)):
+        text = repr(value)
+        into_strings.append(text)
+        if not is_key:
+            into_values.append(text)
+        return
+    if isinstance(value, _JSONObject):
+        for key, item in value.pairs:
+            _collect(str(key), found, depth + 1, rounds, is_key=True)
+            _collect(item, found, depth + 1, rounds)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _collect(str(key), found, depth + 1, rounds, is_key=True)
+            _collect(item, found, depth + 1, rounds)
+        return
+    if isinstance(value, (list, tuple)):
+        codes = [item for item in value if isinstance(item, int) and (not isinstance(item, bool))]
+        if codes and len(codes) == len(value) and all((0 < code < 1114112 for code in codes)):
+            decoded = ''.join((chr(code) for code in codes))
+            found.decoded_strings.append(decoded)
+            found.decoded_values.append(decoded)
+        for item in value:
+            _collect(item, found, depth + 1, rounds)
+        return
+    found.truncated = True
+def _normalize(text: str) -> str:
+    return _fold(text, CONFUSABLE_TO_ASCII)
+def _normalize_confusable_digits(text: str) -> str:
+    return _fold(text, _CONFUSABLE_DIGIT_FOLD)
