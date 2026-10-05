@@ -150,18 +150,29 @@ def _why_nothing_arrived(report: dict[str, Any]) -> str:
     The capture cannot tell the causes apart, but the client often can: a gateway that
     answered 401 rejected the key, which is a one-flag fix, not a routing problem.
     """
-    without_token = report["checks"][_BOUNDARY].get("unattributed_requests", 0)
-    if without_token:
-        # Public capture mode. The gateway reached the capture and the bodies were
-        # inspected, but it presented its own upstream key rather than the capture token,
-        # so nothing is attributed to this run. Seen with Portkey, which forwards the
-        # caller's key: the old message said no request had arrived, under a table of
-        # literal matches from exactly those requests.
+    boundary = report["checks"][_BOUNDARY]
+    without_token = boundary.get("unattributed_requests", 0)
+    if without_token and boundary.get("unattributed_leaked_entity_types"):
+        # Public capture mode, and the requests that arrived without the token carried
+        # this run's own synthetic values. Nobody but the harness and the gateway under
+        # test had those values, so the requests came through that gateway: it presented
+        # its own upstream key rather than the capture token. Seen with Portkey, which
+        # forwards the caller's key; the old message said no request had arrived, under a
+        # table of literal matches from exactly those requests.
         return (
-            f"{without_token} request(s) reached the capture without the capture token, so they "
-            "are not counted (public capture mode). Your gateway sends its own provider key "
-            "upstream: set that key to the capture token (CONFORMANCE_CAPTURE_TOKEN) so the "
-            "capture can attribute its requests."
+            f"{without_token} request(s) carrying this run's values reached the capture without "
+            "the capture token, so they are not attributed to your gateway (public capture "
+            "mode). Only your gateway had those values: it is sending its own provider key "
+            "instead of the token. Set that key to the capture token "
+            "(CONFORMANCE_CAPTURE_TOKEN) so the capture can attribute its requests."
+        )
+    noise = ""
+    if without_token:
+        # Requests without the token and without this run's values say nothing about the
+        # gateway: a public capture receives scanners and other people's misconfiguration.
+        noise = (
+            f" {without_token} request(s) reached the capture without the capture token and "
+            "carried none of this run's values; on a public capture that is unrelated traffic."
         )
     client = report["checks"].get("sse_validity", {})
     failed = sorted(code for code in client.get("status_codes", []) if code >= 400)
@@ -171,23 +182,23 @@ def _why_nothing_arrived(report: dict[str, Any]) -> str:
             return (
                 f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
                 "It rejected the client key: pass the key it expects with --target-api-key "
-                "or CONFORMANCE_TARGET_API_KEY."
+                "or CONFORMANCE_TARGET_API_KEY." + noise
             )
         return (
             f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
             "Its own log says why; an error before forwarding is usually a missing setting, "
-            "such as the key it sends upstream."
+            "such as the key it sends upstream." + noise
         )
     if not client.get("status_codes") and client.get("errors"):
         kinds = ", ".join(sorted(set(client["errors"])))
         return (
             f"The check got no HTTP answer from your gateway ({kinds}). Check that it is "
-            "running and listening at the target URL."
+            "running and listening at the target URL." + noise
         )
     return (
         "No request carrying this run's marker reached the capture. Your gateway is "
         "not configured to use it as its upstream, could not reach it, or sent the "
-        "traffic elsewhere -- these are indistinguishable here."
+        "traffic elsewhere -- these are indistinguishable here." + noise
     )
 
 

@@ -74,9 +74,20 @@ def test_requests_that_arrived_without_the_capture_token_are_named_not_denied() 
         _report(correlated=0, unattributed_requests=3, unattributed_leaked=["EMAIL"], status_codes=[200])
     )
     assert verdict == selfcheck.VERDICT_NOT_MEASURED
-    assert "3 request(s) reached the capture without the capture token" in reason
+    assert "3 request(s) carrying this run's values reached the capture without the capture token" in reason
     assert "CONFORMANCE_CAPTURE_TOKEN" in reason
     assert "No request carrying this run's marker" not in reason
+
+
+def test_token_less_requests_without_this_runs_values_are_called_unrelated_traffic() -> None:
+    """Review: a public capture receives scanners and other people's misconfiguration.
+    Without this run's values in them, those requests establish nothing about the gateway,
+    so the message must not tell the operator their gateway sent them."""
+    verdict, reason = selfcheck.verdict_for(_report(correlated=0, unattributed_requests=3, status_codes=[200]))
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "No request carrying this run's marker" in reason
+    assert "3 request(s) reached the capture without the capture token and carried none of this run's values" in reason
+    assert "provider key" not in reason
 
 
 def test_a_gateway_that_forwards_and_then_answers_an_error_is_not_measured() -> None:
