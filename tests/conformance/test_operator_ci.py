@@ -175,6 +175,19 @@ def test_a_startup_command_that_dies_names_its_exit_code_and_keeps_its_output(tm
     assert "exited with code 126" in (out / "summary.md").read_text()
 
 
+def test_only_the_tail_of_a_talkative_start_command_is_kept(tmp_path):
+    """Review: a command that prints without end for the whole readiness window must not
+    be read whole into memory, and the published file is bounded."""
+    out = tmp_path / "talkative"
+    command = (f'"{sys.executable}" -c "import sys; sys.stdout.write(chr(65) * 300000); '
+               f'sys.stdout.write(chr(10) + chr(90) * 20 + chr(10)); sys.exit(3)"')
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "10", "--out", str(out)]) == 2
+    kept = (out / "current.gateway.log").read_bytes()
+    assert len(kept) <= ci.STARTUP_LOG_TAIL_BYTES
+    assert kept.endswith(b"Z" * 20 + b"\n"), "the end of the output, where the reason is"
+
+
 def test_nothing_listening_and_no_start_command_says_to_start_the_gateway(tmp_path):
     """Without --start-command the old message blamed a readiness timeout on a gateway that
     was never started. Say that nothing is listening and name both ways out."""

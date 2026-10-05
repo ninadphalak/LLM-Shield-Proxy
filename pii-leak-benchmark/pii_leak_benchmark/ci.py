@@ -208,7 +208,13 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
             return " Run it locally to inspect its logs."
         if log_handle is not None:
             log_handle.flush()
-        data = scratch.read_bytes()[-STARTUP_LOG_TAIL_BYTES:]
+        # Read only the tail. A command that never opens its port but keeps printing for the
+        # whole readiness window can grow the scratch file without limit; the memory this
+        # takes must not depend on that (review).
+        with open(scratch, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - STARTUP_LOG_TAIL_BYTES))
+            data = handle.read(STARTUP_LOG_TAIL_BYTES)
         log_path.write_bytes(data)
         return f" What it printed before that is in {log_path.name} next to the reports."
 
