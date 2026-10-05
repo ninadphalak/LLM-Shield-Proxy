@@ -115,6 +115,10 @@ pii-leak-benchmark-v2 --validate --out ./benchmark-output/my-gateway \
   --seed a1b2c3d4e5f60001 --json-out ./benchmark-output/my-gateway/summary.json
 ```
 
+The gateway has to be scanning replies for this profile to pass. LLM-Shield-Proxy does not by
+default: start it with `ENABLE_RESPONSE_PII_REDACTION=true` (the README trial's command leaves
+it off, so that proxy reports a leak here while its request path stays clean).
+
 `--seed` reproduces the fixture selection, which is how a published row's seeds are
 replayed; `--only` picks the policies (or names the label for an external gateway); `--out`
 is required and is where `<policy>.json` lands. `--validate` needs the `validate` extra
