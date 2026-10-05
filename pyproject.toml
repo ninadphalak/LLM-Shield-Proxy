@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.6.9"
+version = "1.6.10"
 description = "Streaming privacy gateway for configurable PII transformation and OpenAI-compatible proxy traffic."
 readme = "README.md"
 # The floor is what CI tests (the `test-and-lint` matrix in ci.yml), and a test holds the
@@ -167,7 +167,7 @@ ignore = [
 # independently of the gateway. It is not listed here on purpose -- the measurer and
 # the measured must not be forced to move together.
 [tool.bumpversion]
-current_version = "1.6.9"
+current_version = "1.6.10"
 commit = true
 tag = true
 
