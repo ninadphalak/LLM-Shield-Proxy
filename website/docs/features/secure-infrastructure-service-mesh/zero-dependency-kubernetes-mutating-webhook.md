@@ -41,7 +41,7 @@ flowchart TD
 ## FAQ
 
 **Q: Do I have to use this webhook feature?**
-A: No. You can manage sidecar injection manually via Helm, Kustomize, or Terrafrom, or rely on a standard service mesh (like Istio) instead.
+A: No. You can manage sidecar injection manually via Helm, Kustomize, or Terraform, or rely on a standard service mesh (like Istio) instead.
 
 ## Practical Effect
 This feature automates the placement of the proxy sidecar across a large fleet of Kubernetes workloads based on simple namespace or pod labels.

@@ -187,6 +187,20 @@ def test_the_package_readme_first_command_is_selfcheck():
     assert commands[1][:2] == ["pii-leak-benchmark", "selfcheck"], first
 
 
+def test_the_submit_page_one_liner_is_the_subcommand_that_needs_no_claim():
+    """add-your-result.mdx opens with "Try it in one line" against a gateway you already run.
+
+    The line used to be the flat command, which without the claim flags prints
+    `Outcome: claim-unstated`, exit 1, and a paragraph about recording the vendor's claim:
+    the wrong first result for someone who wanted to know whether their gateway leaks.
+    `selfcheck` is the command that answers that with no claim required."""
+    page = REPO_ROOT / "website" / "docs" / "conformance" / "add-your-result.mdx"
+    first = _code_blocks(page, "bash")[0]
+    words = _commands(first)[0]
+    assert "pii-leak-benchmark" in words and words[words.index("pii-leak-benchmark") + 1] == "selfcheck", first
+    assert not any(w.startswith("--redaction-") for w in words), "selfcheck records no claim and takes no claim flags"
+
+
 def test_ci_page_powershell_example_sets_the_same_environment():
     """The PowerShell twin cannot run on Linux CI, so pin it to the bash block it mirrors."""
     bash = _block_with(CI_PAGE, "bash", "llm-shield-proxy --port")

@@ -15,11 +15,12 @@ yours does, you would be the first, and that is worth saying loudly.
 No account, no API key, no paid model. Point it at a gateway you already have running:
 
 ```bash
-pipx run pii-leak-benchmark --target-base-url http://localhost:4000/v1
+pipx run pii-leak-benchmark selfcheck --target-base-url http://localhost:4000/v1
 ```
 
-It prints what it sent, what came back, and which of the three questions your gateway answered.
-About a minute. To put the result in CI and on your README, see [the CI setup](./ci.mdx).
+It prints `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`, one row per data type it sent, and
+what each row means. About a minute. Add `--target-api-key` if your gateway wants a key. To put
+the result in CI and on your README, see [the CI setup](./ci.mdx).
 
 Nothing running yet? [Try it from scratch](./try-it-from-scratch.md) starts with an empty machine
 and ends with two results you measured yourself, ours and LiteLLM's, side by side.

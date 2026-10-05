@@ -21,7 +21,9 @@ production rollout.
 **In front** — `litellm/docker-compose.yml`. Clients call LLM Shield, which forwards to
 LiteLLM. Nothing is installed into LiteLLM. The cost is that the shield then owns the
 upstream path: LiteLLM's model routing, key management, retries and budgets sit behind it,
-and the shield must be trusted with the route.
+and the shield must be trusted with the route. `docker compose up` returns before LiteLLM
+is ready, which takes about half a minute; until `docker compose logs litellm` shows
+`Application startup complete`, a request through the shield answers 503.
 
 **In-process** — `litellm/config.guardrail.yaml`. LiteLLM calls the shield as a guardrail and
 keeps the model path. `pre_call` redacts the outbound request, `post_call` restores the reply,
