@@ -127,13 +127,53 @@ def test_sse_framed_responses_are_read():
     assert checks["tool-url-ssrf"].status == PASS
 
 
-def test_wrong_argument_name_is_inconclusive_not_a_pass():
-    with FakeMcpServer() as server:
+@pytest.mark.parametrize("reply", ["error", "is_error"])
+def test_wrong_argument_name_is_inconclusive_not_a_pass(reply):
+    with FakeMcpServer(unknown_tool_reply=reply) as server:
         report = _run(server.url, "--fetch-tool", "fetch", "--url-argument", "nope")
     ssrf = _by_id(report)["tool-url-ssrf"]
     assert ssrf.status == INCONCLUSIVE
     assert "--url-argument" in ssrf.detail
     assert report.exit_code() == EXIT_INCONCLUSIVE
+
+
+@pytest.mark.parametrize("reply", ["error", "is_error"])
+def test_wrong_tool_name_is_inconclusive_not_a_pass(reply):
+    """Against the official Python SDK (1.x and 2.x), `--fetch-tool nope` used to come out
+    PASS: the SDK answers an unknown tool with `isError: true`, which the checker read as
+    "refused". A check that never reached a tool must not read as a pass."""
+    with FakeMcpServer(unknown_tool_reply=reply) as server:
+        report = _run(server.url, "--fetch-tool", "nope")
+    ssrf = _by_id(report)["tool-url-ssrf"]
+    assert ssrf.status == INCONCLUSIVE
+    assert "--fetch-tool" in ssrf.detail
+    assert "it lists: fetch" in ssrf.detail, "the tools the server does list are named, so the typo is one glance away"
+    assert "nope" not in json.dumps(ssrf.evidence.get("tools_listed")), "only the server's own names are listed"
+    assert report.exit_code() == EXIT_INCONCLUSIVE
+
+
+def test_a_listed_tool_and_argument_are_still_probed():
+    """The wiring check gates the probes; it must not swallow a real finding."""
+    with FakeMcpServer(fetch_guard="none", unknown_tool_reply="is_error") as server:
+        report = _run(server.url, "--fetch-tool", "fetch", "--url-argument", "url")
+    assert _by_id(report)["tool-url-ssrf"].status == FAIL
+
+
+def test_a_tool_on_a_later_page_of_tools_list_is_found_and_probed():
+    """`tools/list` is paginated. Review caught the first version reading page one as the
+    whole catalogue, which would have called a correctly wired tool on page two a typo and
+    skipped the probes."""
+    with FakeMcpServer(fetch_guard="none", unknown_tool_reply="is_error", decoy_tools=60, tools_per_page=50) as server:
+        report = _run(server.url, "--fetch-tool", "fetch", "--url-argument", "url")
+    assert _by_id(report)["tool-url-ssrf"].status == FAIL
+
+
+def test_a_missing_tool_is_reported_against_every_page():
+    with FakeMcpServer(unknown_tool_reply="is_error", decoy_tools=3, tools_per_page=2) as server:
+        report = _run(server.url, "--fetch-tool", "nope")
+    ssrf = _by_id(report)["tool-url-ssrf"]
+    assert ssrf.status == INCONCLUSIVE
+    assert ssrf.evidence["tools_listed"] == ["decoy-0", "decoy-1", "decoy-2", "fetch"]
 
 
 def test_control_url_proves_the_wiring():

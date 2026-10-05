@@ -66,7 +66,23 @@ class FakeMcpServer:
         url_argument: str = "url",
         port: int = 0,
         protocol_version: str = STATEFUL,
+        unknown_tool_reply: str = "error",
+        decoy_tools: int = 0,
+        tools_per_page: int = 0,
     ) -> None:
+        # `tools/list` is paginated in the protocol. With `tools_per_page` set, the listing
+        # is `decoy_tools` unrelated tools followed by the real one, served `tools_per_page`
+        # at a time with `nextCursor`, so the real tool sits on the last page.
+        self.decoy_tools = decoy_tools
+        self.tools_per_page = tools_per_page
+        # How `tools/call` for a tool this server does not have, or with the wrong argument,
+        # is answered. "error" is a JSON-RPC -32602, which is what the first fake did and
+        # what the checker always recognised. "is_error" is what the official Python SDK
+        # (1.x and 2.x) actually sends: an ordinary result with `isError: true` and the text
+        # "Unknown tool: <name>", indistinguishable on the wire from a tool that refused.
+        if unknown_tool_reply not in ("error", "is_error"):
+            raise ValueError("unknown_tool_reply must be 'error' or 'is_error'")
+        self.unknown_tool_reply = unknown_tool_reply
         self.stateless = stateless
         self.sessions = sessions and not stateless
         self.check_session = check_session
@@ -240,16 +256,31 @@ class FakeMcpServer:
 
             def _dispatch(self, req_id, method, params) -> None:
                 if method == "tools/list":
-                    tools = [{"name": owner.tool_name, "inputSchema": {"type": "object", "properties": {owner.url_argument: {"type": "string"}}}}]
-                    self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}}, as_sse=owner.sse)
+                    tools = [{"name": f"decoy-{i}", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}} for i in range(owner.decoy_tools)]
+                    tools.append({"name": owner.tool_name, "inputSchema": {"type": "object", "properties": {owner.url_argument: {"type": "string"}}}})
+                    result: Dict[str, Any] = {"tools": tools}
+                    if owner.tools_per_page:
+                        start = int(params.get("cursor") or 0)
+                        result["tools"] = tools[start:start + owner.tools_per_page]
+                        if start + owner.tools_per_page < len(tools):
+                            result["nextCursor"] = str(start + owner.tools_per_page)
+                    self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": result}, as_sse=owner.sse)
                     return
                 if method == "tools/call":
                     if params.get("name") != owner.tool_name:
-                        self._error(200, req_id, -32602, "unknown tool")
+                        if owner.unknown_tool_reply == "is_error":
+                            text = f"Unknown tool: {params.get('name')}"
+                            self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": {"content": [{"type": "text", "text": text}], "isError": True}}, as_sse=owner.sse)
+                        else:
+                            self._error(200, req_id, -32602, "unknown tool")
                         return
                     target = (params.get("arguments") or {}).get(owner.url_argument)
                     if not isinstance(target, str):
-                        self._error(200, req_id, -32602, f"missing argument {owner.url_argument}")
+                        if owner.unknown_tool_reply == "is_error":
+                            text = f"Input validation error: '{owner.url_argument}' is a required property"
+                            self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": {"content": [{"type": "text", "text": text}], "isError": True}}, as_sse=owner.sse)
+                        else:
+                            self._error(200, req_id, -32602, f"missing argument {owner.url_argument}")
                         return
                     self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": owner._fetch(target)}, as_sse=owner.sse)
                     return

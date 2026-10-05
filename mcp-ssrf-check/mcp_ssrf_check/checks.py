@@ -39,6 +39,9 @@ LOOPBACK_SPELLINGS = (
 )
 
 JSONRPC_INVALID_PARAMS = -32602
+# `tools/list` pages are followed up to this many times before the wiring check gives up
+# and lets the probes run. A server that never ends its listing is not a reason to skip.
+TOOLS_LIST_MAX_PAGES = 32
 JSONRPC_METHOD_NOT_FOUND = -32601
 
 
@@ -250,6 +253,50 @@ def _redirect_probe(call, listener: CallbackListener, nonce: str, callback_host:
     return {"outcome": "refused", "target": redirect_target, "response": result.summary()}
 
 
+def _tool_wiring(client: httpx.Client, url: str, lifecycle: Lifecycle, *, tool: str, argument: str):
+    """Check --fetch-tool and --url-argument against ``tools/list`` before probing.
+
+    Returns ``None`` when the tool and argument are listed, or when the server does not
+    answer ``tools/list`` with a result (then the probes run as before and a -32602 on
+    ``tools/call`` is still recognised). Otherwise returns ``(detail, evidence)`` for an
+    INCONCLUSIVE verdict: a check that never reached the tool must not read as a pass.
+    """
+    # `tools/list` is paginated: a page carries `nextCursor` until the last one. Follow
+    # every page, bounded, and fall back to the probes if any page is not a plain result:
+    # a listing that cannot be read whole must not turn into "the tool is not there".
+    tools: List[Any] = []
+    cursor: Optional[str] = None
+    for _ in range(TOOLS_LIST_MAX_PAGES):
+        params: Dict[str, Any] = {"cursor": cursor} if cursor else {}
+        try:
+            listing = post(client, url, "tools/list", params, lifecycle, req_id=6)
+        except httpx.HTTPError:
+            return None
+        if not listing.has_result or not isinstance(listing.message, dict):
+            return None
+        result = listing.message.get("result", {})
+        page = result.get("tools") if isinstance(result, dict) else None
+        if not isinstance(page, list):
+            return None
+        tools.extend(page)
+        cursor = result.get("nextCursor")
+        if not isinstance(cursor, str) or not cursor:
+            break
+    else:
+        return None
+    names = sorted(str(t.get("name")) for t in tools if isinstance(t, dict) and t.get("name"))
+    evidence = {"tool": tool, "argument": argument, "tools_listed": names}
+    if tool not in names:
+        listed = ", ".join(names) if names else "nothing"
+        return f"tools/list has no tool named {tool!r} (it lists: {listed}); check --fetch-tool", evidence
+    schema = next((t.get("inputSchema") for t in tools if isinstance(t, dict) and t.get("name") == tool), None)
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if isinstance(properties, dict) and properties and argument not in properties:
+        evidence["arguments_listed"] = sorted(properties)
+        return f"tool {tool!r} takes {', '.join(sorted(properties))}, not {argument!r}; check --url-argument", evidence
+    return None
+
+
 def check_tool_url_ssrf(
     client: httpx.Client,
     url: str,
@@ -273,6 +320,16 @@ def check_tool_url_ssrf(
     results: List[CheckResult] = []
     nonce = _nonce()
     port = listener.port
+    title = "URL-fetching tool refuses loopback"
+
+    # The official SDK answers `tools/call` for a tool it does not have with an ordinary
+    # result carrying `isError: true`, not a JSON-RPC -32602. On the wire that is exactly
+    # what a tool that refused the URL looks like, so a typo in --fetch-tool used to
+    # produce PASS ("every loopback spelling was refused"). Ask the server what it has first.
+    wiring = _tool_wiring(client, url, lifecycle, tool=tool, argument=argument)
+    if wiring is not None:
+        results.append(CheckResult("tool-url-ssrf", title, INCONCLUSIVE, wiring[0], wiring[1], SBP_SSRF))
+        return results
 
     def call(target: str):
         return post(client, url, "tools/call", {"name": tool, "arguments": {argument: target}}, lifecycle, req_id=7)
@@ -334,7 +391,6 @@ def check_tool_url_ssrf(
         "listener": {"host": listener.host, "port": port, "ipv6": listener.ipv6_bound, "redirect_host": listener.redirect_host},
         "spellings": matrix,
     }
-    title = "URL-fetching tool refuses loopback"
     if reached:
         detail = f"the tool fetched the checker's listener via: {', '.join(reached)}"
         results.append(CheckResult("tool-url-ssrf", title, FAIL, detail, evidence, SBP_SSRF))
