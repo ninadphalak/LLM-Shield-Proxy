@@ -103,6 +103,24 @@ def test_nothing_arriving_names_what_the_gateway_answered(
         assert text in reason
 
 
+def test_the_report_ends_with_the_path_that_leaves_public_evidence(capsys) -> None:
+    """The last lines used to send people to "the flat command" to publish a row. A row is
+    read from a public CI run's artifact, so the flat command is not that path; the CI
+    guide is, and it is one link."""
+    report = _report()
+    report["checks"]["configured_upstream_boundary"].update(
+        {"captured_requests": 3, "leak_evidence": [], "unattributed_leak_evidence": []}
+    )
+    report.update({"implementation": {"name": "x"}, "capture": {"target_must_be_preconfigured_for": "y"},
+                   "outcome": "claim-unstated"})
+    verdict, reason = selfcheck.verdict_for(report)
+    selfcheck._print_report(report, verdict, reason, None)
+    out = capsys.readouterr().out
+    assert selfcheck.CI_GUIDE_URL in out
+    assert "flat command" not in out
+    assert "results wall" in out
+
+
 def test_nothing_arriving_prints_no_leak_findings(capsys) -> None:
     """With no captured request, every value reads "not restored" under "What leaked"."""
     report = _report(correlated=0)

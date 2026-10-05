@@ -177,6 +177,16 @@ def test_one_line_start_and_check_reports_clean(page, needle, tmp_path):
     _run_documented_pair(env, doc_port, _selfcheck_args(block), tmp_path)
 
 
+def test_the_package_readme_first_command_is_selfcheck():
+    """The PyPI page is the package README. Its first block used to be the flat command,
+    which without the claim flags ends in `Outcome: claim-unstated` and exit 1."""
+    readme = REPO_ROOT / "pii-leak-benchmark" / "README.md"
+    first = _code_blocks(readme, "bash")[0]
+    commands = _commands(first)
+    assert commands[0][:2] == ["pip", "install"], first
+    assert commands[1][:2] == ["pii-leak-benchmark", "selfcheck"], first
+
+
 def test_ci_page_powershell_example_sets_the_same_environment():
     """The PowerShell twin cannot run on Linux CI, so pin it to the bash block it mirrors."""
     bash = _block_with(CI_PAGE, "bash", "llm-shield-proxy --port")
