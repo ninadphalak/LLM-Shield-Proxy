@@ -6,7 +6,7 @@
 [![PyPI: mcp-ssrf-check](https://img.shields.io/pypi/v/mcp-ssrf-check.svg?color=green&label=mcp-ssrf-check)](https://pypi.org/project/mcp-ssrf-check/)
 [![PyPI: chunk-invariance](https://img.shields.io/pypi/v/chunk-invariance.svg?color=green&label=chunk-invariance)](https://pypi.org/project/chunk-invariance/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Docs & Playground](https://img.shields.io/badge/docs-browser%20playground-00a878)](https://llmshieldproxy.com)
 
 LLM-Shield-Proxy is a self-hosted gateway for OpenAI-compatible LLM APIs. It replaces the personal
