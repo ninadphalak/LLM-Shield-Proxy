@@ -150,6 +150,19 @@ def _why_nothing_arrived(report: dict[str, Any]) -> str:
     The capture cannot tell the causes apart, but the client often can: a gateway that
     answered 401 rejected the key, which is a one-flag fix, not a routing problem.
     """
+    without_token = report["checks"][_BOUNDARY].get("unattributed_requests", 0)
+    if without_token:
+        # Public capture mode. The gateway reached the capture and the bodies were
+        # inspected, but it presented its own upstream key rather than the capture token,
+        # so nothing is attributed to this run. Seen with Portkey, which forwards the
+        # caller's key: the old message said no request had arrived, under a table of
+        # literal matches from exactly those requests.
+        return (
+            f"{without_token} request(s) reached the capture without the capture token, so they "
+            "are not counted (public capture mode). Your gateway sends its own provider key "
+            "upstream: set that key to the capture token (CONFORMANCE_CAPTURE_TOKEN) so the "
+            "capture can attribute its requests."
+        )
     client = report["checks"].get("sse_validity", {})
     failed = sorted(code for code in client.get("status_codes", []) if code >= 400)
     if failed:
@@ -204,6 +217,22 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
         return (
             VERDICT_LEAK,
             "Raw fixture values reached the upstream: " + ", ".join(leaked) + ".",
+        )
+
+    # The gateway forwarded (so nothing above fired) and then answered the client with an
+    # error on every iteration: the response path was never measured. Seen with a target
+    # URL missing `/v1`: the proxy relayed the capture's 404 for `/chat/completions`, and
+    # the old reading was CHECK FAILED, "masks without restoring", which is not what happened.
+    client = report["checks"].get("sse_validity", {})
+    answered = [int(code) for code in client.get("status_codes", []) if int(code) != 0]
+    if answered and all(code >= 400 for code in answered):
+        codes = ", ".join(str(code) for code in sorted(set(answered)))
+        return (
+            VERDICT_NOT_MEASURED,
+            f"Your gateway forwarded the request to the capture but answered HTTP {codes} to the "
+            "client, so the response checks could not run. If --target-base-url does not end in "
+            "/v1, add it: the check posts to <base>/chat/completions. Otherwise the gateway's own "
+            "log says why it answered that.",
         )
 
     ignored = {"response_fidelity", "fragmentation_safety"} if duty == "anonymize" else set()
@@ -324,10 +353,12 @@ def _print_report(
     for line in _wrap(reason, 76):
         print(f"  {line}")
     print()
+    without_token = boundary.get("unattributed_requests", 0)
     print(
         f"  Requests to capture: {boundary['captured_requests']}"
         f"  |  correlated to this run: {boundary['correlated_requests']}"
         f"  |  uninspectable: {boundary['uninspectable_requests']}"
+        + (f"  |  without the capture token: {without_token}" if without_token else "")
     )
     print()
 
