@@ -130,8 +130,8 @@ criticism of the product, it is just what the thing needs to run with redaction 
 on, and a run without redaction switched on measures nothing.
 
 These commands reach the capture through `host.docker.internal`, which works on Docker
-Desktop. On Linux the LiteLLM container needs the host-network change from step 3, and this
-page has not been tested that way.
+Desktop. On Linux that name does not reach a capture bound to `127.0.0.1`, and LiteLLM
+answers 500; the Linux form is at the end of this step.
 
 A shared network first, so the containers can find each other by name:
 
@@ -201,6 +201,24 @@ docker run -d --name litellm --network bench -p 4000:4000 \
 Put `MSYS_NO_PATHCONV=1` in front of that last command. Without it the shell rewrites
 `/app/config.yaml` into a Windows path and the container exits with "Config file not
 found".
+:::
+
+:::note Linux
+Start the database with `-p 5432:5432` added to its command above, write the three
+addresses in `litellm.yaml` as `http://127.0.0.1:8765/v1`, `http://127.0.0.1:5002` and
+`http://127.0.0.1:5001` (the capture and Presidio's published ports), and start LiteLLM on
+the host network instead:
+
+```bash
+docker run -d --name litellm --network host \
+  -e DATABASE_URL="postgresql://litellm:litellm@127.0.0.1:5432/litellm" \
+  -e LITELLM_MASTER_KEY="sk-local-only" \
+  -v "$(pwd)/litellm.yaml:/app/config.yaml:ro" \
+  ghcr.io/berriai/litellm:main-latest --config /app/config.yaml --port 4000
+```
+
+Checked on an Ubuntu runner: LiteLLM comes up in about half a minute and the check below
+completes.
 :::
 
 Wait for `Application startup complete` in `docker logs litellm`, then run the same check

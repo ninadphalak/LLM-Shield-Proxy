@@ -68,7 +68,7 @@ lists runs exactly those. It cannot prove a filter correct for inputs you did no
 | `per_chunk(process, *, state=dict, flush=None)` | Adapts `process(chunk, state) -> output` and `flush(state) -> output`, with fresh state per stream. |
 | `from_async(async_stream_filter)` | Adapts an async generator filter for the synchronous assertion. |
 | `strategies.splits_of(text, max_parts=None)` | Hypothesis strategy: random splits of `text`, shrinking toward fewer cuts. |
-| `strategies.text_and_splits(texts, max_parts=None)` | Hypothesis strategy: `(text, chunks)` pairs. |
+| `strategies.text_and_splits(texts, max_parts=None)` | Hypothesis strategy: `(text, chunks)` pairs. `texts` is itself a strategy, such as `st.sampled_from([...])`, not a list. |
 
 `stream_filter` is called once per split, so it must start from fresh state each time.
 
