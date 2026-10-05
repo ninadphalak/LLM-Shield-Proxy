@@ -1526,15 +1526,18 @@ def _present(value: str, haystacks: list[str]) -> bool:
     return False
 
 
-def gateway_token() -> str | None:
-    """The bearer token sent to an external gateway.
+def adopt_documented_gateway_key() -> None:
+    """Let `CONFORMANCE_TARGET_API_KEY` stand in for `V2_GATEWAY_TOKEN` when only it is set.
 
     `V2_GATEWAY_TOKEN` is this profile's own variable. `CONFORMANCE_TARGET_API_KEY` is the
     one every other command in the package reads, and the one the README and the CI guide
-    tell people to set, so it is honoured here too: a newcomer who has the flat command
-    working should not have to learn a second name for the same key.
+    tell people to set, so a newcomer who has the flat command working should not have to
+    learn a second name for the same key. The copy happens here, in the entry point, and
+    not where the header is built: `run_case` is part of the instrumented scorer source
+    whose digest the published evidence is pinned to, and must not change.
     """
-    return os.environ.get("V2_GATEWAY_TOKEN") or os.environ.get("CONFORMANCE_TARGET_API_KEY") or None
+    if not os.environ.get("V2_GATEWAY_TOKEN") and os.environ.get("CONFORMANCE_TARGET_API_KEY"):
+        os.environ["V2_GATEWAY_TOKEN"] = os.environ["CONFORMANCE_TARGET_API_KEY"]
 
 
 def _extra_gateway_headers() -> dict[str, str]:
@@ -1678,7 +1681,7 @@ def run_case(
                     response_record_start = len(state.response_records)
                 started = time.perf_counter()
                 headers = {"Content-Type": "application/json"}
-                token = gateway_token()
+                token = os.environ.get("V2_GATEWAY_TOKEN")
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
                 headers.update(_extra_gateway_headers())
@@ -3304,6 +3307,8 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     # so running them must be an explicit `--only`, never a side effect of running the
     # tool with no arguments.
     selected = [n.strip() for n in args.only.split(",") if n.strip()] or list(DEFAULT_POLICIES)
+    if args.gateway_url is not None:
+        adopt_documented_gateway_key()
     if args.gateway_url is None:
         unknown = [n for n in selected if n not in POLICIES]
         if unknown:
