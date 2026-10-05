@@ -35,6 +35,9 @@ ROOT_ACTION_INPUTS = {
     "baseline-report": (False, ""),
     "artifact-name": (False, "pii-leak-benchmark"),
     "submission-section": (False, "true"),
+    # Off by default: the reports are uploaded, and a crashing start command may print the
+    # secrets it was given (review on #174).
+    "startup-log": (False, "false"),
 }
 
 RESEARCH_ACTION_INPUTS = {

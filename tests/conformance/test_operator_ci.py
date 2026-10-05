@@ -106,6 +106,9 @@ def test_managed_gateways_produce_actionable_regression_and_exit_one(tmp_path):
     for port in (current_port, baseline_port):
         with pytest.raises(OSError):
             socket.create_connection(("127.0.0.1", port), timeout=0.3)
+    # Both gateways came up, so what they printed while measured (request bodies, for a
+    # chatty one) is not in the directory the Action uploads.
+    assert not list(output.glob("*.gateway.log"))
 
 
 def test_no_regression_does_not_waive_current_leaks(tmp_path, monkeypatch):
@@ -151,6 +154,86 @@ def test_startup_failure_has_a_summary_and_is_not_a_leak(tmp_path):
                     "--start-command", f'"{sys.executable}" -c "raise SystemExit(3)"',
                     "--readiness-timeout", "2", "--out", str(tmp_path / "failed")]) == 2
     assert "NOT MEASURED" in (tmp_path / "failed/summary.md").read_text()
+
+
+# A stranger followed the CI guide with a start script committed from Windows. Git stored it
+# without the executable bit, the Action said "Gateway startup command exited. Run it locally
+# to inspect its logs." and nothing more; locally, on Windows, it ran fine. The exit code
+# (126) and the script's own output were both available and neither was shown.
+
+
+def test_a_startup_command_that_dies_names_its_exit_code_and_keeps_its_output(tmp_path):
+    out = tmp_path / "died"
+    command = f'"{sys.executable}" -c "import sys; print(\'bind: address in use\'); sys.exit(126)"'
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "5", "--startup-log", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "exited with code 126" in reason
+    assert "not executable" in reason, "126 has one usual meaning, and the message says it"
+    assert "current.gateway.log" in reason
+    assert "bind: address in use" in (out / "current.gateway.log").read_text()
+    assert "exited with code 126" in (out / "summary.md").read_text()
+
+
+def test_what_a_dying_command_printed_is_not_kept_unless_asked(tmp_path):
+    """Review: the reports directory is uploaded, and a crashing command may print the
+    secrets it was given. The exit code and its meaning are always reported; the output
+    only with --startup-log, and the message says so."""
+    out = tmp_path / "quiet"
+    command = f'"{sys.executable}" -c "print(\'UPSTREAM_API_KEY=sk-would-be-published\'); raise SystemExit(126)"'
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "5", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "exited with code 126" in reason and "--startup-log" in reason
+    assert not list(out.glob("*.gateway.log"))
+    assert "sk-would-be-published" not in "".join(p.read_text() for p in out.iterdir())
+
+
+def test_only_the_tail_of_a_talkative_start_command_is_kept(tmp_path):
+    """Review: a command that prints without end for the whole readiness window must not
+    be read whole into memory, and the published file is bounded."""
+    out = tmp_path / "talkative"
+    command = (f'"{sys.executable}" -c "import sys; sys.stdout.write(chr(65) * 300000); '
+               f'sys.stdout.write(chr(10) + chr(90) * 20 + chr(10)); sys.exit(3)"')
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "10", "--startup-log", "--out", str(out)]) == 2
+    kept = (out / "current.gateway.log").read_bytes()
+    assert len(kept) <= ci.STARTUP_LOG_TAIL_BYTES
+    assert kept.rstrip(b"\r\n").endswith(b"Z" * 20), "the end of the output, where the reason is"
+
+
+def test_nothing_listening_and_no_start_command_says_to_start_the_gateway(tmp_path):
+    """Without --start-command the old message blamed a readiness timeout on a gateway that
+    was never started. Say that nothing is listening and name both ways out."""
+    out = tmp_path / "nothing"
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1",
+                    "--readiness-timeout", "1", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "no --start-command was given" in reason
+    assert "Start your gateway first" in reason
+    assert not list(out.glob("*.gateway.log")), "no process was started, so there is no log to point at"
+
+
+def test_a_started_gateway_that_never_listens_is_told_apart_from_a_missing_one(tmp_path):
+    out = tmp_path / "silent"
+    command = f'"{sys.executable}" -c "import time; time.sleep(30)"'
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "1", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "Gateway started but nothing answered" in reason
+    assert "--target-base-url" in reason
+    assert not (out / "current.gateway.log").exists(), "not asked for, so not kept"
+    assert "--startup-log" in reason
+
+
+def test_the_summary_does_not_claim_the_values_were_printed():
+    """`ci` prints the summary, which shows shapes; the specimens never reach any output of this
+    command. The old sentence said they had been printed to the terminal, which sent people
+    looking for values that were not there."""
+    run = _complete_run(findings=[{"display": ["LEAK  EMAIL reached the model provider", "      you sent: <EMAIL>"]}])
+    summary = ci.render_summary(run)
+    assert "printed to the terminal of the machine that ran it" not in summary
+    assert "pii-leak-benchmark selfcheck" in summary
 
 
 def _complete_run(**overrides):
