@@ -248,6 +248,36 @@
         "ranInOwnerType": "User",
         "archive": "benchmarks/results/submitted/56"
       }
+    },
+    {
+      "status": "published",
+      "date": "2026-10-05",
+      "project": "Guardrails AI",
+      "version": "guardrails-ai==0.10.2 (commit 410e8f4a8e37), 0.10.2, its streaming validator holding to the sentence boundary, request p",
+      "sentN": 6,
+      "sent": "all 6 types",
+      "restored": "none",
+      "restoredN": 0.0,
+      "harness": "0.4.1 (operator), 0.2.1 (response)",
+      "leakWhole": "2 of 16",
+      "leakWholeN": 0.125,
+      "leakSplit": "2 of 16",
+      "leakSplitN": 0.125,
+      "note": "Sent AWS keys, card numbers, email addresses, GitHub tokens, Slack tokens and social security numbers to the provider. Did not give the caller their own data back. Splitting a value changed nothing. Built from source commit 410e8f4a8e37.",
+      "provenance": "submitted-fork",
+      "architecture": "not-stated",
+      "license": "Apache-2.0",
+      "runUrl": "https://github.com/teg0011/LLM-Shield-Proxy/actions/runs/37254251177",
+      "pricingUrl": "https://github.com/guardrails-ai/guardrails",
+      "_submission": {
+        "issue": 176,
+        "submitter": "teg0011",
+        "ranIn": "teg0011/LLM-Shield-Proxy",
+        "evidence": "Read from the artifact `source-reproduction` on that run.",
+        "notes": "",
+        "ranInOwnerType": "User",
+        "archive": "benchmarks/results/submitted/176"
+      }
     }
   ]
 }
