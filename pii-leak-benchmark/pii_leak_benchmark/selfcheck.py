@@ -57,6 +57,10 @@ _BOUNDARY = "configured_upstream_boundary"
 # `http_profile` is the heavy import the flat command already defers.
 _CREDENTIAL_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
 
+# Where the output sends people next. The CI guide is the path that leaves public evidence:
+# the same check on every pull request, and a link in its job summary to the results wall.
+CI_GUIDE_URL = "https://llmshieldproxy.com/docs/conformance/ci/"
+
 VERDICT_CLEAN = "CLEAN"
 VERDICT_LEAK = "LEAK"
 VERDICT_CHECK_FAILED = "CHECK FAILED"
@@ -359,8 +363,12 @@ def _print_report(
     print(
         "  This measures your deployment. It is not a publishable verdict about a "
         "product\n  (outcome: "
-        f"{report['outcome']}); to publish a row, use the flat command and record the claim."
+        f"{report['outcome']})."
     )
+    # The one path that leaves evidence someone else can check: the same check in CI, and
+    # the link its job summary ends with. The flat command's report is not that path; a
+    # published row is read from a public run's artifact.
+    print(f"  Next: run this on every pull request and put the result on the results wall:\n  {CI_GUIDE_URL}")
     print()
 
 

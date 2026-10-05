@@ -4,8 +4,14 @@
 
 ```bash
 pip install pii-leak-benchmark
-pii-leak-benchmark --target-base-url http://127.0.0.1:8899/v1
+pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:8899/v1
 ```
+
+It prints `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`, one row per data type it sent,
+and what each row means. Add `--target-api-key` if your gateway wants a key. Nothing running
+yet? `--target-base-url capture://self` is a direct connection with no gateway in it, so it
+shows what a leak looks like. The flat command further down records a vendor's claim and
+writes the report a published row needs; start with `selfcheck`.
 
 Standard library plus `httpx`. You should not have to install one gateway to measure another.
 
