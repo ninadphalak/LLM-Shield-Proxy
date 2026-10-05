@@ -153,6 +153,57 @@ def test_startup_failure_has_a_summary_and_is_not_a_leak(tmp_path):
     assert "NOT MEASURED" in (tmp_path / "failed/summary.md").read_text()
 
 
+# A stranger followed the CI guide with a start script committed from Windows. Git stored it
+# without the executable bit, the Action said "Gateway startup command exited. Run it locally
+# to inspect its logs." and nothing more; locally, on Windows, it ran fine. The exit code
+# (126) and the script's own output were both available and neither was shown.
+
+
+def test_a_startup_command_that_dies_names_its_exit_code_and_keeps_its_output(tmp_path):
+    out = tmp_path / "died"
+    command = f'"{sys.executable}" -c "import sys; print(\'bind: address in use\'); sys.exit(126)"'
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "5", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "exited with code 126" in reason
+    assert "not executable" in reason, "126 has one usual meaning, and the message says it"
+    assert "current.gateway.log" in reason
+    assert "bind: address in use" in (out / "current.gateway.log").read_text()
+    assert "exited with code 126" in (out / "summary.md").read_text()
+
+
+def test_nothing_listening_and_no_start_command_says_to_start_the_gateway(tmp_path):
+    """Without --start-command the old message blamed a readiness timeout on a gateway that
+    was never started. Say that nothing is listening and name both ways out."""
+    out = tmp_path / "nothing"
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1",
+                    "--readiness-timeout", "1", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "no --start-command was given" in reason
+    assert "Start your gateway first" in reason
+    assert not list(out.glob("*.gateway.log")), "no process was started, so there is no log to point at"
+
+
+def test_a_started_gateway_that_never_listens_is_told_apart_from_a_missing_one(tmp_path):
+    out = tmp_path / "silent"
+    command = f'"{sys.executable}" -c "import time; time.sleep(30)"'
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "1", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "Gateway started but nothing answered" in reason
+    assert "--target-base-url" in reason
+
+
+def test_the_summary_does_not_claim_the_values_were_printed():
+    """`ci` prints the summary, which shows shapes; the specimens never reach any output of this
+    command. The old sentence said they had been printed to the terminal, which sent people
+    looking for values that were not there."""
+    run = _complete_run(findings=[{"display": ["LEAK  EMAIL reached the model provider", "      you sent: <EMAIL>"]}])
+    summary = ci.render_summary(run)
+    assert "printed to the terminal of the machine that ran it" not in summary
+    assert "pii-leak-benchmark selfcheck" in summary
+
+
 def _complete_run(**overrides):
     run = {"schema": "pii-leak-benchmark/operator-run/v1",
            "contract": {"profile": "pii-v1", "duty": "restore", "seed": "a"},

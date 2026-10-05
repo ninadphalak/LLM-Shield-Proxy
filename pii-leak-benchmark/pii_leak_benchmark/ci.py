@@ -139,9 +139,9 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None, 
             lines.extend(str(line) for line in item.get("display", []))
             lines.append("")
         lines.extend(["```", "",
-                      "Values are shown as shapes. The specimens this run generated are "
-                      "printed to the terminal of the machine that ran it and are "
-                      "deliberately absent from every artifact here."])
+                      "Values are shown as shapes and are deliberately absent from every artifact here. "
+                      "To see the values themselves, run `pii-leak-benchmark selfcheck` against the same "
+                      "gateway on your own machine: it prints them to your terminal and nowhere else."])
     lines.extend(["", "## Required behavior", ""])
     for check, passed in run["required_checks"].items():
         lines.append(f"- `{check}`: {'pass' if passed else 'FAIL'}")
@@ -171,9 +171,27 @@ def render_summary(run: dict[str, Any], baseline: dict[str, Any] | None = None, 
     return "\n".join(lines)
 
 
+def _exit_hint(code: int) -> str:
+    """What a shell exit code says about a startup command that died at once."""
+    if code == 126:
+        return (" (126 means the command exists but is not executable; a script committed from Windows"
+                " loses its mode, `git update-index --chmod=+x <script>` restores it)")
+    if code == 127:
+        return " (127 means the command was not found; check the path and that it is installed on this machine)"
+    return ""
+
+
 @contextlib.contextmanager
-def gateway(command: str | None, url: str, env: dict[str, str], timeout: float) -> Iterator[None]:
+def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
+            log_path: Path | None = None) -> Iterator[None]:
+    """Start the gateway, wait for its port, stop it afterwards.
+
+    The gateway's own output goes to `log_path` when one is given, never to the console: in
+    CI the console is the job log, and a gateway can print the upstream URL it was handed.
+    The file sits with the reports, so a startup failure can be read without rerunning.
+    """
     process = None
+    log_handle = None
     try:
         parsed = urlsplit(url)
         if url != "capture://self":
@@ -189,21 +207,33 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float) 
                     raise ValueError("Managed gateway port is already occupied; stop it or choose another port")
         if command:
             options: dict[str, Any] = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
-            process = subprocess.Popen(command, shell=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)  # nosec B602 - explicit operator startup command
+            if log_path is not None:
+                log_handle = open(log_path, "wb")  # noqa: SIM115 - closed in finally, after the process
+            sink: Any = log_handle if log_handle is not None else subprocess.DEVNULL
+            process = subprocess.Popen(command, shell=True, env=env, stdout=sink, stderr=subprocess.STDOUT, **options)  # nosec B602 - explicit operator startup command
         if url != "capture://self":
             until = time.monotonic() + timeout
             while True:
                 if process and process.poll() is not None:
-                    raise ValueError("Gateway startup command exited. Run it locally to inspect its logs.")
+                    where = f" Its output is in {log_path.name} next to the reports." if log_path is not None else " Run it locally to inspect its logs."
+                    raise ValueError(f"Gateway startup command exited with code {process.returncode}{_exit_hint(process.returncode)}.{where}")
                 try:
                     with socket.create_connection((parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)), timeout=1):
                         break
                 except OSError:
                     if time.monotonic() >= until:
-                        raise ValueError("Gateway did not become reachable before the readiness timeout") from None
+                        if process:
+                            raise ValueError(f"Gateway started but nothing answered at {url} within {timeout:g} s. Check the"
+                                             " port in --target-base-url against the one it listens on; --readiness-timeout"
+                                             " lengthens the wait") from None
+                        raise ValueError(f"Nothing answered at {url} within {timeout:g} s and no --start-command was given."
+                                         " Start your gateway first, or pass --start-command so this check starts it;"
+                                         " --readiness-timeout lengthens the wait") from None
                     time.sleep(0.2)
         yield
     finally:
+        if log_handle is not None:
+            log_handle.close()
         if process:
             if os.name == "nt":
                 if process.poll() is None:
@@ -300,7 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             env["BENCHMARK_UPSTREAM_BASE_URL"] = capture.advertised_base_url
             if args.upstream_env:
                 env[args.upstream_env] = capture.advertised_base_url
-            with gateway(command, url, env, args.readiness_timeout):
+            with gateway(command, url, env, args.readiness_timeout,
+                         log_path=out / f"{label}.gateway.log" if command else None):
                 report = run_http_conformance(
                     url, api_key=args.target_api_key, model=args.target_model,
                     iterations=args.iterations, timeout_seconds=args.timeout_seconds,
