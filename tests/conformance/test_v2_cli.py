@@ -13,7 +13,10 @@ import os
 import subprocess
 import sys
 import textwrap
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 import tomllib
@@ -159,3 +162,97 @@ def test_the_console_script_does_not_import_the_proxy() -> None:
     env["PYTHONPATH"] = str(PACKAGE) + os.pathsep + env.get("PYTHONPATH", "")
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True, env=env)
     assert "PROXY:False" in result.stdout
+
+
+# --- What a newcomer sees on the first run -----------------------------------------------
+#
+# Found by installing 0.5.0 from PyPI into a clean virtualenv and running the README's two v2
+# commands. The first ended in a traceback (`ModuleNotFoundError: No module named 'jsonschema'`);
+# the second, against a gateway that wanted a key, printed `n=0/32`, an outcome and six schema
+# errors, and never mentioned the 401 the gateway had answered with.
+
+
+def test_validate_without_jsonschema_says_what_to_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _one_case_only(monkeypatch)
+    monkeypatch.setitem(sys.modules, "jsonschema", None)  # what a base install looks like
+    code = v2_cli.main(["--validate", "--only", "passthrough", "--seed", SEED, "--out", str(tmp_path / "r")])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert 'pip install "pii-leak-benchmark[validate]"' in err
+    assert "Traceback" not in err
+    assert not (tmp_path / "r" / "passthrough.json").exists(), "nothing was measured, so nothing is written"
+
+
+class _RejectingGateway(BaseHTTPRequestHandler):
+    """An OpenAI-compatible endpoint that answers 401 and remembers the credential it saw."""
+
+    seen: list[str | None] = []
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server's name
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.seen.append(self.headers.get("Authorization"))
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"error": {"message": "invalid key"}}')
+
+    def log_message(self, *args: Any) -> None:  # quiet
+        return
+
+
+def test_a_gateway_that_rejects_every_request_is_named_under_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _one_case_only(monkeypatch)
+    _RejectingGateway.seen = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RejectingGateway)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.delenv("V2_GATEWAY_TOKEN", raising=False)
+    monkeypatch.setenv("CONFORMANCE_TARGET_API_KEY", "sk-the-documented-variable")
+    try:
+        v2_cli.main(
+            [
+                "--only", "my-gateway", "--seed", SEED, "--out", str(tmp_path / "r"),
+                "--gateway-url", f"http://127.0.0.1:{server.server_port}/v1/chat/completions",
+            ]
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    out = capsys.readouterr().out
+    assert "n=0/" in out, "the row itself is unchanged"
+    assert "HTTP 401" in out and "CONFORMANCE_TARGET_API_KEY" in out, out
+    # The variable every other command reads is honoured here too.
+    assert _RejectingGateway.seen and all(value == "Bearer sk-the-documented-variable" for value in _RejectingGateway.seen)
+
+
+@pytest.mark.parametrize(
+    ("statuses", "applicable", "expected"),
+    [
+        ([200], 3, None),
+        ([0], 0, "No HTTP answer"),
+        ([401], 0, "HTTP 401"),
+        ([404], 0, "/v1/chat/completions"),
+        ([500], 0, "its own log"),
+        ([200], 0, "nothing reached the capture"),
+    ],
+)
+def test_first_run_hint_speaks_only_when_nothing_was_scored(
+    statuses: list[int], applicable: int, expected: str | None
+) -> None:
+    report = {"checks": {"sse_validity": {"status_codes": statuses}}}
+    hint = v2_emitter.first_run_hint(
+        report, {"cases_applicable": applicable}, gateway_url="http://127.0.0.1:1/v1/chat/completions", upstream_port=8799
+    )
+    if expected is None:
+        assert hint is None
+    else:
+        assert hint is not None and expected in hint
+
+
+def test_first_run_hint_is_never_printed_for_an_in_process_policy() -> None:
+    report = {"checks": {"sse_validity": {"status_codes": [0]}}}
+    assert v2_emitter.first_run_hint(report, {"cases_applicable": 0}, gateway_url=None, upstream_port=0) is None

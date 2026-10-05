@@ -1526,6 +1526,20 @@ def _present(value: str, haystacks: list[str]) -> bool:
     return False
 
 
+def adopt_documented_gateway_key() -> None:
+    """Let `CONFORMANCE_TARGET_API_KEY` stand in for `V2_GATEWAY_TOKEN` when only it is set.
+
+    `V2_GATEWAY_TOKEN` is this profile's own variable. `CONFORMANCE_TARGET_API_KEY` is the
+    one every other command in the package reads, and the one the README and the CI guide
+    tell people to set, so a newcomer who has the flat command working should not have to
+    learn a second name for the same key. The copy happens here, in the entry point, and
+    not where the header is built: `run_case` is part of the instrumented scorer source
+    whose digest the published evidence is pinned to, and must not change.
+    """
+    if not os.environ.get("V2_GATEWAY_TOKEN") and os.environ.get("CONFORMANCE_TARGET_API_KEY"):
+        os.environ["V2_GATEWAY_TOKEN"] = os.environ["CONFORMANCE_TARGET_API_KEY"]
+
+
 def _extra_gateway_headers() -> dict[str, str]:
     """Extra request headers for an external gateway, from V2_GATEWAY_HEADERS (JSON).
 
@@ -3190,6 +3204,37 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     return parser
 
 
+def first_run_hint(
+    report: dict[str, Any], summary: dict[str, Any], *, gateway_url: str | None, upstream_port: int
+) -> str | None:
+    """One plain sentence for a gateway run that scored nothing, or None when it did.
+
+    A run against a gateway that answers 401 to every request produces a valid-looking row
+    (`n=0/32`, an outcome, six schema errors) and nothing that names the 401. The report
+    holds the status codes, so the console can say what happened and what to change. The
+    numbers and the outcome are untouched: this is a hint printed beside them.
+    """
+    if gateway_url is None or summary.get("cases_applicable", 0) > 0:
+        return None
+    statuses = [int(code) for code in report["checks"]["sse_validity"].get("status_codes", []) if int(code) != 0]
+    if not statuses:
+        return f"No HTTP answer came from {gateway_url}. Check that the gateway is running and listening there."
+    if all(code >= 400 for code in statuses):
+        codes = ", ".join(str(code) for code in sorted(set(statuses)))
+        if {401, 403} & set(statuses):
+            fix = "pass the key it expects in CONFORMANCE_TARGET_API_KEY (or V2_GATEWAY_TOKEN)"
+        elif 404 in statuses:
+            fix = "check that --gateway-url ends in /v1/chat/completions"
+        else:
+            fix = "its own log says why; an error before forwarding is usually a missing setting"
+        return f"The gateway answered HTTP {codes} to every request and no case was scored: {fix}."
+    port = f"port {upstream_port}" if upstream_port else "the capture port (pass --upstream-port to fix it)"
+    return (
+        f"The gateway answered but nothing reached the capture on {port}. Configure its provider base "
+        "URL as http://127.0.0.1:<port>/v1 and run again."
+    )
+
+
 def summary_row(name: str, seed: str, report: dict[str, Any], errors: list[str] | None) -> dict[str, Any]:
     """One `--json-out` row: the keys `benchmarks/v2_seed_sweep.py` records per seed.
 
@@ -3236,7 +3281,19 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
 
     validator: Callable[[dict[str, Any]], list[str]] | None = None
     if args.validate:
-        import jsonschema
+        try:
+            import jsonschema
+        except ImportError:
+            # A plain `pip install pii-leak-benchmark` has no jsonschema, and the README's
+            # first v2 command uses --validate. A traceback here is the first thing a
+            # newcomer sees; say what to install instead.
+            print(
+                "--validate needs the jsonschema package, which the base install leaves out.\n"
+                'Install it with:  pip install "pii-leak-benchmark[validate]"\n'
+                "or run without --validate to produce the reports unchecked.",
+                file=sys.stderr,
+            )
+            return 2
 
         schema = load_schema(args.schema)
 
@@ -3250,6 +3307,8 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
     # so running them must be an explicit `--only`, never a side effect of running the
     # tool with no arguments.
     selected = [n.strip() for n in args.only.split(",") if n.strip()] or list(DEFAULT_POLICIES)
+    if args.gateway_url is not None:
+        adopt_documented_gateway_key()
     if args.gateway_url is None:
         unknown = [n for n in selected if n not in POLICIES]
         if unknown:
@@ -3284,6 +3343,9 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
         )
         for err in errors[:6]:
             print("      !", err)
+        hint = first_run_hint(report, summary, gateway_url=args.gateway_url, upstream_port=args.upstream_port)
+        if hint:
+            print("      ->", hint)
         if args.partial_emission:
             from pii_leak_benchmark.partial_emission import run_partial_emission
 
