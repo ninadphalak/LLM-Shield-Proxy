@@ -238,22 +238,27 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
     answered = [int(code) for code in client.get("status_codes", []) if int(code) != 0]
     if answered and all(code >= 400 for code in answered):
         codes = ", ".join(str(code) for code in sorted(set(answered)))
+        # Two facts the run recorded, stated side by side and not joined: how many requests
+        # the capture saw, and what every client answer was. Which answer belongs to which
+        # request is not recorded, so the message does not say "forwarded, then answered".
+        reached = boundary["correlated_requests"]
         return (
             VERDICT_NOT_MEASURED,
-            f"Your gateway forwarded the request to the capture but answered HTTP {codes} to the "
-            "client, so the response checks could not run. If --target-base-url does not end in "
-            "/v1, add it: the check posts to <base>/chat/completions. Otherwise the gateway's own "
-            "log says why it answered that.",
+            f"{reached} request(s) reached the capture, and every answer the client got was an "
+            f"error (HTTP {codes}), so the response checks could not run. If --target-base-url "
+            "does not end in /v1, add it: the check posts to <base>/chat/completions. Otherwise "
+            "the gateway's own log says why it answered that.",
         )
     if not answered and client.get("errors"):
-        # Forwarded, then no status line ever came back (a read timeout, a dropped
-        # connection). The response path was not measured either (review).
+        # No status line ever came back (a read timeout, a dropped connection). The
+        # response path was not measured either (review).
         kinds = ", ".join(sorted(set(str(e) for e in client["errors"])))
+        reached = boundary["correlated_requests"]
         return (
             VERDICT_NOT_MEASURED,
-            f"Your gateway forwarded the request to the capture but the check got no HTTP answer "
-            f"back ({kinds}), so the response checks could not run. The gateway's own log says "
-            "what happened to the forwarded request; --timeout-seconds lengthens the wait.",
+            f"{reached} request(s) reached the capture, and the check got no HTTP answer back "
+            f"({kinds}), so the response checks could not run. The gateway's own log says what "
+            "happened after it forwarded; --timeout-seconds lengthens the wait.",
         )
 
     ignored = {"response_fidelity", "fragmentation_safety"} if duty == "anonymize" else set()

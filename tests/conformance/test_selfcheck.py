@@ -113,6 +113,18 @@ def test_a_gateway_that_forwards_and_then_never_answers_is_not_measured() -> Non
     assert "masks without restoring" not in reason
 
 
+def test_mixed_iterations_state_the_two_counts_without_joining_them() -> None:
+    """Review: two of three requests rejected locally (403, never forwarded), one forwarded
+    and answered 500. The run recorded one request at the capture and two error codes; it
+    did not record which answer belongs to which request, so the message must not say
+    "forwarded, then answered"."""
+    verdict, reason = selfcheck.verdict_for(_report(correlated=1, failing_checks=("sse_validity",), status_codes=[403, 500]))
+    assert verdict == selfcheck.VERDICT_NOT_MEASURED
+    assert "1 request(s) reached the capture" in reason
+    assert "HTTP 403, 500" in reason
+    assert "forwarded the request" not in reason
+
+
 def test_a_leak_still_outranks_an_error_answer() -> None:
     verdict, _ = selfcheck.verdict_for(_report(leaked=["SSN"], status_codes=[404]))
     assert verdict == selfcheck.VERDICT_LEAK
