@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.6.7"
+version = "1.6.8"
 description = "Streaming privacy gateway for configurable PII transformation and OpenAI-compatible proxy traffic."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -53,7 +53,7 @@ classifiers = [
 # `llm-shield-proxy benchmark` self-tests against). The benchmark never imports this
 # package, and `tests/conformance/test_harness_install_weight.py` fails if it does.
 dependencies = [
-    "pii-leak-benchmark>=0.1.0",
+    "pii-leak-benchmark>=0.5.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
     "jsonschema>=4.0.0",
@@ -164,7 +164,7 @@ ignore = [
 # independently of the gateway. It is not listed here on purpose -- the measurer and
 # the measured must not be forced to move together.
 [tool.bumpversion]
-current_version = "1.6.7"
+current_version = "1.6.8"
 commit = true
 tag = true
 
