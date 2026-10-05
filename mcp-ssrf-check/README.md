@@ -46,7 +46,8 @@ which has no sessions, and on stateful servers that issue no session id.
 
 Exit code 0 means no check failed. Exit code 1 means at least one `FAIL`. Exit code 2 means
 `INCONCLUSIVE`: the server could not be reached as a legitimate client, the tool or argument
-name was wrong (`-32602`), or the tool answered without an error while nothing reached the
+name was wrong (it is not in `tools/list`, or the server answers `-32602`), or the tool
+answered without an error while nothing reached the
 listener. That last case usually means the server runs in a different network namespace
 from the checker (a container, another host), so its loopback is not yours: run the checker
 where the server runs, or pass `--listen-host` and `--callback-host` with an address the
