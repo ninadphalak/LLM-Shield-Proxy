@@ -68,7 +68,20 @@ def _build_sidecar_patch(keys_secret: Optional[str] = None) -> list[Dict[str, An
         "resources": {
             "limits": {"memory": "256Mi", "cpu": "500m"},
             "requests": {"memory": "128Mi", "cpu": "100m"}
-        }
+        },
+        # The same probes the Helm deployment uses. Without them the pod was Ready while
+        # the sidecar was still starting, and the app's first requests to 127.0.0.1:8000
+        # were refused for a few seconds (seen in a kind cluster, 2026-10-05).
+        "readinessProbe": {
+            "httpGet": {"path": "/readyz", "port": 8000},
+            "initialDelaySeconds": 2,
+            "periodSeconds": 5,
+        },
+        "livenessProbe": {
+            "httpGet": {"path": "/livez", "port": 8000},
+            "initialDelaySeconds": 15,
+            "periodSeconds": 10,
+        },
     }
     # Without keys the sidecar answers every request with a 401.
     if keys_secret:

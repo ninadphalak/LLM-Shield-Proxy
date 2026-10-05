@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from llm_shield_proxy.api import webhook
 from llm_shield_proxy.api.webhook import webhook_router
 from llm_shield_proxy.core.config import settings
 
@@ -69,9 +70,30 @@ def test_matching_label_appends_only_the_configured_sidecar(webhook_client):
                     "limits": {"memory": "256Mi", "cpu": "500m"},
                     "requests": {"memory": "128Mi", "cpu": "100m"},
                 },
+                # Without a readiness probe the pod was Ready while the sidecar was still
+                # starting, and the app's first requests to 127.0.0.1:8000 were refused.
+                "readinessProbe": {
+                    "httpGet": {"path": "/readyz", "port": 8000},
+                    "initialDelaySeconds": 2,
+                    "periodSeconds": 5,
+                },
+                "livenessProbe": {
+                    "httpGet": {"path": "/livez", "port": 8000},
+                    "initialDelaySeconds": 15,
+                    "periodSeconds": 10,
+                },
             },
         }
     ]
+
+
+def test_sidecar_probes_use_the_paths_the_helm_deployment_uses():
+    """One pair of health paths for both ways the proxy runs in a cluster."""
+    chart = (Path(__file__).resolve().parents[1] / "deploy/helm/llm-shield-proxy/templates/deployment.yaml").read_text()
+    [patch] = webhook._build_sidecar_patch()
+    for probe in ("readinessProbe", "livenessProbe"):
+        assert patch["value"][probe]["httpGet"]["path"] in chart
+        assert patch["value"][probe]["httpGet"]["port"] == 8000
 
 
 def test_nonmatching_label_returns_no_patch(webhook_client):
