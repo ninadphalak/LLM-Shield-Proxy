@@ -111,7 +111,12 @@ pii-leak-benchmark-v2 --validate --out ./benchmark-output/my-gateway \
 
 `--seed` reproduces the fixture selection, which is how a published row's seeds are
 replayed; `--only` picks the policies (or names the label for an external gateway); `--out`
-is required and is where `<policy>.json` lands. To replay a published results-wall row with
+is required and is where `<policy>.json` lands. `--validate` needs the `validate` extra
+(`pip install "pii-leak-benchmark[validate]"`); without it the command says so and stops.
+A gateway that wants a key reads it from `CONFORMANCE_TARGET_API_KEY`, the same variable the
+other commands use (`V2_GATEWAY_TOKEN` still works). A run that scores no case prints the
+reason under its row: the HTTP status the gateway answered with, or that nothing reached the
+capture. To replay a published results-wall row with
 the gateway, its detector and this harness all in containers, use a replication pack under
 [`benchmarks/replication/`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/benchmarks/replication).
 
