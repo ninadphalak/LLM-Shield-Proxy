@@ -46,6 +46,9 @@ inputs:
   submission-section:
     description: 'false omits the wall-submission section, for workflows that upload their own bundle and write their own'
     default: 'true'
+  startup-log:
+    description: "'true' keeps the tail of what a start command printed when it failed to start, as current.gateway.log in the reports. Off by default: the reports are uploaded, and a crashing command may print the secrets it was given"
+    default: 'false'
 outputs:
   report-directory:
     description: Directory with operator reports, raw measurements and summary.md
@@ -92,6 +95,7 @@ runs:
         BENCHMARK_BASELINE_VERSION: ${{ inputs.baseline-version }}
         BENCHMARK_BASELINE_REPORT: ${{ inputs.baseline-report }}
         BENCHMARK_SUBMISSION_SECTION: ${{ inputs.submission-section }}
+        BENCHMARK_STARTUP_LOG: ${{ inputs.startup-log }}
       run: |
         "$BENCHMARK_PYTHON" - <<'PY'
         import os
@@ -104,6 +108,8 @@ runs:
             value = os.environ.get('BENCHMARK_' + flag.upper().replace('-', '_'))
             if value:
                 argv.extend(['--' + flag, value])
+        if os.environ.get('BENCHMARK_STARTUP_LOG', '').strip().lower() == 'true':
+            argv.append('--startup-log')
         raise SystemExit(main(argv))
         PY
     - name: Render the result badge

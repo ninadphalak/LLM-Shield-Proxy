@@ -525,7 +525,7 @@ and looking at exactly what arrived upstream when a result surprises you.
 | `baseline.json` | Optional previous operator result |
 | `baseline.raw.json` | Raw baseline when measured during this job |
 | `control.raw.json` | Negative-control evidence |
-| `current.gateway.log` | What your `start-command` printed, kept only when it failed to start (`baseline.gateway.log` for the baseline) |
+| `current.gateway.log` | The tail of what your `start-command` printed, only with `startup-log: 'true'` and only when it failed to start (`baseline.gateway.log` for the baseline) |
 | `pii-leak-badge.json` | Shields.io endpoint file for the README badge |
 
 </details>
@@ -537,9 +537,11 @@ The Action stands up a fake provider, points your gateway at it through `upstrea
 records every request that arrives. It runs a control first, so a run that measures nothing
 fails instead of passing quietly. It starts your gateway, waits for its port, measures, writes
 the summary, and stops what it started. When the command exits before its port opens, the
-summary names the exit code and what the command printed goes to `current.gateway.log` in
-the reports artifact, never to the job log. Once a gateway is up, what it prints is
-discarded: by then it may be logging the test requests, and the artifact is public. A script
+summary names the exit code. What the command printed is not kept unless you set
+`startup-log: 'true'` (locally, `--startup-log`): the reports directory is uploaded as an
+artifact, and a crashing command may print the secrets it was given. With it set, the tail
+goes to `current.gateway.log`, and only when the gateway failed to start; once it is up, what
+it prints is discarded, because by then it may be logging the test requests. A script
 committed from Windows usually exits with 126: Git stored it without the executable bit, and
 `git update-index --chmod=+x scripts/start-test-gateway.sh` puts it back.
 

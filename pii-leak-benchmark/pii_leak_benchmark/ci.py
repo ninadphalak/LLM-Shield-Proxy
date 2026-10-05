@@ -205,7 +205,10 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
     def publish_startup_output() -> str:
         """Copy the tail of what the gateway printed to `log_path`; return the sentence for the message."""
         if log_path is None or scratch is None:
-            return " Run it locally to inspect its logs."
+            # Not kept unless asked: the reports directory is uploaded as a build artifact,
+            # and a crashing command may print the secrets it was given (review).
+            return (" What it printed is not kept unless you pass --startup-log (Action input"
+                    " startup-log: 'true'); the file then sits with the reports, which are uploaded.")
         if log_handle is not None:
             log_handle.flush()
         # Read only the tail. A command that never opens its port but keeps printing for the
@@ -318,6 +321,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start-command", help="Optional foreground gateway command; stopped after the run")
     parser.add_argument("--upstream-env", help="Gateway environment variable to receive the capture /v1 URL")
     parser.add_argument("--readiness-timeout", type=float, default=60)
+    parser.add_argument("--startup-log", action="store_true",
+                        help="When the start command fails to start, keep the tail of what it printed as "
+                             "<label>.gateway.log next to the reports. Off by default: the reports are "
+                             "uploaded, and a crashing command may print the secrets it was given.")
     baseline_group = parser.add_mutually_exclusive_group()
     baseline_group.add_argument("--baseline-report", help="Previous current.json from this command")
     baseline_group.add_argument("--baseline-base-url", help="Live previous gateway's /v1 URL")
@@ -364,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.upstream_env:
                 env[args.upstream_env] = capture.advertised_base_url
             with gateway(command, url, env, args.readiness_timeout,
-                         log_path=out / f"{label}.gateway.log" if command else None):
+                         log_path=out / f"{label}.gateway.log" if command and args.startup_log else None):
                 report = run_http_conformance(
                     url, api_key=args.target_api_key, model=args.target_model,
                     iterations=args.iterations, timeout_seconds=args.timeout_seconds,

@@ -166,13 +166,27 @@ def test_a_startup_command_that_dies_names_its_exit_code_and_keeps_its_output(tm
     out = tmp_path / "died"
     command = f'"{sys.executable}" -c "import sys; print(\'bind: address in use\'); sys.exit(126)"'
     assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
-                    "--readiness-timeout", "5", "--out", str(out)]) == 2
+                    "--readiness-timeout", "5", "--startup-log", "--out", str(out)]) == 2
     reason = json.loads((out / "current.json").read_text())["reason"]
     assert "exited with code 126" in reason
     assert "not executable" in reason, "126 has one usual meaning, and the message says it"
     assert "current.gateway.log" in reason
     assert "bind: address in use" in (out / "current.gateway.log").read_text()
     assert "exited with code 126" in (out / "summary.md").read_text()
+
+
+def test_what_a_dying_command_printed_is_not_kept_unless_asked(tmp_path):
+    """Review: the reports directory is uploaded, and a crashing command may print the
+    secrets it was given. The exit code and its meaning are always reported; the output
+    only with --startup-log, and the message says so."""
+    out = tmp_path / "quiet"
+    command = f'"{sys.executable}" -c "print(\'UPSTREAM_API_KEY=sk-would-be-published\'); raise SystemExit(126)"'
+    assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
+                    "--readiness-timeout", "5", "--out", str(out)]) == 2
+    reason = json.loads((out / "current.json").read_text())["reason"]
+    assert "exited with code 126" in reason and "--startup-log" in reason
+    assert not list(out.glob("*.gateway.log"))
+    assert "sk-would-be-published" not in "".join(p.read_text() for p in out.iterdir())
 
 
 def test_only_the_tail_of_a_talkative_start_command_is_kept(tmp_path):
@@ -182,7 +196,7 @@ def test_only_the_tail_of_a_talkative_start_command_is_kept(tmp_path):
     command = (f'"{sys.executable}" -c "import sys; sys.stdout.write(chr(65) * 300000); '
                f'sys.stdout.write(chr(10) + chr(90) * 20 + chr(10)); sys.exit(3)"')
     assert ci.main(["--target-base-url", f"http://127.0.0.1:{_port()}/v1", "--start-command", command,
-                    "--readiness-timeout", "10", "--out", str(out)]) == 2
+                    "--readiness-timeout", "10", "--startup-log", "--out", str(out)]) == 2
     kept = (out / "current.gateway.log").read_bytes()
     assert len(kept) <= ci.STARTUP_LOG_TAIL_BYTES
     assert kept.rstrip(b"\r\n").endswith(b"Z" * 20), "the end of the output, where the reason is"
@@ -208,7 +222,8 @@ def test_a_started_gateway_that_never_listens_is_told_apart_from_a_missing_one(t
     reason = json.loads((out / "current.json").read_text())["reason"]
     assert "Gateway started but nothing answered" in reason
     assert "--target-base-url" in reason
-    assert (out / "current.gateway.log").exists(), "it never came up, so nothing it printed can be a request"
+    assert not (out / "current.gateway.log").exists(), "not asked for, so not kept"
+    assert "--startup-log" in reason
 
 
 def test_the_summary_does_not_claim_the_values_were_printed():
