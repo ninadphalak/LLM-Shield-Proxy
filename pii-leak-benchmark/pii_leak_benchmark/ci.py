@@ -31,7 +31,6 @@ from .selfcheck import (
     verdict_for,
 )
 
-
 # How much of a gateway's startup output is kept when it fails to start: the tail, because
 # the reason is at the end, and bounded, because the file is uploaded with the reports.
 STARTUP_LOG_TAIL_BYTES = 64 * 1024
