@@ -159,6 +159,23 @@ def test_a_listed_tool_and_argument_are_still_probed():
     assert _by_id(report)["tool-url-ssrf"].status == FAIL
 
 
+def test_a_tool_on_a_later_page_of_tools_list_is_found_and_probed():
+    """`tools/list` is paginated. Review caught the first version reading page one as the
+    whole catalogue, which would have called a correctly wired tool on page two a typo and
+    skipped the probes."""
+    with FakeMcpServer(fetch_guard="none", unknown_tool_reply="is_error", decoy_tools=60, tools_per_page=50) as server:
+        report = _run(server.url, "--fetch-tool", "fetch", "--url-argument", "url")
+    assert _by_id(report)["tool-url-ssrf"].status == FAIL
+
+
+def test_a_missing_tool_is_reported_against_every_page():
+    with FakeMcpServer(unknown_tool_reply="is_error", decoy_tools=3, tools_per_page=2) as server:
+        report = _run(server.url, "--fetch-tool", "nope")
+    ssrf = _by_id(report)["tool-url-ssrf"]
+    assert ssrf.status == INCONCLUSIVE
+    assert ssrf.evidence["tools_listed"] == ["decoy-0", "decoy-1", "decoy-2", "fetch"]
+
+
 def test_control_url_proves_the_wiring():
     with FakeMcpServer(fetch_guard="none") as server:
         report = _run(server.url, "--fetch-tool", "fetch", "--control-url", f"http://127.0.0.1:{server.port}/mcp")

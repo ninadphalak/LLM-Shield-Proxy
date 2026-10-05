@@ -39,6 +39,9 @@ LOOPBACK_SPELLINGS = (
 )
 
 JSONRPC_INVALID_PARAMS = -32602
+# `tools/list` pages are followed up to this many times before the wiring check gives up
+# and lets the probes run. A server that never ends its listing is not a reason to skip.
+TOOLS_LIST_MAX_PAGES = 32
 JSONRPC_METHOD_NOT_FOUND = -32601
 
 
@@ -258,14 +261,28 @@ def _tool_wiring(client: httpx.Client, url: str, lifecycle: Lifecycle, *, tool: 
     ``tools/call`` is still recognised). Otherwise returns ``(detail, evidence)`` for an
     INCONCLUSIVE verdict: a check that never reached the tool must not read as a pass.
     """
-    try:
-        listing = post(client, url, "tools/list", {}, lifecycle, req_id=6)
-    except httpx.HTTPError:
-        return None
-    if not listing.has_result or not isinstance(listing.message, dict):
-        return None
-    tools = listing.message.get("result", {}).get("tools")
-    if not isinstance(tools, list):
+    # `tools/list` is paginated: a page carries `nextCursor` until the last one. Follow
+    # every page, bounded, and fall back to the probes if any page is not a plain result:
+    # a listing that cannot be read whole must not turn into "the tool is not there".
+    tools: List[Any] = []
+    cursor: Optional[str] = None
+    for _ in range(TOOLS_LIST_MAX_PAGES):
+        params: Dict[str, Any] = {"cursor": cursor} if cursor else {}
+        try:
+            listing = post(client, url, "tools/list", params, lifecycle, req_id=6)
+        except httpx.HTTPError:
+            return None
+        if not listing.has_result or not isinstance(listing.message, dict):
+            return None
+        result = listing.message.get("result", {})
+        page = result.get("tools") if isinstance(result, dict) else None
+        if not isinstance(page, list):
+            return None
+        tools.extend(page)
+        cursor = result.get("nextCursor")
+        if not isinstance(cursor, str) or not cursor:
+            break
+    else:
         return None
     names = sorted(str(t.get("name")) for t in tools if isinstance(t, dict) and t.get("name"))
     evidence = {"tool": tool, "argument": argument, "tools_listed": names}

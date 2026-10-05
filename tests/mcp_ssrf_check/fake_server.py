@@ -67,7 +67,14 @@ class FakeMcpServer:
         port: int = 0,
         protocol_version: str = STATEFUL,
         unknown_tool_reply: str = "error",
+        decoy_tools: int = 0,
+        tools_per_page: int = 0,
     ) -> None:
+        # `tools/list` is paginated in the protocol. With `tools_per_page` set, the listing
+        # is `decoy_tools` unrelated tools followed by the real one, served `tools_per_page`
+        # at a time with `nextCursor`, so the real tool sits on the last page.
+        self.decoy_tools = decoy_tools
+        self.tools_per_page = tools_per_page
         # How `tools/call` for a tool this server does not have, or with the wrong argument,
         # is answered. "error" is a JSON-RPC -32602, which is what the first fake did and
         # what the checker always recognised. "is_error" is what the official Python SDK
@@ -249,8 +256,15 @@ class FakeMcpServer:
 
             def _dispatch(self, req_id, method, params) -> None:
                 if method == "tools/list":
-                    tools = [{"name": owner.tool_name, "inputSchema": {"type": "object", "properties": {owner.url_argument: {"type": "string"}}}}]
-                    self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}}, as_sse=owner.sse)
+                    tools = [{"name": f"decoy-{i}", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}} for i in range(owner.decoy_tools)]
+                    tools.append({"name": owner.tool_name, "inputSchema": {"type": "object", "properties": {owner.url_argument: {"type": "string"}}}})
+                    result: Dict[str, Any] = {"tools": tools}
+                    if owner.tools_per_page:
+                        start = int(params.get("cursor") or 0)
+                        result["tools"] = tools[start:start + owner.tools_per_page]
+                        if start + owner.tools_per_page < len(tools):
+                            result["nextCursor"] = str(start + owner.tools_per_page)
+                    self._reply(200, {"jsonrpc": "2.0", "id": req_id, "result": result}, as_sse=owner.sse)
                     return
                 if method == "tools/call":
                     if params.get("name") != owner.tool_name:
