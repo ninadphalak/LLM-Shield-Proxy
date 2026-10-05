@@ -67,6 +67,7 @@ Provide the central API keys the proxy will use to authenticate with upstream pr
 | `CUSTOM_REGEX_PATH` | `None` | Path to `custom_regex.yaml` for Bring-Your-Own-Regex rules. |
 | `ENABLE_SYNTHETIC_SWAPPING` | `True` | Replace detected entities with format-preserving synthetic data. |
 | `SHIELD_DEFAULT_MASKING_MODE` | `SYNTHETIC` | The default masking strategy (`SYNTHETIC`, `SCRUB`, `STATELESS_CRYPTO`). |
+| `ENABLE_RESPONSE_PII_REDACTION` | `False` | Redact personal data the model produced, values that were never in the request and so cannot be restored, before the reply reaches the client. Off by default because a value the model rephrases rather than quotes is redacted and not restored. The request path is redacted either way. The benchmark's response-split profile passes only with this on. |
 | `ENABLE_DEEP_PAYLOAD_REDACTION` | `True` | Walk fields outside the known request shapes: `metadata`, `user`, `response_format`, and any field this proxy does not know by name. Turning it off lets those fields reach the provider unredacted. Tool definitions are redacted either way. |
 | `PAYLOAD_PROTECTED_KEYS` | `""` | Extra JSON keys deep redaction must never rewrite, comma separated, added to the built-in structural set (`model`, `type`, `enum`, `$ref`, and similar). Per-role equivalent: `payload_skip_keys`. |
 | `PAYLOAD_MAX_REDACT_STRING_LENGTH` | `8192` | Strings longer than this, and any `data:` URI, are forwarded without inspection. |

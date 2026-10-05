@@ -307,6 +307,13 @@ only that profile. The seed is `response-seed`, the published one by default. Th
 harness with the `pii-leak-benchmark-v2` command, so `source: ./pii-leak-benchmark` from a
 current checkout, or a release later than 0.4.1.
 
+This profile measures the reply, so the gateway has to be scanning replies. LLM-Shield-Proxy
+does not by default: start it with `ENABLE_RESPONSE_PII_REDACTION=true` for this profile, or
+the values the capture injects pass through and the profile reports a leak with the request
+path still clean. It is off by default because it changes what callers receive (a value the
+model rephrases rather than quotes is redacted and not restored); the published row for the
+proxy was measured with it on and says so in its configuration.
+
 
 <details>
 <summary><b>Show the result on your README</b></summary>
