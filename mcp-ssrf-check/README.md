@@ -85,7 +85,7 @@ in an earlier step; the action does not start it.
     python -m my_mcp_server --port 8000 &
     sleep 2
 - name: Check Host, Origin, sessions and URL-fetching SSRF
-  uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-v0.2.0
+  uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-v0.2.1
   with:
     url: http://127.0.0.1:8000/mcp
     fetch-tool: fetch

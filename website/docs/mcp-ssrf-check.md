@@ -41,7 +41,7 @@ that resolves the name and checks every address passes them all.
 
 ```yaml
 - name: Check Host, Origin, sessions and URL-fetching SSRF
-  uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-v0.2.0
+  uses: ninadphalak/LLM-Shield-Proxy/mcp-ssrf-check@mcp-check-v0.2.1
   with:
     url: http://127.0.0.1:8000/mcp
     fetch-tool: fetch
