@@ -106,6 +106,9 @@ def test_managed_gateways_produce_actionable_regression_and_exit_one(tmp_path):
     for port in (current_port, baseline_port):
         with pytest.raises(OSError):
             socket.create_connection(("127.0.0.1", port), timeout=0.3)
+    # Both gateways came up, so what they printed while measured (request bodies, for a
+    # chatty one) is not in the directory the Action uploads.
+    assert not list(output.glob("*.gateway.log"))
 
 
 def test_no_regression_does_not_waive_current_leaks(tmp_path, monkeypatch):
@@ -192,6 +195,7 @@ def test_a_started_gateway_that_never_listens_is_told_apart_from_a_missing_one(t
     reason = json.loads((out / "current.json").read_text())["reason"]
     assert "Gateway started but nothing answered" in reason
     assert "--target-base-url" in reason
+    assert (out / "current.gateway.log").exists(), "it never came up, so nothing it printed can be a request"
 
 
 def test_the_summary_does_not_claim_the_values_were_printed():

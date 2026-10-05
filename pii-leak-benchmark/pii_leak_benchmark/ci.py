@@ -12,6 +12,7 @@ import signal
 import socket
 import subprocess  # nosec B404 - explicit operator process lifecycle
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Iterator
@@ -29,6 +30,11 @@ from .selfcheck import (
     build_parser,
     verdict_for,
 )
+
+
+# How much of a gateway's startup output is kept when it fails to start: the tail, because
+# the reason is at the end, and bounded, because the file is uploaded with the reports.
+STARTUP_LOG_TAIL_BYTES = 64 * 1024
 
 
 def instrument_digest() -> str:
@@ -186,12 +192,27 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
             log_path: Path | None = None) -> Iterator[None]:
     """Start the gateway, wait for its port, stop it afterwards.
 
-    The gateway's own output goes to `log_path` when one is given, never to the console: in
+    The gateway's own output is captured in a temporary file outside the reports directory
+    and published to `log_path` only when the gateway failed to start, that is, before the
+    first fixture was sent. A gateway that came up may log the request bodies it saw, and
+    the reports directory is uploaded as a build artifact, so what it printed once
+    measurement began is discarded with the temporary file. Never the console either: in
     CI the console is the job log, and a gateway can print the upstream URL it was handed.
-    The file sits with the reports, so a startup failure can be read without rerunning.
     """
     process = None
     log_handle = None
+    scratch: Path | None = None
+
+    def publish_startup_output() -> str:
+        """Copy the tail of what the gateway printed to `log_path`; return the sentence for the message."""
+        if log_path is None or scratch is None:
+            return " Run it locally to inspect its logs."
+        if log_handle is not None:
+            log_handle.flush()
+        data = scratch.read_bytes()[-STARTUP_LOG_TAIL_BYTES:]
+        log_path.write_bytes(data)
+        return f" What it printed before that is in {log_path.name} next to the reports."
+
     try:
         parsed = urlsplit(url)
         if url != "capture://self":
@@ -208,14 +229,16 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
         if command:
             options: dict[str, Any] = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
             if log_path is not None:
-                log_handle = open(log_path, "wb")  # noqa: SIM115 - closed in finally, after the process
+                fd, name = tempfile.mkstemp(prefix="pii-leak-benchmark-gateway-", suffix=".log")
+                scratch = Path(name)
+                log_handle = os.fdopen(fd, "wb")
             sink: Any = log_handle if log_handle is not None else subprocess.DEVNULL
             process = subprocess.Popen(command, shell=True, env=env, stdout=sink, stderr=subprocess.STDOUT, **options)  # nosec B602 - explicit operator startup command
         if url != "capture://self":
             until = time.monotonic() + timeout
             while True:
                 if process and process.poll() is not None:
-                    where = f" Its output is in {log_path.name} next to the reports." if log_path is not None else " Run it locally to inspect its logs."
+                    where = publish_startup_output()
                     raise ValueError(f"Gateway startup command exited with code {process.returncode}{_exit_hint(process.returncode)}.{where}")
                 try:
                     with socket.create_connection((parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)), timeout=1):
@@ -223,9 +246,10 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
                 except OSError:
                     if time.monotonic() >= until:
                         if process:
+                            where = publish_startup_output()
                             raise ValueError(f"Gateway started but nothing answered at {url} within {timeout:g} s. Check the"
                                              " port in --target-base-url against the one it listens on; --readiness-timeout"
-                                             " lengthens the wait") from None
+                                             f" lengthens the wait.{where}") from None
                         raise ValueError(f"Nothing answered at {url} within {timeout:g} s and no --start-command was given."
                                          " Start your gateway first, or pass --start-command so this check starts it;"
                                          " --readiness-timeout lengthens the wait") from None
@@ -251,6 +275,10 @@ def gateway(command: str | None, url: str, env: dict[str, str], timeout: float,
                 except ProcessLookupError:
                     pass
             process.wait(timeout=5)
+        if scratch is not None:
+            # After the process is gone: Windows refuses to unlink a file another process holds.
+            with contextlib.suppress(OSError):
+                scratch.unlink()
 
 
 EPILOG = """\
