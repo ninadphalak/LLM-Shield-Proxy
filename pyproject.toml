@@ -7,7 +7,12 @@ name = "llm-shield-proxy"
 version = "1.6.8"
 description = "Streaming privacy gateway for configurable PII transformation and OpenAI-compatible proxy traffic."
 readme = "README.md"
-requires-python = ">=3.9"
+# The floor is what CI tests (the `test-and-lint` matrix in ci.yml), and a test holds the
+# two equal. 1.6.8 claimed 3.9: on 3.9 the Settings class failed to import (a `|` union
+# evaluated by pydantic) and on 3.10 every request answered 400, because `asyncio.timeout`
+# is 3.11+ and the broad handler around it reported "Malformed JSON payload". Neither
+# version had ever run the suite.
+requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [
     {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
@@ -30,8 +35,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Security",
