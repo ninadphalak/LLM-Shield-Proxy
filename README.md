@@ -18,7 +18,7 @@ Already running LiteLLM? LiteLLM includes it as a built-in guardrail, `guardrail
 so LiteLLM keeps its own routing and calls the Shield to redact each request and restore each reply.
 See [LiteLLM's setup page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy). It is
 on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; until then, use one of the
-wirings in [Running behind LiteLLM](website/docs/features/litellm-integration.md).
+wirings in [Running behind LiteLLM](https://llmshieldproxy.com/docs/features/litellm-integration).
 
 ## Try it in a minute, with no API key
 
