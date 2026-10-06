@@ -23,7 +23,7 @@ changes a file in LiteLLM's repository.
 | | Built-in guardrail | In-process guardrail | Generic guardrail API |
 |---|---|---|---|
 | Wiring | `guardrail: llm_shield_proxy` | LiteLLM loads a class from this repository's example by dotted path | LiteLLM calls an HTTP endpoint that follows its contract |
-| LiteLLM version | first release after 2026-10-05 | any with custom guardrails | any with `generic_guardrail_api` |
+| LiteLLM version | a build of LiteLLM `main` that contains commit `d9467067`; no tagged release yet | any with custom guardrails | any with `generic_guardrail_api` |
 | What runs beside the proxy | nothing | nothing (you mount one file) | a small shim process |
 | Guardrails dashboard card | yes | no | no |
 | Listed in LiteLLM's docs | yes | no | no |
