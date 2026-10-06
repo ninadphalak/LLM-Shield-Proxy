@@ -20,9 +20,11 @@ Below are starting-point configuration recipes for common frameworks.
 
 The table above covers pointing LiteLLM *at* the proxy, so the proxy owns the upstream call.
 LiteLLM can also call the proxy as a guardrail and keep its own model path, routing, retries and
-budgets, either by loading a guardrail class from this package by dotted path, or through
-LiteLLM's built-in `generic_guardrail_api`. Both wirings, what each costs, and the streaming
-settings that have to move together are in
+budgets. LiteLLM includes this as a built-in guardrail, `guardrail: llm_shield_proxy`, documented
+on [LiteLLM's guardrail page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy); it
+is on LiteLLM's `main` branch and not yet in a tagged release. On earlier LiteLLM versions, load a
+guardrail class from this repository by dotted path, or use LiteLLM's `generic_guardrail_api`.
+All three wirings, what each costs, and the streaming settings that have to move together are in
 [Running behind LiteLLM](./features/litellm-integration.md).
 
 ## MCP Integration Boundary

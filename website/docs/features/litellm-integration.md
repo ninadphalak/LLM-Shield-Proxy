@@ -1,23 +1,34 @@
 # Running behind LiteLLM
 
-LLM Shield can sit on a LiteLLM request path two ways. They trade discoverability
-against effort, and you can use either without changing a single file in LiteLLM's
-repository.
+LiteLLM ships LLM Shield Proxy as a built-in guardrail, `guardrail: llm_shield_proxy`
+([BerriAI/litellm#42645](https://github.com/BerriAI/litellm/pull/42645), merged
+2026-10-05). Its setup is documented by LiteLLM:
+[LLM Shield Proxy guardrail](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy).
 
-| | In-process guardrail | Generic guardrail API |
-|---|---|---|
-| Wiring | LiteLLM loads a class from this package by dotted path | LiteLLM calls an HTTP endpoint that follows its contract |
-| LiteLLM code touched | none | none |
-| What runs beside the proxy | nothing (LiteLLM imports `llm_shield_proxy`) | a small shim process |
-| Guardrails dashboard card | no | no |
-| Listed in LiteLLM's docs | no | no |
-| Streaming restoration | yes | yes, opt-in on both sides |
-| Tool-call arguments restored | yes | no: LiteLLM's response contract has no field for them |
-| Conflicts with LiteLLM releases | none | none |
+```yaml
+guardrails:
+  - guardrail_name: llm-shield
+    litellm_params:
+      guardrail: llm_shield_proxy
+      mode: [pre_call, post_call]
+      default_on: true
+      api_base: http://localhost:8000
+      api_key: os.environ/LLM_SHIELD_PROXY_API_KEY
+```
 
-Neither gets you a card in LiteLLM's Admin UI or a page in LiteLLM's own docs: both
-of those exist only by editing LiteLLM's files. If being listed matters, that is a
-conversation with LiteLLM, not a configuration choice.
+It is on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; v1.105.0-rc.1
+and earlier do not include it. On those versions, use one of the two wirings below. Neither
+changes a file in LiteLLM's repository.
+
+| | Built-in guardrail | In-process guardrail | Generic guardrail API |
+|---|---|---|---|
+| Wiring | `guardrail: llm_shield_proxy` | LiteLLM loads a class from this repository's example by dotted path | LiteLLM calls an HTTP endpoint that follows its contract |
+| LiteLLM version | a build of LiteLLM `main` that contains commit `d9467067`; no tagged release yet | any with custom guardrails | any with `generic_guardrail_api` |
+| What runs beside the proxy | nothing | nothing (you mount one file) | a small shim process |
+| Guardrails dashboard card | yes | no | no |
+| Listed in LiteLLM's docs | yes | no | no |
+| Streaming restoration | yes | yes | yes, opt-in on both sides |
+| Tool-call arguments restored | yes | yes | no: LiteLLM's response contract has no field for them |
 
 ## In-process guardrail
 
@@ -91,8 +102,9 @@ them.
 
 ## Streaming
 
-Streaming restoration works on both wirings, and on both it is opt-in, because the defaults
-break it silently:
+The built-in guardrail restores streams through its own streaming hook and needs none of the
+settings below. On the in-process and generic wirings, streaming restoration is opt-in, because
+the defaults break it silently:
 
 - LiteLLM's `streaming_transform_mode` defaults to `block_only`, which **discards a
   rewriting guardrail's output on the streaming path**. Set `incremental_diff`.
@@ -124,6 +136,8 @@ mapping and that the naive single-call version really does reproduce that defect
 
 ## Further reading
 
+- [LLM Shield Proxy guardrail](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy):
+  LiteLLM's page for the built-in guardrail, including the LiteLLM SDK path
 - `examples/integrations/litellm/GENERIC_GUARDRAIL_CONTRACT.md`: the LiteLLM contract,
   read out of LiteLLM's source
 - `examples/integrations/README.md`: the other integration examples
