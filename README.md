@@ -14,6 +14,12 @@ data and secrets it detects (emails, card numbers, SSNs, API keys and more) befo
 to the model provider, and puts the original values back into the streamed response before your
 application sees it. Your application changes only its `base_url` and the key it sends.
 
+Already running LiteLLM? LiteLLM includes it as a built-in guardrail, `guardrail: llm_shield_proxy`,
+so LiteLLM keeps its own routing and calls the Shield to redact each request and restore each reply.
+See [LiteLLM's setup page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy). It is
+on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; until then, use one of the
+wirings in [Running behind LiteLLM](https://llmshieldproxy.com/docs/features/litellm-integration).
+
 ## Try it in a minute, with no API key
 
 ```bash
@@ -332,6 +338,7 @@ rather than skipping them, so a green build cannot mean "nothing ran".
   [feature catalog](website/docs/features-overview.md) · [stability](STABILITY.md) ·
   [limitations](LIMITATIONS.md)
 - **Integrate it:** [integration index](website/docs/integrations.md) ·
+  [running behind LiteLLM](website/docs/features/litellm-integration.md) ·
   [LiteLLM and Ollama recipe](website/docs/litellm-ollama-recipe.md) ·
   [Open WebUI and LangChain recipe](website/docs/openwebui-langchain-recipe.md) ·
   [migration from Presidio](website/docs/migration-from-presidio.md)
