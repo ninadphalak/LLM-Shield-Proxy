@@ -40,7 +40,8 @@ do exactly that when pointed at this source file, because the detect-secrets com
 scanner verifies matches over the network unless run with --no-verify. Two controls hold:
 every fixture value line carries `# pragma: allowlist secret`, which detect-secrets honours
 before any verification runs, and `tests/conformance/test_needle_registry_scanner_safety.py`
-fails if a fixture line loses the pragma or a scan of this file reports anything. Every
+fails if a fixture line loses the pragma or, in CI where detect-secrets 1.5.0 is installed,
+if a scan of this file with the scanner's default filters reports anything. Every
 known presentation is recorded in the fixture's `non_live_basis` (one, SLACKBOT, 2026-10-05,
 before the pragma existed).
 """

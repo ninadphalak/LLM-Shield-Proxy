@@ -69,7 +69,7 @@ jobs:
           # unpinned, so CI silently tracked latest while pre-commit pinned ruff
           # 0.6.1 -- ten minor versions apart, which meant a rule added in between
           # passed locally and failed here. Bump both in the same commit.
-          pip install ruff==0.16.5 bandit==1.9.4 pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil
+          pip install ruff==0.16.5 bandit==1.9.4 pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil detect-secrets==1.5.0
           # hypercorn is the HTTP/2-capable ASGI server used as the upstream in
           # tests/test_http2_upstream.py; uvicorn cannot serve HTTP/2.
           pip install hypercorn
@@ -139,7 +139,7 @@ jobs:
           # has not been released yet still builds.
           pip install ./pii-leak-benchmark
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil build
+          pip install pytest pytest-asyncio pytest-httpx pytest-mock faker httpx psutil build detect-secrets==1.5.0
           pip install -e .
 
       - name: Confirm Docker is usable

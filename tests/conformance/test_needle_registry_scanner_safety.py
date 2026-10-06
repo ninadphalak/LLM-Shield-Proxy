@@ -1,13 +1,15 @@
 """The secret fixtures must never reach a verification endpoint when this file is scanned.
 
 Two checks. The first needs nothing installed: every fixture value line carries the detect-secrets
-allowlist pragma, so a scan skips the line before any verification can run. The second runs when
-detect-secrets is importable: a scan of the registry source with the filters the command-line
-scanner installs by default reports nothing.
+allowlist pragma, so a scan skips the line before any verification can run. The second scans the
+registry source with the filters the command-line scanner installs by default and requires an
+empty result; CI installs detect-secrets==1.5.0 so it runs there and fails if the package is
+missing (locally without the package it skips).
 """
 from __future__ import annotations
 
 import inspect
+import os
 from pathlib import Path
 
 import pytest
@@ -37,7 +39,12 @@ def test_every_secret_fixture_value_line_is_allowlisted():
 
 
 def test_scanner_with_cli_default_filters_reports_nothing():
-    pytest.importorskip("detect_secrets")
+    try:
+        import detect_secrets  # noqa: F401
+    except ImportError:
+        if os.environ.get("CI"):
+            pytest.fail("detect-secrets must be installed in CI (ci.yml installs detect-secrets==1.5.0)")
+        pytest.skip("detect-secrets not installed; CI runs this test")
     from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_class
     from detect_secrets.core.secrets_collection import SecretsCollection
     from detect_secrets.settings import transient_settings
