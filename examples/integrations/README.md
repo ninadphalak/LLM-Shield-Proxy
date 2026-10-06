@@ -32,6 +32,12 @@ and streaming replies are restored as chunks arrive rather than buffered. Mount
 `litellm_guardrail.LLMShieldProxyGuardrail` by dotted path. No file in LiteLLM's repository is
 modified, so there is nothing to keep in sync with upstream.
 
+**Built-in** — LiteLLM now ships the guardrail itself as `guardrail: llm_shield_proxy`, so
+nothing is mounted. See LiteLLM's
+[LLM Shield Proxy guardrail](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy)
+page. It is on LiteLLM's `main` branch and not yet in a tagged release; until then, use the
+in-process wiring above.
+
 ## Common client configuration
 
 The HTTP examples use `http://localhost:8000/v1` and a non-provider client credential.
