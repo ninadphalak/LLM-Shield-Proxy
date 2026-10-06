@@ -33,9 +33,17 @@ THE FIVE THINGS EVERY FIXTURE MUST CARRY, and none of them is optional:
 
 SAFETY RULES THAT ARE NOT NEGOTIABLE. No fixture is ever drawn from the environment, a
 config file, git history, or captured traffic; `assert_no_fixture_resembles_a_live_secret`
-is the test that proves it. No fixture is ever presented to the issuing service to see
-whether it works: submitting a credential-shaped string to an authentication endpoint is
-using a credential, whatever its provenance.
+is the test that proves it. This harness never presents a fixture to the issuing service
+to see whether it works: submitting a credential-shaped string to an authentication
+endpoint is using a credential, whatever its provenance. Third-party secret scanners can
+do exactly that when pointed at this source file, because the detect-secrets command-line
+scanner verifies matches over the network unless run with --no-verify. Two controls hold:
+every fixture value line carries `# pragma: allowlist secret`, which detect-secrets honours
+before any verification runs, and `tests/conformance/test_needle_registry_scanner_safety.py`
+fails if a fixture line loses the pragma or, in CI where detect-secrets 1.5.0 is installed,
+if a scan of this file with the scanner's default filters reports anything. Every
+known presentation is recorded in the fixture's `non_live_basis` (one, SLACKBOT, 2026-10-05,
+before the pragma existed).
 """
 
 from __future__ import annotations
@@ -226,7 +234,7 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         needle_class="secret",
         label="AWS access key ID, AWS's own published documentation example",
         generation="fixed",
-        value="AKIAIOSFODNN7EXAMPLE",
+        value="AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
         validity="syntactically-valid",
         format_source=(
             "AWS IAM User Guide, 'IAM identifiers' -> 'Understanding unique ID prefixes'; "
@@ -235,7 +243,7 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         format_source_quote=(
             "IAM identifiers, prefix table, retrieved 2026-09-09: 'AKIA  Access key'. "
             "AWS CLI credential-file example, retrieved 2026-09-09: "
-            "'[default] aws_access_key_id=AKIAIOSFODNN7EXAMPLE'."
+            "'[default] aws_access_key_id=AKIAIOSFODNN7EXAMPLE'."  # pragma: allowlist secret
         ),
         non_live_basis=(
             "PUBLISHED BY AWS ITSELF as the example access key ID in its own credential "
@@ -266,7 +274,7 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         needle_class="secret",
         label="GitHub personal access token shape, checksum region zeroed",
         generation="fixed",
-        value="ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",
+        value="ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",  # pragma: allowlist secret
         validity="shape-valid",
         format_source=(
             "GitHub Engineering blog, 'Behind GitHub's new authentication token formats'"
@@ -303,7 +311,7 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         needle_class="secret",
         label="Slack bot token shape, all-zero numeric fields",
         generation="fixed",
-        value="xoxb-00000-00000-EXAMPLENOTAREALTOKEN",
+        value="xoxb-00000-00000-EXAMPLENOTAREALTOKEN",  # pragma: allowlist secret
         validity="shape-valid",
         format_source="Slack API documentation, 'Token types'",
         format_source_quote=(
@@ -312,8 +320,12 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         ),
         non_live_basis=(
             "Both numeric fields are all zeros and the secret portion is a fixed "
-            "literal containing EXAMPLE and NOTAREAL. The value was never presented to "
-            "any Slack endpoint. UNVERIFIED, and labelled so: Slack does not publish a "
+            "literal containing EXAMPLE and NOTAREAL. The value was presented to Slack "
+            "exactly once, on 2026-10-05, by the detect-secrets 1.5.0 command-line scanner, "
+            "which posts Slack-shaped matches to slack.com/api/auth.test unless run with "
+            "--no-verify and before the allowlist pragma existed; Slack reported it invalid. "
+            "It has not been presented anywhere else. UNVERIFIED, and labelled so: Slack "
+            "does not publish a "
             "statement that zero is never assigned as a team or bot id, so the "
             "'not assignable' half of this argument rests on the fixed literal in the "
             "secret field rather than on the numeric fields."
@@ -335,7 +347,12 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
             "keep the value inside the documented prefix claim and inside the "
             "detect-secrets pattern while matching no PII detector in the corpus. This "
             "is a construct-validity choice and it narrows the fixture: it does not "
-            "measure how a detector behaves on a full-length issued token."
+            "measure how a detector behaves on a full-length issued token.\n\n"
+            "SCANNER NOTE: the detect-secrets command-line scanner verifies Slack-shaped "
+            "matches over the network by default; scan this fixture with --no-verify. The "
+            "library API under default_settings() does not verify. gitleaks and trufflehog "
+            "never report this fixture: their Slack rules require two 10-to-13-digit fields "
+            "and trufflehog treats EXAMPLE and 00000 as known false positives."
         ),
     ),
     Needle(
@@ -344,7 +361,7 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         label="PEM private-key encapsulation with a non-key payload",
         generation="fixed",
         value=(
-            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "-----BEGIN RSA PRIVATE KEY-----\n"  # pragma: allowlist secret
             "Tk9UQVJFQUxLRVkK\n"
             "-----END RSA PRIVATE KEY-----"
         ),
@@ -366,7 +383,7 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         detector_claims=(
             DetectorClaim(_DS, _DS_VERSION, "PrivateKeyDetector",
                           "detect_secrets/plugins/private_key.py denylist entry "
-                          "'BEGIN RSA PRIVATE KEY'",
+                          "'BEGIN RSA PRIVATE KEY'",  # pragma: allowlist secret
                           "documented"),
             DetectorClaim(_PRESIDIO, "image latest", "-",
                           "no credential entity type", "absent"),

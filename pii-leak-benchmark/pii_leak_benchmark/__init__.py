@@ -68,4 +68,4 @@ __all__ = [
     "write_conformance_report",
 ]
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
