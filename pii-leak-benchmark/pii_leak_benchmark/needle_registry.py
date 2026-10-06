@@ -312,8 +312,11 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
         ),
         non_live_basis=(
             "Both numeric fields are all zeros and the secret portion is a fixed "
-            "literal containing EXAMPLE and NOTAREAL. The value was never presented to "
-            "any Slack endpoint. UNVERIFIED, and labelled so: Slack does not publish a "
+            "literal containing EXAMPLE and NOTAREAL. The value was presented to Slack "
+            "exactly once, on 2026-10-05, by the detect-secrets 1.5.0 command-line scanner, "
+            "which posts Slack-shaped matches to slack.com/api/auth.test unless run with "
+            "--no-verify; Slack reported it invalid. It has not been presented anywhere "
+            "else. UNVERIFIED, and labelled so: Slack does not publish a "
             "statement that zero is never assigned as a team or bot id, so the "
             "'not assignable' half of this argument rests on the fixed literal in the "
             "secret field rather than on the numeric fields."
@@ -335,7 +338,12 @@ _SECRET_NEEDLES: tuple[Needle, ...] = (
             "keep the value inside the documented prefix claim and inside the "
             "detect-secrets pattern while matching no PII detector in the corpus. This "
             "is a construct-validity choice and it narrows the fixture: it does not "
-            "measure how a detector behaves on a full-length issued token."
+            "measure how a detector behaves on a full-length issued token.\n\n"
+            "SCANNER NOTE: the detect-secrets command-line scanner verifies Slack-shaped "
+            "matches over the network by default; scan this fixture with --no-verify. The "
+            "library API under default_settings() does not verify. gitleaks and trufflehog "
+            "never report this fixture: their Slack rules require two 10-to-13-digit fields "
+            "and trufflehog treats EXAMPLE and 00000 as known false positives."
         ),
     ),
     Needle(
