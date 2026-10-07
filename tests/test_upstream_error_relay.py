@@ -10,6 +10,7 @@ the PII engine one-way, caps it, and keeps the status.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -121,3 +122,51 @@ def test_non_chat_routes_relay_too(httpx_mock):
     assert response.status_code == 401
     assert "Incorrect API key provided: [REDACTED]" in response.json()["error"]["message"]
     assert CLIENT_KEY not in response.text
+
+
+def test_a_huge_error_body_is_not_buffered_whole():
+    """The cap applies to what is pulled off the wire, not to a body already read in full."""
+    import asyncio
+
+    import httpx
+
+    from llm_shield_proxy.api import main as proxy_main
+
+    yielded = 0
+
+    class _Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            nonlocal yielded
+            for _ in range(2048):  # 16 MiB offered
+                yielded += 8192
+                yield b"x" * 8192
+
+        async def aclose(self):
+            return None
+
+    response = httpx.Response(502, stream=_Stream(), request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
+    raw = asyncio.run(proxy_main._read_error_body(response))
+    assert raw is not None and len(raw) == proxy_main._UPSTREAM_ERROR_MAX_BODY_BYTES
+    assert yielded <= proxy_main._UPSTREAM_ERROR_MAX_BODY_BYTES + 8192, f"read {yielded} bytes off the wire"
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])
+def test_the_scrub_uses_the_credential_that_was_on_the_wire_for_the_kept_body(httpx_mock, monkeypatch, stream):
+    """Primary answers 500 echoing its own key; the fallback cannot be reached. The body kept is
+    the primary's, so the primary's credential must be the one removed, not the fallback key
+    that current_headers carries by the time the reply is built."""
+    monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", True, raising=False)
+    monkeypatch.setattr(settings, "MAX_RETRIES", 0, raising=False)
+    monkeypatch.setattr(settings, "FALLBACK_BASE_URL", "https://fallback.example", raising=False)
+    monkeypatch.setattr(settings, "FALLBACK_API_KEY", "sk-fallback-key-zzzz", raising=False)
+    httpx_mock.add_response(
+        method="POST",
+        url=UPSTREAM,
+        status_code=500,
+        json={"error": {"message": f"Server error while handling key {CLIENT_KEY}", "type": "server_error"}},
+    )
+    httpx_mock.add_exception(httpx.ConnectError("refused"), method="POST", url="https://fallback.example/v1/chat/completions")
+    response = _chat(stream=stream)
+    assert response.status_code == 500
+    assert CLIENT_KEY not in response.text, response.text
+    assert "Server error while handling key [REDACTED]" in response.json()["error"]["message"]

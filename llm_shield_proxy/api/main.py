@@ -611,14 +611,27 @@ def _provider_error_fields(raw: bytes) -> Tuple[Optional[str], Dict[str, Any]]:
 
 
 async def _read_error_body(upstream_res: Optional[httpx.Response]) -> Optional[bytes]:
-    """At most 64 KiB of a provider error body; None when there is none or it cannot be read."""
+    """At most 64 KiB of a provider error body; None when there is none or it cannot be read.
+
+    Read in pieces and stopped at the cap, never `aread()`: a provider (or a client-steered
+    override target) that answers an error with a huge body must not be buffered whole on
+    the event loop. The rest of the body is left unread and the caller closes the stream.
+    """
     if upstream_res is None:
         return None
     try:
-        raw = await upstream_res.aread()
+        if upstream_res.is_stream_consumed or upstream_res.is_closed:
+            return upstream_res.content[:_UPSTREAM_ERROR_MAX_BODY_BYTES] or None
+        pieces: List[bytes] = []
+        total = 0
+        async for piece in upstream_res.aiter_raw(chunk_size=8192):
+            pieces.append(piece)
+            total += len(piece)
+            if total >= _UPSTREAM_ERROR_MAX_BODY_BYTES:
+                break
     except Exception:  # noqa: BLE001  # a body that cannot be read leaves the generic message
         return None
-    return raw[:_UPSTREAM_ERROR_MAX_BODY_BYTES]
+    return b"".join(pieces)[:_UPSTREAM_ERROR_MAX_BODY_BYTES] or None
 
 
 def _upstream_error_response(
@@ -1332,6 +1345,10 @@ async def _proxy_catch_all_internal(
                 current_sni_hostname = sni_hostname
                 upstream_res = None
                 upstream_error_body: Optional[bytes] = None
+                # The credentials that were on the wire for the attempt whose body was kept.
+                # A later fallback switch rewrites current_headers; scrubbing with those would
+                # miss the credential the first provider echoed.
+                upstream_error_headers: Dict[str, Any] = dict(current_headers)
                 is_fallback = False
 
                 while True:
@@ -1353,6 +1370,7 @@ async def _proxy_catch_all_internal(
                             upstream_res = err.response
                             # The provider's reason, read before the stream is closed below.
                             upstream_error_body = await _read_error_body(upstream_res)
+                            upstream_error_headers = dict(current_headers)
                             # MUST explicitly close the leaked stream to free the HTTP/2 connection pool
                             await upstream_res.aclose()
 
@@ -1390,7 +1408,7 @@ async def _proxy_catch_all_internal(
 
                 if upstream_res is None or upstream_res.is_error:
                     status_code = upstream_res.status_code if upstream_res is not None else 503
-                    error_response = _upstream_error_response(upstream_error_body, status_code, current_headers)
+                    error_response = _upstream_error_response(upstream_error_body, status_code, upstream_error_headers)
                     if upstream_res is not None:
                         try:
                             await upstream_res.aclose()
@@ -1473,6 +1491,7 @@ async def _proxy_catch_all_internal(
                 current_headers = dict(headers)
                 current_sni_hostname = sni_hostname
                 upstream_res = None
+                upstream_error_headers = dict(current_headers)
                 is_fallback = False
 
                 while True:
@@ -1491,6 +1510,7 @@ async def _proxy_catch_all_internal(
 
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response
+                            upstream_error_headers = dict(current_headers)
 
                         status_code = err.response.status_code if isinstance(err, httpx.HTTPStatusError) else 503
                         if isinstance(err, httpx.HTTPStatusError) and status_code in (400, 401, 403):
@@ -1535,7 +1555,7 @@ async def _proxy_catch_all_internal(
                         request_id,
                         applied_role_name=applied_role_name,
                     )
-                    return _upstream_error_response(await _read_error_body(upstream_res), status_code, current_headers)
+                    return _upstream_error_response(await _read_error_body(upstream_res), status_code, upstream_error_headers)
 
                 AuditLogger.log_redaction_event(
                     x_session_id,
