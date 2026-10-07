@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_DIR = REPO_ROOT / "examples" / "integrations" / "litellm"
 PLACEHOLDER = "<EMAIL_ADDRESS>"
 PLAIN = "jane.doe@example.com"
+SESSION_ID = "litellm-installed-contract-session"
 
 
 def _load(name: str, filename: str):
@@ -99,6 +100,9 @@ def adapter(monkeypatch):
     calls = []
 
     async def fake_call_shield(path, session_id, payload):
+        # The id this test minted must reach every Shield call: that is the session plumbing
+        # through the real hook signatures, and the part a stub-only test cannot see.
+        assert session_id == SESSION_ID, f"{path} was called with session {session_id!r}"
         calls.append(path)
         if path == module._REDACT_PATH:
             return {"texts": [t.replace(PLAIN, PLACEHOLDER) for t in payload["texts"]]}
@@ -130,28 +134,33 @@ def test_the_example_subclasses_litellms_real_base_and_overrides_hooks_that_exis
         assert not missing, f"{hook}: LiteLLM now passes {missing}, the example does not accept them"
 
 
-async def _stream(guardrail, chunks):
+def _request_data(module) -> dict:
+    """The request dict as the pre-call hook leaves it: the minted id under `metadata`."""
+    return {"metadata": {module._SESSION_METADATA_KEY: SESSION_ID}}
+
+
+async def _stream(module, guardrail, chunks):
     async def source():
         for chunk in chunks:
             yield chunk
 
-    data = {"litellm_metadata": {"llm_shield_session_id": f"{guardrail._session_id({})}"}}
-    return [c async for c in guardrail.async_post_call_streaming_iterator_hook(None, source(), data)]
+    return [c async for c in guardrail.async_post_call_streaming_iterator_hook(None, source(), _request_data(module))]
 
 
 @pytest.mark.asyncio
 async def test_a_real_chat_stream_is_restored(adapter):
     from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
 
-    _, guardrail, _ = adapter
+    module, guardrail, calls = adapter
     chunks = [
         ModelResponseStream(choices=[StreamingChoices(index=0, delta=Delta(content="Sending to <EMAIL_"))]),
         ModelResponseStream(choices=[StreamingChoices(index=0, delta=Delta(content="ADDRESS> now"))]),
         ModelResponseStream(choices=[StreamingChoices(index=0, delta=Delta(), finish_reason="stop")]),
     ]
-    emitted = await _stream(guardrail, chunks)
+    emitted = await _stream(module, guardrail, chunks)
     text = "".join(c.choices[0].delta.content or "" for c in emitted)
     assert text == f"Sending to {PLAIN} now"
+    assert calls and all(path == module._REHYDRATE_STREAM_PATH for path in calls)
 
 
 @pytest.mark.asyncio
@@ -160,14 +169,14 @@ async def test_a_real_completions_stream_is_restored(adapter):
     one carries `text=None`. Both facts are what the example relies on."""
     from litellm.types.utils import TextChoices, TextCompletionResponse
 
-    _, guardrail, _ = adapter
+    module, guardrail, calls = adapter
     chunks = [
         TextCompletionResponse(choices=[TextChoices(text="Echo: <EMAIL_", index=0)]),
         TextCompletionResponse(choices=[TextChoices(text="ADDRESS> please", index=0)]),
         TextCompletionResponse(choices=[TextChoices(text=None, index=0, finish_reason="stop")]),
     ]
     assert all(not hasattr(c.choices[0], "delta") for c in chunks), "TextChoices grew a delta field"
-    emitted = await _stream(guardrail, chunks)
+    emitted = await _stream(module, guardrail, chunks)
     text = "".join(c.choices[0].text or "" for c in emitted)
     assert text == f"Echo: {PLAIN} please"
 
@@ -176,8 +185,28 @@ async def test_a_real_completions_stream_is_restored(adapter):
 async def test_a_real_non_streaming_reply_is_restored(adapter):
     from litellm.types.utils import Choices, Message, ModelResponse
 
-    _, guardrail, _ = adapter
+    module, guardrail, calls = adapter
     response = ModelResponse(choices=[Choices(index=0, message=Message(content="Sending to <EMAIL_ADDRESS>"))])
-    data = {"litellm_metadata": {"llm_shield_session_id": "x"}}
-    restored = await guardrail.async_post_call_success_hook(data, None, response)
+    restored = await guardrail.async_post_call_success_hook(_request_data(module), None, response)
     assert restored.choices[0].message.content == f"Sending to {PLAIN}"
+    assert calls == [module._REHYDRATE_PATH]
+
+
+@pytest.mark.asyncio
+async def test_the_pre_call_hook_mints_the_id_the_post_call_hooks_read(adapter):
+    """End to end through the real signatures: pre-call writes the id under `metadata`, the
+    post-call hooks read the same id back and send it to the Shield."""
+    module, guardrail, calls = adapter
+    data = {"messages": [{"role": "user", "content": f"Email {PLAIN}"}], "metadata": {}}
+
+    async def fake_redact_only(path, session_id, payload):
+        calls.append((path, session_id))
+        return {"texts": [t.replace(PLAIN, PLACEHOLDER) for t in payload["texts"]]}
+
+    guardrail._call_shield = fake_redact_only
+    out = await guardrail.async_pre_call_hook(None, None, data, "completion")
+    minted = out["metadata"][module._SESSION_METADATA_KEY]
+    assert minted.startswith("litellm-"), minted
+    assert data["messages"][0]["content"] == f"Email {PLACEHOLDER}"
+    assert calls == [(module._REDACT_PATH, minted)]
+    assert guardrail._session_id(out) == minted
