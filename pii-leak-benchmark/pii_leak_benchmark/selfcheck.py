@@ -222,16 +222,22 @@ def _target_url(report: dict[str, Any]) -> str:
     url = (report.get("target") or {}).get("base_url")
     if not url:
         return "your target URL"
-    parts = urlsplit(str(url))
-    host = parts.hostname or ""
-    if ":" in host:
-        host = f"[{host}]"
+    text = str(url).strip()
+    # Without `scheme://`, urlsplit reads `user:pass@host/path` as scheme `user` and keeps
+    # the rest, password included, as the path. Give it the `//` so userinfo and host are
+    # parsed as such; the scheme is then empty and is simply not printed.
+    parts = urlsplit(text if "://" in text or text.startswith("//") else "//" + text)
     try:
+        host = parts.hostname or ""
         port = f":{parts.port}" if parts.port else ""
     except ValueError:
-        port = ""
+        return "your target URL"
+    if not host:
+        return "your target URL"
+    if ":" in host:
+        host = f"[{host}]"
     reduced = urlunsplit((parts.scheme, host + port, parts.path, "", ""))
-    return reduced or "your target URL"
+    return reduced.lstrip("/") if not parts.scheme else reduced
 
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).

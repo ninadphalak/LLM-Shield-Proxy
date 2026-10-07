@@ -1,12 +1,12 @@
 """The v2 console names the reason when `no-leak-profile-not-met` is one-way sites only.
 
-Measured 2026-10-06: llm-shield-proxy 1.6.8 to 1.6.11 with the response scan on score
-fidelity 0.5, leak 0.0, `no-leak-profile-not-met`. By request site: chat-content 1.0,
-unrecognised-key 1.0, system-content 0.0, tool-description 0.0. The gateway redacts the
-system prompt and tool descriptions and never restores values echoed from them, on purpose.
-The outcome is correct; the row alone sent a reader looking for a restoration bug in the
-caller's turns. The hint is printed beside the row by `main()` and touches no scorer, so
-the inspector digest does not move.
+The fixtures model a gateway that redacts the system prompt and tool descriptions and never
+restores values echoed from them, on purpose: by request site, chat-content and
+unrecognised-key restore in full while system-content and tool-description restore nothing,
+so the profile scores fidelity 0.5 with no leak. The outcome is correct; the row alone sends
+a reader looking for a restoration bug in the caller's turns. The hint is printed beside the
+row by `main()` and touches no scorer, so the inspector digest does not move. (These are
+hand-built reports, not a measurement of any released version.)
 """
 
 from __future__ import annotations

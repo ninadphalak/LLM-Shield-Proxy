@@ -143,3 +143,16 @@ def test_the_named_url_carries_no_credential():
         assert secret not in named
     assert _target_url({"target": {"base_url": "http://[::1]:4000/v1"}}) == "http://[::1]:4000/v1"
     assert _target_url({}) == "your target URL"
+
+
+def test_a_schemeless_url_with_a_credential_is_reduced_too():
+    """`admin:s3cr3t@10.0.0.5:8443/v1` has no scheme, so a plain urlsplit reads `admin` as the
+    scheme and keeps the password in the path. The reduction must not depend on the scheme."""
+    from pii_leak_benchmark.selfcheck import _target_url
+
+    named = _target_url({"target": {"base_url": "admin:s3cr3t@10.0.0.5:8443/v1?k=topsecret"}})
+    assert named == "10.0.0.5:8443/v1", named
+    for secret in ("admin", "s3cr3t", "topsecret"):
+        assert secret not in named
+    assert _target_url({"target": {"base_url": "gateway.example/v1"}}) == "gateway.example/v1"
+    assert _target_url({"target": {"base_url": "http://user:pw@host:99999/v1"}}) == "your target URL"
