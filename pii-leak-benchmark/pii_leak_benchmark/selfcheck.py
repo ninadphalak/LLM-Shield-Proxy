@@ -155,6 +155,9 @@ def why_nothing_arrived(report: dict[str, Any]) -> str:
     answered 401 rejected the key, which is a one-flag fix, not a routing problem.
     """
     boundary = report["checks"][_BOUNDARY]
+    # Name the gateway by the URL this run was pointed at: a reader with two gateways, or
+    # a typo in the port, sees at once which one answered.
+    gateway = f"The gateway at {_target_url(report)}"
     without_token = boundary.get("unattributed_requests", 0)
     if without_token and boundary.get("unattributed_leaked_entity_types"):
         # Public capture mode, and the requests that arrived without the token carried
@@ -184,27 +187,33 @@ def why_nothing_arrived(report: dict[str, Any]) -> str:
         codes = ", ".join(str(code) for code in failed)
         if any(code in (401, 403) for code in failed):
             return (
-                f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
+                f"{gateway} answered HTTP {codes} and forwarded nothing to the capture. "
                 "It rejected the client key: pass the key it expects with --target-api-key "
                 "or CONFORMANCE_TARGET_API_KEY." + noise
             )
         return (
-            f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
+            f"{gateway} answered HTTP {codes} and forwarded nothing to the capture. "
             "Its own log says why; an error before forwarding is usually a missing setting, "
             "such as the key it sends upstream." + noise
         )
     if not client.get("status_codes") and client.get("errors"):
         kinds = ", ".join(sorted(set(client["errors"])))
         return (
-            f"The check got no HTTP answer from your gateway ({kinds}). Check that it is "
+            f"The check got no HTTP answer from the gateway at {_target_url(report)} ({kinds}). Check that it is "
             "running and listening at the target URL." + noise
         )
     return (
-        "No request carrying this run's marker reached the capture. Your gateway is "
+        f"No request carrying this run's marker reached the capture. {gateway} is "
         "not configured to use it as its upstream, could not reach it, or sent the "
         "traffic elsewhere -- these are indistinguishable here." + noise
     )
 
+
+
+def _target_url(report: dict[str, Any]) -> str:
+    """The base URL the run was pointed at, or a neutral phrase when the report lacks it."""
+    url = (report.get("target") or {}).get("base_url")
+    return str(url) if url else "your target URL"
 
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).

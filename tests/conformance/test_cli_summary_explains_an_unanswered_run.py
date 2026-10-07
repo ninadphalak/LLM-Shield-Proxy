@@ -105,6 +105,7 @@ def _assert_reason_in_summary(result) -> None:
     assert "Passed:       False" in result.stdout
     # The reason, in the summary itself, with the one-flag fix.
     assert "answered HTTP 401" in result.stdout, result.stdout
+    assert "The gateway at http://127.0.0.1:" in result.stdout, result.stdout
     assert "--target-api-key" in result.stdout, result.stdout
     assert "CONFORMANCE_TARGET_API_KEY" in result.stdout, result.stdout
 
