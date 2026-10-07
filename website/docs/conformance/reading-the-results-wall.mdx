@@ -118,13 +118,14 @@ every injected value is caught both whole and split across two chunks. Both runs
 wall, so the change is something you can see rather than take on trust, and the report behind
 it is on the [results page](./results.md).
 
-**1.6.8 and later score `no-leak-profile-not-met` with the response scan on, by design.** Since 1.6.8
-the proxy never restores a value that came from the system prompt or a tool description: the
-application wrote that text, the end user did not, so handing it back would let a caller read
-the application's own data by getting it echoed. The profile counts those two request sites as
-fidelity misses, so 1.6.8 to 1.6.11 score fidelity 0.5, leak 0.0, outcome `no-leak-profile-not-met`
-(measured 2026-10-06 on the published 1.6.11 with `ENABLE_RESPONSE_PII_REDACTION=true`). The
-caller's own turns restore in full. The console says so beside the row.
+**Later versions keep two request sites one-way, and the profile counts that as a miss.** Since
+1.6.8 the proxy never restores a value that came from the system prompt or a tool description:
+the application wrote that text, the end user did not, so handing it back would let a caller
+read the application's own data by getting it echoed. On this profile those two request sites
+then count as fidelity misses, so a version with that behaviour scores `no-leak-profile-not-met`
+with the response scan on, with nothing leaked and the caller's own turns restored in full. The
+console prints that reason beside the row. No report for a version after 1.6.6 is on the wall
+yet; the 1.6.6 pair stays the published pair until one is.
 
 **On the default settings it still does not pass.** Response scanning is off unless you turn
 it on, because it changes what callers receive, so the out-of-the-box run leaks 16 of 16
