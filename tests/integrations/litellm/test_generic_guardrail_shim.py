@@ -230,7 +230,33 @@ def test_streaming_returns_the_restored_text_and_the_withheld_length(monkeypatch
     assert calls[0][1] == {"text": "Contact <EMAIL_ADDRESS>", "carry": "", "final": False}
     assert body["action"] == "GUARDRAIL_INTERVENED"
     assert body["texts"] == ["Contact jane.doe@example.com"]
-    assert body["stream_holdback_chars"] == len(".doe@example.com")
+    assert body["stream_holdback_chars"] == [len(".doe@example.com")]
+
+
+def test_streaming_holdback_is_a_list_with_one_entry_per_text(monkeypatch):
+    """LiteLLM applies `stream_holdback_chars` per choice, from a list aligned with `texts`
+    (`GenericGuardrailAPIResponse.stream_holdback_chars: list[int]`). A scalar is dropped
+    on the floor: the stream then goes out with no holdback, the raw placeholder's first
+    characters are emitted, and once the restored text is shorter than what was already
+    emitted the client never receives the rest. Seen against the official image at 1.105.0:
+    the reply ended mid-stand-in. One entry per text, even when a text withholds nothing."""
+    module = _load(monkeypatch, streaming=True)
+
+    async def fake(path, session_id, payload):
+        if path.endswith("/stream"):
+            text = payload["text"]
+            if "<EMAIL_ADDRESS>" in text:
+                return {"text": text.split("<EMAIL_ADDRESS>")[0], "carry": "<EMAIL_ADDRESS>"}
+            return {"text": text, "carry": ""}
+        return {"texts": [t.replace("<EMAIL_ADDRESS>", "jane.doe@example.com") for t in payload["texts"]]}
+
+    monkeypatch.setattr(module, "_call_shield", fake)
+    body = _post(TestClient(module.app), _body("response", ["Contact <EMAIL_ADDRESS>", "No value here"])).json()
+
+    assert body["action"] == "GUARDRAIL_INTERVENED"
+    assert body["texts"] == ["Contact jane.doe@example.com", "No value here"]
+    assert body["stream_holdback_chars"] == [len("<EMAIL_ADDRESS>"), 0]
+    assert isinstance(body["stream_holdback_chars"], list)
 
 
 def test_streaming_blocks_when_the_withheld_length_is_missing(monkeypatch):
