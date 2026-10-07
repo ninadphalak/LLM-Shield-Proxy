@@ -32,8 +32,13 @@ The HTTP test suite ships as a separate, endpoint-neutral package named **`pii-l
 
 ```bash
 pip install pii-leak-benchmark
-pii-leak-benchmark --target-base-url http://127.0.0.1:4000/v1
+pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:4000/v1
 ```
+
+Add `--target-api-key` if your gateway wants a key. `selfcheck` prints `CLEAN`, `LEAK`,
+`CHECK FAILED` or `NOT MEASURED` per data type and needs no vendor claim; the flat
+`pii-leak-benchmark` command takes the claim flags and writes the publishable report
+([reproducing](./reproducing.md)).
 
 ## Cross-Implementation HTTP Profile
 

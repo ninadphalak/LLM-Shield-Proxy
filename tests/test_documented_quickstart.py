@@ -301,3 +301,16 @@ def test_home_page_trial_block_matches_the_tested_one():
     home = (REPO_ROOT / "website" / "src" / "pages" / "index.tsx").read_text(encoding="utf-8")
     readme_block = _block_with(README, "bash", "--target-api-key sk-demo").strip()
     assert f"const TRY_IT = `{readme_block}`;" in home
+
+
+def test_the_conformance_landing_page_first_command_is_selfcheck():
+    """conformance/index.md "Independent Harness" opened with the flat command and no key.
+
+    Against a keyed gateway that printed `Passed: False`, `Outcome: claim-unstated` and no
+    reason; the 401 sat only in the JSON. `selfcheck` is the first command everywhere else
+    (README, package README, add-your-result.mdx), and it names the status and the flag."""
+    page = REPO_ROOT / "website" / "docs" / "conformance" / "index.md"
+    first = _code_blocks(page, "bash")[0]
+    commands = _commands(first)
+    assert commands[0][:2] == ["pip", "install"], first
+    assert commands[1][:2] == ["pii-leak-benchmark", "selfcheck"], first

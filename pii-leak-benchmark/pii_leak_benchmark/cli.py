@@ -197,6 +197,17 @@ def print_summary(report: dict[str, Any], destination: str) -> None:
     if report["outcome"] not in ("pass", "fail"):
         # Ensure rationale is printed to prevent misinterpreting non-verdicts as failures.
         print(f"                {report['outcome_rationale']}")
+    boundary = report["checks"].get("configured_upstream_boundary", {})
+    if boundary.get("correlated_requests") == 0:
+        # No request carrying this run's marker reached the capture, so every check failed
+        # for one upstream reason. `correlated_requests` is the field attributability and
+        # the outcome are derived from; `captured_requests` also counts traffic that is not
+        # this run's, such as a managed-startup probe, and would hide the line. The report
+        # records the reason (sse_validity.status_codes); say it here, with the fix, rather
+        # than leaving a reader to open the JSON. Same wording as selfcheck.
+        from pii_leak_benchmark.selfcheck import why_nothing_arrived
+
+        print(f"  Why:          {why_nothing_arrived(report)}")
     print(f"  Checks:       {len(report['checks'])}")
     print(f"  Iterations:   {report['checks']['client_observed_latency']['iterations']}")
     print("  Timing scope: client -> target -> controlled capture upstream -> target -> client")
