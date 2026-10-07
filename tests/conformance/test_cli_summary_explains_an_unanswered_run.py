@@ -129,3 +129,17 @@ def test_an_unrelated_captured_request_does_not_hide_the_reason(tmp_path):
     assert boundary["captured_requests"] >= 1, boundary
     assert boundary["correlated_requests"] == 0, boundary
     _assert_reason_in_summary(result)
+
+
+def test_the_named_url_carries_no_credential():
+    """The reason is written into ci's published artifacts, so userinfo, query and fragment
+    are dropped from the URL before it is named."""
+    from pii_leak_benchmark.selfcheck import _target_url
+
+    report = {"target": {"base_url": "https://user:s3cret@gateway.example:8443/v1?api_key=topsecret#frag"}}
+    named = _target_url(report)
+    assert named == "https://gateway.example:8443/v1"
+    for secret in ("s3cret", "topsecret", "user", "frag", "api_key"):
+        assert secret not in named
+    assert _target_url({"target": {"base_url": "http://[::1]:4000/v1"}}) == "http://[::1]:4000/v1"
+    assert _target_url({}) == "your target URL"

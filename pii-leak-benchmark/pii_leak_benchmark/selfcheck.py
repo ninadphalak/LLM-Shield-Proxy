@@ -211,9 +211,27 @@ def why_nothing_arrived(report: dict[str, Any]) -> str:
 
 
 def _target_url(report: dict[str, Any]) -> str:
-    """The base URL the run was pointed at, or a neutral phrase when the report lacks it."""
+    """The base URL the run was pointed at, reduced to scheme, host, port and path.
+
+    The reason this names ends up in `ci`'s `current.json` and job summary, both published
+    artifacts, so anything a URL can carry as a credential (userinfo, a query string with a
+    key in it, a fragment) is dropped before the URL is written anywhere.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
     url = (report.get("target") or {}).get("base_url")
-    return str(url) if url else "your target URL"
+    if not url:
+        return "your target URL"
+    parts = urlsplit(str(url))
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = f":{parts.port}" if parts.port else ""
+    except ValueError:
+        port = ""
+    reduced = urlunsplit((parts.scheme, host + port, parts.path, "", ""))
+    return reduced or "your target URL"
 
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).
