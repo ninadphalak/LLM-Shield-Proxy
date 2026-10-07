@@ -624,7 +624,9 @@ async def _read_error_body(upstream_res: Optional[httpx.Response]) -> Optional[b
             return upstream_res.content[:_UPSTREAM_ERROR_MAX_BODY_BYTES] or None
         pieces: List[bytes] = []
         total = 0
-        async for piece in upstream_res.aiter_raw(chunk_size=8192):
+        # aiter_bytes, not aiter_raw: providers and their CDNs gzip error bodies too, and the
+        # raw wire bytes would decode to replacement characters, not the reason.
+        async for piece in upstream_res.aiter_bytes(chunk_size=8192):
             pieces.append(piece)
             total += len(piece)
             if total >= _UPSTREAM_ERROR_MAX_BODY_BYTES:

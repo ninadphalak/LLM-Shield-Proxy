@@ -170,3 +170,36 @@ def test_the_scrub_uses_the_credential_that_was_on_the_wire_for_the_kept_body(ht
     assert response.status_code == 500
     assert CLIENT_KEY not in response.text, response.text
     assert "Server error while handling key [REDACTED]" in response.json()["error"]["message"]
+
+
+def test_a_compressed_error_body_on_the_streaming_path_is_decoded():
+    """Providers and CDNs gzip error bodies; the bounded read must decode them, or the client
+    gets replacement-character noise in place of the reason."""
+    import asyncio
+    import gzip
+    import json
+
+    import httpx
+
+    from llm_shield_proxy.api import main as proxy_main
+
+    payload = gzip.compress(json.dumps({"error": {"message": "Rate limit reached for gpt-test", "type": "rate_limit_error"}}).encode())
+
+    class _Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield payload[:10]
+            yield payload[10:]
+
+        async def aclose(self):
+            return None
+
+    response = httpx.Response(
+        429,
+        headers={"content-encoding": "gzip", "content-type": "application/json"},
+        stream=_Stream(),
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+    raw = asyncio.run(proxy_main._read_error_body(response))
+    message, details = proxy_main._provider_error_fields(raw)
+    assert message == "Rate limit reached for gpt-test"
+    assert details == {"type": "rate_limit_error"}
