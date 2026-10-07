@@ -52,7 +52,15 @@ class StatelessStreamingLexer:
 
         # 2. Rehydrate the corresponding actual properties
         for prop, pt in list(self.pending_rehydrations.items()):
-            prop_pattern = re.compile(rf'"{prop}"\s*:\s*"([^"]*)"')
+            # `prop` is an upstream-chosen JSON property name, captured by
+            # `"_ctx_hash_([^"]+)"`, and `[^"]+` admits every regex metacharacter.
+            # Interpolating it raw compiled the upstream's text AS A PATTERN:
+            #   `foo(`    -> PatternError out of the streaming hot path
+            #   `(a+)+b`  -> exponential backtracking; 22 chars of padding took 0.143s,
+            #                40 did not finish in two minutes
+            #   `a.c`     -> a wildcard that rehydrated `abc`, a property nobody named
+            # It is data, so it is escaped.
+            prop_pattern = re.compile(rf'"{re.escape(prop)}"\s*:\s*"([^"]*)"')
             match = prop_pattern.search(content)
             if match:
                 start, end = match.span()

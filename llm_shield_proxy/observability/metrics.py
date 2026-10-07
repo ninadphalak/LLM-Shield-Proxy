@@ -19,6 +19,17 @@ llm_shield_sse_active_streams = Gauge(
     "Number of active SSE streaming responses currently being rehydrated",
 )
 
+llm_shield_sse_sibling_paths_evicted_total = Counter(
+    "llm_shield_sse_sibling_paths_evicted_total",
+    (
+        "Total sibling JSON paths dropped from a stream's bounded cross-event tail map. "
+        "An evicted path loses its memory of what it already emitted, so a value split "
+        "across events on that path stops being detectable: nonzero means a stream "
+        "carried more distinct sibling paths than the cap, and coverage was reduced "
+        "rather than memory grown. Alert on nonzero."
+    ),
+)
+
 llm_shield_latency_seconds_bucket = Histogram(
     "llm_shield_latency_seconds",
     "End-to-end request processing latency in seconds",

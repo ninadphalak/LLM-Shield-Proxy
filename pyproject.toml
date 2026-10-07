@@ -4,10 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-shield-proxy"
-version = "1.3.7"
+version = "1.6.11"
 description = "Streaming privacy gateway for configurable PII transformation and OpenAI-compatible proxy traffic."
 readme = "README.md"
-requires-python = ">=3.9"
+# The floor is what CI tests (the `test-and-lint` matrix in ci.yml), and a test holds the
+# two equal. 1.6.8 claimed 3.9: on 3.9 the Settings class failed to import (a `|` union
+# evaluated by pydantic) and on 3.10 every request answered 400, because `asyncio.timeout`
+# is 3.11+ and the broad handler around it reported "Malformed JSON payload". Neither
+# version had ever run the suite.
+requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [
     {name = "Ninad Phalak", email = "ninadphalak@gmail.com"}
@@ -30,8 +35,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Security",
@@ -53,7 +56,7 @@ classifiers = [
 # `llm-shield-proxy benchmark` self-tests against). The benchmark never imports this
 # package, and `tests/conformance/test_harness_install_weight.py` fails if it does.
 dependencies = [
-    "pii-leak-benchmark>=0.1.0",
+    "pii-leak-benchmark>=0.5.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
     "jsonschema>=4.0.0",
@@ -69,6 +72,15 @@ dependencies = [
     "cryptography>=41.0.0",
     "google-re2>=1.1.20231101",
     "cachetools>=5.3.0",
+    # Same class of gap as `redis` below, found the same way and one release later:
+    # security/identity.py imports `jwt` at module scope, api/main.py imports
+    # verify_agent_identity from it inside the request handler, and the import is not
+    # gated by a setting. On 1.5.1 installed from PyPI every proxied request therefore
+    # 500s with ModuleNotFoundError: No module named 'jwt'. requirements.txt has had
+    # PyJWT since the feature landed, which is why the container image and CI never saw
+    # it. The wheel-only test now drives a REQUEST rather than only importing the app,
+    # because an import-time check cannot reach a lazily imported module.
+    "PyJWT>=2.13.0",
     # Not optional in practice: security/tool_rbac.py imports redis.asyncio at module
     # scope and api/main.py imports tool_rbac, so `pip install llm-shield-proxy`
     # followed by `llm-shield-proxy --host ...` died with ModuleNotFoundError on a
@@ -95,6 +107,15 @@ ner = [
 onnx = [
     "onnxruntime>=1.17.0"
 ]
+# There is deliberately no `litellm` extra. The guardrail adapter lives in
+# `examples/integrations/litellm/` instead of in this package, because it imports
+# LiteLLM at module scope and this distribution must not declare a dependency it
+# cannot satisfy: `tests/ootb/_import_every_module.py` imports every packaged module on
+# a wheel-only install and fails on exactly that. Shipping it in the wheel would force
+# a choice between an undeclared import and pulling LiteLLM's dependency tree into
+# every install of the gateway. Publishing the adapter as its own small distribution --
+# the way the benchmark was split out -- is the proper long-term answer if the
+# `pip install` UX for the adapter is wanted.
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -146,7 +167,7 @@ ignore = [
 # independently of the gateway. It is not listed here on purpose -- the measurer and
 # the measured must not be forced to move together.
 [tool.bumpversion]
-current_version = "1.3.7"
+current_version = "1.6.11"
 commit = true
 tag = true
 
@@ -170,3 +191,43 @@ filterwarnings = [
     "ignore::DeprecationWarning:fastapi.*:",
     "ignore::DeprecationWarning:starlette.*:",
 ]
+
+[tool.pyright]
+# One source of truth for the editor and the pre-commit hook. Pylance reads this, and
+# so does the pinned pyright hook, so "clean in the editor" and "clean in the hook"
+# cannot disagree -- which is the entire point of enforcing it here.
+include = ["llm_shield_proxy"]
+exclude = ["**/__pycache__", "**/.venv", "venv", "venv-*", ".worktrees"]
+typeCheckingMode = "standard"
+# No `pythonVersion` pin on purpose. Pinning it to the 3.11 floor made pyright analyze
+# the LOCAL interpreter's stdlib under 3.11 rules, so a dev on 3.14 got an error out of
+# `string/templatelib.py` -- a file nobody here wrote. Unpinned, each environment checks
+# itself: 3.14 locally, whatever CI installs in CI. Version-floor compatibility is
+# covered by the test matrix, which actually runs on 3.11 and 3.12.
+
+# `pii-leak-benchmark` is a SEPARATE distribution in this repo, installed with its own
+# `pip install ./pii-leak-benchmark`. Point the analyzer at its source so the
+# conformance modules resolve without requiring it to be installed first.
+extraPaths = ["pii-leak-benchmark"]
+
+# Optional at runtime and guarded by try/except ImportError at every use site.
+# Reporting them as missing is noise, not a finding.
+reportMissingImports = "warning"
+
+# BACKLOG, not a blessing. These 21 are real diagnostics that need individual triage --
+# mostly attribute access on the hot-reloading settings proxy and argument variance --
+# and several may be genuine. They are warnings so the hook BLOCKS today on the class
+# that actually crashes at runtime rather than failing on everything and being
+# uninstalled on day one. Burn them down and delete these lines; do not add to them.
+#
+# What is deliberately left at error, because it is the bug class this was added for:
+# reportPossiblyUnbound. It found an UnboundLocalError in the audit worker that hung the
+# queue silently, plus two latent NameErrors.
+reportAttributeAccessIssue = "warning"
+reportArgumentType = "warning"
+reportInvalidTypeForm = "warning"
+reportReturnType = "warning"
+reportAssignmentType = "warning"
+reportIndexIssue = "warning"
+reportCallIssue = "warning"
+reportOptionalMemberAccess = "warning"

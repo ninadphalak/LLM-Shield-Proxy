@@ -1,5 +1,9 @@
+import pytest
+
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
-from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.adapters.provider_factory import is_anthropic_host, resolve_provider
+
+ANTHROPIC = "api.anthropic.com"
 
 
 def test_resolve_provider_header():
@@ -7,16 +11,76 @@ def test_resolve_provider_header():
     assert resolve_provider(headers, {}) == "anthropic"
 
 
-def test_resolve_provider_model_claude():
-    headers = {}
+def test_resolve_provider_header_wins_over_destination():
+    """An explicit override is an instruction, not a guess, so the host cannot veto it."""
+    headers = {"x-shield-provider": "anthropic"}
+    payload = {"model": "gpt-4"}
+    assert resolve_provider(headers, payload, "api.openai.com") == "anthropic"
+
+
+def test_resolve_provider_model_claude_on_anthropic_host():
+    """The documented path: Claude model, Anthropic upstream, adapter engages."""
     payload = {"model": "claude-3-opus-20240229"}
-    assert resolve_provider(headers, payload) == "anthropic"
+    assert resolve_provider({}, payload, ANTHROPIC) == "anthropic"
 
 
 def test_resolve_provider_model_openai():
     headers = {}
     payload = {"model": "gpt-4"}
     assert resolve_provider(headers, payload) == "openai"  # Assuming openai is default
+
+
+# Every one of these is a Claude model that is NOT served by Anthropic's own API.
+# Resolving them to "anthropic" retargeted the request to api.anthropic.com and
+# handed it the configured upstream's credential.
+CLAUDE_RESOLD_ELSEWHERE = [
+    pytest.param("openrouter.ai", "anthropic/claude-sonnet-4.5", id="openrouter"),
+    pytest.param("us-east5-aiplatform.googleapis.com", "claude-sonnet-4-5@20250929", id="vertex"),
+    pytest.param("my-org.openai.azure.com", "my-claude-deployment", id="azure-deployment-name"),
+    pytest.param("bedrock-runtime.us-east-1.amazonaws.com", "anthropic.claude-3-5-sonnet-20241022-v2:0", id="bedrock"),
+    pytest.param("litellm.internal", "claude-3-5-haiku", id="self-hosted-gateway"),
+]
+
+
+@pytest.mark.parametrize("host,model", CLAUDE_RESOLD_ELSEWHERE)
+def test_claude_model_does_not_hijack_non_anthropic_upstream(host, model):
+    assert resolve_provider({}, {"model": model}, host) != "anthropic"
+
+
+@pytest.mark.parametrize("host,model", CLAUDE_RESOLD_ELSEWHERE)
+def test_same_models_still_resolve_when_upstream_is_anthropic(host, model):
+    """Proves the parametrized cases above turn on the host, not on the model string."""
+    assert resolve_provider({}, {"model": model}, ANTHROPIC) == "anthropic"
+
+
+def test_resolve_provider_falls_back_to_configured_upstream(monkeypatch):
+    """Callers that omit upstream_host get the configured value, not a free pass."""
+    from llm_shield_proxy.core import config
+
+    monkeypatch.setattr(config.settings, "UPSTREAM_BASE_URL", "https://openrouter.ai/api", raising=False)
+    assert resolve_provider({}, {"model": "anthropic/claude-sonnet-4.5"}) != "anthropic"
+
+    monkeypatch.setattr(config.settings, "UPSTREAM_BASE_URL", "https://api.anthropic.com", raising=False)
+    assert resolve_provider({}, {"model": "claude-3-opus-20240229"}) == "anthropic"
+
+
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("api.anthropic.com", True),
+        ("anthropic.com", True),
+        ("API.Anthropic.COM", True),
+        ("api.anthropic.com.", True),  # trailing-dot FQDN
+        ("notanthropic.com", False),  # bare endswith would accept this
+        ("anthropic.com.attacker.net", False),
+        ("api.anthropic.com.attacker.net", False),
+        ("openrouter.ai", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_is_anthropic_host(host, expected):
+    assert is_anthropic_host(host) is expected
 
 
 def test_anthropic_adapter_request_transform():

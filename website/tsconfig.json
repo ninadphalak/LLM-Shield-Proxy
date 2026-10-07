@@ -6,6 +6,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "ignoreDeprecations": "6.0",
+    // The results wall reads its submitted rows from a JSON file, so a submission is data
+    // rather than source. Without this, that import type-checks as an error.
+    "resolveJsonModule": true,
     "strict": true
   },
   "exclude": [".docusaurus", "build"]

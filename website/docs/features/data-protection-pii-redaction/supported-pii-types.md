@@ -17,9 +17,10 @@ Tier 1 uses highly optimized `google-re2` regular expressions to detect determin
 5. **`IP_ADDRESS`**: Standard IPv4 network addresses.
 6. **`AWS_API_KEY`**: AWS `AKIA`/`ASIA` access-key shapes, and standard `sk-` API keys.
 7. **`GITHUB_PAT`**: GitHub Personal Access Tokens (e.g., `ghp_...`).
-8. **`SSH_PRIVATE_KEY`**: Private-key PEM/OpenSSH header boundaries.
-9. **`JWT_TOKEN`**: Three-segment JWT-shaped strings (signatures/claims are not cryptographically validated).
-10. **`MRN`**: Project-specific Medical Record Number shapes (e.g., `NNN-NN-NNX`).
+8. **`SLACK_TOKEN`**: Slack bot, user, app, refresh, and legacy tokens (e.g., `xoxb-...`).
+9. **`SSH_PRIVATE_KEY`**: Private-key PEM/OpenSSH header boundaries.
+10. **`JWT_TOKEN`**: Three-segment JWT-shaped strings (signatures/claims are not cryptographically validated).
+11. **`MRN`**: Project-specific Medical Record Number shapes (e.g., `NNN-NN-NNX`).
 
 ### Validation is a Signal, Not a Gate
 Tier 1 structural checks are confidence signals, not definitive gates. A ledger code formatted as `ddd-dd-dddd` will trigger the SSN redaction rule. A 16-digit order number will trigger the Credit Card rule. The pattern alone cannot safely distinguish them.

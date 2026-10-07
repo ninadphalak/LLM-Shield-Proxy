@@ -202,7 +202,14 @@ def test_bare_digit_runs_are_not_rejected_as_phone_matches():
 
 
 def test_validation_fails_closed_when_it_raises(engine, monkeypatch):
-    """A validator that explodes must redact, not leak. Never the reverse."""
+    """A validator that explodes must redact, not leak. Never the reverse.
+
+    Since 1.6.1 this holds for the strongest possible reason: detect_spans does not
+    call classify_tier1_match at all, so no behaviour of the validator -- raising
+    included -- can drop a span. The monkeypatch stays as the regression guard on
+    that independence. If someone wires the validator back into the detection path,
+    this test fails and they have to argue for it.
+    """
     import llm_shield_proxy.engines.pii_engine as module
 
     def boom(*_args, **_kwargs):
@@ -218,3 +225,43 @@ def test_unknown_entity_types_are_passed_through_unchanged():
     assert classify_tier1_match("EMAIL", "someone@example.com")[0] is True
     assert classify_tier1_match("IP_ADDRESS", "192.168.1.1")[0] is True
     assert classify_tier1_match("GITHUB_PAT", "ghp_x" * 8)[0] is True
+
+
+def test_slack_token_fixture_is_detected(engine):
+    from pii_leak_benchmark.http_profile import _CREDENTIAL_VALUES
+    value = _CREDENTIAL_VALUES["SLACK_TOKEN"]
+    text = f"My token is {value}."
+    hits = _spans_over(engine, text, value)
+    assert any(entity == "SLACK_TOKEN" for entity, _ in hits), "SLACK_TOKEN fixture stopped being detected"
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["xoxb", "xoxp", "xoxa", "xoxr", "xoxs", "xoxe", "xapp"],
+)
+def test_all_slack_token_prefixes_are_detected(engine, prefix):
+    value = f"{prefix}-12345-67890-abcdef"
+    text = f"My token is {value}."
+    hits = _spans_over(engine, text, value)
+    assert any(entity == "SLACK_TOKEN" for entity, _ in hits), f"SLACK_TOKEN prefix {prefix} not detected"
+
+
+def test_high_entropy_slack_token_is_typed_as_slack_token(engine):
+    value = "xoxb" + "-28475" + "61930215-" + "2938475" + "610284-" + "KfJ2mQ9x" + "LpR7vTnW3bZyH8dA"
+    text = f"My token is {value}."
+    hits = _spans_over(engine, text, value)
+    assert any(entity == "SLACK_TOKEN" for entity, _ in hits)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "xoxo" + "-hugs-" + "and-" + "kisses",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "a-regular-hyphenated-sentence",
+    ],
+)
+def test_slack_token_no_false_positives(engine, value):
+    text = f"Here is some text: {value}."
+    hits = _spans_over(engine, text, value)
+    assert not any(entity == "SLACK_TOKEN" for entity, _ in hits), f"False positive SLACK_TOKEN on {value}"

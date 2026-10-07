@@ -144,3 +144,54 @@
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/*
+ * "Replicate this result" on the results wall links to one proxy's row of a table
+ * (`<span id="replicate-...">` in its first cell). Keep the row clear of the sticky navbar
+ * and mark it, so the reader lands on the row that is theirs.
+ */
+[id^='replicate-'] {
+  /* The id sits inside a padded cell, so leave room for the row's own top edge too. */
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 3rem);
+}
+
+tr:has([id^='replicate-']:target) {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: -2px;
+  background: var(--ifm-color-emphasis-100);
+}
+
+details#llm-guard {
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 1.5rem);
+}
+
+/* Navbar package tabs: a hover box saying what each one is for. The text comes from the
+   item's data-tip attribute in docusaurus.config.ts; title carries the same text for screen
+   readers and touch devices. */
+.navbar__link.navTip {
+  position: relative;
+}
+
+.navbar__link.navTip[data-tip]:hover::after,
+.navbar__link.navTip[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  white-space: normal;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #161b22;
+  color: #c9d1d9;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  z-index: 200;
+}

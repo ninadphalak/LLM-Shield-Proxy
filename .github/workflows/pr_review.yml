@@ -1,0 +1,252 @@
+name: PR Review
+
+# AI review ONCE per pull request -- when it opens, or when a draft is marked ready -- and
+# again whenever someone with write access comments `/review` on the PR.
+#
+# Runs on the repository owner's Claude subscription through `claude setup-token`, stored as
+# the CLAUDE_CODE_OAUTH_TOKEN secret. There is no per-token bill; every run draws on the
+# same usage limits as the owner's interactive sessions, which is why pushes do not review.
+# It replaced a pay-per-token review chain on 2026-09-26, which is kept as a FALLBACK:
+#
+#   - automatically, when the subscription review fails (usage limit reached, outage);
+#   - on purpose, with `gh variable set PR_REVIEW_ENGINE --body fallback`, to save the
+#     subscription for interactive work. `gh variable delete PR_REVIEW_ENGINE` switches back.
+#
+# The fallback bills per token on the keys in DEEPSEEK_API_KEY_PR / GEMINI_API_KEY_PR and
+# the model chain in PR_REVIEW_MODEL / PR_REVIEW_FALLBACKS. An empty balance there means
+# the fallback fails and so does the required check -- which is the honest outcome when no
+# reviewer could run.
+
+# `synchronize` is still listened for, and the job below SKIPS it. That is deliberate.
+#
+# Reviewing every push fed a loop: an agent fixed each finding in its own commit, every
+# commit bought a fresh whole-diff review, and every fresh review found something new.
+#
+# Dropping `synchronize` from this list would lock the repository instead: "Review the pull
+# request" is a REQUIRED status check on `main`, required checks are read off the head
+# commit, and a push that starts no run leaves the check "expected" on the new head
+# forever, so no PR could merge after its first fix. A job skipped by its `if:` reports as
+# passing, costs nothing, and keeps the check present on every head. Keep the job NAME too:
+# renaming it strands the required check the same way.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
+# The event action is in the key so a push's skipped run cannot cancel the opening review,
+# and the comment id is in it so nothing cancels a review a person asked for.
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.comment.id || github.event.action }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # Every clause is load-bearing.
+    # - Bots never trigger it: a bot's comment would otherwise start a run, and the
+    #   results-wall intake PRs are data, not code (see standing rule 0).
+    # - Comments only on PRs, and only `/review` at the start: without the first, every
+    #   comment on a plain issue runs a review of nothing; without the second, every
+    #   conversational comment on a PR spends the owner's usage.
+    # - Fork PRs are skipped on open: a fork's `pull_request` run gets no secrets and would
+    #   fail the required check. The owner reviews one by commenting `/review`, which runs
+    #   in this repository's context. The action itself also refuses non-write triggerers.
+    # - Drafts are skipped: open agent work as a draft, push freely, mark ready once.
+    # - Results-wall rows (`intake/issue-N`) are skipped. They are opened under
+    #   RESULTS_WALL_TOKEN, a personal token, so the sender is a User, not a Bot, and the
+    #   bot clause alone let every one-line data row buy a full review. The skip still
+    #   satisfies the required check, so auto-merge proceeds. See conformance-intake.yml.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (
+        (
+          github.event.issue.pull_request &&
+          startsWith(github.event.comment.body, '/review')
+        ) ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.action != 'synchronize' &&
+          !github.event.pull_request.draft &&
+          !startsWith(github.event.pull_request.head.ref, 'intake/') &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    name: Review the pull request
+    runs-on: ubuntu-latest
+    # A review that runs this long is looping; stop it before it eats the usage window.
+    timeout-minutes: 20
+    # Read the tree, write comments, nothing else. The review cannot push a commit, so it
+    # cannot "fix" its own findings into another round. `id-token` is what the action uses
+    # to authenticate itself.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
+      - name: Review
+        id: review
+        if: vars.PR_REVIEW_ENGINE != 'fallback'
+        # A failure here must not fail the job before the fallback gets its turn. The job
+        # still fails if the fallback also fails: that step has no continue-on-error.
+        continue-on-error: true
+        # Pinned to a commit SHA with the tag in a comment, matching every other action in
+        # this repository: it receives a repository token and the subscription token.
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029 # v1.0.239
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The workflow's own token, not the Claude GitHub App: nothing extra to install,
+          # the permissions block above is the whole grant, and comments made with
+          # GITHUB_TOKEN never trigger another workflow run -- no review-of-a-review loop.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Sonnet, not Opus: every run spends the owner's subscription limits, and a
+          # diff review does not need the largest model. Raise it here if reviews miss things.
+          # Effort `high`, stated rather than inherited so a default change cannot lower it:
+          # reviews are rare now (once per PR plus requests), and a missed fail-open gate
+          # costs more than the extra thinking. `--max-turns` bounds one run's usage. 45, not
+          # 30: a `/review` re-run reads the earlier review as well as the diff, and on #145 it
+          # ran out of turns twice at 30 without posting a verdict.
+          claude_args: |
+            --model claude-sonnet-5
+            --effort high
+            --max-turns 45
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+
+            You are reviewing a pull request in a streaming privacy gateway and measurement
+            harness for regulated environments. Read `.github/REVIEW-CONTEXT.md` first: it
+            lists the invariants a change must never break. Get the diff with `gh pr diff`.
+            On a `/review` re-run the checked-out tree is the default branch, so trust the
+            diff, not the working files, for what the PR changes.
+
+            Report only findings in these classes, in this order:
+            1. personal data, secrets or PII that could reach a log, a trace, an upstream
+               provider or a published artifact;
+            2. fail-open behaviour in a security or policy gate, which must deny on error,
+               timeout or missing configuration;
+            3. unbounded memory or blocking calls on the async streaming hot path;
+            4. a published measurement or claim the code does not actually establish;
+            5. any other correctness bug you can point to a concrete failing input for.
+            Do not report formatting, naming, style or "consider" suggestions: ruff, bandit
+            and pyright gate those, and every non-blocking comment costs another fix round.
+
+            If this PR already has an earlier review from you, read it first
+            (`gh pr view --comments`). Say which earlier findings are now fixed, and raise a
+            NEW finding only if it is in classes 1-5. Do not re-litigate a finding the author
+            answered in a comment unless the answer is wrong, and say why.
+
+            Post each finding as an inline comment with
+            `mcp__github_inline_comment__create_inline_comment` (confirmed: true), stating
+            the concrete input or path that triggers it. Then post ONE top-level summary with
+            `gh pr comment` whose last line is exactly one of:
+              Verdict: MERGEABLE
+              Verdict: BLOCKING (<n> findings)
+            Post only GitHub comments; do not answer in messages.
+
+      # ---- Fallback: the pay-per-token review chain -------------------------------------
+      # Runs only when the subscription review did not: it failed, or PR_REVIEW_ENGINE says
+      # to skip it. Every key name below is PR-Agent's own; an unrecognised one is silently
+      # ignored, not rejected (CONTEXT detail N).
+      #
+      # The credential NAME comes from a variable because GitHub Actions allows no
+      # expression on the left of an env mapping; exporting the pair at runtime is what
+      # keeps provider names out of this file beyond the secret names.
+      - name: Configure fallback credentials
+        if: steps.review.outcome == 'failure' || vars.PR_REVIEW_ENGINE == 'fallback'
+        env:
+          PROVIDER_A_KEY: ${{ secrets.DEEPSEEK_API_KEY_PR }}
+          PROVIDER_B_KEY: ${{ secrets.GEMINI_API_KEY_PR }}
+          PROVIDER_A_KEY_ENV: ${{ vars.PR_PROVIDER_A_KEY_ENV }}
+          PROVIDER_B_KEY_ENV: ${{ vars.PR_PROVIDER_B_KEY_ENV }}
+        run: |
+          set -euo pipefail
+          # No `set -x` here, ever: it would echo the expanded credential.
+          if [ -n "${PROVIDER_A_KEY_ENV:-}" ] && [ -n "${PROVIDER_A_KEY:-}" ]; then
+            echo "${PROVIDER_A_KEY_ENV}=${PROVIDER_A_KEY}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${PROVIDER_B_KEY_ENV:-}" ] && [ -n "${PROVIDER_B_KEY:-}" ]; then
+            echo "${PROVIDER_B_KEY_ENV}=${PROVIDER_B_KEY}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Fallback review
+        if: steps.review.outcome == 'failure' || vars.PR_REVIEW_ENGINE == 'fallback'
+        uses: the-pr-agent/pr-agent@1d01f24f455bb879c1d9c557ad7de3d72dcc7975 # v0.46.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFIG.MODEL: ${{ vars.PR_REVIEW_MODEL }}
+          # Last entry should be a different provider: only that survives an account-level
+          # outage or an empty balance on the primary's provider.
+          CONFIG.FALLBACK_MODELS: ${{ vars.PR_REVIEW_FALLBACKS }}
+          # A clamp, min(model limit, this), so it stays a ceiling on spend.
+          CONFIG.MAX_MODEL_TOKENS: "200000"
+          # Without this a model missing from PR-Agent's MAX_TOKENS table is refused before
+          # any call ("not defined in MAX_TOKENS"); the primary was never called from #111
+          # to #115 because of it. Still clamped by MAX_MODEL_TOKENS.
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "200000"
+          # PR-Agent sends `medium` by default; the primary's provider accepts low/high/max
+          # only, and the run died silently after the first call carrying `medium`.
+          CONFIG.REASONING_EFFORT: "high"
+          # Exactly the pull_request events that pass the job's `if:`. An event that reaches
+          # PR-Agent and is not listed is skipped with a green result and no review.
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review"]'
+          # Review only. `/improve` is the larger bill and its suggestions fed the fix loop;
+          # `auto_describe` would overwrite PR bodies that carry the evidence.
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
+          # PR-Agent reads these from the default branch; `.llm/` is gitignored by design.
+          CONFIG.REPO_CONTEXT_FILES: '[".github/REVIEW-CONTEXT.md"]'
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
+            This is a streaming privacy gateway and a measurement harness for regulated
+            environments. Report only: (1) anything that could let personal data, secrets or
+            PII reach a log, a trace, an upstream provider or a published artifact; (2)
+            fail-open behaviour in a security or policy gate, which must deny on error,
+            timeout or missing config; (3) unbounded memory or blocking calls on the async
+            streaming hot path; (4) a published measurement or claim the code does not
+            establish; (5) a correctness bug with a concrete failing input. Ignore
+            formatting, naming and style; ruff, bandit and pyright gate those.
+
+      # How much of the subscription one review used, on the run's Summary page. Numbers
+      # only: the execution file also holds everything the model read and wrote, which
+      # can include PR content, so nothing but these counters leaves it. `costUSD` is
+      # what the same tokens would cost at API prices -- a yardstick, not a bill.
+      - name: Report usage
+        if: always() && steps.review.outputs.execution_file != ''
+        env:
+          EXECUTION_FILE: ${{ steps.review.outputs.execution_file }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          raw = open(os.environ["EXECUTION_FILE"], encoding="utf-8").read().strip()
+          try:
+              items = json.loads(raw)
+          except json.JSONDecodeError:
+              items = [json.loads(line) for line in raw.splitlines() if line.strip()]
+          if isinstance(items, dict):
+              items = [items]
+          result = next((i for i in reversed(items) if isinstance(i, dict) and i.get("type") == "result"), {})
+          rows = [f"### Review usage, PR #{os.environ['PR_NUMBER']}", "",
+                  "| model | input | output | cache read | cache write | API-price equivalent |",
+                  "|---|---:|---:|---:|---:|---:|"]
+          for model, u in (result.get("modelUsage") or {}).items():
+              rows.append(f"| {model} | {u.get('inputTokens', 0):,} | {u.get('outputTokens', 0):,} | "
+                          f"{u.get('cacheReadInputTokens', 0):,} | {u.get('cacheCreationInputTokens', 0):,} | "
+                          f"${u.get('costUSD', 0):.3f} |")
+          rows += ["", f"turns: {result.get('num_turns', '?')}, "
+                       f"duration: {result.get('duration_ms', 0) / 1000:.0f}s, "
+                       f"total API-price equivalent: ${result.get('total_cost_usd', 0):.3f}"]
+          text = "\n".join(rows)
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(text + "\n")
+          PY

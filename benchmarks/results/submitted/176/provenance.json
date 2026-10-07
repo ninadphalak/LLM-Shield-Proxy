@@ -1,0 +1,25 @@
+{
+  "schema": "llm-shield-proxy/submitted-row-archive/v1",
+  "issue": 176,
+  "submitter": "teg0011",
+  "ranIn": "teg0011/LLM-Shield-Proxy",
+  "ranInOwnerType": "User",
+  "runUrl": "https://github.com/teg0011/LLM-Shield-Proxy/actions/runs/37254251177",
+  "runId": 37254251177,
+  "headSha": "410e8f4a8e378e4bcd899049c698f4616f76d425",
+  "workflowPath": ".github/workflows/wrappers-source-reproduction.yml",
+  "runCreatedAt": "2026-10-05T02:09:15Z",
+  "artifact": {
+    "name": "source-reproduction",
+    "id": 11321842520,
+    "bytes": 11532,
+    "sha256": "ca027c032589cd98dc443b4334fbd9cb2a9dd35b81bca3641bc40b9270ef0cfc"
+  },
+  "harness": "0.4.1 (operator), 0.2.1 (response)",
+  "redactedFields": [
+    "target.base_url",
+    "capture.target_must_be_preconfigured_for",
+    "capture.self_probe.advertised_url"
+  ],
+  "archivedAt": "2026-10-05T02:13:50Z"
+}

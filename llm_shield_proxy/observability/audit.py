@@ -207,6 +207,13 @@ class AuditLogger:
     @classmethod
     def _worker(cls):
         while True:
+            # Bound BEFORE the try. The handler below touches `item`, and if
+            # `get()` itself raised, `item` was unbound: the handler then died of
+            # UnboundLocalError, the inner bare `except` swallowed that, and
+            # `task_done()` never ran. A caller blocking on `item.completion` waited
+            # forever and `queue.join()` never returned -- a silent hang in the audit
+            # path. Found by pyright's reportPossiblyUnboundVariable.
+            item = None
             try:
                 item = cls._log_queue.get()
                 severity, log_entry = item.severity, item.log_entry
@@ -274,6 +281,10 @@ class AuditLogger:
             except Exception as exc:  # nosec B110 noqa: S110
                 logger.exception("Audit worker failed to persist an event")
                 try:
+                    if item is None:
+                        # The queue read itself failed, so there is no work item to
+                        # complete and nothing was taken off the queue to mark done.
+                        continue
                     item.error.append(exc)
                     if item.completion is not None:
                         item.completion.set()
@@ -408,6 +419,55 @@ class AuditLogger:
             "applied_role_name": applied_role_name,
         }
         AuditLogger._enqueue_log("INFO", log_entry)
+
+    @staticmethod
+    def log_unmapped_blob(
+        json_path: str,
+        size_bytes: int,
+        virtual_key_id: str = "BYOK",
+        request_id: Optional[str] = None,
+        edge_scan: str = "not_run",
+    ) -> None:
+        """Records a blob from an unclaimed field, and what the edge scan made of it.
+
+        This is the onboarding signal for UNMAPPED_BLOB_POLICY=warn: it names the
+        exact JSON path so an operator can add it to that key's `payload_skip_keys`
+        and stop paying to walk it, or investigate why a blob is arriving there.
+
+        `edge_scan` separates two events a single record type used to conflate:
+        `clean` means the bounded edge probe found nothing and the blob went on
+        untouched, `pii_found` means it found PII and the blob was redacted rather
+        than forwarded. An operator tuning `payload_skip_keys` needs to tell a noisy
+        path apart from a leaking one.
+        """
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "UNMAPPED_BLOB_FORWARDED",
+            "service": "LLM-Shield",
+            "instance_id": AuditLogger._instance_id,
+            "process_id": os.getpid(),
+            "request_id": request_id or "n/a",
+            "virtual_key_id": virtual_key_id,
+            "json_path": json_path,
+            "size_bytes": size_bytes,
+            "severity": "CRITICAL" if edge_scan == "pii_found" else "WARNING",
+            "edge_scan": edge_scan,
+            "action": (
+                "REDACTED_EDGE_PII" if edge_scan == "pii_found" else "FORWARDED_UNINSPECTED"
+            ),
+            "message": (
+                "Blob past the inspection ceiling in a field no policy claims, and its edges "
+                "carry PII. The blob was redacted rather than forwarded; investigate what is "
+                "writing to this path."
+                if edge_scan == "pii_found"
+                else "Blob past the inspection ceiling in a field no policy claims. Add this "
+                "path to payload_skip_keys for this key, or set UNMAPPED_BLOB_POLICY=block "
+                "to reject it."
+            ),
+        }
+        AuditLogger._enqueue_log(
+            "CRITICAL" if edge_scan == "pii_found" else "WARNING", log_entry
+        )
 
     @staticmethod
     def log_tripwire_event(
@@ -577,11 +637,11 @@ class AuditLogger:
         Deliberately carries only the exception's type name -- never `str(exc)` or a
         traceback, since either can contain raw request content (a fragment of an
         unredacted prompt, a malformed value under inspection, etc.) that has no
-        business entering the "zero raw PII leakage" WORM audit chain. The full
-        exception message and traceback belong in the operational application logger
-        (see `global_exception_handler` in api/main.py, which logs both there via
-        `logger.error(..., exc_info=exc)`) -- a separate sink with shorter retention
-        that engineers use for root-causing, not the compliance-grade audit record.
+        business entering the "zero raw PII leakage" WORM audit chain. The operational
+        application logger (`global_exception_handler` in api/main.py) is the sink for
+        root-causing: it adds the frame LOCATIONS (`file:line in function`), which cannot
+        carry runtime data, but it withholds `str(exc)` too. Neither sink carries raw
+        request content; this one is the stricter of the two.
         """
         log_entry: Dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

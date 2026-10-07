@@ -1,0 +1,560 @@
+---
+sidebar_position: 5
+title: Reproduce the fragmentation result
+---
+
+# Reproduce the fragmentation result
+
+Three tracks. They answer different questions, and the first one is not the finding.
+
+| Track | What it answers | Cost |
+| :--- | :--- | :--- |
+| **1. Verify the instrument** | Does this harness behave on your machine the way it behaved on ours? | ~70 s, no Docker |
+| **2. See it on real software** | Does the effect appear in a real, widely deployed detector? | ~2.5 min, needs Docker |
+| **3. Test your own gateway** | Does *your* proxy leak, including the one in production? | your deployment |
+
+**Track 1 is a calibration run.** Its two policies are reference controls written by this
+project, and `chunk-local` is *written to be boundary-blind* - its own docstring calls it
+"the modelled defect". Measuring a program built to have a property and discovering it has
+that property tells you nothing about the world. What it does tell you is that your copy of
+the instrument reads the way ours does, which is the precondition for believing anything
+else on this page. Earlier versions of this page called it "the central result". It is not;
+that was an overstatement and it is corrected here.
+
+**The finding lives in Track 2**, where the detector is a real Microsoft Presidio container
+and the only thing that changes between the two rows is whether a chunk boundary is allowed
+to fall inside a value.
+
+You do not need to read anything else, run any other gateway, or know anything about SOC 2
+or HIPAA to do any of them.
+
+## Run it in GitHub Actions, nothing to install
+
+Tracks 1 and 2 run as one job on a GitHub-hosted runner, from a fork of this repository.
+You need a GitHub account and nothing else: no Python, no Docker, no API key. The job takes
+about five minutes.
+
+1. Fork [ninadphalak/LLM-Shield-Proxy](https://github.com/ninadphalak/LLM-Shield-Proxy):
+   click **Fork**, then **Create fork**. Everything you click from here on is in your fork,
+   at `github.com/YOUR-NAME/LLM-Shield-Proxy`.
+2. Open your fork's **Actions** tab and click **I understand my workflows, go ahead and
+   enable them**. GitHub switches workflows off in every new fork until you do.
+3. In the left column, click **Reproduce the fragmentation result**, then the
+   **Run workflow** button on the right, then the green **Run workflow** button in the panel
+   that opens. Leave **Use workflow from** on `main` to run the latest code. There are no
+   boxes to fill.
+4. Wait for the run to finish, then click it and read its summary. It shows the commit,
+   the runner and its Python version, both `RESULT:` lines and one table per policy. Green
+   means both tracks printed `RESULT: all 2 policies reproduced the published reports.`;
+   red means one did not, and the table shows which field differed.
+5. Click **Send this result back** at the bottom of the summary. It opens the
+   [independent reproduction form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=independent-reproduction.yml)
+   on this repository with the commit, the environment and both `RESULT:` lines already
+   filled in. Add your name and press **Create**. Send it whatever the result was.
+
+The run's uploaded reports expire 90 days after the run; the issue does not, so the issue
+is the public record. A reviewer can verify a run from the issue plus the run link in it:
+the job log shows the same `RESULT:` lines, and its artifact holds the regenerated reports
+while it lasts.
+
+The workflow installs exactly what Track 1 below installs, on Python 3.12, and runs the
+same two commands. The pinned Presidio image is started on the runner with Docker. This
+repository's own CI also runs Track 1 on every push, on three operating systems and two
+Python versions ([details below](#this-runs-in-ci-too)).
+
+## Run it on your machine
+
+The same two tracks on a laptop. Track 1 needs Python; Track 2 also needs Docker.
+
+## Track 1 - Verify the instrument
+
+It runs offline on a laptop. Nothing to install but the harness, no cloud account, no API
+key, no model, no network egress. Two policies, about 35 seconds each.
+
+### 1. Get the code
+
+```bash
+git clone -c core.longpaths=true https://github.com/ninadphalak/LLM-Shield-Proxy.git
+cd LLM-Shield-Proxy
+```
+
+`core.longpaths` stops Windows from failing the checkout with `Filename too long`; it
+changes nothing elsewhere.
+
+If you were given a specific commit, check it out now:
+
+```bash
+git checkout <commit>
+git rev-parse HEAD
+```
+
+### 2. Install
+
+Any CPython from 3.11 onward. The runner uses `httpx`; validation also installs `jsonschema`.
+
+CI verifies 3.11 and 3.12; 3.14 is verified locally. The harness package declares
+3.9+, but this experiment has not been run there - if you only have 3.9 or 3.10,
+run it anyway and tell us what happened.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install "./pii-leak-benchmark[validate]"
+```
+
+Do not install the proxy. This experiment does not use it.
+
+### 3. Run
+
+From the repository root:
+
+```bash
+python benchmarks/reproduce_fragmentation.py --out reproduction
+```
+
+### 4. Read the result
+
+The last line is `RESULT: all 2 policies reproduced the published reports.` on success.
+The exit status is `0` on success and `1` on any mismatch.
+
+Above it, one table per policy. These are the values to expect:
+
+| Policy | Fidelity | Leak, single chunk | Leak, fragmented | DeltaFrag | Outcome |
+| :--- | ---: | ---: | ---: | ---: | :--- |
+| `chunk-local` | 1.00 | 0.125 | 1.00 | 0.875 | `fail` |
+| `bounded-retention` | 1.00 | 0.125 | 0.125 | 0.00 | `fail` |
+
+Both reports must also carry corpus digest
+`30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c` and inspector digest
+`94262e29a492ab6a`. The script checks all of this and prints `yes` or `NO` per row.
+
+### 5. Send back four things
+
+1. `reproduction/chunk-local.json` and `reproduction/bounded-retention.json` - the reports
+   your run produced.
+2. `reproduction/reproduction-summary.json` - the comparison, plus your OS, Python version
+   and the commit you ran.
+3. The console output of step 3, and the exact commands you ran if they differed from the
+   ones above.
+4. Anything that went wrong, was unclear, or that you disagree with.
+
+Item 4 is not a formality. A run that fails, a step that does not work on your machine, a
+number that does not match, or a reading of the result you think is wrong is more useful
+than a clean pass. Send them with the
+[independent reproduction form](https://github.com/ninadphalak/LLM-Shield-Proxy/issues/new?template=independent-reproduction.yml),
+or send the files directly.
+
+### 6. Optional: run it in your own GitHub Actions
+
+If you would rather not trust a run on your own laptop either, run it on infrastructure
+neither of us controls: [Run it in GitHub Actions](#run-it-in-github-actions-nothing-to-install)
+above does both tracks from your fork and sends the result back with one click. The
+six-runner matrix in **Reproducible Public Benchmark** runs Track 1 alone on three operating
+systems and two Python versions; each runner uploads its regenerated reports.
+
+### What the controls are for
+
+Track 1 ships two of five reference policies. They are not findings and they are not
+products; they are reference controls. They are the known standards you calibrate an
+instrument against, and each one fails the harness in a different, diagnostic way:
+
+| Control | Known to be | If the harness disagrees, it |
+| :--- | :--- | :--- |
+| `passthrough` | leaks everything | cannot see a leak at all |
+| `redact-all` | destroys the echo | cannot detect broken restoration |
+| `chunk-local` | boundary-blind by construction | cannot see fragmentation |
+| `bounded-retention` | boundary-safe by construction | reports phantom differences |
+| `retention-plus-decoding` | fully correct | cannot recognise containment |
+
+Without `passthrough` at 1.00 and `retention-plus-decoding` at 0.00, a rate in the middle
+is uninterpretable - you do not know the scale has endpoints. `bounded-retention` scoring
+identical rates in both arms is what demonstrates the 16-vs-16 pairing is sound; broken
+pairing would show a spurious gap.
+
+This is how ten instrument defects were caught, each recorded in the
+[revision history](./benchmark-revision-history.md). A control that should read 1.00 reading
+0.33 is how the Portkey socket-reuse bug surfaced.
+
+To run all five rather than the two:
+
+```bash
+python -m pii_leak_benchmark.v2_emitter --validate --out ./benchmark-output/v2 \
+  --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
+```
+
+## Track 2 - See it on real software
+
+Same corpus, same seed, same wrappers, same one field different. The detector is no longer
+a reference policy written here - it is a stock
+[Microsoft Presidio](https://microsoft.github.io/presidio/) analyzer in its published
+container.
+
+About two and a half minutes including the image pull. This is the only track that costs
+you a Docker install, and it is the one that answers "does this happen to real software".
+
+### 1. Start a real Presidio analyzer
+
+Nothing else is needed - no LiteLLM, no Postgres, no shared Docker network. Those are only
+required for the external *gateway* rows.
+
+```bash
+docker run -d --name presidio-analyzer -p 5002:3000 \
+  mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+```
+
+The harness expects it on `127.0.0.1:5002`; `benchmarks/presidio_partition_probe.py` reads
+`PRESIDIO_ANALYZER_API_BASE` if you put it elsewhere. Wait until it answers:
+
+```bash
+curl -s -X POST http://127.0.0.1:5002/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"call me at 939-38-8264","language":"en"}'
+```
+
+### 2. Run the pair
+
+From the repository root, with the environment from Track 1 still active:
+
+```bash
+python benchmarks/reproduce_fragmentation.py --policies presidio-chunk-local,presidio-retention --out reproduction-presidio
+```
+
+It runs both wrappers against the analyzer and compares every field with the published
+reports, in the same format as Track 1. If it says `did NOT reproduce`, first check that
+the analyzer is still up (`docker ps` lists `presidio-analyzer`, and the `curl` above
+answers): with no analyzer running, every field differs.
+
+### 3. Read the result
+
+The pinned image reproduced both stored reports on 2026-09-16, matching every compared
+field. CI now runs that pair too. This verifies the image as a reproduction target without
+rewriting historical target metadata.
+
+One seed, midpoint split oracle:
+
+| Wrapper | Leak, whole | Leak, split | DeltaFrag |
+| :--- | ---: | ---: | ---: |
+| `presidio-chunk-local` | 0.125 | 0.50 | 0.375 |
+| `presidio-retention` | 0.125 | 0.125 | 0.00 |
+
+Across the published twelve-seed sweep the chunk-local wrapper runs 0.1667 single-chunk to
+0.7188 adversarial, DeltaFrag 0.5521; the retaining wrapper holds DeltaFrag at exactly
+0.0000 on every seed. Those numbers and their ranges are in
+[`exhaustive-presidio-seed-sweep/README.md`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/benchmarks/results/v2-response-split/exhaustive-presidio-seed-sweep/README.md).
+
+Add `--exhaustive-splits` to cut at every internal offset instead of the midpoint. It moves
+`presidio-chunk-local` to adversarial 1.00 on every seed (DeltaFrag 0.8333) and leaves
+`presidio-retention` unmoved. Use it before quoting a DeltaFrag from any validating
+detector, because a midpoint cut is one sample and a weak one.
+
+### What this is not
+
+**It is not a defect report against Presidio, and not a ranking.** Presidio makes no
+streaming claim. Applying a whole-string scanner per chunk is the *integrator's* decision,
+and both wrappers here are this project's, not Microsoft's - the detector is Presidio's, the
+streaming integration and the rehydration half are the wrapper's. The claim under test is a
+property of the integration pattern, which any whole-string scanner inherits.
+
+The same shape is measured against LLM Guard 0.3.16 (DeltaFrag 0.5833), Guardrails AI
+0.10.2, LiteLLM 1.99, NeMo 0.24.0 and Portkey OSS - all real, all pinned versions, each with
+its own profile directory under `benchmarks/`.
+
+## Track 3 - Test your own gateway
+
+The harness measures any OpenAI-compatible endpoint, including one already in production.
+Nothing about it is specific to this project's proxy; `pii-leak-benchmark` is a separate
+distribution that is forbidden from importing the proxy, and a test fails the build if that
+changes.
+
+### Checking your own deployment
+
+Use `selfcheck`. It answers one question - *does my deployment leak?* - and it does not ask
+you to record a vendor claim, because there is no vendor to cite when the gateway is yours.
+
+```bash
+pip install "pii-leak-benchmark @ git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.6.0#subdirectory=pii-leak-benchmark"
+
+# Establish the floor FIRST. No gateway at all: this must report LEAK.
+pii-leak-benchmark selfcheck --target-base-url capture://self
+
+# Then your gateway, already configured to use the capture as its upstream.
+pii-leak-benchmark selfcheck --target-base-url http://your-gateway.internal/v1
+```
+
+`selfcheck` was added in 0.2.0; earlier releases do not have the subcommand.
+
+If the floor run reports anything but `LEAK`, your capture is not seeing traffic and no
+other run from that setup means anything.
+
+It reports one row per data type, so a result is actionable rather than a bare verdict:
+
+```
+    TYPE               RESULT        WHAT IT MEANS
+    AWS_ACCESS_KEY_ID  LEAK          sent to the upstream unmasked
+    CREDIT_CARD        contained     never reached the upstream in this run
+    EMAIL              LEAK          sent to the upstream unmasked
+    GITHUB_TOKEN       LEAK          sent to the upstream unmasked
+    SLACK_TOKEN        LEAK          sent to the upstream unmasked
+    SSN                contained     never reached the upstream in this run
+```
+
+Six types by default: three personal-data shapes plus AWS, GitHub and Slack credential
+specimens, added in 0.2.2. The credential values are FIXED rather than generated, unlike the
+personal-data ones, because each specimen's safety rests on an exact literal - AWS's own
+published example key ID, and values carrying `EXAMPLE` and `NOTAREAL` with zeroed regions.
+`--no-credentials` sends only the three published types.
+
+Every run also prints what it did **not** test, and that list shrinks only when a type is
+genuinely sent. Private keys, connection strings and other multi-line secrets are not covered:
+they are a different transport case from a single-line token, not a missing regex.
+
+| Verdict | Exit | What it means for you |
+| :--- | ---: | :--- |
+| `CLEAN` | `0` | Every check passed and the run was attributable to your gateway. |
+| `LEAK` | `1` | Raw test values were observed upstream. |
+| `CHECK FAILED` | `1` | A required behavior check failed without an observed upstream leak. |
+| `NOT MEASURED` | `2` | Nothing reached the capture, or part of the traffic could not be inspected. **Never read this as a pass.** |
+
+`NOT MEASURED` is the one worth dwelling on. A gateway that answers your client normally but
+was never pointed at the capture inspects nothing, so every needle check passes vacuously.
+That is the result that would mislead someone into shipping, so it gets its own state and
+its own exit code rather than being folded into either of the others.
+`tests/conformance/test_selfcheck.py` fails the build if that ordering is ever reversed.
+
+### Running it in your own CI
+
+The [CI Action](./ci.mdx) handles controls, startup, summaries, artifacts and baseline comparisons. A short workflow example is in
+[`examples/ci/gateway-pii-check.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/examples/ci/gateway-pii-check.yml):
+it runs the floor first and fails unless every fixture type is detected, then checks your
+gateway and treats exit 2 as a failure rather than a pass.
+
+That job brings the gateway up inside the job, which is what lets it reach a capture on
+loopback. A deployment running elsewhere cannot, so it needs a capture it can actually
+reach - `--capture-host 0.0.0.0` behind your own tunnel, with `--capture-public-url` and a
+token from `CONFORMANCE_CAPTURE_TOKEN`. Exposing a capture server so production can reach
+it is a deliberate decision: the values it sends are synthetic, but the endpoint is real.
+
+The report `selfcheck` writes is **not publishable as a row about a product**: it records no
+vendor claim, so its `outcome` derives to `claim-unstated` by design. The operator verdict
+and the publishable outcome are separate fields answering separate questions, and a run can
+legitimately be `LEAK` for you and `claim-unstated` for a table.
+
+### Publishing a comparative row instead
+
+To publish a result about a named product, use the flat command and record the claim. Those
+flags are what stop a published table saying "Fail" about a product that never offered
+redaction.
+
+
+```bash
+# Request path: does your gateway send raw values to its upstream?
+pii-leak-benchmark --target-base-url http://your-gateway.internal/v1 \
+  --target-name your-gateway --target-version 1.2.3 \
+  --redaction-claimed claimed --redaction-claim-citation https://vendor.example/docs \
+  --redaction-enabled --redaction-config-reference "guardrail: pii-redact"
+
+# Response path: does it strip values the model emits, including split ones?
+PYTHONPATH=pii-leak-benchmark python -m pii_leak_benchmark.v2_emitter --validate \
+  --only my-gateway --gateway-url http://your-gateway.internal/v1/chat/completions \
+  --upstream-port 8799 --out ./my-gateway
+```
+
+**One constraint, and it is the whole operational story.** Your gateway must already be
+configured to send its upstream traffic to the capture this command starts. The harness
+never reconfigures your gateway - that is deliberate, because a harness that could
+reconfigure the thing it measures could also configure it to pass. A run whose traffic never
+reaches the capture reports `inconclusive`, not `pass`, because the harness cannot
+distinguish "never configured" from "sent it somewhere else".
+
+For a hosted or production gateway that cannot reach your laptop, bind the capture behind
+your own tunnel with `--capture-public-url` and `--capture-token`; put credentials in
+`CONFORMANCE_CAPTURE_TOKEN` and `CONFORMANCE_TARGET_API_KEY` rather than argv, which is
+visible in process listings. See the
+[hosted-gateway runbook](./hosted-gateway-runbook.md).
+
+Establish the floor first. The negative control has no gateway at all and **must** report
+`outcome=fail`; if it does not, your capture is not seeing traffic and no other row from
+that setup means anything:
+
+```bash
+pii-leak-benchmark --target-base-url capture://self \
+  --target-name raw-pass-through-negative-control --target-version 1 \
+  --redaction-claimed claimed \
+  --redaction-claim-citation https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/reproducing.md \
+  --redaction-enabled \
+  --redaction-config-reference "synthetic control: declared redaction intentionally absent"
+```
+
+Exit status is `0` when every check passed, `1` when one did not, and `2` when the run
+itself could not be trusted - an unreachable capture, or something already listening on its
+port. Treat `2` as "no measurement", never as a pass.
+
+## Explanation
+
+Everything below is context. None of it is needed to run the steps.
+
+### What is actually running
+
+There **is** a gateway, and the corpus does flow through it over real HTTP. What you are
+not installing is a *third-party* gateway: the harness starts its own small reference one,
+so the experiment can change a single field of its behaviour and hold everything else fixed.
+
+1. **The client** sends a request carrying fake personal data, then inspects what comes back.
+2. **The gateway** (`_make_gateway` in `v2_emitter.py`) masks the values, remembers them in a
+   vault, and forwards the masked request. On the way back it applies its **response-path
+   policy** to every streamed event: strip values the user never sent, restore the ones they
+   did.
+3. **The capture server** stands in for the model provider. It records exactly what the
+   gateway forwarded, which is how a request-path leak is measured, then streams back a reply.
+
+That reply is built to be a trap. One segment echoes the user's own data, which the gateway
+must put *back*. Another injects data the user never sent, which the gateway must take
+*out* - and the harness deliberately cuts those injected values across two SSE events.
+
+The cut is the whole experiment. The two policies are two settings of one field on that
+gateway:
+
+- **`chunk-local`** inspects each streamed event on its own and forgets it, so a value split
+  across the boundary is invisible to it.
+- **`bounded-retention`** carries a bounded number of trailing characters into the next
+  event, so both halves are still one string when inspected.
+
+Same gateway, same corpus, same masking, same vault, same everything else. One field
+different, which is what licenses attributing the difference to fragmentation.
+
+Testing a real product swaps only the middle box for LiteLLM, Portkey or your own proxy and
+leaves the client, the capture server, the corpus and the cuts untouched. That is what makes
+those rows comparable with these. A measuring instrument that needed the product installed
+to run at all would not be neutral, so `pii-leak-benchmark` is a separate distribution
+forbidden from importing the proxy, and a test fails the build if that ever changes.
+
+### What the four numbers mean
+
+- **Fidelity** - the fraction of echo iterations where the client received the value it
+  was supposed to receive. It says the policy did not break the stream.
+- **Leak, single chunk** - the leak rate over the 16 cases where the protected value
+  arrives whole, in one chunk. This is the baseline arm.
+- **Leak, fragmented** - the leak rate over the 16 paired cases where the same value is
+  split. This is the treatment arm.
+- **DeltaFrag** - fragmented minus single-chunk. Zero means splitting the value changed
+  nothing. A positive number is the share of values that a split made invisible to the
+  inspector.
+
+The two arms are paired case by case, so DeltaFrag is a within-corpus difference, not a
+comparison of two populations.
+
+### Why `chunk-local` reports `fail` even though it detects most values
+
+`fail` has one narrow meaning across this lab: a protected test value reached the capture
+server unmasked. `chunk-local` catches 14 of the 16 values that arrive whole (`0.125`
+leaked) and catches none of the 16 that are split (`1.00` leaked). DeltaFrag `0.875` is
+the whole result: 14 of 16 paired values became invisible to an otherwise working
+detector purely because of where the chunk boundary fell.
+
+`bounded-retention` leaks the same `0.125` in both arms, so its DeltaFrag is `0.00`.
+Splitting the value stopped mattering. It still reports `fail` because that residual
+`0.125` is a real leak, and the per-axis breakdown in the report says where: every
+remaining leak is in the percent-encoded cases (`metrics.by_axis.encoding`: `plain` 0 of
+22, `percent` 4 of 10). Neither policy decodes before matching. Retention fixed the
+fragmentation problem and did not fix the encoding problem; these are separate axes and
+the report keeps them separate. A third reference policy,
+`retention-plus-decoding`, does both and is the only one of the five that reaches
+`0.00` in every arm.
+
+### What the script checks, beyond the four numbers
+
+It does a full recursive comparison of your report against the published one, every field,
+and fails on any difference outside an explicit eleven-entry ignore list. Those eleven
+record when, where and how fast the run happened: the timestamp, your OS and Python
+version, wall-clock latency statistics, and the ephemeral loopback port the capture server
+bound to. Everything else - every rate, every digest, every per-axis marginal, the case
+inventory, the outcome - must match exactly.
+
+Your `environment` block is expected to differ from the published one. That is the report
+recording your machine, which is the point of an independent run.
+
+`tests/conformance/test_reproduce_fragmentation.py` pins that ignore list by exact set
+equality, so it cannot quietly grow to cover a real field.
+
+### Where the published numbers come from
+
+`benchmarks/results/v2-response-split/chunk-local.json` and `bounded-retention.json`,
+produced on 2026-09-09 at seed `a1b2c3d4e5f60001` under the midpoint partition oracle.
+Both files are byte-identical to the copies under the `v2-evidence-round-8` tag
+(commit `6cbfee3`), which is the evidence anchor every published number cites.
+
+### This runs in CI too
+
+The `fragmentation-reproduction` job in
+[`.github/workflows/benchmark.yml`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/.github/workflows/benchmark.yml)
+runs exactly the command in step 3 on Ubuntu, macOS and Windows, on Python 3.11 and 3.12,
+and uploads the regenerated reports.
+
+All six reproduced at commit `46f4c6d`
+([run 34897865803](https://github.com/ninadphalak/LLM-Shield-Proxy/actions/runs/34897865803)).
+Each job's regenerated reports are downloadable from that run, so you can diff your files
+against a machine that is not the author's before reporting anything.
+
+If your machine disagrees with all six of those, that is worth knowing and is exactly what
+item 4 above is asking for.
+
+### What a green Track 1 run proves, and what it does not
+
+Running Track 1 in your own CI raises the claim from *the author says the numbers reproduce*
+to *the numbers reproduce on infrastructure the author does not control*. Concretely, a
+green run in your fork shows that the published JSON in this repository is what this code
+produces, that the result does not depend on hidden machine state, and that nothing
+reaches the network to fetch an answer.
+
+What it does **not** show is that the effect exists outside this repository. Both Track 1
+policies were written here, and `chunk-local` was written to be boundary-blind. That is
+Track 2's job, and no amount of green in Track 1 substitutes for it.
+
+It does not show that the instrument is honest. The corpus, the two policies and the leak
+inspector all live in this repository and were all written by the same person who
+published the numbers. A rigged inspector would reproduce perfectly on six runners.
+
+The part that needs a human reading the code rather than a green check is small, and it is
+worth naming exactly:
+
+All four are in `pii-leak-benchmark/pii_leak_benchmark/v2_emitter.py`. Search the file for
+the name in the second column; line numbers move as the file changes.
+
+| What to read | Search for |
+| :--- | :--- |
+| The chunk-local policy | `class ChunkLocal` |
+| The retaining policy, including its boundary rule | `class Retaining` and its `def _cut` |
+| What both share, so the only difference is retention | `def _redact_then_rehydrate` and `class Policy` |
+| How a leak is decided and tiered | `def _leak_tier` |
+
+Those four are the whole argument. If the two policies differ anywhere except retention,
+the comparison is not measuring what it claims to measure, and that is a finding worth
+reporting.
+
+### What these experiments do not establish
+
+- **Track 1 is not a measurement of any product.** Both policies are reference inspectors
+  written by this project. It calibrates the instrument; it is not evidence about software
+  anyone ships.
+- **Track 2 is not a defect report or a ranking.** It measures a real detector inside a
+  wrapper written here. Presidio makes no streaming claim, and the integration pattern under
+  test is the integrator's choice, not the detector's.
+- It is 32 cases in four entity types and two encodings. It does not measure detector
+  accuracy on real traffic.
+- The fragmentation is a two-part split at the value midpoint by default, not every possible
+  split point. `--exhaustive-splits` and the union oracle are separate, longer runs.
+- Reproducing Track 1's numbers says the instrument is deterministic and the published files
+  are what the code produces. It does not independently validate the method. Disagreeing
+  with the method is a separate and welcome contribution.
+
+## Related
+
+- [Reproduce the conformance report](./reproducing.md) - the v1.0.0 local and HTTP profiles.
+- [Published results](./results.md)
+- [Submit a run](./submitting.md)
+
+Use a fresh output directory. The checker rejects existing artifacts and destinations inside
+published evidence. The historical `bounded-retention` name stays for compatibility, but its
+whitespace-based buffer has no general hard cap for arbitrarily long text without spaces.
+The calibration does not establish production memory bounds or repeatable timing.

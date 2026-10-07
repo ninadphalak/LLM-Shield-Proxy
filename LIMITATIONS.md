@@ -56,6 +56,11 @@ reports may add narrower constraints; none should imply a broader assurance than
 
 - Rehydration covers registered substitutions that survive in the inspected response path.
   Paraphrased, truncated, normalized, encoded, or omitted values may not match.
+- Identifiers embedded in a URL are redacted like any other span, so a link carrying an email or a
+  card-length digit run reaches the provider with that segment replaced. The end user still sees the
+  original link once the response is rehydrated, but a model asked to act on the URL -- a tool call
+  that fetches it -- sees the replaced form. There is no URL entity type: hostnames and ordinary path
+  segments are never rewritten.
 - AST mutation preserves valid JSON for supported values, but it can change schema types for some
   array leaves. Schema rewriting does not force a model or provider to echo context fields.
 - Provider adapters cover documented subsets. Tool calls, structured output, multimodal blocks,

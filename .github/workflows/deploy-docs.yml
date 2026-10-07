@@ -16,10 +16,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 20
           cache: npm
@@ -31,12 +31,16 @@ jobs:
           npm ci
 
       - name: Build Docusaurus
+        env:
+          # Absent on forks and in pull requests, where the build simply emits no
+          # analytics beacon. See the `scripts` block in docusaurus.config.ts.
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
         run: |
           cd website
           npm run build
 
       - name: Deploy to Firebase Hosting
-        uses: w9jds/firebase-action@master
+        uses: w9jds/firebase-action@35d0fd9b92b2c66dcd13f1b72dacc588e89e7567 # master, pinned 2026-09-12
         with:
           args: deploy --only hosting
         env:

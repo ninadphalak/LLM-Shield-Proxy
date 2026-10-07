@@ -84,7 +84,7 @@ gateway and configuration. LLM-Shield-Proxy currently has one run from this proj
 so its result is `unreplicated`.
 
 Maintainer runs do not count toward replication. Conflicting runs appear as separate rows instead
-of being averaged. [Submitting a result](./submitting) lists the required files and review steps.
+of being averaged. [Submitting a result](./submitting.md) lists the required files and review steps.
 
 ## No certification program yet
 

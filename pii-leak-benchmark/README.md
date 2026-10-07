@@ -4,10 +4,50 @@
 
 ```bash
 pip install pii-leak-benchmark
-pii-leak-benchmark --target-base-url http://127.0.0.1:8899/v1
+pii-leak-benchmark selfcheck --target-base-url http://127.0.0.1:8899/v1
 ```
 
+It prints `CLEAN`, `LEAK`, `CHECK FAILED` or `NOT MEASURED`, one row per data type it sent,
+and what each row means. Add `--target-api-key` if your gateway wants a key. Nothing running
+yet? `--target-base-url capture://self` is a direct connection with no gateway in it, so it
+shows what a leak looks like. The flat command further down records a vendor's claim and
+writes the report a published row needs; start with `selfcheck`.
+
 Standard library plus `httpx`. You should not have to install one gateway to measure another.
+
+## A gateway check in your pull request
+
+Use the [GitHub Action and regression guide](https://llmshieldproxy.com/docs/conformance/ci).
+The Action starts your test gateway when given a startup command, checks the capture with
+a negative control, and writes a job summary with results for each tested data type.
+It saves reports even when the check fails. An optional baseline shows new failures and fixes.
+
+```yaml
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.6.0
+  with:
+    target-base-url: http://127.0.0.1:4000/v1
+    start-command: ./scripts/start-test-gateway.sh
+    upstream-env: UPSTREAM_BASE_URL
+```
+
+Provide your gateway's startup script and upstream environment variable once. Run it in the
+foreground and configure its redaction policy in your project. Choose `duty: anonymize` for
+intentional one-way masking; the default is `restore`. `CHECK FAILED` identifies behavior
+failures without an observed leak. `NOT MEASURED` identifies incomplete runs. Both fail CI.
+
+Run the same check locally:
+
+```bash
+pip install "pii-leak-benchmark>=0.3.0"
+pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --out pii-check
+```
+
+To pin the source rather than the package, install
+`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.6.0#subdirectory=pii-leak-benchmark`.
+
+The local command expects upstream routing to `http://127.0.0.1:8765/v1`. It writes a Markdown
+summary, raw measurements and a versioned operator report. These smoke checks are separate
+from the paper's response-injection and fragmentation experiments.
 
 ## What changed after the first benchmark run
 
@@ -40,6 +80,84 @@ You configure the gateway to use the benchmark's capture server as its model pro
 | `client_observed_latency` | an iteration did not complete |
 
 If the capture cannot safely inspect part of a request, such as an unsupported protocol or malformed header line, the run ends with an error instead of assuming that no value leaked. The repository records ten rounds of tests against bypass attempts.
+
+## The v2 response-split profile
+
+The package also ships `pii_leak_benchmark.v2_emitter`, which measures the **response** path
+against the draft `spec/v2.0.0`. The checks above ask what the gateway sent upstream. The v2
+profile asks what it sends back, and it asks two things that pull in opposite directions:
+
+- the **echo** segment replays the prompt, so a masking gateway must put the caller's own
+  values **back in** -- `FidelityRate`;
+- the **injection** segment carries values that were never in the prompt, fragmented across
+  SSE events, so the gateway must **take them out** -- `LeakRate`, and
+  `DeltaFrag = LeakRate(adversarial) - LeakRate(single_chunk)`.
+
+**No single global policy satisfies both.** Forward everything and the injection half fails;
+redact everything and the echo half fails. `DeltaFrag` is the headline number because a
+gateway can score perfectly when values arrive whole and still leak when the transport
+splits them, and only the gap between the two shows it.
+
+The profile is the `pii-leak-benchmark-v2` command (`python -m pii_leak_benchmark.v2_emitter`
+is the same parser and the same run). It works from any directory: `--validate` checks
+each report against the v2 schema bundled with the package, and `--json-out` writes one
+summary row per policy with the seed, the four rates, the case counts, the outcome and
+the instrument digests, never the report and never the gateway address.
+
+```bash
+# the five reference policies, no containers, no credentials
+pii-leak-benchmark-v2 --validate --out ./benchmark-output/v2 \
+  --only passthrough,redact-all,chunk-local,bounded-retention,retention-plus-decoding
+
+# a real gateway you are already running, configured to use the capture as its upstream
+pii-leak-benchmark-v2 --validate --out ./benchmark-output/my-gateway \
+  --only my-gateway --gateway-url http://127.0.0.1:4000/v1/chat/completions --upstream-port 8799 \
+  --seed a1b2c3d4e5f60001 --json-out ./benchmark-output/my-gateway/summary.json
+```
+
+The gateway has to be scanning replies for this profile to pass. LLM-Shield-Proxy does not by
+default: start it with `ENABLE_RESPONSE_PII_REDACTION=true` (the README trial's command leaves
+it off, so that proxy reports a leak here while its request path stays clean).
+
+`--seed` reproduces the fixture selection, which is how a published row's seeds are
+replayed; `--only` picks the policies (or names the label for an external gateway); `--out`
+is required and is where `<policy>.json` lands. `--validate` needs the `validate` extra
+(`pip install "pii-leak-benchmark[validate]"`); without it the command says so and stops.
+A gateway that wants a key reads it from `CONFORMANCE_TARGET_API_KEY`, the same variable the
+other commands use (`V2_GATEWAY_TOKEN` still works). A run that scores no case prints the
+reason under its row: the HTTP status the gateway answered with, or that nothing reached the
+capture. To replay a published results-wall row with
+the gateway, its detector and this harness all in containers, use a replication pack under
+[`benchmarks/replication/`](https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/benchmarks/replication).
+
+**Cut at every internal split point, not just the midpoint.** By default an adversarial case
+cuts its value once, in the middle. That is one sample, and for a detector that scores a
+fragment on what it looks like it is a weak one: `--exhaustive-splits` cuts at every internal
+offset and fails the case if any split leaks. Measured against a live Presidio, it moved
+`LeakRate(adversarial)` from 0.50 to 1.00. Use it before quoting a `DeltaFrag` from any
+context-scored or validating detector.
+
+**Partial emission is scored separately, as its own tier.** `LeakRate` counts a case as
+leaked only when the complete injected value can be recovered from the response. A gateway
+that forwards the first fragment of a value and masks the rest once it recognises the join
+(`user@exa`, then `[REDACTED]`) passes that check, although the client already has part of
+the value. `--partial-emission` runs a second pass with the same seed, corpus and partitions
+and writes `<name>.partial-emission.json` beside each report, under its own schema id
+(`llm-shield.partial-emission/v1.0.0`) and its own instrument digest:
+
+- for the in-process reference policies it applies the exact test: the policy's output for
+  the whole stream must be byte-identical to its output chunk by chunk;
+- for a gateway reached with `--gateway-url` it looks for a contiguous run of the injected
+  value, not supplied by the client, of at least `MIN_SPECIFIC_RUN` characters. The
+  threshold and how it was measured are documented in
+  `pii_leak_benchmark/partial_emission.py`, and `benchmarks/partial_emission_threshold.py` in
+  the repository reproduces the measurement.
+
+The tier is `partial-emission`, ranked after `cross-field-join` so it can be discounted on its
+own. It never changes `LeakRate`, `DeltaFrag`, `outcome` or the v2 report's
+`inspector_sha256`, and rows already published were scored without it and are not re-scored.
+
+`spec/v2.0.0` is a **draft** and is amended in place; `spec/v1.0.0` is frozen.
 
 ## A measurement is not a verdict
 
@@ -82,7 +200,7 @@ pii-leak-benchmark \
 
 Exit code is `0` when all checks passed, `1` when they did not, and `2` when the run itself could not be trusted. For example, it returns `2` if the capture was unreachable or something else was already listening on its port.
 
-Hosted gateways are measurable too, by binding the capture behind your own tunnel and passing `--capture-public-url` with a `--capture-token` (env `CONFORMANCE_CAPTURE_TOKEN`; argv is visible in process listings). See the [hosted-gateway runbook](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/hosted-gateway-runbook.md). This project does not operate a shared capture service; each operator controls the capture endpoint used for their run.
+Hosted gateways are measurable too, by binding the capture behind your own tunnel and passing `--capture-public-url`. Put credentials in `CONFORMANCE_CAPTURE_TOKEN` and `CONFORMANCE_TARGET_API_KEY`; put credential-bearing extra headers in newline-delimited `CONFORMANCE_TARGET_HEADERS`. The corresponding flags remain available, but argv is visible in process listings. See the [hosted-gateway runbook](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/hosted-gateway-runbook.md). This project does not operate a shared capture service; each operator controls the capture endpoint used for their run.
 
 ## Submitting a result
 
@@ -90,7 +208,7 @@ Every product result currently has one run from this project's maintainer. A res
 
 A submission needs both the exact configuration and the JSON report produced by the run. See [submitting](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/website/docs/conformance/submitting.md).
 
-To check a report before you send it, install `pii-leak-benchmark[validate]` and validate it against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json). The schema is published in the repository rather than bundled here, so there is exactly one copy. It re-derives `outcome` in both directions, so a hand-edited report fails validation.
+To check a report before you send it, install `pii-leak-benchmark[validate]` and validate it against [`http-profile.schema.json`](https://github.com/ninadphalak/LLM-Shield-Proxy/blob/main/spec/v1.0.0/http-profile.schema.json). The v1 schema is published in the repository rather than bundled here, so there is exactly one copy. It re-derives `outcome` in both directions, so a hand-edited report fails validation. The v2 schema is bundled so `pii-leak-benchmark-v2 --validate` works anywhere; a test pins the bundled copy to `spec/v2.0.0` byte for byte.
 
 ## Relationship to LLM-Shield-Proxy
 

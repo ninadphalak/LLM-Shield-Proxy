@@ -13,6 +13,7 @@ import inspect
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import orjson
@@ -26,12 +27,42 @@ from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.security.egress_guard import (
     EgressPolicyViolationError,
     PinnedTarget,
+    evaluate_url,
+    find_urls,
     resolve_pinned_target,
     scan_arguments,
 )
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, build_policy_resolver
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_url_for_audit(url: str) -> str:
+    """Reduce a URL to scheme and authority for the signed audit chain.
+
+    The PATH goes too, not just the query, fragment and userinfo. A blocked `tools/call`
+    URL is attacker-shaped and identifiers sit in paths as readily as in query params --
+    `https://x.test/customer/123-45-6789` would otherwise be written verbatim into a
+    tamper-evident record that is meant to contain no raw request content. Nothing is
+    lost for forensics: the audit entry already carries `blocked_host`, `resolved_ip` and
+    `matched_rule` as their own fields.
+
+    Fails soft, and that is the point: this runs INSIDE the egress-violation handler, so
+    an exception here would replace a security rejection with a 500 and lose the audit
+    event entirely. `urlsplit(...).port` raises ValueError on a malformed or out-of-range
+    port, which an attacker controls, so a URL that cannot be parsed is recorded as
+    unparseable rather than allowed to abort the denial.
+    """
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname or ""
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        if parsed.port is not None:
+            host += f":{parsed.port}"
+        return urlunsplit((parsed.scheme, host, "", "", ""))
+    except ValueError:
+        return "<unparseable-url>"
+
 
 mcp_router = APIRouter()
 
@@ -227,9 +258,16 @@ async def _process_single_call(
     if method not in SUPPORTED_METHODS:
         return _jsonrpc_error(req_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}") if has_id else None
 
-    # Fail-Closed Gate: tool authorization is checked BEFORE any upstream routing or sanitization work.
+    # Fail-Closed Gate: tool authorization is checked BEFORE any upstream routing,
+    # sanitization, or attacker-controlled DNS resolution.
+    #
+    # The ordering is the point. When the egress scan below sat above this block, a
+    # caller whose role forbids the tool could still make the gateway resolve any
+    # hostname it put in `params`: an outbound DNS probe performed on behalf of someone
+    # not authorised to call anything. Resolution is attacker-directed work, so it
+    # happens only once the caller has been allowed to make the call at all.
+    tool_name = params.get("name") if method == "tools/call" else None
     if method == "tools/call":
-        tool_name = params.get("name")
         if not tool_name or _is_tool_forbidden(tool_name, allowed, blocked):
             AuditLogger.log_security_event(
                 event_type="mcp_tool_forbidden",
@@ -239,37 +277,44 @@ async def _process_single_call(
             )
             return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Tool forbidden for active role") if has_id else None
 
-        # SSRF / DNS-Rebinding Gate: every http(s) URL found anywhere in the raw (pre-sanitization)
-        # arguments is resolved and checked against the active egress policy before any upstream
-        # routing. Runs on the raw arguments, not the PII-sanitized copy below, so the host actually
-        # being evaluated is the one an upstream tool would actually receive.
-        try:
-            await scan_arguments(params.get("arguments", {}), egress_policy)
-        except EgressPolicyViolationError as exc:
-            AuditLogger.log_security_event(
-                event_type="mcp_egress_policy_violation",
-                severity="CRITICAL",
-                details={
-                    "reason": exc.reason,
-                    "tool_name": tool_name,
-                    "method": method,
-                    "blocked_url": exc.url,
-                    "blocked_host": exc.host,
-                    "resolved_ip": exc.matched_ip,
-                    "matched_rule": exc.matched_rule,
-                    "applied_role_name": egress_policy.get("role_name", virtual_key),
-                },
-                virtual_key_id=virtual_key,
+    # SSRF / DNS-rebinding gate, for EVERY supported method rather than only
+    # `tools/call`. `resources/read` exists to fetch a URI, and it used to skip this
+    # gate entirely: a `resources/read` naming the cloud metadata endpoint was forwarded
+    # upstream unchecked. The scan also covers the whole of `params`, not just
+    # `params["arguments"]`, because a URL in a sibling field such as `_meta` reaches an
+    # upstream tool exactly as readily as one inside `arguments`.
+    #
+    # Scanning the whole of `params` subsumes `params["arguments"]`, so there is no
+    # second pass over the arguments. One used to follow this, purely so the audit
+    # record could name the tool; it resolved every argument URL a second time, which
+    # doubled outbound DNS on every allowed call. `tool_name` is in this record instead.
+    try:
+        await scan_arguments(params, egress_policy)
+    except EgressPolicyViolationError as exc:
+        AuditLogger.log_security_event(
+            event_type="mcp_egress_policy_violation",
+            severity="CRITICAL",
+            details={
+                "reason": exc.reason,
+                "tool_name": tool_name,
+                "method": method,
+                "blocked_url": _redact_url_for_audit(exc.url),
+                "blocked_host": exc.host,
+                "resolved_ip": exc.matched_ip,
+                "matched_rule": exc.matched_rule,
+                "applied_role_name": egress_policy.get("role_name", virtual_key),
+            },
+            virtual_key_id=virtual_key,
+        )
+        return (
+            _jsonrpc_error(
+                req_id,
+                JSONRPC_EGRESS_FORBIDDEN,
+                "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
             )
-            return (
-                _jsonrpc_error(
-                    req_id,
-                    JSONRPC_EGRESS_FORBIDDEN,
-                    "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
-                )
-                if has_id
-                else None
-            )
+            if has_id
+            else None
+        )
 
     if upstream is None:
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "No upstream MCP server configured") if has_id else None
@@ -288,6 +333,55 @@ async def _process_single_call(
             forward_params = await _sanitize_async(params, inbound_vault, active_profile)
     except ValueError:
         return _jsonrpc_error(req_id, JSONRPC_INVALID_REQUEST, "Payload nesting depth exceeded") if has_id else None
+
+    # SSRF Gate, second half: re-check anything sanitization INTRODUCED.
+    #
+    # The gate above deliberately ran on the raw arguments, on the reasoning that those
+    # are what an upstream tool receives. They are not. What goes upstream is the
+    # sanitized copy, and inbound sanitization uses `Vault(synthetic=True)`, which
+    # substitutes realistic look-alike values rather than bracketed markers. When PII
+    # sits inside a URL's authority the substitution rewrites the host:
+    #
+    #     checked   https://bob@example.com.attacker.example/x
+    #     forwarded https://jacksondaniel@example.net/x
+    #
+    # A different registrable domain, never resolved, never evaluated, handed to the
+    # upstream tool to dial. Both halves are needed: the raw check still catches a
+    # forbidden host that sanitization leaves alone.
+    #
+    # Only the DIFFERENCE is evaluated, so a payload sanitization did not rewrite -- the
+    # overwhelming majority -- costs no additional DNS at all.
+    try:
+        for introduced in set(find_urls(forward_params)) - set(find_urls(params)):
+            await evaluate_url(introduced, egress_policy)
+    except EgressPolicyViolationError as exc:
+        AuditLogger.log_security_event(
+            event_type="mcp_egress_policy_violation",
+            severity="CRITICAL",
+            details={
+                "reason": exc.reason,
+                "method": method,
+                # Names the half that caught it: this URL was not in the client's
+                # request, it was produced by redaction, so an operator reading the
+                # chain is not left hunting for a host the caller never sent.
+                "detected_in": "sanitized_payload",
+                "blocked_url": _redact_url_for_audit(exc.url),
+                "blocked_host": exc.host,
+                "resolved_ip": exc.matched_ip,
+                "matched_rule": exc.matched_rule,
+                "applied_role_name": egress_policy.get("role_name", virtual_key),
+            },
+            virtual_key_id=virtual_key,
+        )
+        return (
+            _jsonrpc_error(
+                req_id,
+                JSONRPC_EGRESS_FORBIDDEN,
+                "SSRF Policy Violation: Target IP/Host forbidden by egress policy",
+            )
+            if has_id
+            else None
+        )
 
     forward_payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": forward_params}
 
@@ -311,7 +405,7 @@ async def _process_single_call(
         AuditLogger.log_security_event(
             event_type="mcp_upstream_failure",
             severity="CRITICAL",
-            details={"reason": "MCP Upstream Unavailable", "error": str(exc), "method": method},
+            details={"reason": "MCP Upstream Unavailable", "error_type": type(exc).__name__, "method": method},
             virtual_key_id=virtual_key,
         )
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "Upstream MCP server unreachable") if has_id else None
@@ -402,7 +496,7 @@ async def mcp_gateway(
                 details={
                     "reason": exc.reason,
                     "method": "upstream_routing",
-                    "blocked_url": exc.url,
+                    "blocked_url": _redact_url_for_audit(exc.url),
                     "blocked_host": exc.host,
                     "resolved_ip": exc.matched_ip,
                     "matched_rule": exc.matched_rule,

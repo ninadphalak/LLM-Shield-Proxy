@@ -1,0 +1,18 @@
+---
+title: Which gateways leaked, and which did not
+sidebar_label: Results wall
+sidebar_position: 2
+description: LLM gateways measured with pii-leak-benchmark, with the exact version and configuration each result came from.
+image: /img/wall-social-card.png
+hide_table_of_contents: true
+---
+
+import ResultsWall from '@site/src/components/ResultsWall';
+
+# Can your LLM gateway pass?
+
+Every card below is one proxy, scored on three checks, with each configuration it was tested in and every run of it inside. Every leak on it is a bug someone can now fix. The reports behind each submitted run are kept in this repository, so a run stays checkable after GitHub deletes its CI files.
+
+**[How to read a card](#how-to-read-a-card)** · **[Test a proxy from your own fork](./source-ci.md)** · **[Submit a result](./add-your-result.mdx)**
+
+<ResultsWall />

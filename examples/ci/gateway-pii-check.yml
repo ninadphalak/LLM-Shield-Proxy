@@ -1,0 +1,23 @@
+# Set the gateway-specific inputs once; the Action manages measurement and reporting.
+name: Gateway privacy check
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Build/install your gateway before this step.
+      - uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.6.0
+        with:
+          target-base-url: http://127.0.0.1:4000/v1
+          start-command: ./scripts/start-test-gateway.sh
+          upstream-env: UPSTREAM_BASE_URL
+          duty: restore
+        # Optional gateway authentication:
+        # env:
+        #   CONFORMANCE_TARGET_API_KEY: ${{ secrets.TEST_GATEWAY_KEY }}

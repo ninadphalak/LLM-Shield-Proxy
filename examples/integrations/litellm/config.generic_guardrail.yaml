@@ -1,0 +1,51 @@
+# LiteLLM's built-in Generic Guardrail API, pointed at the LLM Shield shim.
+#
+# Nothing in LiteLLM is modified by this. `generic_guardrail_api` is a shipped
+# LiteLLM guardrail; the only thing on our side is the shim
+# (`litellm_guardrail_shim.py`), which speaks LiteLLM's contract and forwards to
+# the guard API LLM Shield already exposes.
+#
+# See GENERIC_GUARDRAIL_CONTRACT.md for the full contract and its open items.
+
+model_list:
+  - model_name: shield-demo
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+guardrails:
+  - guardrail_name: "llm-shield"
+    litellm_params:
+      guardrail: generic_guardrail_api
+      # Both modes on ONE entry: pre_call redacts the request, post_call restores
+      # the reply. pre_call alone redacts and returns placeholders to the caller.
+      mode: ["pre_call", "post_call"]
+      default_on: true
+      # Base URL only. LiteLLM appends /beta/litellm_basic_guardrail_api itself.
+      api_base: http://127.0.0.1:8100
+      # Sent to the shim as the x-api-key header, not as a bearer token.
+      api_key: os.environ/LLM_SHIELD_SHIM_KEY
+      # A redaction guardrail must not fail open: proceeding would send the
+      # provider exactly the data this guardrail exists to withhold.
+      unreachable_fallback: fail_closed
+
+      # ---------------------------------------------------------------------
+      # STREAMING: off here, and it must be turned on in BOTH places at once.
+      #
+      # LiteLLM's default (`block_only`) silently DROPS a rewriting guardrail's
+      # changes on the streaming path, so with it the end user sees placeholders.
+      # But setting `incremental_diff` alone is also wrong: the shim then sends no
+      # holdback, a placeholder split across two chunks reaches the client, and the
+      # stream fails closed on the next round with stream_transform_underflow.
+      #
+      # So set the three keys below AND export SHIM_STREAMING_REHYDRATION=true.
+      # The mapping is validated against the real rehydration buffer in
+      # tests/integrations/litellm/test_streaming_holdback.py.
+      #
+      # streaming_transform_mode: incremental_diff
+      # streaming_sampling_rate: 1            # default 5 samples every 5th chunk
+      # streaming_end_of_stream_only: false
+      # ---------------------------------------------------------------------

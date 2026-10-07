@@ -1,14 +1,16 @@
 """Unit tests for 3-Tier PII & Secret Detection Engine."""
 
 import base64
+import json
 import os
 import tempfile
 import time
 
+import pytest
 import yaml
 
-from llm_shield_proxy.core.config import settings
-from llm_shield_proxy.engines.pii_engine import PIIEngine, calculate_shannon_entropy
+from llm_shield_proxy.core.config import request_policy_ctx, settings
+from llm_shield_proxy.engines.pii_engine import PIIEngine, UnmappedBlobError, calculate_shannon_entropy
 from llm_shield_proxy.engines.vault import Vault
 
 
@@ -325,7 +327,13 @@ def test_dlp_redos_base64_obfuscation():
     redacted = engine.redact_text(malicious_prompt, vault)
     duration = time.perf_counter() - start_time
 
-    assert duration < 0.1, f"ReDoS detected! Execution took {duration} seconds"
+    # 1.0 s, not 0.1. Measured on this machine the call takes 0.044-0.047 s, so the
+    # old budget held 2.1x headroom -- inside the noise of a shared CI runner, which
+    # duly failed it at 0.214 s on a tree with no engine change. Catastrophic
+    # backtracking on this input runs for seconds to minutes, so a whole second still
+    # catches it and leaves 21x. A gate that cries wolf teaches you to ignore red,
+    # which is when a real one gets in.
+    assert duration < 1.0, f"ReDoS detected! Execution took {duration} seconds"
     # Oversized base64 blobs are deliberately skipped to prevent regex denial of service
     assert encoded_secret in redacted
 
@@ -403,3 +411,490 @@ def test_subword_boundary_safe_rehydration():
     assert "Maybe" in rehydrated
     assert "Sarahbe" not in rehydrated
     assert "check with Sarah tomorrow" in rehydrated
+
+
+def test_anthropic_system_block_list_is_redacted():
+    """A system prompt sent as content blocks must not reach the wire intact.
+
+    Anthropic accepts `system` as a bare string or a list of blocks. Only the
+    string form was redacted, so the block form left the value in the request
+    while the proxy reported redaction as enabled.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {"system": [{"type": "text", "text": "Contact jane.doe@example.com"}]}
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_responses_instructions_are_redacted():
+    """The Responses API carries caller text outside both `messages` and `input`."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {"instructions": "Contact jane.doe@example.com", "input": ""}
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_responses_input_items_are_redacted():
+    """`input` items hold text in `content`, and tool items hold it outside `content`.
+
+    Only bare strings in the `input` list were redacted, so every structured item
+    shape the Responses API sends went through untouched.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "input": [
+            {"role": "user", "content": "Contact jane.doe@example.com"},
+            {"role": "user", "content": [{"type": "input_text", "text": "Also jane.doe@example.com"}]},
+            {"type": "function_call", "name": "send", "arguments": '{"email": "jane.doe@example.com"}'},
+            {"type": "function_call_output", "call_id": "c1", "output": "sent to jane.doe@example.com"},
+        ]
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_non_text_blocks_and_unknown_items_survive_redaction():
+    """Redaction must not damage image blocks or item types it does not understand."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "system": [{"type": "text", "text": "Contact jane.doe@example.com"}, {"type": "image", "source": "s3://x"}],
+        "input": [{"type": "unknown_item", "opaque": 42}],
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert redacted["system"][1] == {"type": "image", "source": "s3://x"}
+    assert redacted["input"][0] == {"type": "unknown_item", "opaque": 42}
+
+
+def test_fields_outside_the_known_shapes_are_redacted():
+    """A passthrough proxy forwards every field, so every field has to be walked.
+
+    Measured against a capture server: `user`, `metadata`, `tools` descriptions,
+    `response_format` and unrecognised top-level fields all reached the provider
+    with the value intact while the proxy reported redaction as enabled.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "model": "gpt-4o",
+        "user": "jane.doe@example.com",
+        "notes": "unknown field jane.doe@example.com",
+        "metadata": {"user_email": "jane.doe@example.com", "nested": {"deep": "jane.doe@example.com"}},
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "send_mail", "description": "e.g. jane.doe@example.com"},
+            }
+        ],
+        "response_format": {"json_schema": {"schema": {"title": "for jane.doe@example.com"}}},
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_structural_values_survive_deep_redaction():
+    """Redacting structure breaks the request instead of protecting anyone.
+
+    A rewritten function name stops the call routing and a rewritten schema stops
+    it validating, so those keys are never touched.
+    """
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "model": "gpt-4o",
+        "tools": [{"type": "function", "function": {"name": "send_mail", "description": "hi"}}],
+        "response_format": {"type": "json_schema", "json_schema": {"schema": {"type": "object", "enum": ["a", "b"]}}},
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    assert redacted["model"] == "gpt-4o"
+    assert redacted["tools"][0]["type"] == "function"
+    assert redacted["response_format"]["json_schema"]["schema"]["type"] == "object"
+    assert redacted["response_format"]["json_schema"]["schema"]["enum"] == ["a", "b"]
+
+
+def test_blobs_are_forwarded_without_inspection():
+    """Scanning one base64 image costs more than the rest of the payload combined."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    blob = "data:image/png;base64," + base64.b64encode(b"x" * 200_000).decode()
+    payload = {"attachment": blob, "notes": "about jane.doe@example.com"}
+    redacted = engine.redact_payload(payload, vault)
+
+    assert redacted["attachment"] == blob
+    assert "jane.doe@example.com" not in redacted["notes"]
+
+
+def test_operators_can_protect_additional_keys():
+    """PAYLOAD_PROTECTED_KEYS is the escape hatch when a value must arrive verbatim."""
+    engine = PIIEngine()
+    original = settings.PAYLOAD_PROTECTED_KEYS
+    try:
+        settings.PAYLOAD_PROTECTED_KEYS = "notes"
+        protected = engine.redact_payload({"notes": "jane.doe@example.com"}, Vault())
+        assert protected["notes"] == "jane.doe@example.com"
+
+        settings.PAYLOAD_PROTECTED_KEYS = ""
+        walked = engine.redact_payload({"notes": "jane.doe@example.com"}, Vault())
+        assert walked["notes"] != "jane.doe@example.com"
+    finally:
+        settings.PAYLOAD_PROTECTED_KEYS = original
+
+
+def test_deep_redaction_can_be_turned_off():
+    """The switch exists to reproduce the old behaviour, not because it is safe."""
+    engine = PIIEngine()
+    original = settings.ENABLE_DEEP_PAYLOAD_REDACTION
+    try:
+        settings.ENABLE_DEEP_PAYLOAD_REDACTION = False
+        redacted = engine.redact_payload({"notes": "jane.doe@example.com"}, Vault())
+        assert redacted["notes"] == "jane.doe@example.com"
+    finally:
+        settings.ENABLE_DEEP_PAYLOAD_REDACTION = original
+
+
+def test_a_value_in_two_places_rehydrates_to_itself():
+    """The same value under a walked and a deep-walked field must share one token.
+
+    Minting a second token would make rehydration restore the placeholder rather
+    than the original.
+    """
+    engine = PIIEngine()
+    vault = Vault(synthetic=True)
+
+    payload = {
+        "messages": [{"role": "user", "content": "Email jane.doe@example.com"}],
+        "metadata": {"copy": "jane.doe@example.com"},
+    }
+    egress = json.dumps(engine.redact_payload(payload, vault))
+    assert "jane.doe@example.com" not in egress
+
+    restored = json.loads(vault.rehydrate(egress))
+    assert restored["messages"][0]["content"] == "Email jane.doe@example.com"
+    assert restored["metadata"]["copy"] == "jane.doe@example.com"
+
+
+def test_a_policy_can_claim_a_proprietary_field():
+    """JSON is schemaless, so a deployment's own fields cannot be known in advance.
+
+    A virtual key's policy naming a field is how an operator says the field is
+    theirs: deep redaction leaves it alone and stops paying to walk it.
+    """
+    engine = PIIEngine()
+    token = request_policy_ctx.set({"payload_skip_keys": ["internal_vision_blob"]})
+    try:
+        payload = {"internal_vision_blob": "B" * 20_000, "notes": "about jane.doe@example.com"}
+        redacted = engine.redact_payload(payload, Vault())
+
+        assert redacted["internal_vision_blob"] == "B" * 20_000
+        assert "jane.doe@example.com" not in redacted["notes"]
+    finally:
+        request_policy_ctx.reset(token)
+
+
+def test_unmapped_blob_policy_skip_forwards_silently():
+    engine = PIIEngine()
+    original = settings.UNMAPPED_BLOB_POLICY
+    try:
+        settings.UNMAPPED_BLOB_POLICY = "skip"
+        redacted = engine.redact_payload({"blob": "B" * 20_000}, Vault())
+        assert redacted["blob"] == "B" * 20_000
+    finally:
+        settings.UNMAPPED_BLOB_POLICY = original
+
+
+def test_unmapped_blob_policy_block_rejects_with_the_path():
+    """Block refuses to forward a field it could not inspect.
+
+    The path travels with the error so the operator can declare that field rather
+    than guess which one tripped.
+    """
+    engine = PIIEngine()
+    original = settings.UNMAPPED_BLOB_POLICY
+    try:
+        settings.UNMAPPED_BLOB_POLICY = "block"
+        with pytest.raises(UnmappedBlobError) as excinfo:
+            engine.redact_payload({"attachments": [{"data": "B" * 20_000}]}, Vault())
+
+        assert excinfo.value.json_path == "attachments[0].data"
+        assert excinfo.value.size_bytes == 20_000
+    finally:
+        settings.UNMAPPED_BLOB_POLICY = original
+
+
+def test_a_claimed_field_is_not_rejected_even_when_blocking():
+    """Declaring a field is what turns a rejection into a supported deployment."""
+    engine = PIIEngine()
+    original = settings.UNMAPPED_BLOB_POLICY
+    token = request_policy_ctx.set({"payload_skip_keys": ["internal_vision_blob"]})
+    try:
+        settings.UNMAPPED_BLOB_POLICY = "block"
+        redacted = engine.redact_payload({"internal_vision_blob": "B" * 20_000}, Vault())
+        assert redacted["internal_vision_blob"] == "B" * 20_000
+    finally:
+        settings.UNMAPPED_BLOB_POLICY = original
+        request_policy_ctx.reset(token)
+
+
+def test_the_ceiling_and_policy_are_per_virtual_key():
+    """One tenant can run on `block` while another is still onboarding.
+
+    Settings resolve through the request policy first, so a role naming either of
+    these overrides the global value for that key's traffic only.
+    """
+    engine = PIIEngine()
+    token = request_policy_ctx.set(
+        {"UNMAPPED_BLOB_POLICY": "block", "PAYLOAD_MAX_REDACT_STRING_LENGTH": 100}
+    )
+    try:
+        with pytest.raises(UnmappedBlobError) as excinfo:
+            engine.redact_payload({"blob": "B" * 200}, Vault())
+        assert excinfo.value.size_bytes == 200
+    finally:
+        request_policy_ctx.reset(token)
+
+    # The same payload is fine under the global defaults.
+    assert engine.redact_payload({"blob": "B" * 200}, Vault())["blob"] == "B" * 200
+
+
+def test_anthropic_tool_result_content_is_redacted():
+    """A tool_result nests its own content, as a string or as further blocks.
+
+    Only each block's `text` was being redacted, so a tool result carrying personal
+    data reached the provider intact.
+    """
+    engine = PIIEngine()
+
+    as_string = engine.redact_payload(
+        {"messages": [{"role": "user", "content": [{"type": "tool_result", "content": "found jane.doe@example.com"}]}]},
+        Vault(),
+    )
+    assert "jane.doe@example.com" not in json.dumps(as_string)
+
+    as_blocks = engine.redact_payload(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "content": [{"type": "text", "text": "found jane.doe@example.com"}]}
+                    ],
+                }
+            ]
+        },
+        Vault(),
+    )
+    assert "jane.doe@example.com" not in json.dumps(as_blocks)
+
+
+def test_nested_tool_results_past_the_bound_are_refused():
+    """Nesting is caller controlled, so the descent has to stop -- and where it stops,
+    the payload must not go out.
+
+    This test used to assert the opposite: that the value buried past the bound came
+    through in clear ("the walk followed the chain past its bound"). That forwarded
+    jane.doe@example.com to the provider unredacted. The refusal is the depth error the
+    API already turns into a 400.
+    """
+    engine = PIIEngine()
+
+    deep = {"type": "tool_result", "content": "jane.doe@example.com"}
+    for _ in range(200):
+        deep = {"type": "tool_result", "content": [deep]}
+
+    payload = {
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "shallow bob@example.com"}, deep]}]
+    }
+    with pytest.raises(ValueError, match="Maximum payload nesting depth exceeded"):
+        engine.redact_payload(payload, Vault())
+
+
+def test_realistic_tool_result_nesting_is_redacted_in_full():
+    """The bound sits far past real payloads, which nest one or two deep."""
+    engine = PIIEngine()
+
+    deep = {"type": "tool_result", "content": "jane.doe@example.com"}
+    for _ in range(3):
+        deep = {"type": "tool_result", "content": [deep]}
+
+    redacted = engine.redact_payload({"messages": [{"role": "user", "content": [deep]}]}, Vault())
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+
+
+def test_replayed_tool_use_input_is_redacted():
+    """An Anthropic tool_use block carries its arguments as a JSON object in `input`,
+    at any depth and under keys that may collide with protected ones."""
+    engine = PIIEngine()
+
+    tool_use = {
+        "type": "tool_use",
+        "id": "toolu_1",
+        "name": "send_mail",
+        "input": {"to": "jane.doe@example.com", "meta": {"type": "bob@example.com"}},
+    }
+    payload = {
+        "messages": [
+            {"role": "assistant", "content": [tool_use]},
+            {"role": "user", "content": [{"type": "tool_result", "content": [dict(tool_use, id="toolu_2")]}]},
+        ]
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "jane.doe@example.com" not in serialised
+    assert "bob@example.com" not in serialised, "a tool's own key named `type` is not a protected key"
+    assert redacted["messages"][0]["content"][0]["name"] == "send_mail"
+
+
+def test_responses_reasoning_summary_and_custom_tool_input_are_redacted():
+    engine = PIIEngine()
+
+    payload = {
+        "input": [
+            {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "asked about jane.doe@example.com"}]},
+            {"type": "custom_tool_call", "call_id": "c1", "name": "shell", "input": "mail bob@example.com"},
+        ]
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "jane.doe@example.com" not in serialised
+    assert "bob@example.com" not in serialised
+    assert redacted["input"][0]["id"] == "rs_1"
+
+
+@pytest.mark.parametrize("property_name", ["type", "format", "role", "index", "model"])
+def test_a_schema_property_named_like_a_protected_key_is_still_redacted(property_name):
+    """Protected keys matched by name at any depth, so a property *called* `type` was
+    skipped wholesale, description and all."""
+    engine = PIIEngine()
+
+    schema = {
+        "type": "object",
+        "properties": {property_name: {"type": "string", "description": "send to jane.doe@example.com"}},
+    }
+    payload = {"messages": [], "tools": [{"type": "function", "function": {"name": "f", "parameters": schema}}]}
+    redacted = engine.redact_payload(payload, Vault())
+
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+    walked = redacted["tools"][0]["function"]["parameters"]
+    assert walked["type"] == "object", "the `type` keyword itself is still protected"
+    assert walked["properties"][property_name]["type"] == "string"
+
+
+def test_enum_values_holding_pii_are_redacted_consistently():
+    """Skipping `enum` sent an email in an enum to the provider in clear. Tokenised,
+    the same value gets the same token wherever it appears, so the schema stays valid
+    and the model's use of it rehydrates."""
+    engine = PIIEngine()
+    vault = Vault()
+
+    payload = {
+        "messages": [{"role": "user", "content": "notify jane.doe@example.com"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "notify",
+                    "parameters": {"properties": {"to": {"type": "string", "enum": ["jane.doe@example.com", "ops"]}}},
+                },
+            }
+        ],
+    }
+    redacted = engine.redact_payload(payload, vault)
+
+    enum = redacted["tools"][0]["function"]["parameters"]["properties"]["to"]["enum"]
+    assert "jane.doe@example.com" not in json.dumps(redacted)
+    assert enum[1] == "ops"
+    assert enum[0] in redacted["messages"][0]["content"], "the enum and the prompt must share one token"
+
+
+@pytest.mark.parametrize("keyword", ["enum", "const", "examples", "default"])
+def test_structured_schema_values_are_redacted_under_any_key(keyword):
+    """`enum`, `const`, `examples` and `default` hold JSON data, not schema: a member like
+    `{"type": <email>}` must not have its `type` skipped as if it were a keyword."""
+    engine = PIIEngine()
+
+    member = {"type": "jane.doe@example.com", "format": "bob@example.com"}
+    value = [member] if keyword in ("enum", "examples") else member
+    payload = {
+        "messages": [],
+        "tools": [{"type": "function", "function": {"name": "f", "parameters": {"properties": {"to": {keyword: value}}}}}],
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "jane.doe@example.com" not in serialised
+    assert "bob@example.com" not in serialised
+
+
+@pytest.mark.parametrize("keyword", ["enum", "const", "examples", "default"])
+def test_operator_protected_keys_still_hold_inside_schema_data(keyword, monkeypatch):
+    """Only the built-in structural keys are dropped inside schema data. A key the operator
+    protected is a promise that its value goes out unchanged, wherever it sits."""
+    monkeypatch.setattr(settings, "PAYLOAD_PROTECTED_KEYS", "name")
+    engine = PIIEngine()
+
+    member = {"name": "jane.doe@example.com", "type": "bob@example.com"}
+    value = [member] if keyword in ("enum", "examples") else member
+    payload = {
+        "messages": [],
+        "tools": [{"type": "function", "function": {"name": "f", "parameters": {"properties": {"to": {keyword: value}}}}}],
+    }
+    redacted = engine.redact_payload(payload, Vault())
+    serialised = json.dumps(redacted)
+
+    assert "jane.doe@example.com" in serialised, "the operator-protected `name` must go out unchanged"
+    assert "bob@example.com" not in serialised, "the built-in `type` is only a field name here"
+
+
+def test_a_role_skip_key_that_is_also_built_in_still_holds_inside_schema_data():
+    """A role listing `type` in payload_skip_keys wants it through unchanged, even where
+    the built-in meaning of `type` does not apply."""
+    engine = PIIEngine()
+    payload = {
+        "messages": [],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "f", "parameters": {"properties": {"to": {"enum": [{"type": "jane.doe@example.com"}]}}}},
+            }
+        ],
+    }
+    token = request_policy_ctx.set({"payload_skip_keys": ["type"]})
+    try:
+        redacted = engine.redact_payload(payload, Vault())
+    finally:
+        request_policy_ctx.reset(token)
+
+    assert "jane.doe@example.com" in json.dumps(redacted)
+
+
+def test_non_text_blocks_survive_tool_result_handling():
+    """Image parts have no text and must come through untouched."""
+    engine = PIIEngine()
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": [{"type": "image", "source": {"url": "s3://bucket/x.png"}}]}
+        ]
+    }
+    redacted = engine.redact_payload(payload, Vault())
+
+    assert redacted["messages"][0]["content"][0]["source"]["url"] == "s3://bucket/x.png"

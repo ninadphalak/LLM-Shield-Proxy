@@ -153,21 +153,40 @@ def test_one_value_larger_than_coalescing_budget_is_returned_intact(monkeypatch)
 
 
 def test_repeated_token_amplification_fails_closed(monkeypatch):
-    """A small upstream line cannot multiply request data without a ceiling."""
+    """A small upstream line cannot multiply request data without a ceiling.
+
+    This asserted `== []`, i.e. that the abort emitted nothing whatsoever. Emptiness
+    was standing in for the property actually under test, which is that no rehydrated
+    request data escapes. A silent abort is its own defect: the response body just
+    stopped, with no terminator, and a client cannot tell that apart from a stalled
+    network. See `tests/test_stream_abort_terminates.py`.
+
+    So the assertion is now the property itself. The stream ends with a fixed-size
+    error event and a terminator, neither of which carries vault or request data, and
+    the total stays far below the ceiling.
+    """
     monkeypatch.setattr(streaming_module.settings, "MAX_SSE_LINE_LENGTH", 512)
     monkeypatch.setattr(streaming_module.settings, "MAX_PAYLOAD_SIZE_BYTES", 1024)
     monkeypatch.setattr(streaming_module.settings, "SHIELD_FAILURE_MODE", "FAIL_CLOSED")
 
     token = "[PERSON_1]"
-    vault = _mapped_vault(token, "A" * 700)
+    original = "A" * 700
+    vault = _mapped_vault(token, original)
     amplified = " ".join([token] * 3)
     raw = (
         "data: " + json.dumps({"choices": [{"delta": {"content": amplified}}]})
         + "\n\ndata: [DONE]\n\n"
     ).encode()
 
+    combined = b"".join(asyncio.run(_collect([raw], vault)))
+
+    # Not one character of the rehydrated value got out.
+    assert original.encode() not in combined
+    assert b"A" * 16 not in combined
+    assert b"shield_stream_aborted" in combined
+    assert combined.rstrip().endswith(b"data: [DONE]")
     # Absolute ceiling is request bound + accepted input line: 1536 bytes.
-    assert asyncio.run(_collect([raw], vault)) == []
+    assert len(combined) < 1536
 
 
 def test_cancellation_does_not_flush_partial_rehydration(monkeypatch):

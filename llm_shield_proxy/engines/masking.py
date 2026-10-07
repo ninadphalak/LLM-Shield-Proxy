@@ -49,6 +49,9 @@ class ScrubVault:
         self.type_counters[entity_type] = self.type_counters.get(entity_type, 0) + 1
         return "[REDACTED]"
 
+    # Nothing this vault mints is ever restored.
+    get_or_create_one_way_token = get_or_create_token
+
     def rehydrate(self, text: str, retention_length: int = 0) -> str:
         return text
 
@@ -66,6 +69,9 @@ class HmacVault:
             raise ValueError("SHIELD_WATERMARK_SECRET is required for HMAC vault")
         hashed = hmac.new(secret.encode("utf-8"), original_val.encode("utf-8"), hashlib.sha256).hexdigest()
         return f"[{entity_type}_{hashed}]"
+
+    # Nothing this vault mints is ever restored.
+    get_or_create_one_way_token = get_or_create_token
 
     def rehydrate(self, text: str, retention_length: int = 0) -> str:
         return text

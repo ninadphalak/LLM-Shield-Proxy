@@ -1,0 +1,10 @@
+LLM-Shield-Proxy
+Copyright 2026 Ninad Phalak
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE). Section 3 of
+that license grants every user of this code a patent license from each contributor for the
+contributor's patent claims that the contribution necessarily infringes.
+
+The author has filed U.S. provisional patent applications 64/126,730 and 64/139,263, related
+to streaming transformation and structured stateless masking. Pending applications are not
+issued patents.

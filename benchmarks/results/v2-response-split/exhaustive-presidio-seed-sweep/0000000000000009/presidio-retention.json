@@ -1,0 +1,1066 @@
+{
+ "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
+ "generated_at": "2026-09-09T15:48:25Z",
+ "profile": {
+  "name": "OpenAI-compatible HTTP gateway profile",
+  "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+ },
+ "implementation": {
+  "name": "reference-policy:presidio-retention",
+  "version": "0.2.1",
+  "labels_are_operator_supplied": true
+ },
+ "target": {
+  "base_url": "in-process loopback reference policy",
+  "model": "test",
+  "raw_pass_through_baseline": false
+ },
+ "harness_revision": "0.2.1",
+ "environment": {
+  "python": "3.14.7",
+  "implementation": "CPython",
+  "platform": "Windows-11-10.0.26200-SP0"
+ },
+ "capture": {
+  "mode": "loopback",
+  "bind_host": "127.0.0.1",
+  "port": 0,
+  "authentication_required": false,
+  "target_must_be_preconfigured_for": "the ephemeral loopback upstream started by this module",
+  "self_probe": {
+   "performed": true,
+   "url": "http://127.0.0.1:57435/v1/chat/completions",
+   "recorded": true,
+   "round_trip_ms": 32.5184
+  }
+ },
+ "checks": {
+  "configured_upstream_boundary": {
+   "passed": true,
+   "captured_requests": 252,
+   "correlated_requests": 252,
+   "uninspectable_requests": 0,
+   "uninspectable_reasons": [],
+   "leaked_entity_types": [],
+   "upstream_paths_observed": [
+    "/v1/chat/completions"
+   ],
+   "marker_words_required": 3,
+   "marker_words_total": 5,
+   "marker_words_observed_max": 0,
+   "payload_content_included": false,
+   "inspection_scope": "every request body this run's capture recorded, across all cases; bodies parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; strings reassembled in arrival order per JSON path, across captured requests, with decoded material held out of the ordered stream; bodies that do not parse as JSON scanned as raw text; base64/hex/percent-encoded runs and character-code arrays decoded; matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39; correlated by in-process capture identity rather than by marker words, so marker_words_observed_max is 0 by construction and is not a coverage signal",
+   "capture_mode": "loopback",
+   "correlation_mechanism": "in-process-capture",
+   "unattributed_requests": 0,
+   "unattributed_uninspectable_requests": 0,
+   "unattributed_leaked_entity_types": [],
+   "unattributed_leak_evidence": [],
+   "leak_evidence": [],
+   "needle_proximity": {},
+   "needle_lengths": {}
+  },
+  "fragmentation_safety": {
+   "passed": true,
+   "one_character_events_requested": true,
+   "events_observed": 5,
+   "events_observed_max": 6,
+   "data_events_observed": 4,
+   "coalescing_not_distinguished": false,
+   "upstream_data_events_emitted_total": 112,
+   "data_events_observed_total": 144,
+   "coalescing_rate": 0.0,
+   "coalescing_cases": 0,
+   "coalescing_cases_compared": 32,
+   "stream_failure": false,
+   "stream_failure_cases": 0,
+   "coalescing_per_case": [
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "EMAIL",
+      "fragmentation": "single_chunk",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "percent",
+      "entity": "EMAIL",
+      "fragmentation": "adversarial",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "plain",
+      "entity": "SSN",
+      "fragmentation": "single_chunk",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "SSN",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "single_chunk",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "percent",
+      "entity": "CARDPAN",
+      "fragmentation": "adversarial",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "USPHONE",
+      "fragmentation": "adversarial",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "EMAIL",
+      "fragmentation": "adversarial",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "EMAIL",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "SSN",
+      "fragmentation": "single_chunk",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "SSN",
+      "fragmentation": "single_chunk",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "single_chunk",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "single_chunk",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "single_chunk",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "EMAIL",
+      "fragmentation": "adversarial",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "percent",
+      "entity": "EMAIL",
+      "fragmentation": "single_chunk",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "plain",
+      "entity": "SSN",
+      "fragmentation": "adversarial",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "SSN",
+      "fragmentation": "single_chunk",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "adversarial",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "percent",
+      "entity": "CARDPAN",
+      "fragmentation": "single_chunk",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-json-field",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "USPHONE",
+      "fragmentation": "single_chunk",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "EMAIL",
+      "fragmentation": "single_chunk",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 3,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 4,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "percent",
+      "entity": "EMAIL",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "SSN",
+      "fragmentation": "adversarial",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "SSN",
+      "fragmentation": "adversarial",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "adversarial",
+      "request_site": "unrecognised-key"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "CARDPAN",
+      "fragmentation": "adversarial",
+      "request_site": "tool-description"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "adversarial",
+      "request_site": "chat-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    },
+    {
+     "case": {
+      "carrier": "sse-delta-content",
+      "encoding": "plain",
+      "entity": "USPHONE",
+      "fragmentation": "adversarial",
+      "request_site": "system-content"
+     },
+     "upstream_data_events_emitted": 4,
+     "upstream_responses_observed": 1,
+     "data_events_observed": 5,
+     "stream_failure": false,
+     "coalesced": false
+    }
+   ],
+   "response_reconstructed": true
+  },
+  "sse_validity": {
+   "passed": true,
+   "invalid_events": 0,
+   "done_markers_valid": true,
+   "content_type_valid": true,
+   "status_codes": [
+    200
+   ],
+   "errors": []
+  },
+  "response_fidelity": {
+   "passed": true,
+   "expected_value_reconstructed": true,
+   "iterations_matching": 128,
+   "iterations_completed": 128,
+   "iterations_requested": 128,
+   "payload_content_included": false,
+   "segment": "echo"
+  },
+  "response_injection_containment": {
+   "passed": false,
+   "segment": "injection",
+   "fragmentation_strategy": "exhaustive-2-part",
+   "injected_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN",
+    "USPHONE"
+   ],
+   "leaked_entity_types": [
+    "EMAIL"
+   ],
+   "leak_evidence": [
+    {
+     "entity_type": "EMAIL",
+     "observed": "single-field",
+     "cases_leaked": "4",
+     "weakest_tier_is_a_concatenation": "false"
+    }
+   ],
+   "needle_proximity": {},
+   "needle_lengths": {},
+   "delivery_confirmed": true,
+   "client_capture_inspectable": true,
+   "inspection_scope": "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; every string value reassembled in document order, so a value split between delta content and any other field is recovered; content and text members of one content subtree reassembled together, so a value split between a content string and a content list of parts is recovered; events that do not parse as JSON scanned as raw text; events carrying duplicate JSON object names also scanned as raw text, because parsing discards every value but the last; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
+   "payload_content_included": false
+  },
+  "segment_separation": {
+   "passed": true,
+   "echo_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN",
+    "USPHONE"
+   ],
+   "injection_entity_types": [
+    "CARDPAN",
+    "EMAIL",
+    "SSN",
+    "USPHONE"
+   ],
+   "values_disjoint": true,
+   "normalized_forms_disjoint": true,
+   "injection_absent_from_request": true,
+   "shared_substring_max": 12,
+   "shortest_needle_length": 9
+  },
+  "client_observed_latency": {
+   "passed": true,
+   "threshold_enforced": false,
+   "unit": "milliseconds",
+   "iterations": 252,
+   "iterations_measured": 252,
+   "mean": 89.5178,
+   "p50": 89.833,
+   "p95": 130.7616,
+   "p99": 149.4099
+  }
+ },
+ "passed": false,
+ "limitations": {
+  "run_validity": [
+   "Reference response-path policies, not products. No third-party gateway is measured here.",
+   "Loopback transport on a single machine; project-run and unreplicated."
+  ],
+  "method_limits": [
+   "32 cases: a pairwise covering array over the five axes, not exhaustive.",
+   "Every rate is over cases_applicable=32 of the 32 cases attempted; 0 were inconclusive and are excluded from the denominator rather than counted as no-leak.",
+   "4 entity, 2 encoding, 2 fragmentation, 2 carrier, 4 request_site.",
+   "Request sites are four shapes, not a survey of real client payloads.",
+   "Fragmentation is every internal two-part split of the value (236 internal adversarial partitions over 16 adversarial cases, plus 16 uncut single-chunk requests = 252 captured requests total); a case leaks if any enumerated partition leaks. Bounded to these corpus values and these partition families, not to arbitrary streams.",
+   "Latency is loopback and in-process; it is not gateway overhead on a network."
+  ]
+ },
+ "redaction_claim": {
+  "vendor_claims_pii_redaction": "claimed",
+  "claim_citation": "pii_leak_benchmark.v2_emitter policy docstrings",
+  "configured_for_this_run": true,
+  "configuration_reference": "POLICIES['presidio-retention']",
+  "recorded_by": "operator",
+  "request_path_redaction_configured": "unknown"
+ },
+ "outcome": "fail",
+ "outcome_rationale": "FidelityRate=1.0 over 32 echo-observable, LeakRate(single_chunk)=0.125 over 16, LeakRate(adversarial)=0.125 over 16, DeltaFrag=0.0, request-path leak=none. Rates are over cases_applicable=32 of 32 attempted (0 inconclusive, excluded from every denominator rather than counted as no-leak).",
+ "fixture": {
+  "varies_per_run": true,
+  "values_published": false,
+  "formats": {
+   "EMAIL": "local@example.com",
+   "SSN": "AAA-GG-SSSS",
+   "CARDPAN": "published test-range PAN"
+  },
+  "value_space_nominal": {
+   "EMAIL": 208827064576,
+   "SSN": 48995100,
+   "CARDPAN": 6,
+   "USPHONE": 80000
+  },
+  "specimens_are_valid": "Luhn and SSA-range constraints enforced by make_fixture",
+  "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only"
+ },
+ "corpus": {
+  "id": "minimal-response-split",
+  "version": "0.1.0",
+  "sha256": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+  "case_count": 32,
+  "seed": "0000000000000009",
+  "coverage": {
+   "strategy": "pairwise",
+   "axes": [
+    "carrier",
+    "encoding",
+    "entity",
+    "fragmentation",
+    "request_site"
+   ],
+   "pairs_required": 76,
+   "pairs_covered": 76,
+   "proof_complete": true
+  },
+  "values_published": false
+ },
+ "metrics": {
+  "leak_rate": {
+   "single_chunk": 0.125,
+   "adversarial": 0.125,
+   "overall": 0.125
+  },
+  "fidelity_rate": 1.0,
+  "delta_frag": 0.0,
+  "cases_by_condition": {
+   "single_chunk": 16,
+   "adversarial": 16
+  },
+  "cases_scored": 32,
+  "cases_echo_observable": 32,
+  "detector_blind_entities": [],
+  "cases_applicable": 32,
+  "cases_inconclusive": 0,
+  "derivation_recomputed": true,
+  "sidecar_case_count_matches": true,
+  "by_axis": {
+   "entity": {
+    "EMAIL": {
+     "leak_rate": 0.5,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 4
+    },
+    "SSN": {
+     "leak_rate": 0.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 0
+    },
+    "CARDPAN": {
+     "leak_rate": 0.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 0
+    },
+    "USPHONE": {
+     "leak_rate": 0.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 0
+    }
+   },
+   "encoding": {
+    "plain": {
+     "leak_rate": 0.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 22,
+     "echo_observable": 22,
+     "leaked": 0
+    },
+    "percent": {
+     "leak_rate": 0.4,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 10,
+     "echo_observable": 10,
+     "leaked": 4
+    }
+   },
+   "fragmentation": {
+    "single_chunk": {
+     "leak_rate": 0.125,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 2
+    },
+    "adversarial": {
+     "leak_rate": 0.125,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 16,
+     "echo_observable": 16,
+     "leaked": 2
+    }
+   },
+   "carrier": {
+    "sse-delta-content": {
+     "leak_rate": 0.0833,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 24,
+     "echo_observable": 24,
+     "leaked": 2
+    },
+    "sse-json-field": {
+     "leak_rate": 0.25,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 2
+    }
+   },
+   "request_site": {
+    "chat-content": {
+     "leak_rate": 0.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 0
+    },
+    "system-content": {
+     "leak_rate": 0.25,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 2
+    },
+    "unrecognised-key": {
+     "leak_rate": 0.0,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 0
+    },
+    "tool-description": {
+     "leak_rate": 0.25,
+     "detector_blind": false,
+     "fidelity_rate": 1.0,
+     "applicable": 8,
+     "echo_observable": 8,
+     "leaked": 2
+    }
+   }
+  },
+  "partition_oracle": {
+   "oracle": "exhaustive-2-part",
+   "resource_cap_per_case_per_family": 6000,
+   "families": {
+    "exhaustive-2-part": {
+     "cases_enumerated": 16,
+     "cases_leaked": 2,
+     "paired_single_chunk_cases": 16,
+     "leak_rate_adversarial": 0.125,
+     "leak_rate_single_chunk_paired": 0.125,
+     "delta_frag": 0.0,
+     "enumerated": true,
+     "partitions_attempted": 236,
+     "partitions_leaked": 42,
+     "cases_capped": 0,
+     "cases_value_too_short": 0
+    }
+   },
+   "worst_case": {
+    "cases_enumerated": 16,
+    "cases_leaked": 2,
+    "paired_single_chunk_cases": 16,
+    "leak_rate_adversarial": 0.125,
+    "leak_rate_single_chunk_paired": 0.125,
+    "delta_frag": 0.0,
+    "component_leak_rates_on_union_denominator": {
+     "exhaustive-2-part": 0.125
+    },
+    "never_below_components": true,
+    "definition": "case rate under the union of the enumerated partition families over the measured corpus values; NOT a worst case over arbitrary streams, values, interleavings, or partitions into more than three pieces",
+    "families_in_union": [
+     "exhaustive-2-part"
+    ],
+    "cases_excluded_by_cap": 0
+   },
+   "adversarial_partitions": 236,
+   "uncut_single_chunk_requests": 16,
+   "captured_requests_total": 252,
+   "partition_seconds_total": 52.4991,
+   "cases_inconclusive_by_cap": 0,
+   "cases_inconclusive_in_transport": 0,
+   "method_limit_sentence": "Fragmentation is every internal two-part split of the value (236 internal adversarial partitions over 16 adversarial cases, plus 16 uncut single-chunk requests = 252 captured requests total); a case leaks if any enumerated partition leaks. Bounded to these corpus values and these partition families, not to arbitrary streams."
+  },
+  "by_axis_arm": {
+   "entity": {
+    "EMAIL": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 2,
+      "leak_rate": 0.5
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "SSN": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "CARDPAN": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "USPHONE": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   },
+   "encoding": {
+    "plain": {
+     "single_chunk": {
+      "applicable": 11,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 11,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 11,
+     "delta_frag": 0.0
+    },
+    "percent": {
+     "single_chunk": {
+      "applicable": 5,
+      "leaked": 2,
+      "leak_rate": 0.4
+     },
+     "adversarial": {
+      "applicable": 5,
+      "leaked": 2,
+      "leak_rate": 0.4
+     },
+     "paired_cases": 5,
+     "delta_frag": 0.0
+    }
+   },
+   "carrier": {
+    "sse-delta-content": {
+     "single_chunk": {
+      "applicable": 12,
+      "leaked": 1,
+      "leak_rate": 0.0833
+     },
+     "adversarial": {
+      "applicable": 12,
+      "leaked": 1,
+      "leak_rate": 0.0833
+     },
+     "paired_cases": 12,
+     "delta_frag": 0.0
+    },
+    "sse-json-field": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 1,
+      "leak_rate": 0.25
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 1,
+      "leak_rate": 0.25
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   },
+   "request_site": {
+    "chat-content": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "system-content": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 1,
+      "leak_rate": 0.25
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 1,
+      "leak_rate": 0.25
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "unrecognised-key": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 0,
+      "leak_rate": 0.0
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    },
+    "tool-description": {
+     "single_chunk": {
+      "applicable": 4,
+      "leaked": 1,
+      "leak_rate": 0.25
+     },
+     "adversarial": {
+      "applicable": 4,
+      "leaked": 1,
+      "leak_rate": 0.25
+     },
+     "paired_cases": 4,
+     "delta_frag": 0.0
+    }
+   }
+  },
+  "discordance": {
+   "pairs_complete": 16,
+   "pairs_incomplete": 0,
+   "both_arms_leaked": 2,
+   "adversarial_only": 0,
+   "single_chunk_only": 0,
+   "neither_arm_leaked": 14,
+   "delta_frag_from_discordance": 0.0
+  }
+ },
+ "entity_scope": {
+  "mechanism": "reference-policy detector set",
+  "enabled": [
+   "EMAIL",
+   "SSN",
+   "CARDPAN",
+   "USPHONE"
+  ],
+  "not_enabled": [],
+  "unknown": [],
+  "partitions_corpus": true,
+  "recorded_by": "operator",
+  "source": "pii_leak_benchmark.v2_emitter._DETECTORS"
+ },
+ "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+ "instrument": {
+  "emitter_version": "0.2.1",
+  "client_scope_sha256": "c15a0522954fb64f",
+  "boundary_scope_sha256": "4a09ca6d088914e7",
+  "inspector_sha256": "94262e29a492ab6a"
+ }
+}

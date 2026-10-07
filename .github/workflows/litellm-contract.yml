@@ -1,0 +1,50 @@
+name: LiteLLM contract
+
+# The two interim LiteLLM wirings (examples/integrations/litellm/) against the newest LiteLLM
+# release on PyPI, unpinned on purpose. On 2026-10-06 LiteLLM had changed the type of one
+# response field and the shim's streaming replies were silently truncated; nothing in CI
+# could have seen it, because every other test stubs LiteLLM. This runs weekly and on every
+# change to the wirings, so an upstream change fails here before a user finds it.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "examples/integrations/litellm/**"
+      - "tests/integrations/litellm/**"
+      - ".github/workflows/litellm-contract.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "examples/integrations/litellm/**"
+      - "tests/integrations/litellm/**"
+      - ".github/workflows/litellm-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  litellm-contract:
+    name: LiteLLM contract (newest release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install the proxy's test environment and the newest LiteLLM
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" litellm
+          python -c "import importlib.metadata as m; print('litellm', m.version('litellm'))"
+
+      - name: Run the LiteLLM wiring tests against the installed release
+        run: python -m pytest tests/integrations/litellm -v -p no:cacheprovider

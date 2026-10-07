@@ -1,12 +1,12 @@
 """LLM-Shield Proxy application gateway.
 
-Transforms configured protected values before the selected upstream boundary and
-rehydrates supported values on the inspected response path.
+Redacts protected values from requests and rehydrates them in responses.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import random
 import sys
 import threading
@@ -21,17 +21,18 @@ import logging
 import re
 import socket
 import time
+import traceback
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Any, Coroutine, Dict, Optional, Set
+from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 import httpx
 import orjson
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from watchdog.events import FileSystemEventHandler
@@ -39,11 +40,12 @@ from watchdog.observers import Observer
 
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
 from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.api.guard_router import guard_router
 from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.api.mcp_router import mcp_router, warn_if_mcp_policy_is_empty_at_startup
 from llm_shield_proxy.api.webhook import webhook_router
 from llm_shield_proxy.core.config import request_policy_ctx, settings
-from llm_shield_proxy.engines.pii_engine import pii_engine
+from llm_shield_proxy.engines.pii_engine import UnmappedBlobError, pii_engine
 from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import (
     ASTDepthExceededException,
     StatelessASTVisitor,
@@ -67,11 +69,15 @@ from llm_shield_proxy.security.tool_rbac import (
     build_policy_resolver,
 )
 from llm_shield_proxy.security.watermark import generate_watermark_text
-from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+from llm_shield_proxy.streaming.streaming import (
+    json_escaped_vault,
+    redact_model_originated_tree,
+    rehydrate_sse_stream,
+)
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.3.7"
+APP_VERSION = "1.6.11"
 
 
 class AppState:
@@ -82,12 +88,7 @@ class AppState:
     background_tasks: Set[asyncio.Task] = set()
 
     def spawn_background_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
-        """Schedules a fire-and-forget task while retaining a strong reference.
-
-        Per asyncio's own docs, a task with no retained reference can be garbage
-        collected mid-execution; this keeps it alive in `background_tasks` until
-        it completes, then lets the done-callback drop the reference.
-        """
+        """Schedule a fire-and-forget task, keeping a strong reference to prevent garbage collection."""
         task = asyncio.create_task(coro)
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
@@ -106,10 +107,7 @@ def _get_vkid_from_hash(key_hash: str) -> str:
 
 
 def get_virtual_key_id(client_auth: str) -> str:
-    """Computes a fast, cryptographically salted virtual key fingerprint using HMAC-SHA256.
-
-    Uses SHA-256 pre-hash as LRU cache key to avoid storing raw API keys in plaintext memory.
-    """
+    """Compute HMAC-SHA256 key fingerprint, caching via pre-hash to avoid storing plaintext keys."""
     if not client_auth:
         return "anonymous"
     key_hash = hashlib.sha256(client_auth.encode("utf-8")).hexdigest()
@@ -117,16 +115,12 @@ def get_virtual_key_id(client_auth: str) -> str:
 
 
 def _is_safe_ip(ip_str: str) -> bool:
-    """Validates that resolved IP address is strictly public and safe from SSRF.
-
-    Delegates to the egress firewall's baseline denylist so the proxy and the MCP
-    gate cannot drift into two different answers for the same address.
-    """
+    """Check if IP is public using the shared egress denylist to prevent SSRF."""
     return is_public_ip(ip_str)
 
 
 async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[str]]:
-    """Asynchronously resolves A and AAAA DNS records in executor to avoid blocking ASGI loop."""
+    """Async DNS resolution via executor."""
     if not hostname:
         return False, None
     loop = asyncio.get_running_loop()
@@ -150,7 +144,7 @@ async def _resolve_and_validate_hostname(hostname: str) -> tuple[bool, Optional[
 
 
 async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
-    """Asynchronously resolves DNS records for trusted internal egress gateway."""
+    """Async DNS resolution for trusted internal gateways."""
     if not hostname:
         return None
     loop = asyncio.get_running_loop()
@@ -162,7 +156,7 @@ async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
     if not infos:
         return None
 
-    # Return the first successfully resolved IP without SSRF restriction
+    # Return the first resolved IP without SSRF restriction
     for family, _, _, _, sockaddr in infos:
         ip_candidate = str(sockaddr[0])
         return ip_candidate
@@ -170,7 +164,7 @@ async def _resolve_internal_hostname(hostname: str) -> Optional[str]:
 
 
 class ConfigHandler(FileSystemEventHandler):
-    """File watcher handler triggering dynamic configuration reloading."""
+    """File watcher triggering dynamic config reloads."""
 
     def on_modified(self, event: Any) -> None:
         if event.src_path.endswith("config.yaml") or event.src_path.endswith(".env"):
@@ -178,13 +172,7 @@ class ConfigHandler(FileSystemEventHandler):
 
 
 def build_upstream_client() -> httpx.AsyncClient:
-    """Construct the upstream AsyncClient.
-
-    Single source of truth for the pool's configuration. The lifespan pool and
-    `get_http_client`'s lazy fallback used to build their clients from two
-    copies of this block that had silently diverged on `http2`, so any request
-    served by the fallback dropped to HTTP/1.1 without a signal.
-    """
+    """Construct the shared upstream HTTP client. Centralized to prevent HTTP/2 downgrade bugs."""
     verify: bool | str = True
     if settings.INSECURE_SKIP_VERIFY:
         verify = False
@@ -214,15 +202,55 @@ def build_upstream_client() -> httpx.AsyncClient:
     )
 
 
+async def _start_ext_proc(serve_ext_proc: Any, sock_path: str) -> Any:
+    import os
+
+    if os.name == "nt":
+        return await serve_ext_proc(sock_path)
+
+    sock_dir = os.path.dirname(sock_path)
+    # SECURITY: Restrict socket parent dir to proxy/envoy group with sticky bit (1770)
+    os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
+    os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
+
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+
+    # SECURITY: Use umask to prevent TOCTOU privilege escalation during socket creation.
+    old_umask = os.umask(0o117)  # Inverts to 0o660
+    try:
+        return await serve_ext_proc(sock_path)
+    finally:
+        os.umask(old_umask)
+
+
+def warn_if_no_client_can_authenticate() -> None:
+    """Say at startup that every request will 401, instead of leaving it to the first caller."""
+    if (
+        settings.valid_virtual_keys_set
+        or settings.ENABLE_OPEN_BYOK_PASSTHROUGH
+        or settings.OVERRIDE_CLIENT_AUTH
+    ):
+        return
+    logger.warning(
+        "VALID_VIRTUAL_KEYS is empty, so every proxied request will be rejected with 401. "
+        "Set VALID_VIRTUAL_KEYS to a comma-separated list of client keys and send one as "
+        "the bearer token."
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manages application lifecycle, shared HTTP connection pools, and background observers."""
+    """Manage app lifecycle, HTTP pools, and background watchers."""
     import os
 
     app_state.is_draining = False
     app_state.shutdown_event = asyncio.Event()
 
-    if settings.ENABLE_EXT_PROC:
+    # Snapshot ENABLE_EXT_PROC to prevent mid-startup race conditions from hot reloads.
+    enable_ext_proc = settings.ENABLE_EXT_PROC
+    serve_ext_proc = None
+    if enable_ext_proc:
         from llm_shield_proxy.api.grpc_service import serve_ext_proc
     from llm_shield_proxy.security.fips_kat import run_fips_kat_self_test
     from llm_shield_proxy.security.vault_client import vault_provider
@@ -242,12 +270,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from llm_shield_proxy.engines.pii_engine import pii_engine
 
-    # Derived from the loaded session, not from whether a path is configured. The old
-    # form claimed "Active (Production ONNX Model)" whenever ONNX_MODEL_PATH was set,
-    # even when the model had failed to load and no PERSON span could be produced -- and
-    # its other branch still advertised a "Keyword fallback" that no longer exists.
-    # Both wordings contradicted the warning the engine logs. This echoes the status word
-    # from the same coverage snapshot; the actionable prose is the engine's warning.
+    # Derive ONNX status from the loaded engine rather than the config path.
     ner_coverage = pii_engine.describe_ner_coverage()
     if not ner_coverage["tier3_enabled"]:
         tier3_status = "Disabled"
@@ -266,6 +289,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         f"  Failure Mode: {settings.SHIELD_FAILURE_MODE}\n"
         f"--------------------------------------------"
     )
+
+    warn_if_no_client_can_authenticate()
 
     if settings.SHIELD_FAILURE_MODE == "FAIL_OPEN":
         logger.warning(
@@ -314,9 +339,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     policy_watch_task = asyncio.create_task(_watch_policies())
 
-    # Moves the vault store's TTL sweep off the per-request hot path (see
-    # VaultStore.get_vault / run_eviction_loop docstrings). Only meaningful for
-    # the in-memory VaultStore -- RedisVaultStore relies on native key TTLs.
+    # Move in-memory vault eviction off the request hot path.
     vault_eviction_task = None
     if isinstance(vault_store, VaultStore) and shutdown_ev is not None:
         vault_eviction_task = asyncio.create_task(
@@ -327,27 +350,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     grpc_server = None
     sock_path = settings.EXT_PROC_SOCK_PATH
 
-    if settings.ENABLE_EXT_PROC:
-        if os.name != "nt":
-            sock_dir = os.path.dirname(sock_path)
-            # SECURITY: Ensure the parent directory is restricted to proxy/envoy group
-            # Apply the sticky bit (1) alongside 770 permissions
-            os.makedirs(sock_dir, mode=0o1770, exist_ok=True)
-            # Security Note: The sticky bit (0o1770) is intentionally applied to the socket directory for IPC security
-            os.chmod(sock_dir, 0o1770)  # nosec B103 noqa: S103
-
-            if os.path.exists(sock_path):
-                os.unlink(sock_path)
-
-            # SECURITY: Prevent local privilege escalation (TOCTOU) by using umask
-            # before socket creation, rather than chmod after creation.
-            old_umask = os.umask(0o117)  # Inverts to 0o660
-            try:
-                grpc_server = await serve_ext_proc(sock_path)
-            finally:
-                os.umask(old_umask)
-        else:
-            grpc_server = await serve_ext_proc(sock_path)
+    if enable_ext_proc:
+        if serve_ext_proc is None:
+            # Explode loudly if ext-proc is enabled but fails to import.
+            raise RuntimeError(
+                "ENABLE_EXT_PROC is set but the ext-proc service could not be imported"
+            )
+        try:
+            grpc_server = await _start_ext_proc(serve_ext_proc, sock_path)
+        except OSError as exc:
+            # The default is on, and its socket lives in /var/run, which only the container
+            # image creates. A plain `pip install` run as a normal user died here before
+            # serving a request. An operator who set ENABLE_EXT_PROC still gets the error.
+            if "ENABLE_EXT_PROC" in settings.model_fields_set:
+                raise
+            logger.warning(
+                "Envoy ext_proc listener not started (%s at %s). The HTTP proxy is unaffected. "
+                "Set EXT_PROC_SOCK_PATH to a writable path to use it, or ENABLE_EXT_PROC=false "
+                "to silence this.",
+                type(exc).__name__,
+                sock_path,
+            )
 
     yield
 
@@ -400,9 +423,19 @@ app = FastAPI(
 
 
 app.include_router(health_router)
-app.include_router(webhook_router)
+# Off unless asked for. It used to be mounted on every install, unauthenticated unless
+# K8S_WEBHOOK_AUTH_TOKEN was set, on a proxy that binds 0.0.0.0 by default.
+if settings.ENABLE_K8S_WEBHOOK:
+    app.include_router(webhook_router)
+    if not settings.K8S_WEBHOOK_AUTH_TOKEN:
+        logger.warning(
+            "K8s mutating webhook is enabled without K8S_WEBHOOK_AUTH_TOKEN; restrict "
+            "/v1/k8s/mutate to the API server with network policy or set the token."
+        )
 app.include_router(audit_router)
 app.include_router(mcp_router)
+# Must precede the catch-all `/{path:path}` below to avoid swallowing routes.
+app.include_router(guard_router)
 
 
 SECURITY_HEADERS = {
@@ -413,14 +446,7 @@ SECURITY_HEADERS = {
 
 
 def apply_security_headers(response: Response, request_id: Optional[str] = None) -> Response:
-    """Stamp the security headers, and the correlation ID when we have one.
-
-    Both `security_and_tracing_middleware` and `global_exception_handler` call
-    this. The handler needs its own call because Starlette runs it inside
-    `ServerErrorMiddleware`, which sits *outside* the user middleware stack --
-    so a sanitized 500 never passes back through the middleware and used to
-    carry neither the security headers nor an X-Request-ID.
-    """
+    """Stamp security headers and correlation ID. Called by both middleware and exception handlers."""
     for header, value in SECURITY_HEADERS.items():
         response.headers[header] = value
     if request_id:
@@ -430,7 +456,7 @@ def apply_security_headers(response: Response, request_id: Optional[str] = None)
 
 @app.middleware("http")
 async def security_and_tracing_middleware(request: Request, call_next: Any) -> Response:
-    """Attaches correlation request IDs and enterprise HTTP security headers."""
+    """Attach request IDs and enterprise security headers."""
     if app_state.is_draining:
         return JSONResponse(
             status_code=429,
@@ -448,34 +474,42 @@ async def security_and_tracing_middleware(request: Request, call_next: Any) -> R
         response: Response = await call_next(request)
         return apply_security_headers(response, request_id)
     finally:
-        # Lock wraps both the decrement and the drain-signal check to prevent a TOCTOU
-        # race where active_requests transitions 1â†’0 between the read and set() calls.
+        # Lock prevents TOCTOU race on `active_requests` during drain.
         with app_state.active_requests_lock:
             app_state.active_requests -= 1
             if app_state.is_draining and app_state.active_requests == 0 and app_state.shutdown_event is not None:
                 app_state.shutdown_event.set()
 
 
+_TRACEBACK_FRAME_LIMIT = 20
+
+
+def _format_sanitized_traceback(exc: BaseException) -> str:
+    """Return `file:line in function` without `str(exc)` or source lines to prevent PII leakage."""
+    try:
+        summary = traceback.StackSummary.extract(
+            traceback.walk_tb(exc.__traceback__),
+            limit=_TRACEBACK_FRAME_LIMIT,
+            lookup_lines=False,
+        )
+    except Exception:  # noqa: BLE001
+        return "<traceback unavailable>"
+    if not summary:
+        return "<no frames>"
+    return "\n".join(f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in summary)
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Sanitized global exception handler preventing raw PII or stack trace leaks.
-
-    The client only ever sees a flat "Internal Server Error" -- but the exception and
-    its full traceback are NOT lost: they go to the operational application logger
-    (this process's stdout/stderr, which enterprises typically ship to a SIEM/log
-    aggregator via a sidecar or the container log driver) with the request_id attached
-    for correlation, plus a PII-safe CRITICAL entry in the signed WORM audit chain
-    (see AuditLogger.log_unhandled_exception) so the *fact* that a request failed
-    unhandled is part of the tamper-evident compliance record even though the raw
-    exception detail deliberately isn't.
-    """
+    """Sanitized global exception handler preventing raw PII or stack trace leaks."""
     request_id = getattr(request.state, "request_id", None) or "n/a"
     logger.error(
-        "Unhandled exception on %s %s (request_id=%s)",
+        "Unhandled exception on %s %s (request_id=%s, exception_type=%s)\n%s",
         request.method,
         request.url.path,
         request_id,
-        exc_info=exc,
+        type(exc).__name__,
+        _format_sanitized_traceback(exc),
     )
     AuditLogger.log_unhandled_exception(
         request_id=request_id,
@@ -487,13 +521,12 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         status_code=500,
         content={"error": {"message": "Internal Server Error", "type": "server_error"}},
     )
-    # `request_id` is "n/a" only if the exception beat the middleware to
-    # assigning one; don't echo that placeholder back as a correlation ID.
+    # Don't echo placeholder request ID.
     return apply_security_headers(response, request_id if request_id != "n/a" else None)
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:
-    """Retrieves or lazily initializes the shared AsyncClient from app state."""
+    """Retrieve or lazily initialize the shared AsyncClient."""
     client = getattr(request.app.state, "http_client", None)
     if client is None or getattr(client, "is_closed", False):
         client = build_upstream_client()
@@ -501,8 +534,141 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
+
+# Provider error relay. The request that reached the provider was already redacted, so a
+# provider message that quotes it carries stand-ins, not the caller's values. What it can
+# carry is the credential the proxy itself attached, which is why every header value sent
+# upstream is removed literally before anything else, and the text then goes through the
+# PII engine one-way. Nothing here is logged.
+_UPSTREAM_ERROR_GENERIC = "Failed to communicate with upstream provider."
+_UPSTREAM_ERROR_MAX_BODY_BYTES = 64 * 1024
+_UPSTREAM_ERROR_MAX_MESSAGE_CHARS = 512
+# What the PII engine is given to scrub: the output is cut at 512 characters, so nothing past
+# this prefix can appear in it, and a 64 KiB HTML error page never reaches the detectors.
+_UPSTREAM_ERROR_MAX_SCRUB_CHARS = 2048
+_CREDENTIAL_HEADERS = ("authorization", "x-api-key", "x-goog-api-key", "api-key")
+
+
+def _sent_credentials(sent_headers: Optional[Dict[str, Any]]) -> List[str]:
+    """Every secret the proxy may have attached to the upstream request, longest first."""
+    values: List[str] = []
+    for name in _CREDENTIAL_HEADERS:
+        value = (sent_headers or {}).get(name)
+        if isinstance(value, str) and value.strip():
+            bare = value.strip()
+            values.append(bare)
+            if bare.lower().startswith("bearer "):
+                values.append(bare[7:].strip())
+    for configured in (settings.UPSTREAM_API_KEY, settings.FALLBACK_API_KEY, settings.OPENAI_API_KEY,
+                       settings.GEMINI_API_KEY, settings.ANTHROPIC_API_KEY, getattr(settings, "DEEPSEEK_API_KEY", None)):
+        if isinstance(configured, str) and configured.strip():
+            values.append(configured.strip())
+    return sorted({v for v in values if len(v) >= 4}, key=len, reverse=True)
+
+
+async def _scrub_provider_text(text: str, sent_headers: Optional[Dict[str, Any]]) -> str:
+    """Removes the proxy's own credentials, redacts PII one-way, caps the length.
+
+    The engine runs in the executor like every other engine call on this path: a detection
+    cascade (and a Tier 3 model forward pass, when enabled) must not block the event loop
+    and the SSE streams on it.
+    """
+    from llm_shield_proxy.engines.masking import ScrubVault
+
+    cleaned = text[:_UPSTREAM_ERROR_MAX_SCRUB_CHARS]
+    for secret in _sent_credentials(sent_headers):
+        cleaned = cleaned.replace(secret, "[REDACTED]")
+    try:
+        cleaned = await asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(pii_engine.redact_text, cleaned, ScrubVault(), restorable=False)  # type: ignore[arg-type]
+        )
+    except Exception:  # noqa: BLE001  # the relay must never fail the error response itself
+        return _UPSTREAM_ERROR_GENERIC
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > _UPSTREAM_ERROR_MAX_MESSAGE_CHARS:
+        cleaned = cleaned[:_UPSTREAM_ERROR_MAX_MESSAGE_CHARS].rstrip() + " [truncated]"
+    return cleaned
+
+
+def _provider_error_fields(raw: bytes) -> Tuple[Optional[str], Dict[str, Any]]:
+    """The provider's message plus its type/code/param, from the shapes providers use.
+
+    OpenAI and DeepSeek: ``{"error": {"message", "type", "code", "param"}}``. Anthropic:
+    ``{"type": "error", "error": {"type", "message"}}``. Google: a one-element list around
+    ``{"error": {"code", "message", "status"}}``. Anything else: the body as text.
+    """
+    text = raw.decode("utf-8", "replace")
+    try:
+        parsed: Any = orjson.loads(raw)
+    except Exception:  # noqa: BLE001
+        parsed = None
+    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+        parsed = parsed[0]
+    error = parsed.get("error") if isinstance(parsed, dict) else None
+    if isinstance(error, str):
+        return error, {}
+    if isinstance(error, dict):
+        message = error.get("message")
+        details = {
+            key: error[key]
+            for key in ("type", "code", "param", "status")
+            if key in error and isinstance(error[key], (str, int)) and error[key] not in ("", None)
+        }
+        return (message if isinstance(message, str) else None), details
+    if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
+        return parsed["message"], {}
+    stripped = text.strip()
+    return (stripped or None), {}
+
+
+async def _read_error_body(upstream_res: Optional[httpx.Response]) -> Optional[bytes]:
+    """At most 64 KiB of a provider error body; None when there is none or it cannot be read.
+
+    Read in pieces and stopped at the cap, never `aread()`: a provider (or a client-steered
+    override target) that answers an error with a huge body must not be buffered whole on
+    the event loop. The rest of the body is left unread and the caller closes the stream.
+    """
+    if upstream_res is None:
+        return None
+    try:
+        if upstream_res.is_stream_consumed or upstream_res.is_closed:
+            return upstream_res.content[:_UPSTREAM_ERROR_MAX_BODY_BYTES] or None
+        pieces: List[bytes] = []
+        total = 0
+        # aiter_bytes, not aiter_raw: providers and their CDNs gzip error bodies too, and the
+        # raw wire bytes would decode to replacement characters, not the reason.
+        async for piece in upstream_res.aiter_bytes(chunk_size=8192):
+            pieces.append(piece)
+            total += len(piece)
+            if total >= _UPSTREAM_ERROR_MAX_BODY_BYTES:
+                break
+    except Exception:  # noqa: BLE001  # a body that cannot be read leaves the generic message
+        return None
+    return b"".join(pieces)[:_UPSTREAM_ERROR_MAX_BODY_BYTES] or None
+
+
+async def _upstream_error_response(
+    raw: Optional[bytes],
+    status_code: int,
+    sent_headers: Optional[Dict[str, Any]],
+) -> JSONResponse:
+    """The client's view of a provider error: the status, and the provider's reason, scrubbed."""
+    content: Dict[str, Any] = {"error": {"message": _UPSTREAM_ERROR_GENERIC, "type": "upstream_error", "code": status_code}}
+    if not raw or not settings.RELAY_UPSTREAM_ERROR_MESSAGES:
+        return JSONResponse(status_code=status_code, content=content)
+    message, details = _provider_error_fields(raw)
+    if message:
+        scrubbed = await _scrub_provider_text(message, sent_headers)
+        content["error"]["message"] = f"Upstream provider answered HTTP {status_code}: {scrubbed}"
+    if details:
+        upstream: Dict[str, Any] = {}
+        for key, value in details.items():
+            upstream[key] = await _scrub_provider_text(value, sent_headers) if isinstance(value, str) else value
+        content["error"]["upstream"] = upstream
+    return JSONResponse(status_code=status_code, content=content)
+
 def build_target_url(upstream_base: str, path: str) -> str:
-    """Constructs sanitized upstream target URL, resolving provider-specific pathing."""
+    """Construct sanitized upstream target URL, resolving provider-specific pathing."""
     base = upstream_base.rstrip("/")
     p = path.lstrip("/")
     if p.startswith("v1/"):
@@ -512,11 +678,18 @@ def build_target_url(upstream_base: str, path: str) -> str:
 
 
 async def read_body_with_limit(request: Request, limit: Optional[int] = None) -> bytes:
-    """Reads request body stream enforcing maximum memory payload limits."""
+    """Read request body stream enforcing max memory payload limits."""
     max_limit = limit or settings.MAX_PAYLOAD_SIZE_BYTES
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > max_limit:
-        raise ValueError("Payload Too Large")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+        if declared_length < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+        if declared_length > max_limit:
+            raise ValueError("Payload Too Large")
 
     body_bytes = bytearray()
     cumulative_size = 0
@@ -536,7 +709,6 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
             body_bytes.extend(chunk)
             cumulative_size += chunk_len
         except TimeoutError:
-            from fastapi import HTTPException
             raise HTTPException(status_code=408, detail="Request Timeout: Slowloris prevention")
 
     return bytes(body_bytes)
@@ -549,7 +721,7 @@ async def read_body_with_limit(request: Request, limit: Optional[int] = None) ->
 
 @app.get("/metrics", tags=["Observability"])
 async def metrics_endpoint(request: Request) -> Response:
-    """Prometheus metrics endpoint with optional Bearer token security."""
+    """Prometheus metrics endpoint with optional token security."""
     if settings.METRICS_BEARER_TOKEN:
         auth_header = request.headers.get("authorization", "")
         token = auth_header.replace("Bearer ", "").strip()
@@ -560,7 +732,7 @@ async def metrics_endpoint(request: Request) -> Response:
 
 
 async def get_policy_resolver(request: Request) -> BasePolicyResolver:
-    """Dependency injection provider for the active Pluggable RBAC Engine."""
+    """Dependency provider for the active Pluggable RBAC Engine."""
     if not hasattr(request.app.state, "rbac_state"):
         request.app.state.rbac_state = {
             "cache": OrderedDict(),
@@ -578,6 +750,10 @@ async def get_policy_resolver(request: Request) -> BasePolicyResolver:
 # Proxy Catch-All Gateway Routing
 # -----------------------------------------------------------------------------
 
+INVALID_PROXY_KEY_MESSAGE = (
+    "Invalid Proxy API Key. Send a key listed in the proxy's VALID_VIRTUAL_KEYS setting."
+)
+
 PROVIDER_KEY_MAP: Dict[str, str] = {
     "api.openai.com": "OPENAI_API_KEY",
     "generativelanguage.googleapis.com": "GEMINI_API_KEY",
@@ -587,7 +763,7 @@ PROVIDER_KEY_MAP: Dict[str, str] = {
 
 
 def resolve_upstream_key(hostname: str) -> Optional[str]:
-    """Resolves centralized enterprise provider key via dictionary lookup."""
+    """Resolve centralized enterprise provider key."""
     from llm_shield_proxy.security.vault_client import vault_provider
 
     attr_name = PROVIDER_KEY_MAP.get(hostname)
@@ -653,9 +829,6 @@ async def _proxy_catch_all_internal(
     background_tasks: Optional[BackgroundTasks] = None,
     policy_resolver: Optional[BasePolicyResolver] = None,
 ) -> Response:
-    if path == "metrics":
-        return await metrics_endpoint(request)
-
     # CORS Preflight
     if request.method == "OPTIONS":
         origin = request.headers.get("origin", "")
@@ -665,9 +838,7 @@ async def _proxy_catch_all_internal(
         elif origin and origin in allowed_origins:
             allow_origin = origin
         else:
-            # Strict-by-default: an unset/empty CORS_ALLOWED_ORIGINS (or an Origin not on
-            # the explicit allowlist) disables cross-origin access rather than reflecting
-            # the caller's Origin or falling back to "*".
+            # Strict-by-default: invalid origins get `null`.
             allow_origin = "null"
 
         return Response(
@@ -682,11 +853,7 @@ async def _proxy_catch_all_internal(
         )
 
     target_host = None
-    # Set only when upstream_base gets rewritten to an SSRF-validated IP literal below.
-    # Carries the original FQDN through to the outbound httpx call so TLS SNI and
-    # certificate hostname verification happen against the real domain -- pinning the
-    # *socket* to the validated IP without also pinning (and breaking) TLS to it. See
-    # the `extensions={"sni_hostname": ...}` call sites downstream.
+    # Original FQDN for TLS SNI when upstream_base is rewritten to an IP literal.
     sni_hostname: Optional[str] = None
 
     if settings.AIR_GAPPED_MODE and settings.EGRESS_GATEWAY_URL:
@@ -720,6 +887,9 @@ async def _proxy_catch_all_internal(
             ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
             port_str = f":{parsed.port}" if parsed.port else ""
             upstream_base = f"{parsed.scheme}://{ip_str}{port_str}{parsed.path}"
+
+    # Effective upstream hostname before SSRF IP pinning.
+    upstream_host = sni_hostname or urlparse(upstream_base).hostname
 
     target_url = build_target_url(upstream_base, path)
 
@@ -755,11 +925,14 @@ async def _proxy_catch_all_internal(
     if matched_key:
         is_virtual_key = True
         virtual_key_id = get_virtual_key_id(matched_key)
-    elif settings.ENABLE_OPEN_BYOK_PASSTHROUGH and client_auth.startswith(("sk-proj-", "sk-ant-", "AIza")):
+    elif settings.ENABLE_OPEN_BYOK_PASSTHROUGH and client_auth.startswith(settings.byok_key_prefixes):
         # Direct genuine BYOK provider key passthrough. Gated behind ENABLE_OPEN_BYOK_PASSTHROUGH
         # (default False): a prefix match alone doesn't authenticate the caller as an entitled
         # proxy user -- without this flag, an unrecognized key falls through to the 401 below
         # instead of being routed through the DLP pipeline and forwarded upstream.
+        # The accepted prefixes are BYOK_KEY_PREFIXES, not a literal here: which providers a
+        # deployment fronts is a deployment fact, and hardcoding it meant every new upstream
+        # (OpenRouter being the case that surfaced it) was a source change and a release.
         is_virtual_key = False
     elif settings.OVERRIDE_CLIENT_AUTH:
         # Bypass strict prefix checks if enterprise secret injection is active
@@ -767,7 +940,7 @@ async def _proxy_catch_all_internal(
     else:
         return JSONResponse(
             status_code=401,
-            content={"error": {"message": "Invalid Proxy API Key", "type": "authentication_error"}},
+            content={"error": {"message": INVALID_PROXY_KEY_MESSAGE, "type": "authentication_error"}},
         )
 
     # Dynamic Virtual Key Resolution for FinOps & Tenant Scoping
@@ -793,7 +966,11 @@ async def _proxy_catch_all_internal(
                 status_code=500,
                 content={
                     "error": {
-                        "message": "Upstream provider API Key is missing in proxy configuration.",
+                        "message": (
+                            "Upstream provider API Key is missing in proxy configuration. Set "
+                            + (f"{PROVIDER_KEY_MAP[hostname]} or " if hostname in PROVIDER_KEY_MAP else "")
+                            + "UPSTREAM_API_KEY."
+                        ),
                         "type": "proxy_misconfiguration",
                     }
                 },
@@ -893,6 +1070,8 @@ async def _proxy_catch_all_internal(
                 status_code=400,
                 content={"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}},
             )
+        except HTTPException:
+            raise
         except Exception:
             return JSONResponse(
                 status_code=400,
@@ -946,6 +1125,11 @@ async def _proxy_catch_all_internal(
 
             is_v3 = False
             v3_cipher = None
+            # Pre-bound like the two above. It is assigned further down inside this try,
+            # and read again in the response path, which pyright showed can be reached
+            # without the assignment having run. None falls through to the default
+            # OpenAI-shaped branch, which is the safe answer when the provider is unknown.
+            target_provider = None
             try:
                 is_json_rpc = isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
                 if is_json_rpc:
@@ -1005,14 +1189,38 @@ async def _proxy_catch_all_internal(
                     import contextvars
                     ctx = contextvars.copy_context()
 
-                    redacted_payload = await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        ctx.run,  # type: ignore
-                        pii_engine.redact_payload,
-                        payload,
-                        vault,
-                        active_profile,
-                    )  # type: ignore
+                    try:
+                        redacted_payload = await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            ctx.run,  # type: ignore
+                            pii_engine.redact_payload,
+                            payload,
+                            vault,
+                            active_profile,
+                        )  # type: ignore
+                    except UnmappedBlobError as blob_error:
+                        # UNMAPPED_BLOB_POLICY=block. The field is not claimed by any
+                        # policy and the value is too large to inspect, so it leaves
+                        # uninspected or it does not leave at all.
+                        AuditLogger.log_unmapped_blob(
+                            json_path=blob_error.json_path,
+                            size_bytes=blob_error.size_bytes,
+                            virtual_key_id=virtual_key_id,
+                            request_id=request_id,
+                        )
+                        return JSONResponse(
+                            status_code=413,
+                            content={
+                                "error": {
+                                    "message": (
+                                        f"Uninspectable payload at '{blob_error.json_path}'. Declare it in "
+                                        "payload_skip_keys for this key, or raise "
+                                        "PAYLOAD_MAX_REDACT_STRING_LENGTH."
+                                    ),
+                                    "type": "unmapped_blob",
+                                }
+                            },
+                        )
 
                     new_entities_count = sum(vault.type_counters.values())
                     entities_detected = new_entities_count - old_entities_count
@@ -1060,11 +1268,18 @@ async def _proxy_catch_all_internal(
                                 redacted_payload["system"].append({"type": "text", "text": directive})
 
                 # target_provider is refined with payload
-                target_provider = resolve_provider(dict(request.headers), redacted_payload)
+                target_provider = resolve_provider(dict(request.headers), redacted_payload, upstream_host)
                 if target_provider == "anthropic":
                     anthropic_payload = AnthropicAdapter.transform_request(redacted_payload)
                     redacted_bytes = orjson.dumps(anthropic_payload)
-                    target_url = "https://api.anthropic.com/v1/messages"
+                    # Swap the path, never the destination. This used to hardcode
+                    # https://api.anthropic.com/v1/messages, which discarded the
+                    # operator's configured upstream: it bypassed the air-gapped
+                    # egress gateway and the SSRF IP pinning, and forwarded
+                    # whichever credential had been injected for the *configured*
+                    # upstream to Anthropic instead. Deriving the URL keeps
+                    # "traffic goes where UPSTREAM_BASE_URL says" absolute.
+                    target_url = build_target_url(upstream_base, "v1/messages")
                     headers["anthropic-version"] = settings.ANTHROPIC_API_VERSION
                     headers["x-api-key"] = headers.get("authorization", "").replace("Bearer ", "").strip()
                     headers.pop("authorization", None)
@@ -1099,6 +1314,42 @@ async def _proxy_catch_all_internal(
                     redacted_bytes = body_bytes
 
             x_shield_fallback_url = request.headers.get("x-shield-fallback-url")
+            # SSRF guard: a client-supplied failover target is a routing override just like
+            # X-Upstream-Base-Url, so it must be gated by the same flag and IP-pinned by the
+            # same resolver. The configured FALLBACK_BASE_URL is operator-controlled (like
+            # UPSTREAM_BASE_URL) and is used directly.
+            fallback_url_override: Optional[str] = None
+            fallback_sni_hostname: Optional[str] = None
+            if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
+                parsed_fallback = urlparse(x_shield_fallback_url)
+                hostname = parsed_fallback.hostname or ""
+                # `.port` PARSES, and raises ValueError on a non-numeric or out-of-range
+                # port ("https://h:abc", "https://h:99999"). Reading it lazily further
+                # down turned a malformed routing header into an unhandled 500. Force the
+                # parse here, inside the validation that already fails closed.
+                try:
+                    fallback_port = parsed_fallback.port
+                except ValueError:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {"message": "Forbidden fallback hostname", "type": "security_error"}},
+                    )
+                if parsed_fallback.scheme not in ("http", "https") or not hostname:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {"message": "Forbidden fallback hostname", "type": "security_error"}},
+                    )
+                is_safe, resolved_ip = await _resolve_and_validate_hostname(hostname)
+                if not is_safe or not resolved_ip:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {"message": "Forbidden fallback hostname", "type": "security_error"}},
+                    )
+                fallback_sni_hostname = hostname
+                ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+                port_str = f":{fallback_port}" if fallback_port else ""
+                fallback_url_override = f"{parsed_fallback.scheme}://{ip_str}{port_str}{parsed_fallback.path}"
+
             max_retries = settings.MAX_RETRIES if settings.ENABLE_RETRY_FAILOVER else 0
 
             if is_streaming:
@@ -1107,6 +1358,11 @@ async def _proxy_catch_all_internal(
                 current_headers = dict(headers)
                 current_sni_hostname = sni_hostname
                 upstream_res = None
+                upstream_error_body: Optional[bytes] = None
+                # The credentials that were on the wire for the attempt whose body was kept.
+                # A later fallback switch rewrites current_headers; scrubbing with those would
+                # miss the credential the first provider echoed.
+                upstream_error_headers: Dict[str, Any] = dict(current_headers)
                 is_fallback = False
 
                 while True:
@@ -1126,6 +1382,9 @@ async def _proxy_catch_all_internal(
 
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response
+                            # The provider's reason, read before the stream is closed below.
+                            upstream_error_body = await _read_error_body(upstream_res)
+                            upstream_error_headers = dict(current_headers)
                             # MUST explicitly close the leaked stream to free the HTTP/2 connection pool
                             await upstream_res.aclose()
 
@@ -1142,32 +1401,34 @@ async def _proxy_catch_all_internal(
                             continue
 
                         if settings.ENABLE_RETRY_FAILOVER and not is_fallback:
-                            fallback_url = x_shield_fallback_url or settings.FALLBACK_BASE_URL
+                            fallback_url = fallback_url_override or settings.FALLBACK_BASE_URL
                             if fallback_url:
                                 is_fallback = True
                                 attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
-                                # Fallback URLs are plain configured FQDNs, never IP-rewritten,
-                                # so normal httpx hostname-based TLS applies -- no SNI override.
-                                current_sni_hostname = None
+                                # A client-supplied fallback is IP-pinned and carries its original
+                                # hostname for TLS SNI; a configured fallback is a plain FQDN with
+                                # normal httpx hostname-based TLS.
+                                current_sni_hostname = fallback_sni_hostname
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
-                                parsed_fallback = urlparse(fallback_url)
-                                if parsed_fallback.hostname:
-                                    current_headers["host"] = parsed_fallback.hostname
+                                fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_host:
+                                    current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
                                 continue
 
                         break
 
                 if upstream_res is None or upstream_res.is_error:
+                    status_code = upstream_res.status_code if upstream_res is not None else 503
+                    error_response = await _upstream_error_response(upstream_error_body, status_code, upstream_error_headers)
                     if upstream_res is not None:
                         try:
                             await upstream_res.aclose()
                         except Exception:  # nosec B110 noqa: S110
                             # Security Note: Silently dropping upstream connection closure errors to prevent worker crashes
                             pass
-                    status_code = upstream_res.status_code if upstream_res is not None else 503
                     AuditLogger.log_redaction_event(
                         x_session_id,
                         vault.type_counters,
@@ -1177,16 +1438,7 @@ async def _proxy_catch_all_internal(
                         request_id,
                         applied_role_name=applied_role_name,
                     )
-                    return JSONResponse(
-                        status_code=status_code,
-                        content={
-                            "error": {
-                                "message": "Failed to communicate with upstream provider.",
-                                "type": "upstream_error",
-                                "code": status_code,
-                            }
-                        },
-                    )
+                    return error_response
 
                 AuditLogger.log_redaction_event(
                     x_session_id,
@@ -1253,6 +1505,7 @@ async def _proxy_catch_all_internal(
                 current_headers = dict(headers)
                 current_sni_hostname = sni_hostname
                 upstream_res = None
+                upstream_error_headers = dict(current_headers)
                 is_fallback = False
 
                 while True:
@@ -1271,6 +1524,7 @@ async def _proxy_catch_all_internal(
 
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response
+                            upstream_error_headers = dict(current_headers)
 
                         status_code = err.response.status_code if isinstance(err, httpx.HTTPStatusError) else 503
                         if isinstance(err, httpx.HTTPStatusError) and status_code in (400, 401, 403):
@@ -1285,19 +1539,20 @@ async def _proxy_catch_all_internal(
                             continue
 
                         if settings.ENABLE_RETRY_FAILOVER and not is_fallback:
-                            fallback_url = x_shield_fallback_url or settings.FALLBACK_BASE_URL
+                            fallback_url = fallback_url_override or settings.FALLBACK_BASE_URL
                             if fallback_url:
                                 is_fallback = True
                                 attempt = 0
                                 current_target_url = build_target_url(fallback_url, path)
-                                # Fallback URLs are plain configured FQDNs, never IP-rewritten,
-                                # so normal httpx hostname-based TLS applies -- no SNI override.
-                                current_sni_hostname = None
+                                # A client-supplied fallback is IP-pinned and carries its original
+                                # hostname for TLS SNI; a configured fallback is a plain FQDN with
+                                # normal httpx hostname-based TLS.
+                                current_sni_hostname = fallback_sni_hostname
                                 if settings.FALLBACK_API_KEY:
                                     current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
-                                parsed_fallback = urlparse(fallback_url)
-                                if parsed_fallback.hostname:
-                                    current_headers["host"] = parsed_fallback.hostname
+                                fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_host:
+                                    current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
                                 continue
 
@@ -1314,16 +1569,7 @@ async def _proxy_catch_all_internal(
                         request_id,
                         applied_role_name=applied_role_name,
                     )
-                    return JSONResponse(
-                        status_code=status_code,
-                        content={
-                            "error": {
-                                "message": "Failed to communicate with upstream provider.",
-                                "type": "upstream_error",
-                                "code": status_code,
-                            }
-                        },
-                    )
+                    return await _upstream_error_response(await _read_error_body(upstream_res), status_code, upstream_error_headers)
 
                 AuditLogger.log_redaction_event(
                     x_session_id,
@@ -1356,11 +1602,20 @@ async def _proxy_catch_all_internal(
                         rehydrator = NonStreamingRehydrator(v3_cipher)
                         rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, res_json)
                     else:
+                        # Response-path model-originated PII redaction for the non-streaming
+                        # REST path: redact what the model produced that is not this session's
+                        # own token, then rehydrate the caller's own values -- the same order
+                        # as the SSE path.
+                        scan_target = res_json
+                        if settings.ENABLE_RESPONSE_PII_REDACTION:
+                            scan_target = await loop.run_in_executor(
+                                None, _redact_model_originated_json_response, res_json, vault
+                            )
                         if target_provider == "anthropic":
-                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, scan_target, vault)
                             rehydrated_res = AnthropicAdapter.transform_response(rehydrated_res)
                         else:
-                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, res_json, vault)
+                            rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, scan_target, vault)
 
                     if watermark_text:
                         _append_watermark(rehydrated_res, watermark_text)
@@ -1447,17 +1702,8 @@ async def _proxy_catch_all_internal(
     )
 
     if upstream_res.status_code >= 400:
-        # Prevent upstream auth key leakage
-        return JSONResponse(
-            status_code=upstream_res.status_code,
-            content={
-                "error": {
-                    "message": "Failed to communicate with upstream provider.",
-                    "type": "upstream_error",
-                    "code": upstream_res.status_code,
-                }
-            },
-        )
+        # The provider's reason, with the credential the proxy attached removed first.
+        return await _upstream_error_response(await _read_error_body(upstream_res), upstream_res.status_code, headers)
 
     return Response(
         content=upstream_res.content,
@@ -1482,6 +1728,44 @@ def _append_watermark(res: Dict[str, Any], watermark_text: str) -> None:
             block["text"] += watermark_text
 
 
+# Matches the ceiling `NonStreamingRehydrator` already applies to decoded payloads. The
+# bound exists to stop a crafted reply becoming an unbounded walk, not to describe a real
+# schema: tool inputs nest a handful deep, so it should never be reached. It was 8 first,
+# which sits inside the range a legitimate payload can occupy -- and truncating here hands
+# the caller a placeholder, the exact failure this function exists to prevent, so the
+# cheap bound was the expensive choice.
+_MAX_TOOL_INPUT_DEPTH = 40
+
+
+def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0) -> Any:
+    """Rehydrates every string leaf of an already-decoded JSON value.
+
+    Anthropic carries tool input as a decoded object rather than as JSON text, so the
+    leaves are restored in place and the serializer escapes them on the way out. That
+    is why this needs no `json_escaped_vault`, unlike the OpenAI `arguments` string,
+    which the model hands over already serialised.
+
+    Bounded rather than trusting the payload's own nesting to terminate. Reaching the
+    bound is logged rather than passed over quietly: everything below it keeps its
+    placeholders, and a caller holding one cannot tell it from a value.
+    """
+    if depth > _MAX_TOOL_INPUT_DEPTH:
+        # The message names no node content. Invariant 4 holds in log records too.
+        logger.warning(
+            "Tool input nesting exceeded %d levels; leaves below that depth keep their "
+            "placeholders and were not restored.",
+            _MAX_TOOL_INPUT_DEPTH,
+        )
+        return node
+    if isinstance(node, dict):
+        return {key: _rehydrate_decoded_leaves(value, vault, depth + 1) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_rehydrate_decoded_leaves(item, vault, depth + 1) for item in node]
+    if isinstance(node, str):
+        return vault.rehydrate(node)
+    return node
+
+
 def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
     """Rehydrates tokens in the known OpenAI and Anthropic response shapes.
 
@@ -1494,6 +1778,10 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     import copy
 
     res_copy = copy.deepcopy(res_json)
+    # OpenAI `arguments` is JSON *text*, so a restored value carrying a quote,
+    # backslash or control character would leave the document unparseable. Built once
+    # per response: the escaped mapping is rebuilt whenever the vault grows.
+    json_vault = json_escaped_vault(vault)
 
     # 1. OpenAI Chat Completion choices
     if "choices" in res_copy and isinstance(res_copy["choices"], list):
@@ -1510,22 +1798,52 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
                             if isinstance(tc, dict) and "function" in tc and isinstance(tc["function"], dict):
                                 fn = tc["function"]
                                 if "arguments" in fn and isinstance(fn["arguments"], str):
-                                    fn["arguments"] = vault.rehydrate(fn["arguments"])
+                                    fn["arguments"] = json_vault.rehydrate(fn["arguments"])
 
                     # Rehydrate legacy function_call arguments
                     if "function_call" in message and isinstance(message["function_call"], dict):
                         fn = message["function_call"]
                         if "arguments" in fn and isinstance(fn["arguments"], str):
-                            fn["arguments"] = vault.rehydrate(fn["arguments"])
+                            fn["arguments"] = json_vault.rehydrate(fn["arguments"])
 
                 delta = choice.get("delta", {})
                 if isinstance(delta, dict) and "content" in delta and isinstance(delta["content"], str):
                     delta["content"] = vault.rehydrate(delta["content"])
 
+                # Legacy /v1/completions carries the reply in `choice.text`.
+                if isinstance(choice.get("text"), str):
+                    choice["text"] = vault.rehydrate(choice["text"])
+
     # 2. Anthropic Claude top-level content blocks
     if "content" in res_copy and isinstance(res_copy["content"], list):
         for block in res_copy["content"]:
-            if isinstance(block, dict) and "text" in block and isinstance(block["text"], str):
+            if not isinstance(block, dict):
+                continue
+            if "text" in block and isinstance(block["text"], str):
                 block["text"] = vault.rehydrate(block["text"])
+            elif block.get("type") == "tool_use":
+                # A tool_use block has no `text`, so a walk keyed on that field skipped it
+                # entirely and handed the caller a placeholder as a tool argument. Its
+                # `input` is a decoded object, so its leaves are restored in place.
+                block["input"] = _rehydrate_decoded_leaves(block.get("input"), vault)
 
     return res_copy
+
+
+def _redact_model_originated_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
+    """Redact model-originated PII anywhere in a non-streaming response.
+
+    This deliberately does NOT mirror `_rehydrate_json_response`'s shape walk. Rehydration
+    may be narrow: it only has to find this session's own tokens, which it put there.
+    Redaction may not, because it has to find text the MODEL chose to emit, and the model
+    chooses the field. An earlier version of this function walked exactly the rehydration
+    shapes and so skipped list-valued content parts, `refusal`, `reasoning_content`, and
+    Anthropic `thinking` / `tool_use` inputs -- all model-generated text, all forwarded
+    unscanned with `ENABLE_RESPONSE_PII_REDACTION` on.
+
+    Runs before rehydration, the same order the SSE path uses; see
+    `redact_model_originated_tree` for the structural-key exception list.
+    """
+    if not isinstance(res_json, dict):
+        return res_json
+    return redact_model_originated_tree(res_json, vault)

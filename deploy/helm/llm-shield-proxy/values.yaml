@@ -8,24 +8,58 @@ image:
 webhook:
   enabled: false
   sidecarImage: ""
+  # Secret each injected sidecar loads its keys from (envFrom). A pod's
+  # llm-shield.io/keys-secret annotation overrides it.
+  sidecarSecretName: ""
   certManager:
     enabled: false
     issuerRef:
       name: ""
       kind: ClusterIssuer
 
+# The proxy's resident memory is about 75-100 MiB idle (measured in the image). The old
+# 60Mi limit had a pod killed for memory before it served a request.
 resources:
   limits:
-    cpu: 100m
-    memory: 60Mi
+    cpu: 500m
+    memory: 256Mi
   requests:
     cpu: 100m
-    memory: 60Mi
+    memory: 128Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
 
 service:
   type: ClusterIP
   httpPort: 8000
   grpcPort: 50051
+
+# The proxy rejects every request until it knows its client keys and has a provider key.
+# Put both in a Secret and reference it here, for example:
+#   kubectl create secret generic llm-shield-keys \
+#     --from-literal=VALID_VIRTUAL_KEYS=<client key> --from-literal=OPENAI_API_KEY=<provider key>
+envFrom: []
+#  - secretRef:
+#      name: llm-shield-keys
+
+# Any other setting from the deployment guide, as plain env entries.
+extraEnv: []
+#  - name: UPSTREAM_BASE_URL
+#    value: https://api.openai.com
 
 config:
   redisUrl: ""

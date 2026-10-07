@@ -1,0 +1,61 @@
+# Replication pack: NeMo Guardrails 0.24.0 with its Presidio output rail, the
+# `nemo-guardrails-0.24.0` row.
+#
+#   docker compose up --build --exit-code-from runner
+#
+# NeMo runs Presidio in its own process, so there are two containers: NeMo, built here
+# from the pinned Dockerfile, and the harness runner. The runner shares NeMo's network
+# namespace and binds the capture on 127.0.0.1:8799, which is what `config/config.yml`
+# already names through `host.docker.internal`; `extra_hosts` points that name back at
+# 127.0.0.1. The config file is used unchanged.
+services:
+  nemo:
+    build: .
+    environment:
+      # NeMo's OpenAI engine wants a key to exist; the capture never reads it.
+      OPENAI_API_KEY: sk-dummy-not-used
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"
+    volumes:
+      - ./config:/config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/v1/rails/configs', timeout=5)"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+
+  runner:
+    build:
+      context: ../../../pii-leak-benchmark
+      dockerfile: ../benchmarks/replication/runner/Dockerfile
+    network_mode: "service:nemo"
+    depends_on:
+      nemo:
+        condition: service_healthy
+    environment:
+      # Part of the measured configuration, transcribed from the published run recipe:
+      # NeMo has no request-path rail here, and its first requests load a model, so the
+      # sweep was measured with a 30 s read deadline rather than the 10 s default.
+      V2_REQUEST_PATH_REDACTION: not-configured
+      V2_CLIENT_READ_TIMEOUT: "30"
+    volumes:
+      - ../runner/replicate.py:/replicate.py:ro
+      - ../../results/v2-response-split/seed-sweep-nemo.json:/expected/seed-sweep.json:ro
+      - ../../results/v2-response-split/nemo-guardrails-0.24.0.json:/expected/report.json:ro
+      - ./out:/out
+    command:
+      - --policy
+      - nemo-guardrails-0.24.0
+      - --gateway-url
+      - http://127.0.0.1:9000/v1/chat/completions
+      - --model
+      - config
+      - --upstream-port
+      - "8799"
+      - --expected
+      - /expected/seed-sweep.json
+      - --expected-report
+      - /expected/report.json
+      - --out
+      - /out

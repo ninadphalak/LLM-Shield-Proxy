@@ -1,0 +1,37 @@
+# LiteLLM proxy configured for the v2 response-split profile.
+#
+# The upstream is this harness's capture server, pinned to 127.0.0.1:8799, so LiteLLM's
+# "model" is an OpenAI-compatible endpoint we control and can fragment at will. That is
+# the whole point: the capture IS the configured upstream, which is where the harness has
+# control over chunk boundaries.
+#
+# The guardrail under test is LiteLLM's own Presidio integration, pointed at the same
+# analyzer container the reference policies use, so the detector is held constant and the
+# only variable is the gateway wrapping it.
+
+model_list:
+  - model_name: capture
+    litellm_params:
+      model: openai/capture
+      api_base: http://127.0.0.1:8799/v1
+      api_key: sk-not-used-by-the-capture
+
+guardrails:
+  - guardrail_name: presidio-mask
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call
+      # Mask on the way out. LiteLLM's output_parse_pii handles the return path.
+      output_parse_pii: true
+      presidio_analyzer_api_base: http://127.0.0.1:5002
+      presidio_anonymizer_api_base: http://127.0.0.1:5001
+      default_on: true
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  # Required. With no master_key LiteLLM answers 401 "No api key passed in"; with a
+  # master_key it accepts exactly this value without a database. Any OTHER key triggers a
+  # virtual-key lookup and fails with "No connected db".
+  master_key: sk-v2-profile-local

@@ -22,6 +22,43 @@ _config_reload_lock: threading.Lock = threading.Lock()
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 _ENV_FILE_PATH: str = str(_REPO_ROOT / ".env")
 
+# Key prefixes that look enough like a real provider credential to be forwarded as
+# BYOK when ENABLE_OPEN_BYOK_PASSTHROUGH is on. This is a shape check, never an
+# authentication decision -- see that flag's description. Operators override the
+# list with BYOK_KEY_PREFIXES rather than editing it here, because the set of
+# providers a deployment fronts is a deployment fact, not a property of the proxy.
+DEFAULT_BYOK_KEY_PREFIXES: tuple[str, ...] = (
+    "sk-proj-",  # OpenAI
+    "sk-ant-",  # Anthropic
+    "AIza",  # Google AI Studio / Gemini
+    "sk-or-v1-",  # OpenRouter
+)
+
+# Keys whose values carry structure rather than prose. Rewriting one does not
+# protect anybody and can break the request: a tool stops routing, a schema stops
+# validating, a model name stops resolving. Operators extend this with
+# PAYLOAD_PROTECTED_KEYS rather than editing it here.
+#
+# `enum` is deliberately NOT here. An enum value can be an email, and skipping it sent
+# that to the provider in clear. Tokenising it keeps the schema consistent (the same
+# value always gets the same token within a vault), and the model's tool arguments are
+# rehydrated on every path, so the application still receives a value its enum allows.
+DEFAULT_PROTECTED_PAYLOAD_KEYS: frozenset[str] = frozenset(
+    {
+        "model",
+        "type",
+        "role",
+        "format",
+        "object",
+        "index",
+        "finish_reason",
+        "$ref",
+        "$schema",
+        "mime_type",
+        "encoding_format",
+    }
+)
+
 
 class Settings(BaseSettings):
     """Centralized, validated runtime configuration schema for LLM-Shield-Proxy."""
@@ -94,14 +131,63 @@ class Settings(BaseSettings):
     AIR_GAPPED_MODE: bool = Field(default=False, description="Enable strict Zero-Internet egress gateway mode")
     EGRESS_GATEWAY_URL: Optional[str] = Field(default=None, description="Internal proxy/gateway URL for Air-Gapped mode")
     FORWARD_CLIENT_AUTH: bool = Field(default=False, description="Forward client auth headers in air-gapped mode")
+    ENABLE_K8S_WEBHOOK: bool = Field(
+        default=False,
+        description="Serve the Kubernetes mutating admission webhook at /v1/k8s/mutate. The Helm chart sets it when webhook.enabled is true.",
+    )
     K8S_WEBHOOK_AUTH_TOKEN: Optional[str] = Field(default=None, description="Optional bearer token for K8s admission webhook")
     K8S_SIDECAR_IMAGE: str = Field(
         default="ghcr.io/ninadphalak/llm-shield-proxy:latest",
         description="Container image appended by the Kubernetes admission webhook",
     )
+    K8S_SIDECAR_SECRET_NAME: Optional[str] = Field(
+        default=None,
+        description=(
+            "Secret the injected sidecar loads its environment from (envFrom), for example "
+            "VALID_VIRTUAL_KEYS and a provider key. A pod's llm-shield.io/keys-secret "
+            "annotation overrides it. Without one the sidecar rejects every request."
+        ),
+    )
 
     # Virtual Key Scoping & Multi-Tenancy
     VALID_VIRTUAL_KEYS: str = Field(default="", description="Comma-separated list of authorized virtual API keys")
+    ENABLE_DEEP_PAYLOAD_REDACTION: bool = Field(
+        default=True,
+        description=(
+            "Redact strings in request fields outside the known request shapes: metadata, user, "
+            "response_format, and any provider-specific or unrecognised field. Turning this off "
+            "lets those fields reach the provider unredacted. Tool definitions are redacted either way."
+        ),
+    )
+    PAYLOAD_PROTECTED_KEYS: str = Field(
+        default="",
+        description=(
+            "Comma-separated JSON keys deep redaction must never rewrite, added to the built-in "
+            "structural set. Use it when a value has to reach the provider byte for byte, for "
+            "example add 'name' if a tool's function name is ever rewritten."
+        ),
+    )
+    UNMAPPED_BLOB_POLICY: Literal["skip", "warn", "block"] = Field(
+        default="warn",
+        description=(
+            "What to do when a string past PAYLOAD_MAX_REDACT_STRING_LENGTH is found in a field "
+            "no policy claims. 'skip' forwards it silently. 'warn' forwards it and writes a "
+            "signed audit record naming the JSON path, so the security team learns which custom "
+            "paths to add to payload_skip_keys. 'block' rejects the request with 413. Roll out on "
+            "warn, tune payload_skip_keys from the audit trail, then move to block. This and the "
+            "ceiling are both overridable per virtual key in policies.yaml, like any other setting."
+        ),
+    )
+    PAYLOAD_MAX_REDACT_STRING_LENGTH: int = Field(
+        default=8192,
+        ge=0,
+        description=(
+            "Strings longer than this, and any data: URI, are forwarded without inspection. "
+            "Scanning one base64 image costs more than the rest of a payload combined; raising "
+            "this slows every request that carries a blob. Measure the cost on your own traffic "
+            "with benchmarks/payload_walk_latency.py before changing it."
+        ),
+    )
     CORS_ALLOWED_ORIGINS: str = Field(default="", description="Comma-separated allowed CORS origins (empty allows same-origin / configured)")
     ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = Field(
         default=False, description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
@@ -111,8 +197,17 @@ class Settings(BaseSettings):
         default=False,
         description=(
             "Allow callers presenting an unrecognized key that merely looks like a provider key "
-            "(sk-proj-/sk-ant-/AIza prefix) to pass through as BYOK without matching VALID_VIRTUAL_KEYS. "
+            "(see BYOK_KEY_PREFIXES) to pass through as BYOK without matching VALID_VIRTUAL_KEYS. "
             "Disabled by default: unauthenticated callers are rejected with 401 unless this is explicitly enabled."
+        ),
+    )
+    BYOK_KEY_PREFIXES: str = Field(
+        default="",
+        description=(
+            "Comma-separated key prefixes accepted by ENABLE_OPEN_BYOK_PASSTHROUGH. Empty uses the built-in "
+            "list (OpenAI, Anthropic, Google, OpenRouter). Setting it REPLACES that list rather than extending "
+            "it, so a deployment fronting a single provider can narrow the surface. Blank entries are dropped: "
+            "an empty prefix would match every key and turn the gate into allow-all."
         ),
     )
 
@@ -173,15 +268,42 @@ class Settings(BaseSettings):
     MAX_SESSION_VAULTS: int = Field(default=10000, description="Maximum capacity of in-memory LRU session vault cache")
 
     # Redaction & Detection Cascade Settings
+    RELAY_UPSTREAM_ERROR_MESSAGES: bool = Field(
+        default=True,
+        description=(
+            "When the provider answers 4xx/5xx, pass its error message back to the client after "
+            "scrubbing it: every credential the proxy sent upstream is removed, the text goes "
+            "through the PII engine one-way, and it is cut at 512 characters. Off, the client "
+            "gets only 'Failed to communicate with upstream provider.' and the status."
+        ),
+    )
+    ENABLE_RESPONSE_PII_REDACTION: bool = Field(
+        default=False,
+        description=(
+            "Redact PII the MODEL produced -- values that were never in the request and so "
+            "are not in the vault -- before the response reaches the client. Off by default "
+            "because it changes what callers receive: a value the model rephrases rather "
+            "than quotes will not match a vault token, so it is redacted and not restored. "
+            "Turning it on trades that risk against egressing model-originated PII, which "
+            "is what happens with it off. Request-path redaction is unaffected either way."
+        ),
+    )
+    RESPONSE_PII_SCAN_WINDOW: int = Field(
+        default=64,
+        ge=16,
+        le=4096,
+        description=(
+            "Characters held back at the emit boundary when ENABLE_RESPONSE_PII_REDACTION "
+            "is on, so a detectable value cannot straddle two chunks and escape a "
+            "chunk-local scan. Bounded on purpose: this is the retention window, and an "
+            "unbounded one would reintroduce whole-response buffering."
+        ),
+    )
     SHIELD_DEFAULT_MASKING_MODE: str = Field(
         default="SYNTHETIC", description="Default masking mode (SYNTHETIC, STRUCTURAL_TAG, SCRUB, STATELESS_CRYPTO)"
     )
     SHIELD_ENCRYPTION_KEY: Optional[str] = Field(
         default=None, description="256-bit AES-GCM encryption key for stateless cryptographic masking (base64 or hex)"
-    )
-    VAULT_ENCRYPTION_KEY: Optional[str] = Field(
-        default=None,
-        description="Key material for the session vault DEK. Unset derives an ephemeral per-process key.",
     )
     ENABLE_SYNTHETIC_SWAPPING: bool = Field(
         default=True, description="Enable Faker-based realistic synthetic entity swapping instead of token placeholders"
@@ -347,6 +469,36 @@ class Settings(BaseSettings):
         if self.AIR_GAPPED_MODE and not self.EGRESS_GATEWAY_URL:
             raise ValueError("EGRESS_GATEWAY_URL must be set if AIR_GAPPED_MODE is True.")
         return self
+
+    @property
+    def byok_key_prefixes(self) -> tuple[str, ...]:
+        """Prefixes accepted as BYOK-shaped, fail-closed on a malformed override.
+
+        Blank entries are dropped because ``"anything".startswith("")`` is True, so a
+        stray trailing comma would otherwise widen the gate to every key ever
+        presented. An override that parses to nothing yields an empty tuple, and
+        ``str.startswith(())`` is False, so the gate denies rather than admits.
+        """
+        if not self.BYOK_KEY_PREFIXES:
+            return DEFAULT_BYOK_KEY_PREFIXES
+        return tuple(p.strip() for p in self.BYOK_KEY_PREFIXES.split(",") if p.strip())
+
+    @property
+    def payload_protected_keys_set(self) -> frozenset[str]:
+        """Structural keys plus operator additions, never rewritten by deep redaction."""
+        return DEFAULT_PROTECTED_PAYLOAD_KEYS | self.payload_operator_protected_keys_set
+
+    @property
+    def payload_operator_protected_keys_set(self) -> frozenset[str]:
+        """Only the keys an operator added through PAYLOAD_PROTECTED_KEYS.
+
+        Kept apart from the built-in structural keys because the two mean different
+        things inside schema data (`enum`, `const`, ...): a built-in key there is just a
+        field name, while an operator's key is a promise that the value goes out unchanged.
+        """
+        if not self.PAYLOAD_PROTECTED_KEYS:
+            return frozenset()
+        return frozenset(key.strip() for key in self.PAYLOAD_PROTECTED_KEYS.split(",") if key.strip())
 
     @property
     def valid_virtual_keys_set(self) -> frozenset[str]:

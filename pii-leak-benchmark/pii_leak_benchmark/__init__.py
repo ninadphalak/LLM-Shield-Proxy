@@ -19,9 +19,15 @@ product.
 Public API:
 
 - ``run_http_conformance`` - run the profile against a base URL, return a report.
+- ``capture_session`` - hold the capture endpoint open across a target you start
+  yourself, so a gateway that contacts its upstream during startup finds it there.
 - ``write_conformance_report`` - write a report as LF-terminated JSON.
 - ``build_attestation`` - self-reported CI provenance for a run, or ``None``.
 - ``derive_outcome`` / ``rationale_for`` - what a published row is ALLOWED to say.
+- ``OperatorSpecimens`` / ``findings_from_report`` / ``render`` - the explanation layer.
+  Pass ``OperatorSpecimens()`` to ``run_http_conformance`` to receive the run's generated
+  values; they are never written to the report. ``render(..., reveal=False)`` publishes
+  shapes instead. See ``explain`` for the rule.
 
 Reports validate against the Streaming Privacy Gateway (SPG) report schema in
 ``spec/v1.0.0`` of the LLM-Shield-Proxy repository. The specification keeps the SPG
@@ -29,18 +35,37 @@ name; only this tool carries the searchable one.
 """
 
 from pii_leak_benchmark.artifact import write_conformance_report
-from pii_leak_benchmark.http_profile import CaptureUnreachableError, run_http_conformance
+from pii_leak_benchmark.explain import (
+    Finding,
+    OperatorSpecimens,
+    findings_from_report,
+    published_dict,
+    render,
+)
+from pii_leak_benchmark.http_profile import (
+    CaptureSession,
+    CaptureUnreachableError,
+    capture_session,
+    run_http_conformance,
+)
 from pii_leak_benchmark.provenance import build_attestation, source_revision
 from pii_leak_benchmark.redaction_claim import derive_outcome, rationale_for
 
 __all__ = [
+    "CaptureSession",
     "CaptureUnreachableError",
+    "Finding",
+    "OperatorSpecimens",
     "build_attestation",
+    "capture_session",
     "derive_outcome",
+    "findings_from_report",
+    "published_dict",
     "rationale_for",
+    "render",
     "run_http_conformance",
     "source_revision",
     "write_conformance_report",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.6.0"

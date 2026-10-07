@@ -1,0 +1,41 @@
+# Higress `ai-data-masking` WasmPlugin, configured for the four v2 corpus entities.
+#
+# SINGLE-quoted scalars, deliberately. The first version of this file used double quotes,
+# and a YAML double-quoted scalar processes backslash escapes: `\.` and `\d` are not legal
+# escapes, so the document did not parse. The row measured a config file that never
+# loaded, and reported it as a property of Higress. Single-quoted YAML passes the
+# backslashes through untouched, which is what a regex needs.
+#
+# The `/pattern/g` wrapper is the plugin's own syntax, not YAML.
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: ai-data-masking
+  namespace: higress-system
+  labels:
+    higress.io/resource-definer: higress
+spec:
+  defaultConfig:
+    deny_openai: false
+    system_deny: false
+    replace_roles:
+      - regex: '/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g'
+        type: replace
+        restore: true
+        value: '***EMAIL***'
+      - regex: '/\b\d{3}-\d{2}-\d{4}\b/g'
+        type: replace
+        restore: true
+        value: '***SSN***'
+      - regex: '/\b\d{3}-\d{3}-\d{4}\b/g'
+        type: replace
+        restore: true
+        value: '***PHONE***'
+      - regex: '/\b(?:\d{4}-){3}\d{4}\b/g'
+        type: replace
+        restore: true
+        value: '***CARD***'
+  defaultConfigDisable: false
+  phase: UNSPECIFIED_PHASE
+  priority: 991
+  url: file:///usr/share/nginx/html/plugins/ai-data-masking/2.0.1/plugin.wasm

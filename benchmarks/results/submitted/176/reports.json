@@ -1,0 +1,1299 @@
+{
+  "current.json": {
+    "attestation": {
+      "ci_provider": "github-actions",
+      "commit_sha": "410e8f4a8e378e4bcd899049c698f4616f76d425",
+      "repository": "teg0011/LLM-Shield-Proxy",
+      "run_url": "https://github.com/teg0011/LLM-Shield-Proxy/actions/runs/37254251177",
+      "runner": "GitHub Actions 1000000152",
+      "verification": "self-reported",
+      "workflow_ref": "teg0011/LLM-Shield-Proxy/.github/workflows/wrappers-source-reproduction.yml@refs/heads/main"
+    },
+    "contract": {
+      "duty": "anonymize",
+      "fixture_sha256": "7dc537dbaad3af8b96a1252278720116a09c07bbcb31c1e3ca90dd2e8c412bc3",
+      "harness_version": "0.4.1",
+      "instrument_sha256": "86eeab3a6bb7b03b128e1078cfbfbaaf1fb4df3340f96a503c6da8fb7ce2ef57",
+      "iterations": 3,
+      "model": "capture",
+      "profile": "pii-secrets-v1",
+      "seed": "gateway-ci-v1",
+      "workload_version": "operator-smoke/1"
+    },
+    "coverage": [
+      {
+        "entity": "AWS_ACCESS_KEY_ID",
+        "format": "AKIA + 16 uppercase alphanumerics",
+        "variation": "fixed synthetic specimen"
+      },
+      {
+        "entity": "CREDIT_CARD",
+        "format": "dddd-dddd-dddd-dddd",
+        "variation": "seeded synthetic value"
+      },
+      {
+        "entity": "EMAIL",
+        "format": "[a-z]{8}@example.com",
+        "variation": "seeded synthetic value"
+      },
+      {
+        "entity": "GITHUB_TOKEN",
+        "format": "ghp_ + 36 characters",
+        "variation": "fixed synthetic specimen"
+      },
+      {
+        "entity": "SLACK_TOKEN",
+        "format": "xoxb- + numeric fields + secret",
+        "variation": "fixed synthetic specimen"
+      },
+      {
+        "entity": "SSN",
+        "format": "ddd-dd-dddd",
+        "variation": "seeded synthetic value"
+      }
+    ],
+    "entities": {
+      "AWS_ACCESS_KEY_ID": "leak",
+      "CREDIT_CARD": "leak",
+      "EMAIL": "leak",
+      "GITHUB_TOKEN": "leak",
+      "SLACK_TOKEN": "leak",
+      "SSN": "leak"
+    },
+    "findings": [
+      {
+        "attributed": true,
+        "carrier": "upstream-request",
+        "display": [
+          "LEAK  EMAIL reached the model provider",
+          "      you sent:         <EMAIL>",
+          "      the provider saw: <EMAIL>               <- nothing removed it on the way",
+          "      The gateway forwarded the caller's own email address to the model",
+          "      provider byte for byte. Not doing that is a privacy gateway's one job on",
+          "      the request path. An address is the cheapest key there is for tying a",
+          "      transcript to a named person.",
+          "      Case: upstream-request / plain / split=no   Seed: gateway-ci-v1"
+        ],
+        "encoding": "plain",
+        "entity_type": "EMAIL",
+        "explanation": "The gateway forwarded the caller's own email address to the model provider byte for byte. Not doing that is a privacy gateway's one job on the request path. An address is the cheapest key there is for tying a transcript to a named person.",
+        "fragmented": false,
+        "kind": "leak-to-provider",
+        "redaction_configured": false,
+        "seed": "gateway-ci-v1",
+        "values_published": false
+      },
+      {
+        "attributed": true,
+        "carrier": "upstream-request",
+        "display": [
+          "LEAK  SSN reached the model provider",
+          "      you sent:         <SSN>",
+          "      the provider saw: <SSN>                 <- nothing removed it on the way",
+          "      The gateway forwarded the caller's own US Social Security number to the",
+          "      model provider byte for byte. Not doing that is a privacy gateway's one",
+          "      job on the request path. A Social Security number is a government",
+          "      identifier and cannot be rotated after it is exposed.",
+          "      Case: upstream-request / plain / split=no   Seed: gateway-ci-v1"
+        ],
+        "encoding": "plain",
+        "entity_type": "SSN",
+        "explanation": "The gateway forwarded the caller's own US Social Security number to the model provider byte for byte. Not doing that is a privacy gateway's one job on the request path. A Social Security number is a government identifier and cannot be rotated after it is exposed.",
+        "fragmented": false,
+        "kind": "leak-to-provider",
+        "redaction_configured": false,
+        "seed": "gateway-ci-v1",
+        "values_published": false
+      },
+      {
+        "attributed": true,
+        "carrier": "upstream-request",
+        "display": [
+          "LEAK  CREDIT_CARD reached the model provider",
+          "      you sent:         <CREDIT_CARD>",
+          "      the provider saw: <CREDIT_CARD>         <- nothing removed it on the way",
+          "      The gateway forwarded the caller's own payment card number to the model",
+          "      provider byte for byte. Not doing that is a privacy gateway's one job on",
+          "      the request path. Under PCI DSS a primary account number is exactly the",
+          "      value a gateway exists to stop.",
+          "      Case: upstream-request / plain / split=no   Seed: gateway-ci-v1"
+        ],
+        "encoding": "plain",
+        "entity_type": "CREDIT_CARD",
+        "explanation": "The gateway forwarded the caller's own payment card number to the model provider byte for byte. Not doing that is a privacy gateway's one job on the request path. Under PCI DSS a primary account number is exactly the value a gateway exists to stop.",
+        "fragmented": false,
+        "kind": "leak-to-provider",
+        "redaction_configured": false,
+        "seed": "gateway-ci-v1",
+        "values_published": false
+      },
+      {
+        "attributed": true,
+        "carrier": "upstream-request",
+        "display": [
+          "LEAK  AWS_ACCESS_KEY_ID reached the model provider",
+          "      you sent:         <AWS_ACCESS_KEY_ID>",
+          "      the provider saw: <AWS_ACCESS_KEY_ID>   <- nothing removed it on the way",
+          "      The gateway forwarded the caller's own AWS access key ID to the model",
+          "      provider byte for byte. Not doing that is a privacy gateway's one job on",
+          "      the request path. An access key ID names the account half of an AWS",
+          "      credential and tells an attacker which secret is worth hunting for.",
+          "      Case: upstream-request / plain / split=no   Seed: gateway-ci-v1"
+        ],
+        "encoding": "plain",
+        "entity_type": "AWS_ACCESS_KEY_ID",
+        "explanation": "The gateway forwarded the caller's own AWS access key ID to the model provider byte for byte. Not doing that is a privacy gateway's one job on the request path. An access key ID names the account half of an AWS credential and tells an attacker which secret is worth hunting for.",
+        "fragmented": false,
+        "kind": "leak-to-provider",
+        "redaction_configured": false,
+        "seed": "gateway-ci-v1",
+        "values_published": false
+      },
+      {
+        "attributed": true,
+        "carrier": "upstream-request",
+        "display": [
+          "LEAK  GITHUB_TOKEN reached the model provider",
+          "      you sent:         <GITHUB_TOKEN>",
+          "      the provider saw: <GITHUB_TOKEN>        <- nothing removed it on the way",
+          "      The gateway forwarded the caller's own GitHub access token to the model",
+          "      provider byte for byte. Not doing that is a privacy gateway's one job on",
+          "      the request path. A GitHub token is a bearer credential: whoever holds",
+          "      it is the user it was issued to.",
+          "      Case: upstream-request / plain / split=no   Seed: gateway-ci-v1"
+        ],
+        "encoding": "plain",
+        "entity_type": "GITHUB_TOKEN",
+        "explanation": "The gateway forwarded the caller's own GitHub access token to the model provider byte for byte. Not doing that is a privacy gateway's one job on the request path. A GitHub token is a bearer credential: whoever holds it is the user it was issued to.",
+        "fragmented": false,
+        "kind": "leak-to-provider",
+        "redaction_configured": false,
+        "seed": "gateway-ci-v1",
+        "values_published": false
+      },
+      {
+        "attributed": true,
+        "carrier": "upstream-request",
+        "display": [
+          "LEAK  SLACK_TOKEN reached the model provider",
+          "      you sent:         <SLACK_TOKEN>",
+          "      the provider saw: <SLACK_TOKEN>         <- nothing removed it on the way",
+          "      The gateway forwarded the caller's own Slack bot token to the model",
+          "      provider byte for byte. Not doing that is a privacy gateway's one job on",
+          "      the request path. A Slack bot token can read and post in every channel",
+          "      its app was installed in.",
+          "      Case: upstream-request / plain / split=no   Seed: gateway-ci-v1"
+        ],
+        "encoding": "plain",
+        "entity_type": "SLACK_TOKEN",
+        "explanation": "The gateway forwarded the caller's own Slack bot token to the model provider byte for byte. Not doing that is a privacy gateway's one job on the request path. A Slack bot token can read and post in every channel its app was installed in.",
+        "fragmented": false,
+        "kind": "leak-to-provider",
+        "redaction_configured": false,
+        "seed": "gateway-ci-v1",
+        "values_published": false
+      }
+    ],
+    "generated_at": "2026-10-05T02:10:10.942789Z",
+    "reason": "Raw fixture values reached the upstream: AWS_ACCESS_KEY_ID, CREDIT_CARD, EMAIL, GITHUB_TOKEN, SLACK_TOKEN, SSN.",
+    "required_checks": {
+      "client_observed_latency": true,
+      "configured_upstream_boundary": false,
+      "sse_validity": true
+    },
+    "schema": "pii-leak-benchmark/operator-run/v1",
+    "target_version": "guardrails-ai==0.10.2",
+    "verdict": "LEAK"
+  },
+  "guardrails-ai-stream-validate.json": {
+    "capture": {
+      "authentication_required": false,
+      "bind_host": "127.0.0.1",
+      "mode": "loopback",
+      "port": 8799,
+      "self_probe": {
+        "performed": true,
+        "recorded": true,
+        "round_trip_ms": 29.6629,
+        "url": "http://127.0.0.1:8799/v1/chat/completions"
+      },
+      "target_must_be_preconfigured_for": "[REDACTED]"
+    },
+    "cases_digest": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+    "checks": {
+      "client_observed_latency": {
+        "iterations": 32,
+        "iterations_measured": 32,
+        "mean": 3.3519,
+        "p50": 1.832,
+        "p95": 8.8898,
+        "p99": 9.5574,
+        "passed": true,
+        "threshold_enforced": false,
+        "unit": "milliseconds"
+      },
+      "configured_upstream_boundary": {
+        "capture_mode": "loopback",
+        "captured_requests": 32,
+        "correlated_requests": 32,
+        "correlation_mechanism": "in-process-capture",
+        "inspection_scope": "every request body this run's capture recorded, across all cases; bodies parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; strings reassembled in arrival order per JSON path, across captured requests, with decoded material held out of the ordered stream; bodies that do not parse as JSON scanned as raw text; base64/hex/percent-encoded runs and character-code arrays decoded; matched literally and with separators removed, over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39; correlated by in-process capture identity rather than by marker words, so marker_words_observed_max is 0 by construction and is not a coverage signal",
+        "leak_evidence": [
+          {
+            "channel": "body",
+            "entity_type": "CARDPAN",
+            "match": "literal",
+            "scope": "per-request"
+          },
+          {
+            "channel": "body",
+            "entity_type": "EMAIL",
+            "match": "literal",
+            "scope": "per-request"
+          },
+          {
+            "channel": "body",
+            "entity_type": "SSN",
+            "match": "literal",
+            "scope": "per-request"
+          },
+          {
+            "channel": "body",
+            "entity_type": "USPHONE",
+            "match": "literal",
+            "scope": "per-request"
+          }
+        ],
+        "leaked_entity_types": [
+          "CARDPAN",
+          "EMAIL",
+          "SSN",
+          "USPHONE"
+        ],
+        "marker_words_observed_max": 0,
+        "marker_words_required": 3,
+        "marker_words_total": 5,
+        "needle_lengths": {},
+        "needle_proximity": {},
+        "passed": false,
+        "payload_content_included": false,
+        "unattributed_leak_evidence": [],
+        "unattributed_leaked_entity_types": [],
+        "unattributed_requests": 0,
+        "unattributed_uninspectable_requests": 0,
+        "uninspectable_reasons": [],
+        "uninspectable_requests": 0,
+        "upstream_paths_observed": [
+          "/v1/chat/completions"
+        ]
+      },
+      "fragmentation_safety": {
+        "coalescing_cases": 0,
+        "coalescing_cases_compared": 32,
+        "coalescing_not_distinguished": false,
+        "coalescing_per_case": [
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "EMAIL",
+              "fragmentation": "single_chunk",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "percent",
+              "entity": "EMAIL",
+              "fragmentation": "adversarial",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "plain",
+              "entity": "SSN",
+              "fragmentation": "single_chunk",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "percent",
+              "entity": "SSN",
+              "fragmentation": "adversarial",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "CARDPAN",
+              "fragmentation": "single_chunk",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "percent",
+              "entity": "CARDPAN",
+              "fragmentation": "adversarial",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "plain",
+              "entity": "USPHONE",
+              "fragmentation": "single_chunk",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "percent",
+              "entity": "USPHONE",
+              "fragmentation": "adversarial",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "EMAIL",
+              "fragmentation": "adversarial",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "percent",
+              "entity": "EMAIL",
+              "fragmentation": "single_chunk",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "SSN",
+              "fragmentation": "single_chunk",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "SSN",
+              "fragmentation": "single_chunk",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "CARDPAN",
+              "fragmentation": "single_chunk",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "CARDPAN",
+              "fragmentation": "single_chunk",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "USPHONE",
+              "fragmentation": "single_chunk",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "USPHONE",
+              "fragmentation": "single_chunk",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "EMAIL",
+              "fragmentation": "adversarial",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "percent",
+              "entity": "EMAIL",
+              "fragmentation": "single_chunk",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "plain",
+              "entity": "SSN",
+              "fragmentation": "adversarial",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "percent",
+              "entity": "SSN",
+              "fragmentation": "single_chunk",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "CARDPAN",
+              "fragmentation": "adversarial",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "percent",
+              "entity": "CARDPAN",
+              "fragmentation": "single_chunk",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-json-field",
+              "encoding": "plain",
+              "entity": "USPHONE",
+              "fragmentation": "adversarial",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "percent",
+              "entity": "USPHONE",
+              "fragmentation": "single_chunk",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "EMAIL",
+              "fragmentation": "single_chunk",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 4,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 3,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "percent",
+              "entity": "EMAIL",
+              "fragmentation": "adversarial",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "SSN",
+              "fragmentation": "adversarial",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "SSN",
+              "fragmentation": "adversarial",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "CARDPAN",
+              "fragmentation": "adversarial",
+              "request_site": "unrecognised-key"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "CARDPAN",
+              "fragmentation": "adversarial",
+              "request_site": "tool-description"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "USPHONE",
+              "fragmentation": "adversarial",
+              "request_site": "chat-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          },
+          {
+            "case": {
+              "carrier": "sse-delta-content",
+              "encoding": "plain",
+              "entity": "USPHONE",
+              "fragmentation": "adversarial",
+              "request_site": "system-content"
+            },
+            "coalesced": false,
+            "data_events_observed": 5,
+            "stream_failure": false,
+            "upstream_data_events_emitted": 4,
+            "upstream_responses_observed": 1
+          }
+        ],
+        "coalescing_rate": 0.0,
+        "data_events_observed": 4,
+        "data_events_observed_total": 144,
+        "events_observed": 5,
+        "events_observed_max": 6,
+        "one_character_events_requested": false,
+        "passed": true,
+        "response_reconstructed": true,
+        "stream_failure": false,
+        "stream_failure_cases": 0,
+        "upstream_data_events_emitted_total": 112
+      },
+      "response_fidelity": {
+        "expected_value_reconstructed": false,
+        "iterations_completed": 128,
+        "iterations_matching": 0,
+        "iterations_requested": 128,
+        "passed": false,
+        "payload_content_included": false,
+        "segment": "echo"
+      },
+      "response_injection_containment": {
+        "client_capture_inspectable": true,
+        "delivery_confirmed": true,
+        "fragmentation_strategy": "across-sse-events",
+        "injected_entity_types": [
+          "CARDPAN",
+          "EMAIL",
+          "SSN",
+          "USPHONE"
+        ],
+        "inspection_scope": "every SSE event the client received; event data parsed as JSON; walked recursively over all JSON types, including nested objects, lists, numbers and object keys; every element of choices, not only the first; delta content reassembled in arrival order; non-content string fields reassembled in arrival order, in a stream kept separate from delta content; every string value reassembled in document order, so a value split between delta content and any other field is recovered; content and text members of one content subtree reassembled together, so a value split between a content string and a content list of parts is recovered; events that do not parse as JSON scanned as raw text; events carrying duplicate JSON object names also scanned as raw text, because parsing discards every value but the last; base64-encoded runs decoded, over multiple rounds; hex-encoded runs decoded; percent-encoded runs decoded; character-code arrays reconstructed; matched literally and with separators removed; over NFKD-decomposed text with non-Latin digits resolved to their decimal value and non-ASCII look-alikes folded to ASCII per UTS #39",
+        "leak_evidence": [
+          {
+            "cases_leaked": "4",
+            "entity_type": "EMAIL",
+            "observed": "single-field",
+            "weakest_tier_is_a_concatenation": "false"
+          }
+        ],
+        "leaked_entity_types": [
+          "EMAIL"
+        ],
+        "needle_lengths": {},
+        "needle_proximity": {},
+        "passed": false,
+        "payload_content_included": false,
+        "segment": "injection"
+      },
+      "segment_separation": {
+        "echo_entity_types": [
+          "CARDPAN",
+          "EMAIL",
+          "SSN",
+          "USPHONE"
+        ],
+        "injection_absent_from_request": true,
+        "injection_entity_types": [
+          "CARDPAN",
+          "EMAIL",
+          "SSN",
+          "USPHONE"
+        ],
+        "normalized_forms_disjoint": true,
+        "passed": true,
+        "shared_substring_max": 12,
+        "shortest_needle_length": 9,
+        "values_disjoint": true
+      },
+      "sse_validity": {
+        "content_type_valid": true,
+        "done_markers_valid": true,
+        "errors": [],
+        "invalid_events": 0,
+        "passed": true,
+        "status_codes": [
+          200
+        ]
+      }
+    },
+    "corpus": {
+      "case_count": 32,
+      "coverage": {
+        "axes": [
+          "carrier",
+          "encoding",
+          "entity",
+          "fragmentation",
+          "request_site"
+        ],
+        "pairs_covered": 76,
+        "pairs_required": 76,
+        "proof_complete": true,
+        "strategy": "pairwise"
+      },
+      "id": "minimal-response-split",
+      "seed": "a1b2c3d4e5f60001",
+      "sha256": "30efa2eb658888448b4416bb527c9ff5ea8489a469f0bec71049eb88ac9efd3c",
+      "values_published": false,
+      "version": "0.1.0"
+    },
+    "entity_scope": {
+      "enabled": [
+        "EMAIL",
+        "SSN",
+        "CARDPAN",
+        "USPHONE"
+      ],
+      "mechanism": "reference-policy detector set",
+      "not_enabled": [],
+      "partitions_corpus": true,
+      "recorded_by": "operator",
+      "source": "pii_leak_benchmark.v2_emitter._DETECTORS",
+      "unknown": []
+    },
+    "environment": {
+      "implementation": "CPython",
+      "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+      "python": "3.12.14"
+    },
+    "fixture": {
+      "formats": {
+        "CARDPAN": "published test-range PAN",
+        "EMAIL": "local@example.com",
+        "SSN": "AAA-GG-SSSS"
+      },
+      "specimens_are_non_real": "SSN area 900-999 and published test-card ranges only",
+      "specimens_are_valid": "Luhn and SSA-range constraints enforced by make_fixture",
+      "value_space_nominal": {
+        "CARDPAN": 6,
+        "EMAIL": 208827064576,
+        "SSN": 48995100,
+        "USPHONE": 80000
+      },
+      "values_published": false,
+      "varies_per_run": true
+    },
+    "generated_at": "2026-10-05T02:10:30Z",
+    "harness_revision": "0.2.1",
+    "implementation": {
+      "labels_are_operator_supplied": true,
+      "name": "external-gateway:guardrails-ai-stream-validate",
+      "version": "0.2.1"
+    },
+    "instrument": {
+      "boundary_scope_sha256": "4a09ca6d088914e7",
+      "client_scope_sha256": "c15a0522954fb64f",
+      "emitter_version": "0.2.1",
+      "inspector_sha256": "94262e29a492ab6a"
+    },
+    "limitations": {
+      "method_limits": [
+        "32 cases: a pairwise covering array over the five axes, not exhaustive.",
+        "Every rate is over cases_applicable=32 of the 32 cases attempted; 0 were inconclusive and are excluded from the denominator rather than counted as no-leak.",
+        "4 entity, 2 encoding, 2 fragmentation, 2 carrier, 4 request_site.",
+        "Request sites are four shapes, not a survey of real client payloads.",
+        "Fragmentation is a two-part split at the value midpoint, not every split point (16 midpoint partitions over 16 uncut single-chunk requests; 32 captured requests total).",
+        "Latency is loopback and in-process; it is not gateway overhead on a network."
+      ],
+      "run_validity": [
+        "Reference response-path policies, not products. No third-party gateway is measured here.",
+        "Loopback transport on a single machine; project-run and unreplicated."
+      ]
+    },
+    "metrics": {
+      "by_axis": {
+        "carrier": {
+          "sse-delta-content": {
+            "applicable": 24,
+            "detector_blind": false,
+            "echo_observable": 24,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0833,
+            "leaked": 2
+          },
+          "sse-json-field": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.25,
+            "leaked": 2
+          }
+        },
+        "encoding": {
+          "percent": {
+            "applicable": 10,
+            "detector_blind": false,
+            "echo_observable": 10,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.4,
+            "leaked": 4
+          },
+          "plain": {
+            "applicable": 22,
+            "detector_blind": false,
+            "echo_observable": 22,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0,
+            "leaked": 0
+          }
+        },
+        "entity": {
+          "CARDPAN": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0,
+            "leaked": 0
+          },
+          "EMAIL": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.5,
+            "leaked": 4
+          },
+          "SSN": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0,
+            "leaked": 0
+          },
+          "USPHONE": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0,
+            "leaked": 0
+          }
+        },
+        "fragmentation": {
+          "adversarial": {
+            "applicable": 16,
+            "detector_blind": false,
+            "echo_observable": 16,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.125,
+            "leaked": 2
+          },
+          "single_chunk": {
+            "applicable": 16,
+            "detector_blind": false,
+            "echo_observable": 16,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.125,
+            "leaked": 2
+          }
+        },
+        "request_site": {
+          "chat-content": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0,
+            "leaked": 0
+          },
+          "system-content": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.25,
+            "leaked": 2
+          },
+          "tool-description": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.25,
+            "leaked": 2
+          },
+          "unrecognised-key": {
+            "applicable": 8,
+            "detector_blind": false,
+            "echo_observable": 8,
+            "fidelity_rate": 0.0,
+            "leak_rate": 0.0,
+            "leaked": 0
+          }
+        }
+      },
+      "by_axis_arm": {
+        "carrier": {
+          "sse-delta-content": {
+            "adversarial": {
+              "applicable": 12,
+              "leak_rate": 0.0833,
+              "leaked": 1
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 12,
+            "single_chunk": {
+              "applicable": 12,
+              "leak_rate": 0.0833,
+              "leaked": 1
+            }
+          },
+          "sse-json-field": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.25,
+              "leaked": 1
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.25,
+              "leaked": 1
+            }
+          }
+        },
+        "encoding": {
+          "percent": {
+            "adversarial": {
+              "applicable": 5,
+              "leak_rate": 0.4,
+              "leaked": 2
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 5,
+            "single_chunk": {
+              "applicable": 5,
+              "leak_rate": 0.4,
+              "leaked": 2
+            }
+          },
+          "plain": {
+            "adversarial": {
+              "applicable": 11,
+              "leak_rate": 0.0,
+              "leaked": 0
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 11,
+            "single_chunk": {
+              "applicable": 11,
+              "leak_rate": 0.0,
+              "leaked": 0
+            }
+          }
+        },
+        "entity": {
+          "CARDPAN": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            }
+          },
+          "EMAIL": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.5,
+              "leaked": 2
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.5,
+              "leaked": 2
+            }
+          },
+          "SSN": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            }
+          },
+          "USPHONE": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            }
+          }
+        },
+        "request_site": {
+          "chat-content": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            }
+          },
+          "system-content": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.25,
+              "leaked": 1
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.25,
+              "leaked": 1
+            }
+          },
+          "tool-description": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.25,
+              "leaked": 1
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.25,
+              "leaked": 1
+            }
+          },
+          "unrecognised-key": {
+            "adversarial": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            },
+            "delta_frag": 0.0,
+            "paired_cases": 4,
+            "single_chunk": {
+              "applicable": 4,
+              "leak_rate": 0.0,
+              "leaked": 0
+            }
+          }
+        }
+      },
+      "cases_applicable": 32,
+      "cases_by_condition": {
+        "adversarial": 16,
+        "single_chunk": 16
+      },
+      "cases_echo_observable": 32,
+      "cases_inconclusive": 0,
+      "cases_scored": 32,
+      "delta_frag": 0.0,
+      "derivation_recomputed": true,
+      "detector_blind_entities": [],
+      "discordance": {
+        "adversarial_only": 0,
+        "both_arms_leaked": 2,
+        "delta_frag_from_discordance": 0.0,
+        "neither_arm_leaked": 14,
+        "pairs_complete": 16,
+        "pairs_incomplete": 0,
+        "single_chunk_only": 0
+      },
+      "fidelity_rate": 0.0,
+      "leak_rate": {
+        "adversarial": 0.125,
+        "overall": 0.125,
+        "single_chunk": 0.125
+      },
+      "partition_oracle": {
+        "adversarial_partitions": 16,
+        "captured_requests_total": 32,
+        "cases_inconclusive_by_cap": 0,
+        "cases_inconclusive_in_transport": 0,
+        "families": {},
+        "method_limit_sentence": "Fragmentation is a two-part split at the value midpoint, not every split point (16 midpoint partitions over 16 uncut single-chunk requests; 32 captured requests total).",
+        "oracle": "midpoint",
+        "partition_seconds_total": 16.1524,
+        "resource_cap_per_case_per_family": 6000,
+        "uncut_single_chunk_requests": 16,
+        "worst_case": {
+          "cases_enumerated": 0,
+          "cases_excluded_by_cap": 0,
+          "cases_leaked": 0,
+          "component_leak_rates_on_union_denominator": {},
+          "definition": "no partition family was enumerated by this oracle, so no union-based worst-case statistic is defined for this run; the rates are null rather than zero because they were not measured, and NOT a worst case over arbitrary streams",
+          "delta_frag": null,
+          "families_in_union": [],
+          "leak_rate_adversarial": null,
+          "leak_rate_single_chunk_paired": null,
+          "never_below_components": true,
+          "paired_single_chunk_cases": 0
+        }
+      },
+      "sidecar_case_count_matches": true
+    },
+    "outcome": "fail",
+    "outcome_rationale": "FidelityRate=0.0 over 32 echo-observable, LeakRate(single_chunk)=0.125 over 16, LeakRate(adversarial)=0.125 over 16, DeltaFrag=0.0, request-path leak=CARDPAN,EMAIL,SSN,USPHONE. Rates are over cases_applicable=32 of 32 attempted (0 inconclusive, excluded from every denominator rather than counted as no-leak).",
+    "passed": false,
+    "profile": {
+      "name": "OpenAI-compatible HTTP gateway profile",
+      "scope": "client-to-gateway request, controlled configured-upstream capture, and SSE response"
+    },
+    "redaction_claim": {
+      "claim_citation": "operator-supplied; see the run recipe in the target's profile directory",
+      "configuration_reference": "external gateway configured by the operator; see the run script",
+      "configured_for_this_run": true,
+      "recorded_by": "operator",
+      "request_path_redaction_configured": "not-configured",
+      "vendor_claims_pii_redaction": "claimed"
+    },
+    "schema": "llm-shield.streaming-privacy-http-profile/v2.0.0",
+    "target": {
+      "base_url": "[REDACTED]",
+      "model": "capture",
+      "raw_pass_through_baseline": false
+    }
+  },
+  "source-identity.json": {
+    "configuration": "0.10.2, its streaming validator holding to the sentence boundary, request path not masked",
+    "distribution_version": "0.10.2",
+    "license": "Apache-2.0",
+    "product": "Guardrails AI",
+    "project_url": "https://github.com/guardrails-ai/guardrails",
+    "schema": "pii-leak-benchmark/source-build/v1",
+    "source_commit": "410e8f4a8e378e4bcd899049c698f4616f76d425",
+    "source_repository": "teg0011/LLM-Shield-Proxy",
+    "source_selector": "guardrails-ai==0.10.2",
+    "wrapper_gateway": "benchmarks/guardrails-v2-profile/gateway.py",
+    "wrapper_mode": ""
+  }
+}

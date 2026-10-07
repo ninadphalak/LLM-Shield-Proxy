@@ -1,0 +1,25 @@
+{
+  "schema": "llm-shield-proxy/submitted-row-archive/v1",
+  "issue": 56,
+  "submitter": "ninadphalak",
+  "ranIn": "ninadphalak/llm-shield-intake-test",
+  "ranInOwnerType": "User",
+  "runUrl": "https://github.com/ninadphalak/llm-shield-intake-test/actions/runs/36495598565",
+  "runId": 36495598565,
+  "headSha": "ce1cd0c554d12872dec2777549aebc9be990bd25",
+  "workflowPath": ".github/workflows/pii-leak-check.yml",
+  "runCreatedAt": "2026-09-28T23:00:03Z",
+  "artifact": {
+    "name": "pii-leak-benchmark",
+    "id": 11003516173,
+    "bytes": 15900,
+    "sha256": "f8f929baba8a6ba7299bc1e319d69e7a681d62fc3b4a2d99bdbe9e425a38c9da"
+  },
+  "harness": "0.4.1",
+  "redactedFields": [
+    "target.base_url",
+    "capture.target_must_be_preconfigured_for",
+    "capture.self_probe.advertised_url"
+  ],
+  "archivedAt": "2026-09-28T23:02:57Z"
+}

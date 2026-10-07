@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00ff9d"/>
+      <stop offset="1" stop-color="#00a8ff"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="85%" cy="12%" r="75%">
+      <stop offset="0" stop-color="#161b22"/>
+      <stop offset="1" stop-color="#0a0e14"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bgGlow)"/>
+
+  <!-- Eyebrow -->
+  <text x="70" y="82" fill="#00ff9d" font-size="23" font-weight="700" letter-spacing="3.5">PII-LEAK-BENCHMARK</text>
+
+  <!-- Headline -->
+  <text x="70" y="152" fill="#ffffff" font-size="54" font-weight="800">Catch PII leaks before they merge</text>
+  <text x="70" y="196" fill="#8b949e" font-size="26">Does your LLM gateway send real customer data to OpenAI? Find out on every pull request.</text>
+
+  <!-- Terminal: the failure this catches -->
+  <rect x="70" y="232" width="1060" height="252" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <rect x="70" y="232" width="4" height="252" rx="2" fill="#f85149"/>
+
+  <!-- Window dots -->
+  <circle cx="106" cy="264" r="6" fill="#f85149"/>
+  <circle cx="126" cy="264" r="6" fill="#d29922"/>
+  <circle cx="146" cy="264" r="6" fill="#3fb950"/>
+  <text x="170" y="270" fill="#6e7681" font-size="18" font-family="Consolas, 'Courier New', monospace">pii-leak-benchmark</text>
+
+  <g font-family="Consolas, 'Courier New', monospace" font-size="26" xml:space="preserve">
+    <text x="104" y="330"><tspan fill="#f85149" font-weight="700">LEAK</tspan><tspan fill="#e6edf3">  EMAIL reached the model provider</tspan></text>
+    <text x="104" y="386"><tspan fill="#8b949e">you sent:         </tspan><tspan fill="#e6edf3">ada.lovelace@example.com</tspan></text>
+    <text x="104" y="432"><tspan fill="#8b949e">the provider saw: </tspan><tspan fill="#e6edf3">ada.lovelace@example.com</tspan></text>
+    <text x="104" y="462"><tspan fill="#0d1117">the provider saw: </tspan><tspan fill="#f85149" font-size="22">^ nothing removed it on the way</tspan></text>
+  </g>
+
+  <!-- Footer -->
+  <text x="70" y="556" fill="#8b949e" font-size="24">Open source &#183; No account &#183; No API key &#183; Runs in CI in about a minute</text>
+  <text x="70" y="594" fill="url(#grad)" font-size="24" font-weight="700">llmshieldproxy.com</text>
+
+  <!-- Shield mark -->
+  <g transform="translate(1012,516) scale(0.36)">
+    <path d="M110 0 L210 34 V110 C210 175 165 220 110 245 C55 220 10 175 10 110 V34 Z"
+          fill="none" stroke="url(#grad)" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M110 0 L210 34 V110 C210 175 165 220 110 245 Z" fill="url(#grad)" fill-opacity="0.12"/>
+    <path d="M68 122 L98 152 L155 90" stroke="url(#grad)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>

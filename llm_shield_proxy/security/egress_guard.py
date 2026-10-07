@@ -35,11 +35,14 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import ipaddress
+import logging
 import re
 import socket
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional, Sequence, Union
 from urllib.parse import urlsplit, urlunsplit
+
+logger = logging.getLogger(__name__)
 
 IPNetwork = Union["ipaddress.IPv4Network", "ipaddress.IPv6Network"]
 IPAddress = Union["ipaddress.IPv4Address", "ipaddress.IPv6Address"]
@@ -109,9 +112,23 @@ def compile_policy(policy: Optional[dict]) -> CompiledEgressPolicy:
     protection for free.
     """
     policy = policy or {}
-    mode = policy.get("egress_mode", "DEFAULT_BLOCK")
-    if mode not in ("DEFAULT_BLOCK", "ALLOWLIST_ONLY"):
+    # An absent key is not a misconfiguration: the documented default applies. A key
+    # that is PRESENT but unrecognised is, and it used to become DEFAULT_BLOCK, the
+    # permissive mode. Writing `allowlist_only` in lower case therefore produced the
+    # opposite of what it says, silently, and allowed every public host.
+    raw_mode = policy.get("egress_mode")
+    if raw_mode is None:
         mode = "DEFAULT_BLOCK"
+    else:
+        mode = str(raw_mode).strip().upper()
+        if mode not in ("DEFAULT_BLOCK", "ALLOWLIST_ONLY"):
+            logger.critical(
+                "Unrecognised egress_mode %r. Falling back to ALLOWLIST_ONLY, which denies "
+                "every host not named in allowed_domains. Fix the policy: a gate denies on "
+                "bad configuration rather than choosing the open option.",
+                raw_mode,
+            )
+            mode = "ALLOWLIST_ONLY"
 
     extra_cidrs = policy.get("additional_denied_cidrs") or []
     networks = tuple(

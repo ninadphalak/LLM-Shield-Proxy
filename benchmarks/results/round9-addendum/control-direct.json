@@ -1,0 +1,137 @@
+{
+ "schema": "mode-regression-probe/1",
+ "generated_at": "2026-09-14T02:11:52Z",
+ "label": "control-no-gateway",
+ "target": {
+  "url": "http://127.0.0.1:8811/v1/chat/completions",
+  "model": "capture",
+  "direct": true
+ },
+ "corpus": {
+  "seed": "a1b2c3d4e5f60001",
+  "case": {
+   "entity": "EMAIL",
+   "encoding": "plain",
+   "carrier": "sse-delta-content",
+   "request_site": "chat-content",
+   "fragmentation": "adversarial"
+  },
+  "cases": 1,
+  "measured_passes_per_condition": 3,
+  "discarded_warmup_passes": 1
+ },
+ "conditions": [
+  "whole-response",
+  "single-chunk",
+  "adversarial-midpoint"
+ ],
+ "rows": [
+  {
+   "condition": "whole-response",
+   "stream_requested_by_client": false,
+   "stream_requested_of_upstream": false,
+   "transport": {
+    "ok": true,
+    "status": 200,
+    "error": null
+   },
+   "upstream_saw_request": true,
+   "echo_observable": true,
+   "echo_restored": true,
+   "injection_leaked": true,
+   "injection_leak_tier": "literal",
+   "request_path_leaked_caller_value": true,
+   "delivery": {
+    "repeats": 3,
+    "ttfb_ms_median": 1.3,
+    "ttfe_ms_median": 1.3,
+    "ttfuc_ms_median": 1.3,
+    "total_ms_median": 1.307,
+    "ttfuc_ms_samples": [
+     12.564,
+     1.3,
+     1.252
+    ]
+   },
+   "stable_across_repeats": true,
+   "upstream_data_events_written": 1,
+   "response_bytes": 278
+  },
+  {
+   "condition": "single-chunk",
+   "stream_requested_by_client": true,
+   "stream_requested_of_upstream": true,
+   "transport": {
+    "ok": true,
+    "status": 200,
+    "error": null
+   },
+   "upstream_saw_request": true,
+   "echo_observable": true,
+   "echo_restored": true,
+   "injection_leaked": true,
+   "injection_leak_tier": "literal",
+   "request_path_leaked_caller_value": true,
+   "delivery": {
+    "repeats": 3,
+    "ttfb_ms_median": 1.245,
+    "ttfe_ms_median": 1.245,
+    "ttfuc_ms_median": 1.245,
+    "total_ms_median": 1.463,
+    "ttfuc_ms_samples": [
+     1.149,
+     1.245,
+     13.897
+    ]
+   },
+   "stable_across_repeats": true,
+   "upstream_data_events_written": 3,
+   "response_bytes": 294
+  },
+  {
+   "condition": "adversarial-midpoint",
+   "stream_requested_by_client": true,
+   "stream_requested_of_upstream": true,
+   "transport": {
+    "ok": true,
+    "status": 200,
+    "error": null
+   },
+   "upstream_saw_request": true,
+   "echo_observable": true,
+   "echo_restored": true,
+   "injection_leaked": true,
+   "injection_leak_tier": "same-path-join",
+   "request_path_leaked_caller_value": true,
+   "delivery": {
+    "repeats": 3,
+    "ttfb_ms_median": 13.909,
+    "ttfe_ms_median": 13.909,
+    "ttfuc_ms_median": 13.909,
+    "total_ms_median": 14.07,
+    "ttfuc_ms_samples": [
+     13.909,
+     1.251,
+     14.693
+    ]
+   },
+   "stable_across_repeats": true,
+   "upstream_data_events_written": 4,
+   "response_bytes": 343
+  }
+ ],
+ "verdict": {
+  "mode_regression": "none",
+  "reasons": [
+   "the whole-response arm already leaked: containment is absent in both modes, so no mode regression can be attributed to streaming"
+  ]
+ },
+ "limitations": [
+  "One case, one seed, one entity per run. A probe, not a profile run: it emits no outcome, no DeltaFrag, and validates against no published schema.",
+  "Timings are medians over the measured passes after one discarded warm-up. A condition whose repeats disagreed on restoration or leakage is reported with stable_across_repeats=false and must not be quoted as a result.",
+  "Not comparable with any v2 or FIDE report: this module has its own capture and client and is deliberately outside v2_emitter._INSTRUMENTED, so no inspector_sha256 applies to it.",
+  "The scorer IS the published one: _haystacks, _present and _leak_tier are imported from v2_emitter unchanged, so the three arms are scored alike.",
+  "Delivery times are loopback with a synthetic upstream on one machine. They exclude model inference and wide-area network time by construction and are not an end-to-end latency claim.",
+  "The non-streaming arm maps the sse-json-field carrier onto one sibling key of a single message, because a whole response has no second sibling for a value to be split across."
+ ]
+}

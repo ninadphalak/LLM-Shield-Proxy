@@ -3,6 +3,7 @@ message: "If you use this software, please cite it as below."
 authors:
   - family-names: "Phalak"
     given-names: "Ninad"
+    orcid: "https://orcid.org/0009-0004-8037-5466"
 title: "ninadphalak/LLM-Shield-Proxy: v1.3.0: Stateless Cryptography, MCP Governance, Air-Gapped Egress, and System Hardening"
 version: "v1.3.0"
 date-released: "2026-08-28"

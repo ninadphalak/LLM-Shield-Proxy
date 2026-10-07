@@ -5,7 +5,7 @@
   "scripts": {
     "docusaurus": "docusaurus",
     "start": "docusaurus start",
-    "build": "docusaurus build",
+    "build": "node --test scripts/generate-result-badges.test.mjs scripts/check-evidence-archives.test.mjs && node scripts/check-evidence-archives.mjs && docusaurus build && node scripts/generate-result-badges.mjs",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",
     "clear": "docusaurus clear",
@@ -19,6 +19,7 @@
     "@docusaurus/faster": "3.10.2",
     "@docusaurus/preset-classic": "3.10.2",
     "@docusaurus/theme-mermaid": "^3.10.2",
+    "@easyops-cn/docusaurus-search-local": "^0.55.3",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.0.0",
     "prism-react-renderer": "^2.3.0",
@@ -31,6 +32,9 @@
     "@docusaurus/types": "3.10.2",
     "@types/react": "^19.0.0",
     "typescript": "~6.0.2"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   },
   "browserslist": {
     "production": [

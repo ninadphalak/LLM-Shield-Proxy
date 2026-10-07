@@ -9,6 +9,7 @@ import base64
 import hmac
 import json
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Security
@@ -18,9 +19,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from llm_shield_proxy.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-if not settings.K8S_WEBHOOK_AUTH_TOKEN:
-    logger.warning("K8s Mutating Webhook is exposed without authentication (K8S_WEBHOOK_AUTH_TOKEN is unset).")
 
 webhook_router = APIRouter(prefix="/v1/k8s", tags=["Kubernetes Webhook"])
 security = HTTPBearer(auto_error=False)
@@ -42,26 +40,53 @@ async def verify_webhook_token(
     return True
 
 
-def _build_sidecar_patch() -> list[Dict[str, Any]]:
-    return [
-        {
-            "op": "add",
-            "path": "/spec/containers/-",
-            "value": {
-                "name": "llm-shield-proxy",
-                "image": settings.K8S_SIDECAR_IMAGE,
-                "ports": [{"containerPort": 8000}],
-                "env": [
-                    {"name": "SHIELD_FAILURE_MODE", "value": "FAIL_CLOSED"},
-                    {"name": "ENABLE_TIER3_ONNX_NER", "value": "false"},
-                ],
-                "resources": {
-                    "limits": {"memory": "60Mi", "cpu": "200m"},
-                    "requests": {"memory": "25Mi", "cpu": "50m"}
-                }
-            }
-        }
-    ]
+# A Kubernetes object name (RFC 1123 subdomain). Anything else in the annotation is ignored
+# rather than copied into the patch.
+_SECRET_NAME = re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?")
+KEYS_SECRET_ANNOTATION = "llm-shield.io/keys-secret"  # nosec B105 - an annotation name, not a secret
+
+
+def _keys_secret_for(annotations: Dict[str, Any]) -> Optional[str]:
+    """The Secret the sidecar loads its keys from: the pod's annotation, else the setting."""
+    name = annotations.get(KEYS_SECRET_ANNOTATION) or settings.K8S_SIDECAR_SECRET_NAME
+    if isinstance(name, str) and _SECRET_NAME.fullmatch(name):
+        return name
+    return None
+
+
+def _build_sidecar_patch(keys_secret: Optional[str] = None) -> list[Dict[str, Any]]:
+    container: Dict[str, Any] = {
+        "name": "llm-shield-proxy",
+        "image": settings.K8S_SIDECAR_IMAGE,
+        "ports": [{"containerPort": 8000}],
+        "env": [
+            {"name": "SHIELD_FAILURE_MODE", "value": "FAIL_CLOSED"},
+            {"name": "ENABLE_TIER3_ONNX_NER", "value": "false"},
+        ],
+        # Resident memory is about 75-100 MiB idle; a 60Mi limit had the sidecar
+        # killed for memory before it served a request.
+        "resources": {
+            "limits": {"memory": "256Mi", "cpu": "500m"},
+            "requests": {"memory": "128Mi", "cpu": "100m"}
+        },
+        # The same probes the Helm deployment uses. Without them the pod was Ready while
+        # the sidecar was still starting, and the app's first requests to 127.0.0.1:8000
+        # were refused for a few seconds (seen in a kind cluster, 2026-10-05).
+        "readinessProbe": {
+            "httpGet": {"path": "/readyz", "port": 8000},
+            "initialDelaySeconds": 2,
+            "periodSeconds": 5,
+        },
+        "livenessProbe": {
+            "httpGet": {"path": "/livez", "port": 8000},
+            "initialDelaySeconds": 15,
+            "periodSeconds": 10,
+        },
+    }
+    # Without keys the sidecar answers every request with a 401.
+    if keys_secret:
+        container["envFrom"] = [{"secretRef": {"name": keys_secret}}]
+    return [{"op": "add", "path": "/spec/containers/-", "value": container}]
 
 @webhook_router.post("/mutate", dependencies=[Depends(verify_webhook_token)])
 async def mutate_webhook(request: Request) -> JSONResponse:
@@ -88,7 +113,13 @@ async def mutate_webhook(request: Request) -> JSONResponse:
                     }
                 })
 
-            patch = _build_sidecar_patch()
+            keys_secret = _keys_secret_for(metadata.get("annotations") or {})
+            if keys_secret is None:
+                logger.warning(
+                    "Injected sidecar has no keys Secret; it will reject every request. Set "
+                    "K8S_SIDECAR_SECRET_NAME or the pod annotation llm-shield.io/keys-secret."
+                )
+            patch = _build_sidecar_patch(keys_secret)
             patch_b64 = base64.b64encode(json.dumps(patch).encode("utf-8")).decode("utf-8")
 
             return JSONResponse({

@@ -9,6 +9,10 @@ __pycache__/
 env/
 venv/
 ENV/
+# Per-target venvs for gateways under test. `llm-guard` and `guardrails-ai` pin torch and
+# cannot share the harness interpreter, so each profile builds its own multi-GB venv at the
+# repo root (venv-llmguard, venv-guardrails). Software under test is never committed.
+venv-*/
 build/
 dist/
 *.egg-info/
@@ -65,3 +69,10 @@ repomix-output.xml
 # root when it cannot clean up, and one file from it reached a commit that way.
 /llm_shield_proxy-*/
 /pii_leak_benchmark-*/
+
+# Output of `benchmarks/reproduce_fragmentation.py`, whose default `--out` is the repo
+# root. An independent reproducer's regenerated reports are THEIR evidence to send back,
+# not a candidate for commit next to the published ones they were diffed against.
+/reproduction/
+/pii-check/
+/reproduction-presidio/

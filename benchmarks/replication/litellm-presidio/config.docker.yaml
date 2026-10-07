@@ -1,0 +1,39 @@
+# LiteLLM proxy config for the containerised v2 response-split run.
+#
+# Differs from config.yaml only in hostnames. Everything the proxy talks to is reached by
+# container DNS on the `v2profile` network, except the harness capture, which runs on the
+# host and is reached through host.docker.internal.
+#
+# Running LiteLLM in its own container is deliberate: installing it into the harness venv
+# broke `tests/conformance/test_harness_install_weight.py`, which asserts that importing
+# pii_leak_benchmark pulls in nothing beyond the httpx dependency tree. Software under test
+# does not belong in the harness environment.
+
+model_list:
+  - model_name: capture
+    litellm_params:
+      # The harness capture server, running on the host, pinned to 8799. It is the
+      # gateway's configured upstream, which is where the harness controls chunking.
+      model: openai/capture
+      api_base: http://host.docker.internal:8799/v1
+      api_key: sk-not-used-by-the-capture
+
+guardrails:
+  - guardrail_name: presidio-mask
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call
+      output_parse_pii: true
+      # Same analyzer container the reference `presidio-*` policies use, so the detector
+      # is held constant and the only variable is the gateway wrapping it.
+      presidio_analyzer_api_base: http://presidio-analyzer:3000
+      presidio_anonymizer_api_base: http://presidio-anonymizer:3000
+      default_on: true
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  # Required: with no master_key LiteLLM answers 401; with one it accepts exactly this
+  # value without a virtual-key lookup.
+  master_key: sk-v2-profile-local

@@ -240,17 +240,23 @@ async def test_dpop_missing_jti_rejected():
 
 @pytest.mark.asyncio
 async def test_global_exception_handler_logs_and_audits_without_leaking_to_client():
-    """The client must only ever see the sanitized 500 body, but the real exception
-    (with traceback) must reach the operational logger, and a CRITICAL entry must
-    reach the signed WORM audit chain -- so an unhandled failure is never silently
-    invisible server-side.
+    """The client must only ever see the sanitized 500 body; the operational logger
+    must locate the fault (type name + traceback frames) WITHOUT recording `str(exc)`,
+    which can carry an unredacted prompt fragment; and a CRITICAL entry must reach the
+    signed WORM audit chain -- so an unhandled failure is never silently invisible
+    server-side.
     """
     request = MagicMock(spec=Request)
     request.state.request_id = "req-exc-test"
     request.method = "POST"
     request.url.path = "/v1/chat/completions"
 
-    exc = ValueError("boom: maybe-sensitive-detail-that-must-not-reach-the-client")
+    # Raised, not merely constructed: a bare exception has no __traceback__, and the
+    # frames are half of what this test is asserting.
+    try:
+        raise ValueError("boom: maybe-sensitive-detail-that-must-not-reach-the-client")
+    except ValueError as raised:
+        exc = raised
 
     with patch("llm_shield_proxy.api.main.logger.error") as mock_log_error, \
          patch("llm_shield_proxy.api.main.AuditLogger.log_unhandled_exception") as mock_audit:
@@ -261,7 +267,14 @@ async def test_global_exception_handler_logs_and_audits_without_leaking_to_clien
     assert b"maybe-sensitive-detail" not in response.body
 
     mock_log_error.assert_called_once()
-    assert mock_log_error.call_args.kwargs.get("exc_info") is exc
+    # The whole exception is never handed to logging: that is what renders `str(exc)`.
+    assert mock_log_error.call_args.kwargs.get("exc_info") is None
+    rendered = mock_log_error.call_args.args[0] % mock_log_error.call_args.args[1:]
+    assert "maybe-sensitive-detail" not in rendered
+    assert "boom" not in rendered
+    # ...but the fault is still locatable: type name plus our own frames.
+    assert "ValueError" in rendered
+    assert "test_hardening_remediation.py" in rendered
 
     mock_audit.assert_called_once_with(
         request_id="req-exc-test",

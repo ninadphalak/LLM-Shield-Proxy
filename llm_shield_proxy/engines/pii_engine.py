@@ -9,6 +9,7 @@ Implements a high-throughput multi-tier detection cascade:
 from __future__ import annotations
 
 import base64
+import html
 import logging
 import math
 import os
@@ -16,13 +17,16 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import unquote
 
 import yaml
 
-from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.core.config import DEFAULT_PROTECTED_PAYLOAD_KEYS, request_policy_ctx, settings
 from llm_shield_proxy.core.config_schema import CustomRegexConfig
+from llm_shield_proxy.engines.confusables import CONFUSABLE_TO_ASCII
 from llm_shield_proxy.engines.vault import Vault
+from llm_shield_proxy.observability.audit import AuditLogger
 from llm_shield_proxy.observability.tracing import tracer
 
 try:
@@ -40,39 +44,77 @@ class CompiledProfile:
     tier3_ner_entities: Set[str] = field(default_factory=set)
 
 
-# Zero-Width, Invisible, and BiDirectional (BiDi/RTL override) Unicode format characters
-INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u180E]")
+# Characters that render as nothing and so hide a value from every pattern while the
+# client still displays the real thing.
+INVISIBLE_CHARS_PATTERN: re.Pattern[str] = re.compile(
+    "["
+    "\u00AD"  # soft hyphen
+    "\u034F"  # combining grapheme joiner
+    "\u061C"  # Arabic letter mark
+    "\u115F\u1160"  # Hangul choseong/jungseong fillers
+    "\u17B4\u17B5"  # Khmer inherent vowels, invisible
+    "\u180E"  # Mongolian vowel separator, a format character with no glyph
+    # NOT U+180B-U+180D. Those are Mongolian Free Variation Selectors and they SELECT
+    # GLYPH VARIANTS in ordinary Mongolian text. This class is deleted from what gets
+    # FORWARDED, so including them silently rewrote real Mongolian input before it
+    # reached the provider. Same rule that keeps U+FE0F and U+2800 out: invisible is
+    # not sufficient, the character must also have no role in ordinary prose.
+    "\u200B-\u200F"  # zero-width space through RTL mark
+    "\u202A-\u202E"  # bidi embedding and override
+    "\u2060-\u206F"  # word joiner, invisible operators, deprecated format chars
+    "\u3164"  # Hangul filler
+    "\uFEFF"  # zero-width no-break space
+    "\uFFA0"  # halfwidth Hangul filler
+    "\U000e0000-\U000e007f"  # tag block, the classic ASCII smuggler
+    "]"
+)
 
-# Candidate base64 patterns for obfuscated PII smuggling
-BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9+/]{20,}={0,2}\b")
+# Candidate base64 patterns for obfuscated PII smuggling.
+BASE64_CANDIDATE_PATTERN: re.Pattern[str] = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{8,}={0,2}(?![A-Za-z0-9+/=_-])")
 MAX_BASE64_INSPECTION_CHARS = 8_192
 BASE64_BOUNDARY_SCAN_CHARS = 256
+# How many times a candidate is decoded before giving up.
+MAX_BASE64_DECODE_DEPTH = 3
+
+# Percent-encoding hides PII from every Tier 1 pattern.
+PERCENT_ESCAPE_PATTERN: re.Pattern[str] = re.compile(r"%[0-9A-Fa-f]{2}")
+MAX_PERCENT_INSPECTION_CHARS = 8_192
+# A run longer than the limit is not skipped. Its edges are still decoded.
+PERCENT_BOUNDARY_SCAN_CHARS = 256
+# Finds runs of non-delimiter characters in one C-level pass.
+PERCENT_RUN_PATTERN: re.Pattern[str] = re.compile(r"[^\s\"'<>{}\[\],;()]+")
+
+# Cross-script look-alikes, from the UTS #39 confusables table.
+_CONFUSABLE_TRANSLATION = str.maketrans(CONFUSABLE_TO_ASCII)
+
+# HTML entities hide structured PII.
+HTML_ENTITY_PATTERN: re.Pattern[str] = re.compile(
+    r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});"
+)
+MAX_ENTITY_INSPECTION_CHARS = 8_192
+# A run longer than the limit is not skipped. Its edges are still decoded.
+ENTITY_BOUNDARY_SCAN_CHARS = 256
+# The same 256-char edge probe, for a blob in a field no policy claims.
+BLOB_BOUNDARY_SCAN_CHARS = 256
+# Deliberately NOT `_PERCENT_RUN_DELIMITERS`.
+_ENTITY_RUN_DELIMITERS = frozenset(" \t\r\n\f\v\"'<>{}[](),")
 
 # Indirect prompt injection override patterns in tool / retrieval contexts
 INDIRECT_PROMPT_INJECTION_PATTERN: re.Pattern[str] = re.compile(
     r"(?i)\b(?:system\s+override|ignore\s+all\s+previous\s+instructions|<\|im_start\|>system|<\|im_end\|>)\b"
 )
 
-# ASCII-only boundary assertions. Python's `\b` treats any Unicode word character
-# (including CJK ideographs, Hiragana, Katakana, Hangul) as part of `\w`, so PII
-# glued directly to non-Latin script text with no whitespace (e.g. "邮箱是john@x.com没有")
-# silently fails to match with `\b`. These assertions only block adjacency to ASCII
-# alphanumerics/underscore, permitting adjacency to non-Latin scripts.
+# ASCII-only boundary assertions.
+_DASH = r"[-\u2010-\u2014\u2212]"
+
 _ASCII_LEFT_BOUNDARY = r"(?<![A-Za-z0-9_])"
 _ASCII_RIGHT_BOUNDARY = r"(?![A-Za-z0-9_])"
 
 # ---------------------------------------------------------------------------
 # Structural validation of Tier 1 matches.
-#
-# Issuer and checksum checks are confidence SIGNALS, never card-redaction gates.
-# A finite IIN table cannot prove that a number is not a private-label, gift, or newly
-# assigned card, and a typo can make a genuine card fail Luhn. Therefore every value
-# matching the native CREDIT_CARD shape is kept. See docs/features
-# .../supported-pii-types.
 # ---------------------------------------------------------------------------
 
-# Selected public payment-network identifiers. This table is deliberately incomplete
-# and must never be used to reject a match.
+# Selected public payment-network identifiers.
 _CARD_IIN_PREFIXES = (
     "4",                                     # Visa
     "34", "37",                              # American Express
@@ -82,10 +124,7 @@ _CARD_IIN_PREFIXES = (
     "6011", "62", "64", "65",                # Discover / UnionPay / Maestro
 )
 _CARD_MASTERCARD_2_SERIES = (222100, 272099)
-# ISO/IEC 7812-1 permits a PAN of up to 19 digits. The previous ceiling of 16 meant a
-# Luhn-valid 19-digit Visa (`4111111111111111110`) matched NOTHING: the ASCII boundary
-# assertions stop a 16-digit prefix from matching when a digit follows, so the value was
-# not partially redacted, it passed through untouched. That is a direct PCI DSS leak.
+# ISO/IEC 7812-1 permits a PAN of up to 19 digits.
 _CARD_MIN_DIGITS = 13
 _CARD_MAX_DIGITS = 19
 
@@ -113,15 +152,7 @@ def _is_payment_iin(digits: str) -> bool:
 
 
 def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
-    """Return (keep_the_span, confidence).
-
-    ``keep_the_span`` is the only value the detection path consumes. Confidence is
-    computed and returned so it can be asserted and, later, surfaced -- it is NOT
-    currently attached to the span tuple or to an audit record, and the documentation
-    says so rather than implying a feature that does not exist.
-
-    Anything not covered by an explicit rule is kept with unchanged behaviour.
-    """
+    """Return (keep_the_span, confidence)."""
     if entity_type == "CREDIT_CARD":
         digits = "".join(character for character in matched if character.isdigit())
         if not _CARD_MIN_DIGITS <= len(digits) <= _CARD_MAX_DIGITS:
@@ -130,9 +161,7 @@ def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
         checksum = _luhn_ok(digits)
         if issuer and checksum:
             return True, "high"
-        # Every regex-shaped card is redacted. An unrecognised IIN may be private-label,
-        # gift-card, or newly assigned; a bad checksum may be a one-digit error or
-        # transposition. Neither observation can safely prove the value is non-PII.
+        # Every regex-shaped card is redacted.
         return True, "medium"
 
     return True, "medium"
@@ -141,21 +170,33 @@ def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
 # Tier 1 Pre-Compiled Regex Patterns
 TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     (
+        # The repetition limits stop a denial of service.
         "EMAIL",
         re.compile(
-            _ASCII_LEFT_BOUNDARY + r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}" + _ASCII_RIGHT_BOUNDARY
+            _ASCII_LEFT_BOUNDARY
+            + r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,}"
+            + _ASCII_RIGHT_BOUNDARY
         ),
     ),
-    ("SSN", re.compile(_ASCII_LEFT_BOUNDARY + r"\d{3}-\d{2}-\d{4}" + _ASCII_RIGHT_BOUNDARY)),
+    ("SSN", re.compile(
+        _ASCII_LEFT_BOUNDARY + r"\d{3}" + _DASH + r"\d{2}" + _DASH + r"\d{4}" + _ASCII_RIGHT_BOUNDARY
+    )),
     (
         "PHONE",
         re.compile(
             _ASCII_LEFT_BOUNDARY
-            + r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?(?:\d{3}[-.\s]?)?\d{4}"
+            + r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[.\s]?" + _DASH + r"?(?:\d{3}[.\s]?" + _DASH + r"?)?\d{4}"
             + _ASCII_RIGHT_BOUNDARY
         ),
     ),
-    ("CREDIT_CARD", re.compile(_ASCII_LEFT_BOUNDARY + r"(?:\d[ -]?){13,19}" + _ASCII_RIGHT_BOUNDARY)),
+    ("CREDIT_CARD", re.compile(
+        _ASCII_LEFT_BOUNDARY + r"(?:\d[ ]?" + _DASH + r"?){13,19}" + _ASCII_RIGHT_BOUNDARY
+    )),
+    (
+        # A digit run longer than any card.
+        "LONG_DIGIT_RUN",
+        re.compile(_ASCII_LEFT_BOUNDARY + r"\d{20,}" + _ASCII_RIGHT_BOUNDARY),
+    ),
     (
         "IP_ADDRESS",
         re.compile(
@@ -176,6 +217,14 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
         "GITHUB_PAT",
         re.compile(
             _ASCII_LEFT_BOUNDARY + r"(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]+)" + _ASCII_RIGHT_BOUNDARY
+        ),
+    ),
+    (
+        "SLACK_TOKEN",
+        re.compile(
+            _ASCII_LEFT_BOUNDARY
+            + r"x(?:ox[baprse]|app)-(?:[0-9a-zA-Z]+-)+[0-9a-zA-Z]+"
+            + _ASCII_RIGHT_BOUNDARY
         ),
     ),
     (
@@ -209,35 +258,12 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
 
 # ---------------------------------------------------------------------------
 # Tier 3: Contextual Named Entity Recognition.
-#
-# There is no regex fallback here, deliberately. Until 2026-09-02 this module shipped a
-# TIER3_NER_PATTERNS heuristic that matched any run of capitalized words as a PERSON. It
-# was measured over a 60-string prose corpus: it fired on 25 of 25 ordinary business
-# sentences containing a capitalized bigram, producing 26 fabricated names, and it could
-# not match a CJK, Hangul, Cyrillic or Arabic name at all.
-#
-# The failure mode is what removed it. A Tier 1 false positive over-redacts, which is
-# safe. A PERSON false positive REPLACES real text: under synthetic swapping "My Aadhaar
-# is on the enrolment slip." became "Elizabeth is on the enrolment slip." -- grammatical
-# English that no downstream consumer can tell was altered. The heuristic corrupted more
-# text than it protected, and it made name redaction look enabled when it was not.
-#
-# Name redaction therefore requires a loaded ONNX NER model. With no model the engine
-# emits NO PERSON spans and says so loudly rather than quietly approximating:
-# describe_ner_coverage() reports it, the constructor logs a warning naming every profile
-# that expects PERSON, /readyz and /health surface it, and the compliance report records
-# it. A stated gap is safer than a silent approximation.
 # ---------------------------------------------------------------------------
 
-# Entity types the Tier 3 model path can emit. Used to populate the built-in
-# ``global_strict`` profile; a profile may still list a subset via CUSTOM_REGEX_PATH.
+# Entity types the Tier 3 model path can emit.
 TIER3_NER_ENTITIES: Set[str] = {"PERSON"}
 
-# The single wording for "names are not being redacted", used by the startup warning and
-# echoed in the startup banner. Written for an operator reading a log at 3am, not for a
-# developer: it says what is off, what is still on, and the exact two settings that turn
-# it on. Structured detail (which profiles declare PERSON) lives in
-# describe_ner_coverage() and on /readyz, where it is data rather than prose.
+# The single wording for "names are not being redacted".
 NER_DISABLED_WARNING = (
     "Name redaction is off. The Tier 3 NER model is not loaded, so people's names will "
     "not be redacted. Email addresses, card numbers, SSNs and other structured "
@@ -246,25 +272,14 @@ NER_DISABLED_WARNING = (
 )
 
 # Candidate pattern for Shannon Entropy evaluation
-CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9_\-+=]{16,}\b")
+# Candidate pattern for Shannon Entropy evaluation.
+CANDIDATE_SECRET_PATTERN: re.Pattern[str] = re.compile(
+    r"(?<![A-Za-z0-9_\-+=])[A-Za-z0-9_\-+=]{16,}(?![A-Za-z0-9_\-+=])"
+)
 
 
 # ---------------------------------------------------------------------------
 # No span may stop in the middle of a digit run.
-#
-# Measured on 2026-09-02: `Aadhaar 3333 3333 3333` redacted to
-# `Aadhaar [PHONE_1] 3333`. The PHONE expression consumed `3333 3333`, stopped at its
-# own grouping limit, and the final four digits went upstream verbatim. A partial match
-# is strictly worse than a miss, because the output looks redacted.
-#
-# The fix is applied to resolved spans rather than to any one expression, because the
-# defect is a class: every numeric pattern has some grouping limit, and the next one
-# added will have a different one. Growing the span cannot change which detector won or
-# what it was typed as; it can only make the redaction cover the whole identifier. Where
-# it over-reaches it over-redacts, which is the safe direction.
-#
-# Verified not to move the documented 22-string false-positive corpus in
-# tests/test_tier1_validation_signal.py (17 strings / 18 spans before and after).
 # ---------------------------------------------------------------------------
 
 # Separators that may appear inside a single printed identifier.
@@ -290,6 +305,37 @@ def _extend_span_over_digit_run(text: str, end: int, limit: int) -> int:
         else:
             break
     return end
+
+
+def _decode_base64_candidate(token: str) -> Optional[bytes]:
+    """Decodes a base64 candidate in either alphabet, padded or not.
+
+    The decode used to be a bare `b64decode(token, validate=True)`, which rejected
+    two entirely ordinary spellings:
+
+    - **Unpadded.** Encoders drop `=` routinely (JWT segments, URL parameters, a
+      value that was `.rstrip("=")`-ed). `aaa@aaa.com` becomes `YWFhQGFhYS5jb20`,
+      length 15, and `validate=True` raises on the length rather than decoding it.
+    - **URL-safe**, which uses `-` and `_` where the standard alphabet uses `+`
+      and `/`.
+
+    Padding is restored arithmetically and the standard alphabet is tried first,
+    since it is far more common. `validate=True` stays on in both cases: it is what
+    stops ordinary prose from being decoded into noise and scanned.
+
+    Returns the decoded bytes, or None if this is not base64 in either alphabet.
+    """
+    padded = token + "=" * (-len(token) % 4)
+    for altchars in (None, b"-_"):
+        try:
+            return base64.b64decode(padded, altchars=altchars, validate=True)
+        # nosec B112 - the swallow IS the logic. "Not valid base64 in this alphabet"
+        # is the ordinary answer for most candidates, and the only way to ask is to
+        # try the decode. A candidate that decodes in neither alphabet returns None
+        # below and is dropped, so nothing is silently passed through.
+        except Exception:  # noqa: BLE001  # nosec B112 - see above
+            continue
+    return None
 
 
 def normalize_and_desmuggle(text: str) -> str:
@@ -327,14 +373,238 @@ def calculate_shannon_entropy(text: str) -> float:
     return entropy
 
 
+# Keys whose subtrees redact_payload already walks by shape. Deep redaction skips
+# them so a value is never redacted twice; redacting a synthetic placeholder would
+# mint a second token and rehydration would restore the placeholder, not the original.
+_TARGETED_PAYLOAD_KEYS: frozenset[str] = frozenset(
+    {"messages", "prompt", "system", "input", "instructions", "tools", "functions"}
+)
+
+# Turns the application writes, not the caller. Their values are redacted one-way, like a
+# tool description: a caller who gets the model to echo the placeholder must receive the
+# placeholder, not the application's value.
+_PRIVILEGED_ROLES: frozenset[str] = frozenset({"system", "developer"})
+
+# Anthropic document sources that hold text. Base64, url and file sources hold binary or a
+# reference and pass through.
+_TEXT_DOCUMENT_SOURCES: frozenset[str] = frozenset({"text", "content"})
+
+# Tool definitions: redacted whatever ENABLE_DEEP_PAYLOAD_REDACTION says, because they are
+# a known request shape, not an unrecognised field.
+_TOOL_DEFINITION_KEYS: tuple[str, ...] = ("tools", "functions")
+
+# Identifiers the application sets for its end user. Redacted one-way whatever the deep
+# switch says: a reply that echoes the placeholder must not hand the identifier to its
+# reader.
+_END_USER_ID_KEYS: tuple[str, ...] = ("user", "safety_identifier")
+
+# Inside a tool definition, the keywords that hold caller-authored prose. Values redacted
+# out of them are one-way: the reply never gets them back. Everything else in a definition
+# stays restorable, because `enum`, `const`, `default` and `examples` hold values the model
+# sends back as tool arguments, and those are rehydrated.
+_TOOL_PROSE_KEYS: frozenset[str] = frozenset({"description", "title"})
+
+# JSON Schema keywords whose value maps names to subschemas. The keys of that map are
+# property names, not keywords, so protected keys must not match them: a tool property
+# called `type` or `format` is a subschema whose description is caller text like any
+# other, and matching it by name skipped it wholesale.
+_SCHEMA_NAME_MAPS: frozenset[str] = frozenset(
+    {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"}
+)
+
+# JSON Schema keywords whose value is JSON data rather than schema. No key inside that data
+# is structural, so the BUILT-IN protected keys do not apply there: an enum member
+# `{"type": <email>}` is a value the model may send, and skipping its `type` would forward
+# the email. Keys an operator protected, and policy skip keys, still hold -- those are an
+# explicit promise that the value goes out unchanged, wherever it sits.
+_SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples", "default"})
+
+
+# Inside a message, content block or input item, every field the shape walk does not handle
+# is scanned (see _redact_remaining_fields). Two kinds of DIRECT field are not; anything deeper
+# is walked whatever its key is called, so `metadata.name` or `metadata.data` is ordinary data.
+#
+# A string under one of these keys: identifiers that link a tool result to its call or name a
+# tool, and blobs the provider verifies byte for byte (a thinking `signature`,
+# `redacted_thinking` `data`, `encrypted_content`). Rewriting them breaks the request, and
+# their high entropy is what Tier 2 flags.
+_OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
+    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content", "file_id"}
+)
+
+# Media payloads, by shape (see _is_media_field): the exact fields an image, audio or file
+# part's payload has. Rewriting an image URL breaks the reference, and an inline file is a
+# data: URI the blob policy rejects. A value with any other field, or a string that is not a
+# URL, is not media and is walked like everything else.
+_MEDIA_SHAPES: Dict[str, frozenset[str]] = {
+    "image_url": frozenset({"url", "detail"}),
+    "input_audio": frozenset({"data", "format"}),
+    "file": frozenset({"file_data", "file_id", "filename"}),
+    "source": frozenset({"type", "media_type", "data", "url", "file_id"}),
+}
+
+# Anthropic source types that hold media or a reference, and the field each must carry. A
+# `text` or `content` source is a document's text, handled by _redact_document_block.
+_MEDIA_SOURCE_NEEDS: Dict[str, str] = {"base64": "data", "url": "url", "file": "file_id"}
+
+_MEDIA_URL_PREFIXES: tuple[str, ...] = ("data:", "http://", "https://")
+
+# What a media payload's bytes look like: standard base64, padded to a multiple of four, at
+# least 16 characters, mixing upper and lower case, line breaks allowed; or a data: URI. Text
+# in a `data` field is not media, whatever the field around it says.
+_BASE64_PAYLOAD = re.compile(r"[A-Za-z0-9+/]*={0,2}")
+
+
+def _looks_like_media_bytes(payload: str, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
+    if payload.startswith("data:"):
+        return True
+    compact = payload.replace("\r", "").replace("\n", "")
+    if len(compact) < 16 or len(compact) % 4 or not _BASE64_PAYLOAD.fullmatch(compact):
+        return False
+    # Encoded bytes nearly always mix upper and lower case. A run of digits or of one case is
+    # in the base64 alphabet too: it may be a card number, or short single-case media. Ask
+    # the detectors: if they find nothing, it is media and goes out unchanged.
+    if any(ch.isupper() for ch in compact) and any(ch.islower() for ch in compact):
+        return True
+    return has_pii is not None and not has_pii(compact)
+
+# Media fields that hold the bytes themselves.
+_MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
+
+# Identifier keys whose STRING values go out unchanged at any depth of the scan, not only as a
+# direct field: an `audio.id`, an annotation's `file_id`, a nested tool `call_id`. Rewriting
+# one breaks the reference, a high-entropy id is what Tier 2 flags, and these names hold ids,
+# not personal data. `name` and `data` are not here: below a direct field they are ordinary
+# data (`metadata.name`), so they are only skipped as direct fields.
+_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"id", "call_id", "tool_call_id", "tool_use_id", "file_id"})
+
+
+_MEDIA_FIELD_PATTERNS: Dict[str, "re.Pattern[str]"] = {
+    "format": re.compile(r"[A-Za-z0-9]{1,10}"),
+    "media_type": re.compile(r"[A-Za-z0-9.+-]{1,40}/[A-Za-z0-9.+-]{1,60}"),
+    "detail": re.compile(r"auto|low|high"),
+    "file_id": re.compile(r"[A-Za-z0-9_-]{1,100}"),
+    "type": re.compile(r"base64|url|file"),
+}
+
+
+def _is_media_value(field: str, item: str, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
+    """Every sub-field of a media payload must look like what it is, or the object is walked."""
+    if field in _MEDIA_BYTES_KEYS:
+        return _looks_like_media_bytes(item, has_pii)
+    if field == "url":
+        return item.startswith(_MEDIA_URL_PREFIXES) and not any(ch.isspace() for ch in item)
+    if field == "filename":
+        return True  # scanned separately by _redact_remaining_fields
+    pattern = _MEDIA_FIELD_PATTERNS.get(field)
+    return bool(pattern and pattern.fullmatch(item))
+
+
+def _is_media_field(key: str, value: Any, has_pii: Optional[Callable[[str], bool]] = None) -> bool:
+    """A direct field that is a media payload, judged by key AND the shape of every value."""
+    shape = _MEDIA_SHAPES.get(key)
+    if shape is None:
+        return False
+    if key == "image_url" and isinstance(value, str):
+        return _is_media_value("url", value)
+    if not isinstance(value, dict) or not value or not set(value) <= shape:
+        return False
+    if not all(isinstance(item, str) and _is_media_value(field, item, has_pii) for field, item in value.items()):
+        return False
+    if key == "image_url":
+        return "url" in value
+    if key == "source":
+        # A source declares its kind and carries what that kind needs.
+        needs = _MEDIA_SOURCE_NEEDS.get(value.get("type", ""))
+        return needs is not None and needs in value
+    if key == "input_audio":
+        return "data" in value
+    return "file_data" in value or "file_id" in value
+
+
+# Replayed model and caller text found by that scan. Scanned whole whatever its length: past
+# the blob ceiling only a string's edges are inspected, and a long reasoning trace is text,
+# not an attachment.
+_REPLAYED_TEXT_KEYS: frozenset[str] = frozenset(
+    {"reasoning_content", "reasoning", "refusal", "thinking", "transcript", "cited_text", "text"}
+)
+
+# What the message walk in redact_payload handles by shape.
+_MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
+    {"role", "content", "name", "tool_calls", "function_call", "messages"}
+)
+
+# What the content-block walks handle by shape. A document's `title` and `context` belong
+# here too; they are added for document blocks only.
+_BLOCK_HANDLED_KEYS: frozenset[str] = frozenset({"type", "text", "input", "content"})
+
+# What _redact_text_blocks handles by shape: only the text.
+_TEXT_BLOCK_HANDLED_KEYS: frozenset[str] = frozenset({"type", "text"})
+
+# What _redact_input_item handles by shape.
+_INPUT_ITEM_HANDLED_KEYS: frozenset[str] = frozenset(
+    {"role", "type", "content", "summary", "arguments", "output", "input", "code", "outputs"}
+)
+
+
+def _block_handled_keys(block: Dict[str, Any]) -> frozenset[str]:
+    """The keys of one content block the shape walk handled."""
+    if block.get("type") == "document":
+        return _BLOCK_HANDLED_KEYS | {"title", "context", "source"}
+    return _BLOCK_HANDLED_KEYS
+
+
+def _protected_inside_schema_data(protected: frozenset[str]) -> frozenset[str]:
+    """`protected` minus the built-in structural keys nobody also listed explicitly.
+
+    A built-in key an operator put in PAYLOAD_PROTECTED_KEYS, or a role put in its
+    `payload_skip_keys`, is an explicit promise and still holds.
+    """
+    explicit = settings.payload_operator_protected_keys_set | _policy_skip_keys()
+    return protected - (DEFAULT_PROTECTED_PAYLOAD_KEYS - explicit)
+
+
+def _token_minter(vault: Any, restorable: bool) -> Callable[[str, str], str]:
+    """The vault method that mints a token, restorable or one-way.
+
+    A vault that cannot mint one-way tokens gets a fixed marker rather than a
+    restorable token.
+    """
+    if restorable:
+        return vault.get_or_create_token
+    return getattr(vault, "get_or_create_one_way_token", None) or (lambda _value, _type: "[REDACTED]")
+
+
+class UnmappedBlobError(ValueError):
+    """A blob was found in a field no policy claims, under UNMAPPED_BLOB_POLICY=block.
+
+    Carries the JSON path so the operator can add it to `payload_skip_keys` rather
+    than guessing which field tripped.
+    """
+
+    def __init__(self, json_path: str, size_bytes: int) -> None:
+        self.json_path = json_path
+        self.size_bytes = size_bytes
+        super().__init__(f"Unmapped blob at {json_path} ({size_bytes} bytes)")
+
+
+def _policy_skip_keys() -> frozenset[str]:
+    """Keys the active virtual key's policy claims, so deep redaction leaves them alone."""
+    policy = request_policy_ctx.get() or {}
+    declared = policy.get("payload_skip_keys")
+    if isinstance(declared, str):
+        declared = [part.strip() for part in declared.split(",")]
+    if not isinstance(declared, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(str(key) for key in declared if str(key).strip())
+
+
 class PIIEngine:
     """3-Tier Cascade PII Redaction and Secret Neutralization Engine.
 
     - Tier 1: Microsecond regex for structured identifiers.
     - Tier 2: Shannon Entropy filter for high-entropy secrets and keys.
-    - Tier 3: Contextual Named Entity Recognition via a loaded ONNX model. There is no
-      heuristic fallback: with no model, no PERSON span is produced. See
-      describe_ner_coverage().
+    - Tier 3: Contextual Named Entity Recognition via a loaded ONNX model.
     """
 
     def __init__(
@@ -434,30 +704,16 @@ class PIIEngine:
             name="global_strict", tier1_patterns=all_tier1, tier3_ner_entities=all_tier3
         )
 
-        # Fires at construction and on every policy hot-reload, so a profile edit that
-        # newly declares PERSON is reported even on a long-running process.
+        # Fires at construction and on every policy hot-reload.
         self._warn_if_ner_is_declared_but_unbacked()
 
     @property
     def name_redaction_active(self) -> bool:
-        """True only when a Tier 3 NER model is actually loaded and usable.
-
-        There is no heuristic fallback, so this is the whole answer to "are names being
-        redacted": if it is False, no PERSON span can be produced by any profile.
-        """
+        """True only when a Tier 3 NER model is actually loaded and usable."""
         return bool(self.enable_tier3 and self._onnx_session and self._tokenizer)
 
     def describe_ner_coverage(self) -> Dict[str, Any]:
-        """Report whether name (PERSON) redaction is actually in force, and for whom.
-
-        This exists so an operator cannot believe name redaction is on when it is not.
-        The same structure is surfaced by ``/readyz``, ``/health`` and the compliance
-        report, and the constructor logs a warning built from it at startup.
-
-        ``profiles_expecting_ner`` names every compiled profile that declares a Tier 3
-        entity. When ``model_loaded`` is False, every one of those declarations is
-        inert: the profile asks for name redaction and does not get it.
-        """
+        """Report whether name (PERSON) redaction is actually in force, and for whom."""
         expecting = sorted(
             profile.name
             for profile in (
@@ -483,15 +739,7 @@ class PIIEngine:
         }
 
     def _warn_if_ner_is_declared_but_unbacked(self) -> None:
-        """Log once per (re)compile if a profile expects PERSON and no model can supply it.
-
-        Deliberately at WARNING. The previous behaviour -- a regex heuristic standing in
-        silently -- is what made this gap invisible in the first place.
-
-        This is the ONLY place the fact is stated in prose. The startup banner in
-        ``api/main.py`` shows the status word from the same coverage snapshot and does not
-        restate it, so an operator sees one message, not two competing ones.
-        """
+        """Log once per (re)compile if a profile expects PERSON and no model can supply it."""
         coverage = self.describe_ner_coverage()
         if coverage["name_redaction_active"] or not coverage["unbacked_profiles"]:
             return
@@ -527,10 +775,7 @@ class PIIEngine:
         if active_profile is None:
             active_profile = self._global_strict_profile
 
-        # Locate encoded bodies once. Small candidates are decoded below. For an
-        # attachment-sized candidate, retain small edge guards so detectors can still
-        # catch plaintext that touches the body, but do not run every detector across
-        # the encoded interior. Segment offsets preserve positions in the source text.
+        # Locate encoded bodies once.
         base64_candidates: List[Tuple[int, int, str]] = []
         excluded_interiors: List[Tuple[int, int]] = []
         for match in BASE64_CANDIDATE_PATTERN.finditer(text):
@@ -540,6 +785,19 @@ class PIIEngine:
                 interior_end = end - BASE64_BOUNDARY_SCAN_CHARS
                 if interior_start < interior_end:
                     excluded_interiors.append((interior_start, interior_end))
+
+                # Decode each guard on its own.
+                blob = match.group(0)
+                tail_offset = len(blob) - BASE64_BOUNDARY_SCAN_CHARS
+                tail_offset -= tail_offset % 4
+                for guard_start, guard_text in (
+                    (start, blob[:BASE64_BOUNDARY_SCAN_CHARS]),
+                    (start + tail_offset, blob[tail_offset:]),
+                ):
+                    if len(guard_text) >= 8:
+                        base64_candidates.append(
+                            (guard_start, guard_start + len(guard_text), guard_text)
+                        )
                 continue
             base64_candidates.append((start, end, match.group(0)))
 
@@ -561,16 +819,22 @@ class PIIEngine:
                 for offset, segment in scan_segments:
                     for match in pattern.finditer(segment):
                         matched_text = match.group(0)
-                        # Structural validation. Fail-closed: any error keeps the span.
-                        try:
-                            keep, _confidence = classify_tier1_match(entity_type, matched_text)
-                        except Exception:  # noqa: BLE001
-                            keep = True
-                        if not keep:
-                            continue
+                        # classify_tier1_match is deliberately NOT called here.
                         raw_spans.append(
                             (offset + match.start(), offset + match.end(), entity_type, matched_text)
                         )
+
+        # Tier 1b: the same patterns over a confusables-folded copy.
+        if not text.isascii():
+            folded = text.translate(_CONFUSABLE_TRANSLATION)
+            if len(folded) == len(text) and folded != text:
+                for offset, segment in scan_segments:
+                    folded_segment = folded[offset:offset + len(segment)]
+                    for entity_type, pattern in active_profile.tier1_patterns:
+                        for match in pattern.finditer(folded_segment):
+                            start = offset + match.start()
+                            end = offset + match.end()
+                            raw_spans.append((start, end, entity_type, text[start:end]))
 
         # Tier 2: Shannon Entropy Analysis (Detects unformatted API keys, hashes, secret tokens)
         if self.enable_tier2 and settings.ENABLE_TIER2_ENTROPY:
@@ -595,16 +859,96 @@ class PIIEngine:
 
         # Obfuscated Base64 Candidate Inspection
         for start, end, token in base64_candidates:
-            try:
-                decoded_bytes = base64.b64decode(token, validate=True)
+            probe = token
+            for _ in range(MAX_BASE64_DECODE_DEPTH):
+                decoded_bytes = _decode_base64_candidate(probe)
+                if decoded_bytes is None:
+                    break
                 decoded_text = decoded_bytes.decode("utf-8", errors="ignore")
-                if decoded_text and len(decoded_text) >= 6:
-                    for entity_type, pattern in active_profile.tier1_patterns:
-                        if pattern.search(decoded_text):
-                            raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
-                            break
-            except Exception as exc:
-                logger.debug("Base64 candidate decode failed: %s", exc)
+                if len(decoded_text) < 6:
+                    break
+
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
+                    # The span stays the whole source run, as it was.
+                    raw_spans.append((start, end, "BASE64_OBFUSCATED_PII", token))
+                    break
+
+                # Nothing found.
+                nested = decoded_text.strip()
+                if not BASE64_CANDIDATE_PATTERN.fullmatch(nested):
+                    break
+                probe = nested
+
+        # Obfuscated Percent-Encoded Candidate Inspection.
+        for run in PERCENT_RUN_PATTERN.finditer(text):
+            token = run.group(0)
+            # Two C-level rejections before any Python work.
+            if "%" not in token or not PERCENT_ESCAPE_PATTERN.search(token):
+                continue
+            start, end = run.span()
+            if end - start > MAX_PERCENT_INSPECTION_CHARS:
+                # Decode the edges only.
+                probes = (
+                    token[:PERCENT_BOUNDARY_SCAN_CHARS],
+                    token[-PERCENT_BOUNDARY_SCAN_CHARS:],
+                )
+            else:
+                probes = (token,)
+            for probe in probes:
+                try:
+                    decoded_text = unquote(probe, errors="ignore")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Percent candidate decode failed: %s", exc)
+                    continue
+                # Nothing actually decoded, so Tier 1 already saw this text as-is.
+                if decoded_text == probe or len(decoded_text) < 6:
+                    continue
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
+                    raw_spans.append((start, end, "PERCENT_OBFUSCATED_PII", token))
+                    break
+
+        # Obfuscated HTML-Entity Candidate Inspection.
+        run_end = -1
+        for entity in HTML_ENTITY_PATTERN.finditer(text):
+            if entity.start() < run_end:
+                continue  # already inside a run this loop captured
+            start = entity.start()
+            while start > 0 and text[start - 1] not in _ENTITY_RUN_DELIMITERS:
+                start -= 1
+            end = entity.end()
+            while end < len(text) and text[end] not in _ENTITY_RUN_DELIMITERS:
+                end += 1
+            run_end = end
+            token = text[start:end]
+            if end - start > MAX_ENTITY_INSPECTION_CHARS:
+                # Decode the edges only, rather than skipping the run.
+                probes = (
+                    token[:ENTITY_BOUNDARY_SCAN_CHARS],
+                    token[-ENTITY_BOUNDARY_SCAN_CHARS:],
+                )
+            else:
+                probes = (token,)
+            for probe in probes:
+                try:
+                    decoded_text = html.unescape(probe)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("HTML entity candidate decode failed: %s", exc)
+                    continue
+                # Nothing actually decoded, so Tier 1 already saw this text as-is.
+                if decoded_text == probe or len(decoded_text) < 6:
+                    continue
+                if any(
+                    pattern.search(decoded_text)
+                    for _entity_type, pattern in active_profile.tier1_patterns
+                ):
+                    raw_spans.append((start, end, "ENTITY_OBFUSCATED_PII", token))
+                    break
 
         # Tier 3: Contextual Named Entity Recognition (Person, Location, Org).
         # Model-backed only. With no session loaded this block does nothing and no PERSON
@@ -670,9 +1014,7 @@ class PIIEngine:
                 non_overlapping.append(span)
                 last_end = end
 
-        # A span that ends on a digit while the run continues is a partial match, and a
-        # partial match on a structured identifier leaks its tail. Grow it to cover the
-        # whole run, clamped by the next accepted span. See _extend_span_over_digit_run.
+        # A span that ends on a digit while the run continues is a partial match.
         completed: List[Tuple[int, int, str, str]] = []
         for index, (start, end, entity_type, matched_text) in enumerate(non_overlapping):
             if end > start and text[end - 1].isdigit():
@@ -684,11 +1026,14 @@ class PIIEngine:
 
         return completed
 
-    def redact_text(self, text: str, vault: Vault, active_profile: Optional[CompiledProfile] = None) -> str:
+    def redact_text(
+        self,
+        text: str,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> str:
         """Redacts PII spans in text and registers deterministic mappings in the Vault.
-
-        Applies Unicode de-smuggling (stripping zero-width and invisible format characters)
-        and obfuscated Base64 detection to prevent adversarial filter evasion.
 
         Time Complexity: O(N + K) where N is text length and K is number of matches.
         Space Complexity: O(N) for reconstructed redacted text.
@@ -697,6 +1042,9 @@ class PIIEngine:
             text: Input string to redact.
             vault: Session-scoped Vault to store mappings.
             active_profile: The compiled policy profile for the current tenant.
+            restorable: False for text whose values the reply must never get back. The
+                vault then mints a token no rehydration path restores. A vault that
+                cannot do that gets a fixed marker rather than a restorable token.
 
         Returns:
             Redacted text containing placeholders or synthetic replacements.
@@ -711,10 +1059,12 @@ class PIIEngine:
         if not spans:
             return working_text
 
+        mint = _token_minter(vault, restorable)
+
         # Replace spans from right to left to preserve preceding string indices
         result = list(working_text)
         for start, end, entity_type, matched_text in reversed(spans):
-            token = vault.get_or_create_token(matched_text, entity_type)
+            token = mint(matched_text, entity_type)
             result[start:end] = list(token)
 
         return "".join(result)
@@ -728,9 +1078,6 @@ class PIIEngine:
         max_depth: int = 20,
     ) -> Dict[str, Any]:
         """Recursively traverses LLM payload dictionary and redacts string content.
-
-        Supports standard OpenAI/Anthropic/Gemini payload structures (messages array, prompt, system, input, tool_calls).
-        Protects against indirect prompt injection in tool responses and JSON recursion bombs.
 
         Args:
             payload: Request JSON dictionary.
@@ -763,6 +1110,7 @@ class PIIEngine:
 
                     msg_copy = msg.copy()
                     role = msg_copy.get("role", "")
+                    restorable = role not in _PRIVILEGED_ROLES
 
                     # 1. Redact message content (string or multi-part content blocks)
                     if "content" in msg_copy and isinstance(msg_copy["content"], str):
@@ -772,7 +1120,9 @@ class PIIEngine:
                             content_str = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
                                 "[SYSTEM_OVERRIDE_BLOCKED]", content_str
                             )
-                        msg_copy["content"] = self.redact_text(content_str, vault, active_profile)
+                        msg_copy["content"] = self.redact_text(
+                            content_str, vault, active_profile, restorable=restorable
+                        )
                     elif "content" in msg_copy and isinstance(msg_copy["content"], list):
                         new_content_blocks = []
                         for block in msg_copy["content"]:
@@ -784,7 +1134,27 @@ class PIIEngine:
                                         text_val = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
                                             "[SYSTEM_OVERRIDE_BLOCKED]", text_val
                                         )
-                                    block_copy["text"] = self.redact_text(text_val, vault, active_profile)
+                                    block_copy["text"] = self.redact_text(
+                                        text_val, vault, active_profile, restorable=restorable
+                                    )
+                                if block_copy.get("type") == "document":
+                                    self._redact_document_block(block_copy, vault, active_profile, restorable)
+                                # A replayed Anthropic tool call carries its arguments as a
+                                # JSON object in `input`, not as a string.
+                                if block_copy.get("type") == "tool_use" and "input" in block_copy:
+                                    block_copy["input"] = self._redact_tool_input(
+                                        block_copy["input"], vault, active_profile
+                                    )
+                                # An Anthropic tool_result nests its own content, as a
+                                # string or as further blocks.
+                                if "content" in block_copy:
+                                    block_copy["content"] = self._redact_nested_content(
+                                        block_copy["content"], vault, active_profile, restorable=restorable
+                                    )
+                                self._redact_remaining_fields(
+                                    block_copy, _block_handled_keys(block_copy), vault, active_profile,
+                                    depth + 2, max_depth, "messages.content", restorable,
+                                )
                                 new_content_blocks.append(block_copy)
                             else:
                                 new_content_blocks.append(block)
@@ -794,11 +1164,14 @@ class PIIEngine:
                     if "name" in msg_copy and isinstance(msg_copy["name"], str):
                         raw_name = msg_copy["name"]
                         spaced_name = raw_name.replace("_", " ")
-                        redacted_spaced = self.redact_text(spaced_name, vault, active_profile)
+                        redacted_spaced = self.redact_text(
+                            spaced_name, vault, active_profile, restorable=restorable
+                        )
                         if redacted_spaced != spaced_name:
                             msg_copy["name"] = redacted_spaced.replace(" ", "_")
                         elif raw_name and raw_name[0].isupper():
-                            msg_copy["name"] = vault.get_or_create_token(raw_name, "PERSON").replace(" ", "_")
+                            mint = _token_minter(vault, restorable)
+                            msg_copy["name"] = mint(raw_name, "PERSON").replace(" ", "_")
 
                     # 3. Redact OpenAI tool_calls function arguments in multi-turn agent history
                     if "tool_calls" in msg_copy and isinstance(msg_copy["tool_calls"], list):
@@ -825,6 +1198,13 @@ class PIIEngine:
                             fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
                         msg_copy["function_call"] = fn_copy
 
+                    # 5. Everything else a client replays: `reasoning_content`, `refusal`,
+                    # `audio.transcript` and whatever a provider adds next.
+                    self._redact_remaining_fields(
+                        msg_copy, _MESSAGE_HANDLED_KEYS, vault, active_profile,
+                        depth + 1, max_depth, "messages", restorable,
+                    )
+
                     redacted_messages.append(msg_copy)
                 else:
                     redacted_messages.append(msg)
@@ -839,10 +1219,31 @@ class PIIEngine:
                     self.redact_text(p, vault, active_profile) if isinstance(p, str) else p
                     for p in new_payload["prompt"]
                 ]
+            elif isinstance(new_payload["prompt"], dict):
+                new_payload["prompt"] = self._redact_prompt_object(new_payload["prompt"], vault, active_profile)
 
-        # Redact system prompt if separated at top level
-        if "system" in new_payload and isinstance(new_payload["system"], str):
-            new_payload["system"] = self.redact_text(new_payload["system"], vault, active_profile)
+        # Redact system prompt if separated at top level. One-way: see _PRIVILEGED_ROLES.
+        if "system" in new_payload:
+            if isinstance(new_payload["system"], str):
+                new_payload["system"] = self.redact_text(
+                    new_payload["system"], vault, active_profile, restorable=False
+                )
+            elif isinstance(new_payload["system"], list):
+                new_payload["system"] = self._redact_text_blocks(
+                    new_payload["system"], vault, active_profile, restorable=False
+                )
+
+        # Redact the Responses API instructions field, one-way like `system`.
+        if "instructions" in new_payload:
+            if isinstance(new_payload["instructions"], str):
+                new_payload["instructions"] = self.redact_text(
+                    new_payload["instructions"], vault, active_profile, restorable=False
+                )
+            elif isinstance(new_payload["instructions"], list):
+                new_payload["instructions"] = [
+                    self._redact_input_item(item, vault, active_profile, restorable=False)
+                    for item in new_payload["instructions"]
+                ]
 
         # Redact embeddings / moderation / responses input field
         if "input" in new_payload:
@@ -850,11 +1251,467 @@ class PIIEngine:
                 new_payload["input"] = self.redact_text(new_payload["input"], vault, active_profile)
             elif isinstance(new_payload["input"], list):
                 new_payload["input"] = [
-                    self.redact_text(item, vault, active_profile) if isinstance(item, str) else item
+                    self.redact_text(item, vault, active_profile)
+                    if isinstance(item, str)
+                    else self._redact_input_item(item, vault, active_profile)
                     for item in new_payload["input"]
                 ]
 
+        protected = settings.payload_protected_keys_set | _policy_skip_keys()
+        ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
+
+        # Tool definitions. Their prose is redacted one-way; see _TOOL_PROSE_KEYS. No blob
+        # handling (None): it exists to skip base64 attachments, and a definition is text.
+        # With it, a description past the ceiling had only its edges scanned, and one that
+        # began "data:" was forwarded unscanned as if it were a media URI.
+        for key in _TOOL_DEFINITION_KEYS:
+            if key in new_payload and key not in protected:
+                new_payload[key] = self._deep_redact(
+                    new_payload[key],
+                    vault,
+                    active_profile,
+                    protected,
+                    None,
+                    depth + 1,
+                    max_depth,
+                    key,
+                    one_way_keys=_TOOL_PROSE_KEYS,
+                )
+
+        # End-user identifiers; see _END_USER_ID_KEYS. Only a detected value is replaced,
+        # so an opaque id such as "user-123" goes through as sent. Nothing checks the
+        # field's type, so an object or list is walked one-way too.
+        for key in _END_USER_ID_KEYS:
+            if key in new_payload and key not in protected:
+                new_payload[key] = self._deep_redact(
+                    new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key,
+                    restorable=False,
+                )
+
+        # A gateway such as LiteLLM merges `extra_body` into the provider request, so it
+        # can carry the same fields as the top level, `system` and `tools` included. Walk
+        # it as a request of its own, or deep redaction would put that application text
+        # into the restorable vault.
+        if isinstance(new_payload.get("extra_body"), dict) and "extra_body" not in protected:
+            new_payload["extra_body"] = self.redact_payload(
+                new_payload["extra_body"], vault, active_profile, depth=depth + 1, max_depth=max_depth
+            )
+
+        # Everything else still reaches the provider verbatim. Walk those too.
+        if settings.ENABLE_DEEP_PAYLOAD_REDACTION:
+            for key in list(new_payload):
+                if key in _TARGETED_PAYLOAD_KEYS or key in protected or key == "extra_body":
+                    continue
+                if key in _END_USER_ID_KEYS:
+                    continue
+                new_payload[key] = self._deep_redact(
+                    new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key
+                )
+
         return new_payload
+
+    def _redact_remaining_fields(
+        self,
+        node: Dict[str, Any],
+        handled: frozenset[str],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+        json_path: str,
+        restorable: bool = True,
+    ) -> None:
+        """Scans, in place, every field of `node` the shape walk did not handle.
+
+        The default is to scan, like `redact_model_originated_tree` on the reply path: a walk
+        that follows known shapes forwards whatever field a provider adds next. Skipped:
+        `handled`, operator- and policy-protected keys, the built-in structural keys, and
+        two kinds of direct field: media payloads by shape (_is_media_field) and strings under
+        _OPAQUE_MESSAGE_KEYS. Below the direct fields every key is walked. Text under
+        _REPLAYED_TEXT_KEYS is scanned whole; anything else past the blob ceiling gets the
+        unmapped-blob treatment, as deep redaction does.
+        """
+        protected = settings.payload_protected_keys_set | _policy_skip_keys()
+        for key, value in node.items():
+            if key in handled or key in protected:
+                continue
+            if _is_media_field(key, value, lambda text: bool(self.detect_spans(text, active_profile))):
+                # A file's name is the one text field in a media payload.
+                if key == "file" and isinstance(value.get("filename"), str):
+                    node[key] = {
+                        **value,
+                        "filename": self.redact_text(value["filename"], vault, active_profile, restorable=restorable),
+                    }
+                continue
+            if key in _OPAQUE_MESSAGE_KEYS and isinstance(value, str):
+                continue
+            node[key] = self._deep_redact(
+                value,
+                vault,
+                active_profile,
+                protected,
+                None if key in _REPLAYED_TEXT_KEYS and isinstance(value, str) else settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
+                depth + 1,
+                max_depth,
+                f"{json_path}.{key}",
+                restorable=restorable,
+                text_keys=_REPLAYED_TEXT_KEYS,
+                reference_keys=_NESTED_REFERENCE_KEYS,
+            )
+
+    def _deep_redact(
+        self,
+        node: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        protected: frozenset[str],
+        max_string_length: Optional[int],
+        depth: int,
+        max_depth: int,
+        json_path: str = "",
+        keys_are_names: bool = False,
+        one_way_keys: frozenset[str] = frozenset(),
+        restorable: bool = True,
+        text_keys: frozenset[str] = frozenset(),
+        reference_keys: frozenset[str] = frozenset(),
+    ) -> Any:
+        """Redacts every string beneath `node`, skipping structure and opaque blobs.
+
+        `max_string_length` None means the subtree is text with no blobs in it: every
+        string is scanned in full, whatever its length or prefix.
+
+        `keys_are_names` marks a dict whose keys are property names (the value of a
+        `_SCHEMA_NAME_MAPS` keyword) rather than keywords, so protected keys do not apply
+        to them.
+
+        Strings under a keyword in `one_way_keys` are redacted one-way (`restorable` is
+        False below it). Inside schema data (`_SCHEMA_VALUE_KEYWORDS`) no key is a
+        keyword, so none is one-way there.
+
+        A string directly under a key in `text_keys` is scanned in full, past the blob
+        ceiling too. A string directly under a key in `reference_keys` goes out unchanged;
+        an object under the same name is walked.
+        """
+        if depth > max_depth:
+            raise ValueError("Maximum payload nesting depth exceeded")
+
+        if isinstance(node, str):
+            if max_string_length is not None and (len(node) > max_string_length or node.startswith("data:")):
+                return self._handle_unmapped_blob(node, json_path, active_profile)
+            return self.redact_text(node, vault, active_profile, restorable=restorable)
+
+        if isinstance(node, dict):
+            return {
+                key: (
+                    value
+                    if (key in protected and not keys_are_names)
+                    or (key in reference_keys and isinstance(value, str))
+                    else self._deep_redact(
+                        value,
+                        vault,
+                        active_profile,
+                        (
+                            _protected_inside_schema_data(protected)
+                            if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS
+                            else protected
+                        ),
+                        None if key in text_keys and isinstance(value, str) else max_string_length,
+                        depth + 1,
+                        max_depth,
+                        f"{json_path}.{key}" if json_path else key,
+                        keys_are_names=not keys_are_names and key in _SCHEMA_NAME_MAPS,
+                        one_way_keys=(
+                            frozenset()
+                            if not keys_are_names and key in _SCHEMA_VALUE_KEYWORDS
+                            else one_way_keys
+                        ),
+                        restorable=restorable and (keys_are_names or key not in one_way_keys),
+                        text_keys=text_keys,
+                        reference_keys=reference_keys,
+                    )
+                )
+                for key, value in node.items()
+            }
+
+        if isinstance(node, list):
+            return [
+                self._deep_redact(
+                    item,
+                    vault,
+                    active_profile,
+                    protected,
+                    max_string_length,
+                    depth + 1,
+                    max_depth,
+                    f"{json_path}[{index}]",
+                    one_way_keys=one_way_keys,
+                    restorable=restorable,
+                    text_keys=text_keys,
+                    reference_keys=reference_keys,
+                )
+                for index, item in enumerate(node)
+            ]
+
+        return node
+
+    def _handle_unmapped_blob(
+        self,
+        blob: str,
+        json_path: str,
+        active_profile: Optional[CompiledProfile] = None,
+    ) -> str:
+        """Applies UNMAPPED_BLOB_POLICY to a blob in a field no policy claims.
+
+        The blob's edges are inspected first to avoid skipping limits, which tells an
+        attacker how much padding to add. Measured: a 12 KB base64 blob carrying an
+        email at its head was caught before hitting the base64 character limit.
+        The interior is not decoded; this bound avoids the cost of full inspection.
+
+        A `data:` URI is skipped. Rewriting declared media breaks vision models,
+        which is a worse failure than the risk it removes.
+        """
+        policy = settings.UNMAPPED_BLOB_POLICY
+        if policy == "block":
+            raise UnmappedBlobError(json_path or "<root>", len(blob))
+
+        # `skip` is an explicit opt-out.
+        if policy == "skip" or blob.startswith("data:"):
+            return blob
+
+        # Align tail offset to the blob's 4-character framing (like oversized base64).
+        # An unaligned slice decodes to a shifted smear, causing tail PII to be missed.
+        tail_offset = len(blob) - BLOB_BOUNDARY_SCAN_CHARS
+        tail_offset -= tail_offset % 4
+        # Joined with a newline so a match cannot straddle the seam.
+        probe = blob[:BLOB_BOUNDARY_SCAN_CHARS] + "\n" + blob[tail_offset:]
+
+        try:
+            edge_scan = "pii_found" if self.detect_spans(probe, active_profile) else "clean"
+        except Exception:  # noqa: BLE001  # nosec B110
+            # A probe failure must not take down the request.
+            logger.warning("Unmapped-blob edge scan failed at %s", json_path or "<root>")
+            edge_scan = "failed"
+
+        AuditLogger.log_unmapped_blob(
+            json_path=json_path or "<root>",
+            size_bytes=len(blob),
+            # Different events for telemetry.
+            edge_scan=edge_scan,
+        )
+
+        if edge_scan == "pii_found":
+            # Return a FIXED marker. Minting a vault token would hash and retain the
+            # entire blob in plaintext in Redis, making the payload size bound pointless.
+            return "[UNMAPPED_BLOB_PII_REDACTED]"
+
+        return blob
+
+    def _redact_nested_content(
+        self,
+        content: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        max_depth: int = 8,
+        restorable: bool = True,
+    ) -> Any:
+        """Redacts a tool_result's own content, a string or further blocks.
+
+        `restorable` is False inside a system or developer turn, for every level below it.
+
+        Nesting past `max_depth` raises rather than stopping: the blocks below the bound
+        would otherwise reach the provider unredacted. The error is the same one the
+        payload walk raises, which the API turns into a 400.
+        """
+        if isinstance(content, str):
+            return self.redact_text(content, vault, active_profile, restorable=restorable)
+        if not isinstance(content, list):
+            return content
+
+        root: List[Any] = [block.copy() if isinstance(block, dict) else block for block in content]
+        pending: List[Tuple[List[Any], int]] = [(root, 0)]
+        cursor = 0
+        while cursor < len(pending):
+            blocks, depth = pending[cursor]
+            cursor += 1
+            for position, block in enumerate(blocks):
+                if not isinstance(block, dict):
+                    continue
+                if isinstance(block.get("text"), str):
+                    block["text"] = self.redact_text(block["text"], vault, active_profile, restorable=restorable)
+                if block.get("type") == "document":
+                    self._redact_document_block(block, vault, active_profile, restorable)
+                if block.get("type") == "tool_use" and "input" in block:
+                    block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
+                self._redact_remaining_fields(
+                    block, _block_handled_keys(block), vault, active_profile, 0, 20, "tool_result.content",
+                    restorable,
+                )
+                nested = block.get("content")
+                if isinstance(nested, str):
+                    block["content"] = self.redact_text(nested, vault, active_profile, restorable=restorable)
+                elif isinstance(nested, list) and nested:
+                    if depth + 1 >= max_depth:
+                        raise ValueError("Maximum payload nesting depth exceeded")
+                    copied = [item.copy() if isinstance(item, dict) else item for item in nested]
+                    block["content"] = copied
+                    pending.append((copied, depth + 1))
+                blocks[position] = block
+        return root
+
+    def _redact_text_blocks(
+        self,
+        blocks: List[Any],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> List[Any]:
+        """Redacts the `text` of every content block, then the block's other fields."""
+        redacted: List[Any] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                redacted.append(block)
+                continue
+            block_copy = block.copy()
+            if isinstance(block_copy.get("text"), str):
+                block_copy["text"] = self.redact_text(
+                    block_copy["text"], vault, active_profile, restorable=restorable
+                )
+            self._redact_remaining_fields(
+                block_copy, _TEXT_BLOCK_HANDLED_KEYS, vault, active_profile, 0, 20, "content", restorable
+            )
+            redacted.append(block_copy)
+        return redacted
+
+    def _redact_input_item(
+        self,
+        item: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> Any:
+        """Redacts one Responses API input item.
+
+        A system or developer item is one-way whatever `restorable` says; see
+        _PRIVILEGED_ROLES.
+        """
+        if isinstance(item, str):
+            return self.redact_text(item, vault, active_profile, restorable=restorable)
+        if not isinstance(item, dict):
+            return item
+
+        item_copy = item.copy()
+        restorable = restorable and item_copy.get("role") not in _PRIVILEGED_ROLES
+        content = item_copy.get("content")
+        if isinstance(content, str):
+            item_copy["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
+        elif isinstance(content, list):
+            item_copy["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
+
+        # A replayed reasoning item quotes the conversation in its summary parts.
+        summary = item_copy.get("summary")
+        if isinstance(summary, list):
+            item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile, restorable)
+
+        # function_call / mcp_call hold `arguments`, their outputs `output`, a
+        # custom_tool_call holds its free-form `input`, and a code_interpreter_call its
+        # `code`.
+        for tool_field in ("arguments", "output", "input", "code"):
+            if isinstance(item_copy.get(tool_field), str):
+                item_copy[tool_field] = self.redact_text(item_copy[tool_field], vault, active_profile)
+
+        # A function_call_output can return a list of input_text / input_image parts.
+        if isinstance(item_copy.get("output"), list):
+            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile, restorable)
+
+        # A replayed code_interpreter_call carries what its code printed.
+        outputs = item_copy.get("outputs")
+        if isinstance(outputs, list):
+            item_copy["outputs"] = [
+                {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile)}
+                if isinstance(entry, dict) and isinstance(entry.get("logs"), str)
+                else entry
+                for entry in outputs
+            ]
+
+        self._redact_remaining_fields(
+            item_copy, _INPUT_ITEM_HANDLED_KEYS, vault, active_profile, 0, 20, "input", restorable
+        )
+        return item_copy
+
+    def _redact_prompt_object(
+        self,
+        prompt: Dict[str, Any],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+    ) -> Dict[str, Any]:
+        """Redacts a Responses API prompt object's `variables`, which are the caller's values.
+
+        A variable is a string or a typed part; only `input_text` parts carry text. The
+        stored prompt's `id` and `version` pass through.
+        """
+        variables = prompt.get("variables")
+        if not isinstance(variables, dict):
+            return prompt
+        redacted: Dict[str, Any] = {}
+        for name, value in variables.items():
+            if isinstance(value, str):
+                value = self.redact_text(value, vault, active_profile)
+            elif isinstance(value, dict) and isinstance(value.get("text"), str):
+                value = {**value, "text": self.redact_text(value["text"], vault, active_profile)}
+            redacted[name] = value
+        return {**prompt, "variables": redacted}
+
+    def _redact_document_block(
+        self,
+        block: Dict[str, Any],
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> None:
+        """Redacts an Anthropic document block in place: its text source, `title` and `context`.
+
+        A `text` source holds its text in `data`; a `content` source holds a string or
+        text blocks. Other sources pass through; see _TEXT_DOCUMENT_SOURCES.
+        """
+        for prose_key in ("title", "context"):
+            if isinstance(block.get(prose_key), str):
+                block[prose_key] = self.redact_text(block[prose_key], vault, active_profile, restorable=restorable)
+
+        source = block.get("source")
+        if not isinstance(source, dict) or source.get("type") not in _TEXT_DOCUMENT_SOURCES:
+            return
+        source = source.copy()
+        if isinstance(source.get("data"), str):
+            source["data"] = self.redact_text(source["data"], vault, active_profile, restorable=restorable)
+        content = source.get("content")
+        if isinstance(content, str):
+            source["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
+        elif isinstance(content, list):
+            source["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
+        block["source"] = source
+
+    def _redact_tool_input(
+        self,
+        tool_input: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        max_depth: int = 20,
+    ) -> Any:
+        """Redacts every string in a tool call's JSON `input`, whatever its keys are called.
+
+        No keys are protected here. They are the tool's own argument names, so a key that
+        happens to be called `type` or `format` still holds a caller value.
+        """
+        return self._deep_redact(
+            tool_input,
+            vault,
+            active_profile,
+            frozenset(),
+            settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
+            0,
+            max_depth,
+            "tool_use.input",
+        )
 
 
 pii_engine = PIIEngine()

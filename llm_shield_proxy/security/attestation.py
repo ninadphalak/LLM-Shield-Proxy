@@ -6,12 +6,16 @@ network-wide proof and does not establish detector recall.
 
 import hashlib
 import hmac
+import logging
 from datetime import datetime, timezone
 
 import orjson as json
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.observability.audit import audit_logger
+
+logger = logging.getLogger(__name__)
+_warned_unkeyed = False
 
 
 class StreamDigestReceipt:
@@ -40,7 +44,23 @@ class StreamDigestReceipt:
         self.total_chunks_processed += 1
 
     def emit_audit_receipt(self) -> None:
-        """Emit HMAC-signed digest metadata through the configured audit logger."""
+        """Emit HMAC-signed digest metadata through the configured audit logger.
+
+        Runs after the client already has every byte, so it must not raise: an
+        exception here aborted the finished response mid-connection, on every
+        stream, under the default configuration (no SHIELD_ENCRYPTION_KEY).
+        """
+        global _warned_unkeyed
+        key_str = settings.SHIELD_ENCRYPTION_KEY
+        if not key_str:
+            if not _warned_unkeyed:
+                _warned_unkeyed = True
+                logger.warning(
+                    "SHIELD_ENCRYPTION_KEY is unset, so stream digest receipts are not emitted. "
+                    "Set it to sign one receipt per streamed response."
+                )
+            return
+
         final_digest = self.hasher.hexdigest()
 
         payload = {
@@ -53,9 +73,6 @@ class StreamDigestReceipt:
 
         # Sign the payload using the explicitly configured SHIELD_ENCRYPTION_KEY.
         # Sort keys to ensure deterministic JSON structure for HMAC verification
-        key_str = settings.SHIELD_ENCRYPTION_KEY
-        if not key_str:
-            raise ValueError("SHIELD_ENCRYPTION_KEY is required for the stream digest receipt")
         key = key_str.encode("utf-8")
         payload_bytes = json.dumps(payload, option=json.OPT_SORT_KEYS)
 

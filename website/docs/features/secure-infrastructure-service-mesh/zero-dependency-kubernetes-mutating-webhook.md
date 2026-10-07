@@ -28,17 +28,20 @@ flowchart TD
 
 | Environment Variable | Description |
 | :--- | :--- |
+| `ENABLE_K8S_WEBHOOK` | Serve `/v1/k8s/mutate`. Off by default; the Helm chart in `deploy/helm` sets it when `webhook.enabled` is true. |
 | `K8S_SIDECAR_IMAGE` | The proxy container image digest to inject. |
+| `K8S_SIDECAR_SECRET_NAME` | Secret each injected sidecar loads its environment from (`envFrom`): `VALID_VIRTUAL_KEYS` and a provider key. A pod's `llm-shield.io/keys-secret` annotation overrides it. |
 | `K8S_WEBHOOK_AUTH_TOKEN` | Optional bearer token to authenticate incoming admission requests from the API Server. |
 
 ## Implementation Details & Edge Cases
 * **No Automatic Routing:** The webhook *only* injects the proxy container. It does *not* automatically rewrite the application's environment variables (e.g., `OPENAI_BASE_URL`) or configure `iptables` rules. You must still configure your application to send traffic to `localhost:8000`.
+* **Keys for the sidecar:** The injected container loads its keys from the Secret named by `K8S_SIDECAR_SECRET_NAME` or the pod's `llm-shield.io/keys-secret` annotation. With neither, it rejects every request with a 401, and the webhook logs a warning. The Secret must exist in the pod's namespace.
 * **Idempotency:** If the Pod already contains a container named `llm-shield-proxy`, the webhook skips injection to prevent conflicts.
 
 ## FAQ
 
 **Q: Do I have to use this webhook feature?**
-A: No. You can manage sidecar injection manually via Helm, Kustomize, or Terrafrom, or rely on a standard service mesh (like Istio) instead.
+A: No. You can manage sidecar injection manually via Helm, Kustomize, or Terraform, or rely on a standard service mesh (like Istio) instead.
 
 ## Practical Effect
 This feature automates the placement of the proxy sidecar across a large fleet of Kubernetes workloads based on simple namespace or pod labels.

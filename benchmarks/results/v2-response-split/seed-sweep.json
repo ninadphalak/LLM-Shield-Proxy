@@ -1,0 +1,1444 @@
+{
+ "passthrough": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 1.0,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_adversarial": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "delta_frag": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ },
+ "redact-all": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 0.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 0.125,
+    "min": 0.125,
+    "max": 0.125,
+    "stdev": 0.0
+   },
+   "leak_adversarial": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "delta_frag": {
+    "mean": 0.875,
+    "min": 0.875,
+    "max": 0.875,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ },
+ "chunk-local": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 0.125,
+    "min": 0.125,
+    "max": 0.125,
+    "stdev": 0.0
+   },
+   "leak_adversarial": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "delta_frag": {
+    "mean": 0.875,
+    "min": 0.875,
+    "max": 0.875,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ },
+ "bounded-retention": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 0.125,
+    "min": 0.125,
+    "max": 0.125,
+    "stdev": 0.0
+   },
+   "leak_adversarial": {
+    "mean": 0.125,
+    "min": 0.125,
+    "max": 0.125,
+    "stdev": 0.0
+   },
+   "delta_frag": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ },
+ "retention-plus-decoding": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.0,
+    "leak_adversarial": 0.0,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "pass",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   },
+   "leak_adversarial": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   },
+   "delta_frag": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ },
+ "presidio-chunk-local": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.375,
+    "leak_adversarial": 0.25,
+    "delta_frag": -0.125,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.375,
+    "leak_adversarial": 0.75,
+    "delta_frag": 0.375,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.875,
+    "delta_frag": 0.75,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.75,
+    "delta_frag": 0.625,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.75,
+    "delta_frag": 0.625,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.75,
+    "delta_frag": 0.625,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.875,
+    "delta_frag": 0.75,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.75,
+    "delta_frag": 0.625,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 1.0,
+    "delta_frag": 0.875,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.75,
+    "delta_frag": 0.625,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.625,
+    "delta_frag": 0.5,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.5,
+    "delta_frag": 0.375,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 0.1667,
+    "min": 0.125,
+    "max": 0.375,
+    "stdev": 0.0973
+   },
+   "leak_adversarial": {
+    "mean": 0.7188,
+    "min": 0.25,
+    "max": 1.0,
+    "stdev": 0.1931
+   },
+   "delta_frag": {
+    "mean": 0.5521,
+    "min": -0.125,
+    "max": 0.875,
+    "stdev": 0.2582
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ },
+ "presidio-retention": {
+  "runs": [
+   {
+    "seed": "0000000000000001",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.375,
+    "leak_adversarial": 0.375,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000002",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.3125,
+    "leak_adversarial": 0.3125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000003",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000004",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000005",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000006",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000007",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000008",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "0000000000000009",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000a",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000b",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   },
+   {
+    "seed": "000000000000000c",
+    "fidelity_rate": 1.0,
+    "leak_single_chunk": 0.125,
+    "leak_adversarial": 0.125,
+    "delta_frag": 0.0,
+    "inconclusive": 0,
+    "echo_observable": 32,
+    "cases_applicable": 32,
+    "cases_attempted": 32,
+    "outcome": "fail",
+    "request_path_leak": []
+   }
+  ],
+  "summary": {
+   "fidelity_rate": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "stdev": 0.0
+   },
+   "leak_single_chunk": {
+    "mean": 0.1615,
+    "min": 0.125,
+    "max": 0.375,
+    "stdev": 0.0862
+   },
+   "leak_adversarial": {
+    "mean": 0.1615,
+    "min": 0.125,
+    "max": 0.375,
+    "stdev": 0.0862
+   },
+   "delta_frag": {
+    "mean": 0.0,
+    "min": 0.0,
+    "max": 0.0,
+    "stdev": 0.0
+   }
+  },
+  "seeds": [
+   "0000000000000001",
+   "0000000000000002",
+   "0000000000000003",
+   "0000000000000004",
+   "0000000000000005",
+   "0000000000000006",
+   "0000000000000007",
+   "0000000000000008",
+   "0000000000000009",
+   "000000000000000a",
+   "000000000000000b",
+   "000000000000000c"
+  ],
+  "instrument": {
+   "emitter_version": "0.2.1",
+   "client_scope_sha256": "c15a0522954fb64f",
+   "boundary_scope_sha256": "4a09ca6d088914e7",
+   "inspector_sha256": "94262e29a492ab6a"
+  }
+ }
+}

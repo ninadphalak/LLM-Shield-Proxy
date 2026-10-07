@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import gzip
 import json
 import os
@@ -15,14 +16,17 @@ import statistics
 import sys
 import threading
 import time
+import unicodedata
 import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 from urllib.parse import unquote_plus, urljoin
 
 import httpx
 
+from pii_leak_benchmark.confusables import CONFUSABLE_TO_ASCII, CONFUSABLE_TO_DIGIT
+from pii_leak_benchmark.explain import OperatorSpecimens
 from pii_leak_benchmark.provenance import build_attestation
 from pii_leak_benchmark.redaction_claim import (
     derive_outcome,
@@ -33,59 +37,27 @@ from pii_leak_benchmark.redaction_claim import (
 # ---------------------------------------------------------------------------
 # The protected fixture. Every value must satisfy BOTH properties at once.
 #
-# VALID -- a detector that validates its input recognises it. The fixture this
-# replaced did not: `123-45-6789` is on Presidio's own invalidation list, the card
-# `4532-1234-5678-9012` has Luhn checksum 68, and `.invalid` has no public suffix so
-# `tldextract` rejects it. Measured against `mcr.microsoft.com/presidio-analyzer`,
-# stock registry, `score_threshold: 0.0`, that fixture produced NO `US_SSN`, NO
-# `CREDIT_CARD` and NO `EMAIL_ADDRESS`. The fixture therefore favored shape matching
-# over validated detection. The reference implementation's Tier 1 engine uses regex
-# matching without Luhn or SSN range rejection, so this block prevents that detector
-# design from receiving an unintended fixture advantage. Never reintroduce an invalid
-# specimen.
-#
-# NON-REAL -- the value can never identify a person or route anywhere. Reserved
-# space only. This is why the card is DRAWN FROM A PUBLISHED LIST rather than
-# generated: a randomly generated Luhn-valid PAN in an issued BIN may be a live
-# card, and the harness must never emit one.
+# VALID -- a detector that validates its input recognises it.
+# NON-REAL -- the value can never identify a person or route anywhere.
 # ---------------------------------------------------------------------------
 
 PROTECTED_ENTITY_TYPES = ("EMAIL", "SSN", "CREDIT_CARD")
 
-# RFC 2606 s3 reserves example.com for documentation. It resolves to IANA-operated
-# hosts that accept no mail, so the address cannot reach a person -- and `.com` is a
-# real public suffix, so `tldextract`-style validation accepts it.
+# example.com is reserved and resolves to hosts that accept no mail.
 _FIXTURE_EMAIL_DOMAIN = "example.com"
-# Letters only and a CONSTANT length. A digit in the local part would join the
-# cross-request digit haystacks the SSN and card needles are matched against, which
-# is the same reason the capture probe path carries no digits.
+# Letters only to prevent collision with digit-based fixtures (SSN/card).
 _FIXTURE_EMAIL_LOCAL_ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 _FIXTURE_EMAIL_LOCAL_LENGTH = 8
 
-# The SSA has never issued a Social Security Number with an area of 900-999, so a
-# number from this space cannot belong to anyone. Presidio's `UsSsnRecognizer` does
-# not range-check the area, so it still scores these 0.85 -- verified by measurement,
-# not assumed.
-#
-# The group is held to 01-49, which is outside EVERY group range in Presidio's ITIN
-# recognizer (50-65, 70-88, 90-92, 94-99). Without that the value is also a
-# syntactically valid ITIN and a validating detector may label it `US_ITIN` instead
-# of `US_SSN` -- measured: `987-65-4320`, the range the SSA publishes for use in
-# ADVERTISING, comes back US_ITIN 0.5 and no US_SSN at all, because Presidio's SSN
-# recognizer additionally blacklists the prefix `98765432` outright. The officially
-# "safe" SSN is precisely the one a careful detector ignores, which is the whole
-# problem in miniature.
+# SSN space that cannot belong to anyone (900-999 area), but is not caught
+# by ITIN recognizers.
 _FIXTURE_SSN_AREA = (900, 999)
 _FIXTURE_SSN_GROUP = (1, 49)
 _FIXTURE_SSN_SERIAL = (1, 9999)
-# Presidio's UsSsnRecognizer.invalidate_result rejects a value starting with any of
-# these. The generated space cannot produce one, and the generator checks anyway.
+# Invalidating prefixes for UsSsnRecognizer.
 _SSN_INVALIDATING_PREFIXES = ("000", "666", "123456789", "98765432", "078051120")
 
-# Published test PANs. Every one is Luhn-valid, 16 digits, and identically grouped as
-# dddd-dddd-dddd-dddd, so drawing between them varies the VALUE without varying the
-# FORMAT. None is issued to a cardholder. They are enumerated rather than generated
-# on purpose: see the NON-REAL note above.
+# Published test PANs (Luhn-valid but non-real). Drawn from list, not generated.
 _FIXTURE_TEST_CARDS = (
     "4111111111111111",
     "4012888888881881",
@@ -95,9 +67,7 @@ _FIXTURE_TEST_CARDS = (
     "6011111111111117",
 )
 
-# The shape of each value, published in the report and used by callers that must
-# recover the fixture from the prompt they received. A gateway that wants to pass
-# now needs a format-based detector rather than three string replacements.
+# The shape of each value, used to recover the fixture from the prompt.
 PROTECTED_VALUE_FORMATS = {
     "EMAIL": "[a-z]{8}@example.com",
     "SSN": "ddd-dd-dddd",
@@ -113,18 +83,38 @@ _PROMPT_TEMPLATE = (
     "Synthetic conformance record {nonce}: contact {email}, SSN {ssn}, card {card}"
 )
 
+# --------------------------------------------------------------------------- credentials
+#
+# Additive and opt-in to avoid silently changing what old v1 rows mean.
+# These are fixed (not generated) literals. Values are synced from `needle_registry.py`.
+CREDENTIAL_ENTITY_TYPES = ("AWS_ACCESS_KEY_ID", "GITHUB_TOKEN", "SLACK_TOKEN")
+
+# Bandit B105 flags these deliberately since they test secret scanners.
+_CREDENTIAL_VALUES = {
+    "AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+    "GITHUB_TOKEN": "ghp_EXAMPLENOTAREALGITHUBTOKEN0000000000",  # nosec B105 -- fixture
+    "SLACK_TOKEN": "xoxb-00000-00000-EXAMPLENOTAREALTOKEN",  # nosec B105 -- fixture
+}
+
+CREDENTIAL_VALUE_FORMATS = {
+    "AWS_ACCESS_KEY_ID": "AKIA + 16 uppercase alphanumerics",
+    "GITHUB_TOKEN": "ghp_ + 36 characters",  # nosec B105 -- a shape, not a value
+    "SLACK_TOKEN": "xoxb- + numeric fields + secret",  # nosec B105 -- a shape, not a value
+}
+CREDENTIAL_VALUE_PATTERNS = {
+    "AWS_ACCESS_KEY_ID": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    "GITHUB_TOKEN": re.compile(r"\bghp_[A-Za-z0-9_]{36}\b"),
+    "SLACK_TOKEN": re.compile(r"\bxoxb-(?:\d+-)+[A-Za-z0-9]+\b"),
+}
+
+# The PEM private-key block is planned as part of a structured-secret tranche.
+_CREDENTIAL_PROMPT_SUFFIX = (
+    ", aws key {AWS_ACCESS_KEY_ID}, github token {GITHUB_TOKEN}, slack token {SLACK_TOKEN}"
+)
+
 
 def _ipv4_can_produce(digits: str) -> bool:
-    """Could some dotted-quad IPv4 address normalize to exactly these digits?
-
-    `_normalize` strips separators, so an injected client IP is matched against the
-    needle with its dots removed. Round 7 measured exactly this: the single address
-    123.45.67.89 normalizes to the old SSN fixture's digits, so a tunnel that adds an
-    `x-forwarded-for` header produced an SSN finding against a gateway that had
-    redacted correctly. A generated SSN is rejected if any valid IPv4 can collide
-    with it, which removes that class of false leak result by construction rather
-    than by disclosure.
-    """
+    """Could some dotted-quad IPv4 address normalize to exactly these digits?"""
 
     def walk(rest: str, parts: int) -> bool:
         if parts == 4:
@@ -168,17 +158,8 @@ def _make_ssn() -> str:
         return value
 
 
-def make_fixture() -> dict[str, str]:
-    """One run's protected values. Same format every run, different values.
-
-    Variation does not prevent format-specific handling on its own -- a target that redacts by FORMAT
-    passes either way, which is the point. It raises the cheapest way to pass without
-    building anything from three string replacements to a working format detector,
-    which is approximately the thing being measured.
-
-    The card is drawn from a fixed published list rather than generated. Generating a
-    Luhn-valid PAN would satisfy VALID and break NON-REAL.
-    """
+def make_fixture(*, include_credentials: bool = False) -> dict[str, str]:
+    """One run's protected values. Same format every run, different values."""
     local = "".join(
         _FIXTURE_EMAIL_LOCAL_ALPHABET[
             secrets.randbelow(len(_FIXTURE_EMAIL_LOCAL_ALPHABET))
@@ -186,28 +167,18 @@ def make_fixture() -> dict[str, str]:
         for _ in range(_FIXTURE_EMAIL_LOCAL_LENGTH)
     )
     card = _FIXTURE_TEST_CARDS[secrets.randbelow(len(_FIXTURE_TEST_CARDS))]
-    return {
+    fixture = {
         "EMAIL": f"{local}@{_FIXTURE_EMAIL_DOMAIN}",
         "SSN": _make_ssn(),
         "CREDIT_CARD": "-".join(card[index : index + 4] for index in range(0, 16, 4)),
     }
+    if include_credentials:
+        fixture.update(_CREDENTIAL_VALUES)
+    return fixture
 
 
 def fixture_value_space() -> dict[str, int]:
-    """How many distinct values each entity can draw from, before rejection.
-
-    Published so a reader can see what value variation is actually worth per entity
-    rather than taking "varies per run" on trust. NOMINAL: `_make_ssn` resamples away
-    the IPv4-collidable values on top of this, which is not a rounding error -- a
-    measured 37.3% of the 9-digit space is some dotted quad with its dots removed, so
-    the effective SSN space is about 3.1e7 rather than 4.9e7. It is reported nominal
-    because counting the exact residue is a 49-million-iteration walk and does not
-    belong on the report path.
-
-    The card number is deliberately the smallest by four orders of magnitude. That is
-    not an oversight: it is drawn from a published list because a generated
-    Luhn-valid PAN in an issued BIN could be a live card.
-    """
+    """How many distinct values each entity can draw from, before rejection."""
     return {
         "EMAIL": len(_FIXTURE_EMAIL_LOCAL_ALPHABET) ** _FIXTURE_EMAIL_LOCAL_LENGTH,
         "SSN": (
@@ -220,23 +191,16 @@ def fixture_value_space() -> dict[str, int]:
 
 
 def extract_fixture(prompt: str) -> dict[str, str]:
-    """Recover the fixture from a prompt, by FORMAT.
-
-    Exported because the values now vary per run: anything that needs to act on them
-    -- a mock gateway in the test suite, a reference redactor -- must detect them
-    rather than compare against a constant.
-    """
+    """Recover the fixture from a prompt, by FORMAT."""
     found: dict[str, str] = {}
-    for entity, pattern in PROTECTED_VALUE_PATTERNS.items():
+    for entity, pattern in {**PROTECTED_VALUE_PATTERNS, **CREDENTIAL_VALUE_PATTERNS}.items():
         match = pattern.search(prompt)
         if match:
             found[entity] = match.group(0)
     return found
 
 
-# A stable, valid, non-real example of the fixture SHAPE, for documentation and for
-# callers that need one value set without running the harness. It is NOT what a run
-# uses -- `make_fixture()` is -- so never match a captured request against it.
+# A stable, valid, non-real example of the fixture SHAPE for documentation.
 REFERENCE_FIXTURE = {
     "EMAIL": "jrmccalx@example.com",
     "SSN": "914-27-6083",
@@ -250,25 +214,18 @@ PROMPT = _PROMPT_TEMPLATE.format(
 )
 
 # Bounds on what the capture server will buffer and inspect from one request.
-# Exceeding any of them marks the capture uninspectable, which FAILS the boundary
-# check. A budget that silently stopped the walk would let a target hide the PII
-# below the limit and read as clean.
 _MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 _MAX_INSPECT_DEPTH = 64
 _MAX_INSPECT_NODES = 200_000
 _MAX_DECODE_ROUNDS = 3
-_BASE64ISH = re.compile(r"[A-Za-z0-9+/_-]{16,}={0,2}")
+# The shortest base64 run worth decoding (8 chars supports 6 bytes of payload).
+_BASE64_MIN_RUN = 8
+_BASE64_MIN_VALUE_BYTES = 6
+_BASE64ISH = re.compile(r"[A-Za-z0-9+/_-]{%d,}={0,2}" % _BASE64_MIN_RUN)
 _HEXISH = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 _NON_ALPHANUM = re.compile(r"[^0-9a-z]+")
 
-# The correlation marker must survive a CORRECT gateway. A random hex nonce is
-# high-entropy and a conforming secret detector redacts it. Evocative nouns are worse
-# still: `amber`, `olive`, `sage`, `rowan` and `willow` are given names, so a gateway
-# with a conforming PERSON detector redacts them and fails a valid implementation.
-# These are mundane concrete nouns that no NER model tags as an entity. Five drawn
-# from 96 give 96**5 ~= 2**33 combinations, and correlation needs only a majority of
-# them back, so redacting one or two still ties the capture to this run. (The prior
-# list claimed ~2**32 for four words drawn from 54, which was really 2**23.)
+# A nonce dictionary of mundane concrete nouns that won't trigger NER detectors.
 _NONCE_WORDS = (
     "anchor anvil apron awning barrel basin beacon bellows blanket bobbin bolt bracket "
     "bridle bucket buckle cabinet caliper candle canvas cauldron chisel cistern clamp "
@@ -286,25 +243,10 @@ _NONCE_MIN_MATCHES = 3
 
 
 class CaptureUnreachableError(OSError):
-    """The capture server did not observe the harness's own probe request.
-
-    Raised BEFORE any target traffic, so no report is produced. Every condition it
-    detects -- a hijacked port, a firewall, a broken tunnel, a stray proxy
-    environment variable, a dead server -- otherwise produces a schema-valid report
-    that fails checks against a gateway which did nothing wrong.
-
-    Deliberately an OSError. It replaces the EADDRINUSE that POSIX used to raise for
-    the one hijack shape a bind could refuse, and the CLI already turns an OSError
-    from the harness into "Benchmark failed: ..." and exit 2. The replacement must
-    fail the same way the thing it replaces did, and it genuinely is a connectivity
-    condition.
-    """
+    """The capture server did not observe the harness's own probe request."""
 
 
-# The probe path carries a per-run secret so a target cannot address it, and is drawn
-# from LETTERS ONLY: a digit in the path would join the cross-request digit haystacks
-# that the SSN and card needles are matched against, and the probe
-# is that it cannot influence a verdict.
+# The probe path must be strictly alphabetic to avoid polluting digit haystacks.
 #
 # It is appended to the capture BASE url rather than to the origin, and matched as a
 # SUFFIX rather than by equality. A tester's reverse proxy may forward only `/v1/*`,
@@ -315,6 +257,8 @@ _PROBE_PATH_TEMPLATE = "/__conformance_capture_probe__/{token}"
 _PROBE_TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyz"  # nosec B105 - an alphabet, not a secret
 _PROBE_TOKEN_LENGTH = 24
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})
+_DEFAULT_CAPTURE_HOST = "127.0.0.1"
+_DEFAULT_CAPTURE_PORT = 8765
 
 
 def _make_probe_token() -> str:
@@ -336,22 +280,106 @@ def _make_nonce() -> str:
 
 
 def _build_prompt(nonce: str, fixture: dict[str, str]) -> str:
-    return _PROMPT_TEMPLATE.format(
+    prompt = _PROMPT_TEMPLATE.format(
         nonce=nonce,
         email=fixture["EMAIL"],
         ssn=fixture["SSN"],
         card=fixture["CREDIT_CARD"],
     )
+    # Appended rather than woven into the template, so the three published values keep their
+    # exact positions and surrounding words. A row measured without credentials and one
+    # measured with them differ by a suffix and nothing else.
+    if any(entity in fixture for entity in CREDENTIAL_ENTITY_TYPES):
+        prompt += _CREDENTIAL_PROMPT_SUFFIX.format(
+            **{entity: fixture[entity] for entity in CREDENTIAL_ENTITY_TYPES}
+        )
+    return prompt
+
+
+# The digit fold is the ASCII fold plus the zero and one families redirected to `0`
+# and `1`. Merged once at import: it is applied per character on every captured
+# string.
+_CONFUSABLE_DIGIT_FOLD = {**CONFUSABLE_TO_ASCII, **CONFUSABLE_TO_DIGIT}
+
+
+def _fold(text: str, table: dict[str, str]) -> str:
+    """Case-fold, decompose, map look-alikes to ASCII, then drop what is left.
+
+    `_NON_ALPHANUM` deletes rather than folds, and deletion is a false PASS: a
+    fullwidth SSN `９１４-２７-６０８３` normalized to the empty string, and
+    `jrmccalx@examрle.com` with one Cyrillic ER normalized to `jrmccalxexamlecom`,
+    so neither needle was ever found. Both are named encodings on the corpus's Axis B
+    (`homoglyph`, and the fullwidth case that `numeric-char-array` neighbours), and a
+    capture server that cannot decode an encoding it is scoring produces a clean
+    report for a gateway that leaked.
+
+    Three layers, cheapest first, and each one exists because the one before it does
+    not cover the next:
+
+    1. NFKD -- fullwidth and halfwidth forms, mathematical alphanumerics, ligatures,
+       superscripts, and precomposed accents (`josé` now folds to `jose` instead of
+       losing its last letter). Combining marks left behind are dropped by the strip.
+    2. `unicodedata.decimal` -- every non-Latin digit script. An SSN written in
+       Devanagari or Arabic-Indic digits carries the same nine digits and NFKD does
+       not touch it, because those are not compatibility equivalents.
+    3. The vendored UTS #39 confusables fold -- cross-script glyph look-alikes, which
+       neither of the above reaches. See `confusables.py` for the derivation and for
+       why no ASCII character is ever a source. It runs AFTER the decimal check on
+       purpose: UTS #39 maps DEVANAGARI DIGIT ZERO to the letter `o`, and for a
+       needle made of digits the UCD's decimal value is the truth.
+
+    Matching on the result still defeats separator-level obfuscation (unicode escapes,
+    inserted punctuation, whitespace, zero-width insertions) and fragments split across
+    adjacent string literals, without a decoder per trick.
+    """
+    folded: list[str] = []
+    # Case folding happens AFTER the table lookup, not before. UTS #39 lists both
+    # cases as separate rows and their prototypes are not case variants of each
+    # other: GREEK CAPITAL LETTER EPSILON resolves to ASCII `E`, while GREEK SMALL
+    # LETTER EPSILON resolves to LATIN SMALL LETTER C WITH BAR and never reaches
+    # ASCII at all. Case folding first turns every uppercase source into a lowercase
+    # one the table may not carry, which silently deletes the row -- measured on the
+    # first cut of this function, where a value written in capital Greek normalized
+    # to the empty string exactly as it had before the fix.
+    for character in unicodedata.normalize("NFKD", text):
+        if character.isascii():
+            folded.append(character)
+            continue
+        # Decimal value first, and the order is load-bearing. UTS #39 maps DEVANAGARI
+        # DIGIT ZERO to the LETTER `o` -- visually true, semantically wrong for a
+        # needle made of digits. A character that carries a decimal value IS that
+        # digit, whatever it resembles, so the UCD's own answer wins over the
+        # look-alike table.
+        decimal = unicodedata.decimal(character, None)
+        if decimal is not None:
+            folded.append(str(decimal))
+            continue
+        mapped = table.get(character)
+        folded.append(character if mapped is None else mapped)
+    return _NON_ALPHANUM.sub("", "".join(folded).casefold())
 
 
 def _normalize(text: str) -> str:
-    """Lowercase and drop every non-alphanumeric character.
+    """The primary fold: look-alikes become their UTS #39 ASCII prototype."""
+    return _fold(text, CONFUSABLE_TO_ASCII)
 
-    Matching on this defeats separator-level obfuscation (unicode escapes, inserted
-    punctuation, whitespace) and fragments split across adjacent string literals,
-    without needing a decoder for each individual trick.
+
+def _normalize_confusable_digits(text: str) -> str:
+    """The secondary fold, for an ADDITIONAL haystack -- never a replacement.
+
+    UTS #39's prototype for the zero family is the letter `O` and for the one family
+    the letter `l`, so `_normalize` turns a Cyrillic `о` into `o` and a needle
+    whose digits include `0` still does not match. This fold sends those two families
+    to `0` and `1` instead.
+
+    It is a second haystack rather than a wider `_normalize` because collapsing the
+    letter/digit distinction is only safe while it cannot touch ASCII. Folding ASCII
+    `o` to `0` across a joined capture manufactures digit runs nothing ever sent --
+    the false-positive class that produced the round 7 IPv4 SSN finding against a
+    gateway which had redacted correctly. Restricted to non-ASCII sources, this fold
+    can only match text that really did contain a look-alike.
     """
-    return _NON_ALPHANUM.sub("", text.lower())
+    return _fold(text, _CONFUSABLE_DIGIT_FOLD)
 
 
 def _decode_candidates(value: str) -> list[str]:
@@ -368,8 +396,8 @@ def _decode_candidates(value: str) -> list[str]:
         # which is all it took to hide an encoded value from an anchored match.
         for offset in range(4):
             aligned = run[offset:]
-            # Floor of one decodable group, NOT the 16 characters _BASE64ISH needs to
-            # spot a run in the first place. Reusing 16 here meant a 16-character run
+            # Floor of one decodable group, NOT the _BASE64_MIN_RUN characters
+            # _BASE64ISH needs to spot a run in the first place. Reusing 16 here meant a 16-character run
             # -- exactly what one prefix character plus an 11-byte value produces --
             # was only ever tried at offset 0, which decodes to noise, so the value
             # was never recovered. The suite did not catch it because the previous
@@ -406,11 +434,26 @@ def _decode_candidates(value: str) -> list[str]:
 
 
 class _Inspection:
-    """Every string a parsed body carries, plus whether the walk saw all of it."""
+    """Every string a parsed body carries, plus whether the walk saw all of it.
+
+    DECODED MATERIAL IS KEPT IN ITS OWN LISTS, and that separation is load-bearing
+    rather than tidy. `strings` is an ORDERED stream and the cross-fragment matcher
+    works by joining it: two halves of an email in adjacent array elements are only
+    recoverable because nothing sits between them. Appending a string's decodings
+    inline splices that decoded text BETWEEN the two fragments and the join stops
+    reassembling. Measured: with the base64 run floor lowered, the eight-character
+    prefix of a fragment became a decode candidate, its garbage decoding landed
+    between the halves, and `test_fragment_split_inside_a_protected_value_is_
+    reassembled` went from finding EMAIL to finding nothing.
+
+    Both are searched. Only the verbatim stream is searched IN ORDER.
+    """
 
     def __init__(self) -> None:
         self.strings: list[str] = []
         self.values: list[str] = []
+        self.decoded_strings: list[str] = []
+        self.decoded_values: list[str] = []
         self.truncated = False
         self.nodes = 0
 
@@ -451,10 +494,15 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
     if depth > _MAX_INSPECT_DEPTH:
         found.truncated = True
         return
+    # `rounds` is already the "did we get here through a decoder" flag, so it also
+    # selects which stream this string belongs to. Nothing reached by decoding may
+    # enter the ordered verbatim stream -- see `_Inspection`.
+    into_strings = found.decoded_strings if rounds else found.strings
+    into_values = found.decoded_values if rounds else found.values
     if isinstance(value, str):
-        found.strings.append(value)
+        into_strings.append(value)
         if not is_key:
-            found.values.append(value)
+            into_values.append(value)
         if rounds < _MAX_DECODE_ROUNDS:
             for decoded in _decode_candidates(value):
                 _collect(decoded, found, depth, rounds + 1)
@@ -465,9 +513,9 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
         # Numbers carry PII too: a digit string survives as an integer, and a
         # character-code array reconstructs upstream while holding no strings at all.
         text = repr(value)
-        found.strings.append(text)
+        into_strings.append(text)
         if not is_key:
-            found.values.append(text)
+            into_values.append(text)
         return
     if isinstance(value, _JSONObject):
         # json.loads normally collapses duplicate members before the object walk.
@@ -485,9 +533,11 @@ def _collect(value: Any, found: _Inspection, depth: int = 0, rounds: int = 0, is
     if isinstance(value, (list, tuple)):
         codes = [item for item in value if isinstance(item, int) and not isinstance(item, bool)]
         if codes and len(codes) == len(value) and all(0 < code < 0x110000 for code in codes):
+            # A reconstruction, not something the target literally wrote, so it goes
+            # to the decoded stream for the same reason a base64 decoding does.
             decoded = "".join(chr(code) for code in codes)
-            found.strings.append(decoded)
-            found.values.append(decoded)
+            found.decoded_strings.append(decoded)
+            found.decoded_values.append(decoded)
         for item in value:
             _collect(item, found, depth + 1, rounds)
         return
@@ -584,21 +634,46 @@ def _leaked_entities(
     evidence: list[dict[str, Any]] = []
     proximity: dict[str, int] = {entity: 0 for entity in fixture}
 
-    def inspect(strings: list[str], values: list[str], channel: str, scope: str) -> None:
-        haystacks = (
+    def inspect(
+        strings: list[str],
+        values: list[str],
+        decoded_strings: list[str],
+        decoded_values: list[str],
+        channel: str,
+        scope: str,
+    ) -> None:
+        # Two joins, and the difference between them is the whole reason decoded
+        # material is kept apart. The first preserves the ORDER the target wrote in,
+        # so two halves of a value in adjacent fields still sit next to each other.
+        # The second appends everything a decoder recovered, which is where an
+        # encoded value is found. Searching only the second would break fragment
+        # reassembly; searching only the first would miss every encoding.
+        joined = (
             "".join(strings),
             "".join(values),
-            _normalize("".join(strings)),
-            _normalize("".join(values)),
+            "".join(strings + decoded_strings),
+            "".join(values + decoded_values),
         )
+        folded = tuple(_normalize(text) for text in joined)
+        # The digit fold is a separate pair, and a needle is only ever matched against
+        # haystacks folded the same way it was. Comparing a digit-folded needle
+        # against a letter-folded capture would report a match that neither form
+        # contains. Fixture values are ASCII today, so the two needles are identical
+        # and this costs nothing; a corpus entity in a non-Latin script makes them
+        # differ, and then the pairing is what keeps the finding true.
+        digit_folded = tuple(_normalize_confusable_digits(text) for text in joined)
         for entity, value in fixture.items():
             proximity[entity] = max(
-                proximity[entity], _needle_proximity(_normalize(value), haystacks)
+                proximity[entity],
+                _needle_proximity(_normalize(value), joined + folded),
+                _needle_proximity(_normalize_confusable_digits(value), digit_folded),
             )
         for entity, value in fixture.items():
             if entity in leaked:
                 continue
-            if any(value in text for text in strings):
+            if any(value in text for text in strings) or any(
+                value in text for text in decoded_strings
+            ):
                 # The fixture value appears verbatim in something the target sent.
                 # This is the strong form and needs no interpretation.
                 leaked.add(entity)
@@ -612,11 +687,19 @@ def _leaked_entities(
                 )
                 continue
             normalized = _normalize(value)
-            if any(value in hay or normalized in hay for hay in haystacks):
-                # Recovered only after joining and stripping separators. Still a
-                # finding -- this is what catches deliberate obfuscation -- but a
-                # purely numeric needle can in principle collide with unrelated
-                # digits, so the artifact says which matcher fired.
+            digit_normalized = _normalize_confusable_digits(value)
+            if (
+                any(value in hay or normalized in hay for hay in joined + folded)
+                or any(digit_normalized in hay for hay in digit_folded)
+            ):
+                # Recovered only after joining and stripping separators, or after
+                # folding a non-ASCII look-alike back to ASCII. Still a finding --
+                # this is what catches deliberate obfuscation -- but a purely numeric
+                # needle can in principle collide with unrelated digits, so the
+                # artifact says which matcher fired. Both folds report as
+                # "normalized": the v1.0.0 schema's match enum is frozen, and a
+                # confusable hit IS a normalized-form hit, so this understates how
+                # the value was found rather than misstating it.
                 leaked.add(entity)
                 evidence.append(
                     {
@@ -628,19 +711,35 @@ def _leaked_entities(
                 )
 
     for record in records:
-        inspect(record["strings"], record["values"], "all", "per-request")
+        inspect(
+            record["strings"],
+            record["values"],
+            record.get("decoded_strings", []),
+            record.get("decoded_values", []),
+            "all",
+            "per-request",
+        )
 
     # A stateful upstream can reassemble one logical value from ordered requests.
     # Join each data channel independently across records so ordinary method/header
     # metadata does not break a body-to-body (or trailer-to-trailer) reconstruction.
     for channel in ("request", "headers", "framing", "body"):
-        strings = [
-            item for record in records for item in record.get(f"{channel}_strings", [])
-        ]
-        values = [
-            item for record in records for item in record.get(f"{channel}_values", [])
-        ]
-        inspect(strings, values, channel, "cross-request")
+
+        def gather(suffix: str, channel: str = channel) -> list[str]:
+            return [
+                item
+                for record in records
+                for item in record.get(f"{channel}_{suffix}", [])
+            ]
+
+        inspect(
+            gather("strings"),
+            gather("values"),
+            gather("decoded_strings"),
+            gather("decoded_values"),
+            channel,
+            "cross-request",
+        )
     return sorted(leaked), evidence, proximity
 
 
@@ -777,8 +876,12 @@ def _handler_for(state: _CaptureState):
                         "parsed": False,
                         "strings": found.strings,
                         "values": found.values,
+                        "decoded_strings": found.decoded_strings,
+                        "decoded_values": found.decoded_values,
                         "request_strings": list(found.strings),
                         "request_values": list(found.values),
+                        "request_decoded_strings": list(found.decoded_strings),
+                        "request_decoded_values": list(found.decoded_values),
                         "headers_strings": [],
                         "headers_values": [],
                         "framing_strings": [],
@@ -907,27 +1010,49 @@ def _handler_for(state: _CaptureState):
                 "parsed": False,
                 "strings": [],
                 "values": [],
+                "decoded_strings": [],
+                "decoded_values": [],
                 "byte_length": len(body),
                 "error": framing_error or encoding_error,
             }
             payload = None
             found = _Inspection()
-            request_string_start, request_value_start = len(found.strings), len(found.values)
+
+            def mark() -> tuple[int, int, int, int]:
+                return (
+                    len(found.strings),
+                    len(found.values),
+                    len(found.decoded_strings),
+                    len(found.decoded_values),
+                )
+
+            def slice_since(marker: tuple[int, int, int, int], channel: str) -> None:
+                """Record one channel's own contribution, verbatim and decoded apart.
+
+                Four cursors rather than two: decoded material lives in its own
+                stream so it cannot land between two ordered fragments, and a
+                cross-request join has to be able to reassemble a channel from the
+                verbatim stream alone.
+                """
+                record[f"{channel}_strings"] = found.strings[marker[0]:]
+                record[f"{channel}_values"] = found.values[marker[1]:]
+                record[f"{channel}_decoded_strings"] = found.decoded_strings[marker[2]:]
+                record[f"{channel}_decoded_values"] = found.decoded_values[marker[3]:]
+
+            request_mark = mark()
             # Every component of the request line is inspected. A query string is as
             # much an egress channel as a body, and custom methods are attacker-chosen.
             _collect(self.command, found)
             _collect(unquote_plus(self.path), found)
-            record["request_strings"] = found.strings[request_string_start:]
-            record["request_values"] = found.values[request_value_start:]
+            slice_since(request_mark, "request")
             # So are request headers. A gateway can redact the visible message field
             # and carry the raw values in metadata headers instead; the upstream
             # receives them either way, so an unwalked header is an unwatched channel.
-            header_string_start, header_value_start = len(found.strings), len(found.values)
+            header_mark = mark()
             for header_name, header_value in self.headers.items():
                 _collect(str(header_name), found, is_key=True)
                 _collect(unquote_plus(str(header_value)), found)
-            record["headers_strings"] = found.strings[header_string_start:]
-            record["headers_values"] = found.values[header_value_start:]
+            slice_since(header_mark, "headers")
             header_defects = getattr(self.headers, "defects", ())
             if header_defects:
                 # email.message intentionally recovers from malformed header lines
@@ -937,19 +1062,19 @@ def _handler_for(state: _CaptureState):
                 record["error"] = record["error"] or (
                     "malformed_headers:" + ",".join(defect_names)
                 )
-            framing_string_start, framing_value_start = len(found.strings), len(found.values)
+            framing_mark = mark()
             for kind, item in framing_metadata:
                 _collect_framing_metadata(kind, item, found)
-            record["framing_strings"] = found.strings[framing_string_start:]
-            record["framing_values"] = found.values[framing_value_start:]
+            slice_since(framing_mark, "framing")
             record["body_strings"] = []
             record["body_values"] = []
+            record["body_decoded_strings"] = []
+            record["body_decoded_values"] = []
             try:
                 inspection_payload = json.loads(body, object_pairs_hook=_JSONObject)
-                body_string_start, body_value_start = len(found.strings), len(found.values)
+                body_mark = mark()
                 _collect(inspection_payload, found)
-                record["body_strings"] = found.strings[body_string_start:]
-                record["body_values"] = found.values[body_value_start:]
+                slice_since(body_mark, "body")
                 if found.truncated:
                     # Fail closed. A body too deep or too large to walk has NOT been
                     # shown to be clean, and a target can choose how deep to nest.
@@ -972,6 +1097,8 @@ def _handler_for(state: _CaptureState):
                     record["parsed"] = not record["error"] and not found.truncated
             record["strings"] = found.strings
             record["values"] = found.values
+            record["decoded_strings"] = found.decoded_strings
+            record["decoded_values"] = found.decoded_values
             # Always recorded, parsed or not: an inspection failure must be able to
             # fail the boundary check rather than silently count as a clean capture.
             state.append(record)
@@ -1142,6 +1269,186 @@ def _self_probe(
     return probe
 
 
+class CaptureSession:
+    """A bound, recording capture server whose lifetime the caller controls.
+
+    The capture has to be listening when the target STARTS, not only when the client
+    iterations begin. A gateway that talks to its configured upstream before it opens
+    its own port -- model discovery, a provider health check, a credential probe --
+    finds nothing there when the capture binds later, and exits or times out before
+    the harness ever sends it a request. Binding first and holding the socket open
+    across the whole target lifecycle is the only ordering under which such a gateway
+    can be measured at all.
+
+    Everything that arrives while the session is open is recorded and inspected on
+    the same terms, whenever it arrived. Startup traffic is deliberately NOT bucketed
+    out of the measurement: the capture answers ``GET /v1/models`` so ordinary
+    discovery succeeds on its own, and anything else a target sends to its configured
+    upstream is egress to that origin whether it left before or after the first
+    iteration. A window in which traffic reached the boundary and counted as clean
+    because nobody was looking is exactly what this class exists to close.
+
+    One session therefore measures exactly ONE run. Its record set starts at the bind
+    and is never sliced, which is what lets startup traffic count; a second run over
+    the same session would inherit the first one's requests, and the two runs do not
+    even share a fixture. ``claim`` refuses that rather than quietly reporting the
+    earlier target's traffic against the later one.
+
+    The session never stores the capture token; ``_CaptureState`` holds it, and the
+    report publishes only whether one was required.
+    """
+
+    def __init__(
+        self,
+        server: ThreadingHTTPServer,
+        state: _CaptureState,
+        *,
+        bind_host: str,
+        mode: str,
+        authentication_required: bool,
+        advertised_base_url: str,
+        local_base_url: str,
+    ) -> None:
+        self.server = server
+        self.state = state
+        self.bind_host = bind_host
+        self.mode = mode
+        self.authentication_required = authentication_required
+        self.advertised_base_url = advertised_base_url
+        self.local_base_url = local_base_url
+        self.port = server.server_address[1]
+        # Filled in by capture_session once the probe has proved the channel, so a
+        # report can never publish a self_probe block the session did not earn.
+        self.self_probe: dict[str, Any] = {}
+        self._claimed = False
+
+    def claim(self) -> None:
+        """Take this session for one measurement. A second attempt is refused.
+
+        Every record since the bind belongs to the run, which is the whole point:
+        traffic a target sent during startup is egress to the boundary under test.
+        The same property makes reuse unsound. A second run would inherit the first
+        one's captured requests into its counts and its cross-request joins, and a
+        fixture value that happened to repeat would be read as a leak the second
+        target never sent. Slicing the records instead would reopen the startup
+        window this class exists to close, so the answer is a fresh session.
+        """
+        if self._claimed:
+            raise ValueError(
+                "This capture session has already measured a run. Open one "
+                "capture_session() per measurement: its records start at the bind, so "
+                "a second run would inherit the first one's captured traffic."
+            )
+        self._claimed = True
+
+    def capture_block(self) -> dict[str, Any]:
+        """The report's ``capture`` object. FROZEN v1.0.0 shape -- no new keys."""
+        return {
+            "mode": self.mode,
+            "bind_host": self.bind_host,
+            "port": self.port,
+            "authentication_required": self.authentication_required,
+            "target_must_be_preconfigured_for": self.advertised_base_url,
+            # Proof the capture was reachable and recording at the address the target
+            # was configured with, taken before the target was even started.
+            "self_probe": self.self_probe,
+        }
+
+
+@contextlib.contextmanager
+def capture_session(
+    *,
+    capture_host: str = _DEFAULT_CAPTURE_HOST,
+    capture_port: int = _DEFAULT_CAPTURE_PORT,
+    capture_token: Optional[str] = None,
+    capture_public_url: Optional[str] = None,
+    timeout_seconds: float = 30.0,
+) -> Iterator[CaptureSession]:
+    """Bind, self-probe, then serve the capture until the caller is finished with it.
+
+    Enter this BEFORE starting the target -- see ``CaptureSession`` for why. The
+    self-probe runs here, so a hijacked, firewalled or dead capture aborts before a
+    target process is launched rather than after a run has already blamed it.
+
+    ``run_http_conformance`` opens one of these for itself when no session is passed,
+    which is what every single-shot caller wants. Pass a session when the target's
+    lifecycle is yours to manage, as the CI command's managed startup is.
+    """
+    bind_is_loopback = capture_host in _LOOPBACK_HOSTS
+    capture_mode = "loopback" if bind_is_loopback and not capture_public_url else "public"
+    if not bind_is_loopback and not capture_public_url:
+        raise ValueError(
+            f"capture_host={capture_host!r} is not loopback, so capture_public_url is "
+            "required (CLI: --capture-public-url URL, env: "
+            "CONFORMANCE_CAPTURE_PUBLIC_URL). A wildcard bind has no address anything "
+            "can connect to, so publishing it as the URL the target must be configured "
+            "for is simply wrong. Pass the externally reachable /v1 base URL the target "
+            "will use -- your tunnel, your VPS, or http://host.docker.internal:PORT/v1 "
+            "for a container. A public bind also requires capture_token (CLI: "
+            "--capture-token, env: CONFORMANCE_CAPTURE_TOKEN)."
+        )
+    if capture_mode == "public" and not capture_token:
+        raise ValueError(
+            "capture_token is required when the capture is reachable beyond loopback "
+            "(CLI: --capture-token TOKEN, env: CONFORMANCE_CAPTURE_TOKEN -- prefer the "
+            f"env var, process listings show argv). bind_host={capture_host!r}, "
+            f"public_url={capture_public_url!r}. Without a token any internet traffic "
+            "could enter the capture record. Configure the target's upstream API key to "
+            "the same value so its requests are attributable."
+        )
+
+    probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
+    state = _CaptureState(probe_path, capture_token)
+
+    # SO_REUSEADDR is left at HTTPServer's default on every platform. Clearing it on
+    # Windows was tried and measured not to prevent a hijack -- the steal happens
+    # when the two sockets bind DIFFERENT addresses, where the flag is irrelevant,
+    # and the matching-address case was already refused without it. Keeping the flag
+    # is also what lets a repeat run rebind over the previous run's TIME_WAIT
+    # entries, which a baseline-then-candidate CI run does on one port. The post-bind
+    # self-probe below is what actually fails closed here.
+    server = ThreadingHTTPServer((capture_host, capture_port), _handler_for(state))
+    actual_host, actual_port = server.server_address[:2]
+    local_base_url = f"http://{actual_host}:{actual_port}/v1"
+    # What the TARGET must be pointed at. In public mode that is the tester's own
+    # externally reachable address, not the bind address -- a capture bound to
+    # 0.0.0.0 has no usable URL of its own.
+    advertised_base_url = (capture_public_url or local_base_url).rstrip("/")
+    # The local probe must use an address the harness can actually connect to. A
+    # wildcard bind is not one, so normalize it to loopback for the probe only.
+    probe_host = "127.0.0.1" if actual_host in ("0.0.0.0", "::", "") else actual_host
+    session = CaptureSession(
+        server,
+        state,
+        bind_host=capture_host,
+        mode=capture_mode,
+        authentication_required=capture_token is not None,
+        advertised_base_url=advertised_base_url,
+        local_base_url=local_base_url,
+    )
+    thread = threading.Thread(target=server.serve_forever, name="conformance-capture", daemon=True)
+    thread.start()
+    try:
+        # Before any target traffic, and before the target has even been started. A
+        # run whose capture cannot be reached measures nothing, and the report it
+        # would otherwise emit is schema-valid and blames the target.
+        session.self_probe = _self_probe(
+            f"http://{probe_host}:{actual_port}/v1{probe_path}",
+            advertised_base_url + probe_path,
+            probe_path,
+            state,
+            capture_token,
+            min(timeout_seconds, 30.0),
+        )
+        yield session
+    finally:
+        # Runs on the probe's own failure too, so a refused session never leaves the
+        # port bound for the retry or for the next measurement on the same port.
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 async def _exercise_target(
     target_base_url: str,
     api_key: str,
@@ -1217,6 +1524,12 @@ async def _exercise_target(
 
     completed = len(texts)
     return {
+        # NOT a published field, and nothing spreads this dict into the report -- every
+        # report key is taken by name. It exists so `run_http_conformance` can tell an
+        # operator what the client actually saw where their own value should have been,
+        # which is the difference between "restoration is broken" and "restoration
+        # returned a placeholder". See `explain.OperatorSpecimens`.
+        "client_text": texts[-1] if texts else "",
         "durations_ms": durations_ms,
         "iterations_requested": iterations,
         "iterations_completed": completed,
@@ -1243,17 +1556,29 @@ def run_http_conformance(
     implementation_version: str = "unspecified",
     iterations: int = 3,
     timeout_seconds: float = 30.0,
-    capture_host: str = "127.0.0.1",
-    capture_port: int = 8765,
+    capture_host: str = _DEFAULT_CAPTURE_HOST,
+    capture_port: int = _DEFAULT_CAPTURE_PORT,
     capture_token: Optional[str] = None,
     capture_public_url: Optional[str] = None,
+    session: Optional[CaptureSession] = None,
     extra_headers: Optional[dict[str, str]] = None,
     redaction_claim: Optional[dict[str, Any]] = None,
+    include_credentials: bool = False,
+    fixture_seed: Optional[str] = None,
+    specimens: Optional["OperatorSpecimens"] = None,
 ) -> dict[str, Any]:
     """Evaluate an OpenAI-compatible endpoint against a controlled capture upstream.
 
     Configure the target gateway's upstream base URL to the capture server before running.
     Use ``capture://self`` as the target to record an explicit raw-pass-through baseline.
+
+    ``session`` accepts a ``CaptureSession`` the caller has already opened, for the
+    case where the target is STARTED by the caller: the capture must be listening
+    before a gateway that contacts its configured upstream during startup, or that
+    gateway never reaches the point of serving a request. Without one, this binds and
+    tears down its own capture around the run, and the remaining ``capture_*``
+    arguments configure it; with one, they belong to ``capture_session`` instead and
+    passing them here is refused rather than silently ignored.
 
     Two capture modes:
 
@@ -1281,6 +1606,14 @@ def run_http_conformance(
     ``outcome: claim-unstated`` -- valid measurements, not publishable as a row. See
     ``conformance/redaction_claim.py``: a product that never offered redaction must
     never be printed as "Fail".
+
+    ``specimens`` is an OUT parameter and the only way this run's generated values leave
+    it. The report never carries them -- ``fixture.values_published`` is false and stays
+    false -- but the operator who generated them on their own machine seconds ago is
+    entitled to see them, and a leak display without the value explains nothing. An
+    explicit object the caller has to ask for keeps the two audiences apart by
+    construction: the report is written to disk and published, so anything reachable from
+    it is eventually serialized by someone who did not read the rule.
     """
     if iterations < 1:
         raise ValueError("iterations must be at least 1")
@@ -1289,29 +1622,51 @@ def run_http_conformance(
     # Validated before the capture server binds: a malformed claim should cost nothing
     # and must never be silently defaulted into a verdict.
     claim_block = normalize_claim(redaction_claim)
+    if fixture_seed is not None and redaction_claim is not None:
+        raise ValueError("Seeded operator runs cannot publish a vendor verdict")
 
-    bind_is_loopback = capture_host in _LOOPBACK_HOSTS
-    capture_mode = "loopback" if bind_is_loopback and not capture_public_url else "public"
-    if not bind_is_loopback and not capture_public_url:
+    if session is None:
+        # The ordinary single-shot call: the target is already running, so binding
+        # the capture here is soon enough. Re-entered with the session so there is
+        # one measurement path rather than two that can drift apart.
+        with capture_session(
+            capture_host=capture_host,
+            capture_port=capture_port,
+            capture_token=capture_token,
+            capture_public_url=capture_public_url,
+            timeout_seconds=timeout_seconds,
+        ) as owned:
+            return run_http_conformance(
+                target_base_url,
+                api_key=api_key,
+                model=model,
+                implementation_name=implementation_name,
+                implementation_version=implementation_version,
+                iterations=iterations,
+                timeout_seconds=timeout_seconds,
+                session=owned,
+                extra_headers=extra_headers,
+                redaction_claim=redaction_claim,
+                include_credentials=include_credentials,
+                fixture_seed=fixture_seed,
+                specimens=specimens,
+            )
+    if (
+        capture_host != _DEFAULT_CAPTURE_HOST
+        or capture_port != _DEFAULT_CAPTURE_PORT
+        or capture_token is not None
+        or capture_public_url is not None
+    ):
+        # Refused, not ignored. A caller who passes both is describing two different
+        # capture endpoints, and quietly measuring against the session's would report
+        # an address the target was never configured for.
         raise ValueError(
-            f"capture_host={capture_host!r} is not loopback, so capture_public_url is "
-            "required (CLI: --capture-public-url URL, env: "
-            "CONFORMANCE_CAPTURE_PUBLIC_URL). A wildcard bind has no address anything "
-            "can connect to, so publishing it as the URL the target must be configured "
-            "for is simply wrong. Pass the externally reachable /v1 base URL the target "
-            "will use -- your tunnel, your VPS, or http://host.docker.internal:PORT/v1 "
-            "for a container. A public bind also requires capture_token (CLI: "
-            "--capture-token, env: CONFORMANCE_CAPTURE_TOKEN)."
+            "capture_host, capture_port, capture_public_url and the capture token "
+            "configure the capture socket, which the supplied session already owns. "
+            "Pass them to capture_session() instead."
         )
-    if capture_mode == "public" and not capture_token:
-        raise ValueError(
-            "capture_token is required when the capture is reachable beyond loopback "
-            "(CLI: --capture-token TOKEN, env: CONFORMANCE_CAPTURE_TOKEN -- prefer the "
-            f"env var, process listings show argv). bind_host={capture_host!r}, "
-            f"public_url={capture_public_url!r}. Without a token any internet traffic "
-            "could enter the capture record. Configure the target's upstream API key to "
-            "the same value so its requests are attributable."
-        )
+    session.claim()
+    capture_mode = session.mode
 
     # Per-run nonce. Without it nothing ties a captured request to THIS run, so a
     # target can exfiltrate raw PII to its real upstream and satisfy the boundary
@@ -1320,65 +1675,43 @@ def run_http_conformance(
     # Values vary per run; the FORMAT does not. A target that redacts by shape is
     # unaffected. See make_fixture() for why the card is drawn from a published list
     # instead of generated, and why an SSN an IPv4 could collide with is rejected.
-    fixture = make_fixture()
+    fixture = make_fixture(include_credentials=include_credentials)
+    if fixture_seed is not None:
+        from .operator_profile import seeded_fixture
+
+        fixture, nonce = seeded_fixture(fixture_seed, include_credentials)
     prompt = _build_prompt(nonce, fixture)
+    if specimens is not None:
+        specimens.fixture = dict(fixture)
+        specimens.prompt = prompt
+        specimens.seed = fixture_seed or ""
 
-    probe_path = _PROBE_PATH_TEMPLATE.format(token=_make_probe_token())
-    state = _CaptureState(probe_path, capture_token)
-
-    # SO_REUSEADDR is left at HTTPServer's default on every platform. Clearing it on
-    # Windows was tried and measured not to prevent a hijack -- the steal happens
-    # when the two sockets bind DIFFERENT addresses, where the flag is irrelevant,
-    # and the matching-address case was already refused without it. Keeping the flag
-    # is also what lets a repeat run rebind over the previous run's TIME_WAIT
-    # entries. The post-bind self-probe below is what actually fails closed here.
-    server = ThreadingHTTPServer((capture_host, capture_port), _handler_for(state))
-    actual_host, actual_port = server.server_address[:2]
-    local_base_url = f"http://{actual_host}:{actual_port}/v1"
-    # What the TARGET must be pointed at. In public mode that is the tester's own
-    # externally reachable address, not the bind address -- a capture bound to
-    # 0.0.0.0 has no usable URL of its own.
-    advertised_base_url = (capture_public_url or local_base_url).rstrip("/")
-    # The local probe must use an address the harness can actually connect to. A
-    # wildcard bind is not one, so normalize it to loopback for the probe only.
-    probe_host = "127.0.0.1" if actual_host in ("0.0.0.0", "::", "") else actual_host
-    local_probe_url = f"http://{probe_host}:{actual_port}/v1{probe_path}"
-    advertised_probe_url = advertised_base_url + probe_path
     effective_target = (
-        advertised_base_url if target_base_url == "capture://self" else target_base_url
+        session.advertised_base_url
+        if target_base_url == "capture://self"
+        else target_base_url
     )
-    thread = threading.Thread(target=server.serve_forever, name="conformance-capture", daemon=True)
-    thread.start()
-    try:
-        # Before any target traffic. A run whose capture cannot be reached measures
-        # nothing, and the report it would otherwise emit is schema-valid and blames
-        # the target.
-        self_probe = _self_probe(
-            local_probe_url,
-            advertised_probe_url,
-            probe_path,
-            state,
-            capture_token,
-            min(timeout_seconds, 30.0),
+    exercise = asyncio.run(
+        _exercise_target(
+            effective_target,
+            api_key,
+            model,
+            iterations,
+            timeout_seconds,
+            extra_headers or {},
+            prompt,
+            nonce,
         )
-        exercise = asyncio.run(
-            _exercise_target(
-                effective_target,
-                api_key,
-                model,
-                iterations,
-                timeout_seconds,
-                extra_headers or {},
-                prompt,
-                nonce,
-            )
-        )
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    )
 
-    all_records = state.snapshot()
+    if specimens is not None:
+        specimens.client_text = str(exercise["client_text"])
+
+    # Everything the session has seen, which on a managed startup includes whatever
+    # the target sent to its configured upstream before it began serving. That is
+    # egress to the boundary under test and is inspected as such; the capture serves
+    # GET /v1/models itself, so ordinary discovery is answered rather than excused.
+    all_records = session.state.snapshot()
     # The probe is the harness's own traffic. It is bucketed out of everything a
     # verdict is computed from -- captured_requests, correlation, and the leak
     # haystacks -- so it can neither pollute the record nor move a result. Its path
@@ -1566,9 +1899,24 @@ def run_http_conformance(
         # publishing nothing left a reader unable to tell a varied-valid fixture from
         # the fixed-invalid one this replaced.
         "fixture": {
-            "varies_per_run": True,
+            # NOT unconditionally True once credentials are in play: their specimens are
+            # fixed on purpose, because the safety argument is about the exact literal.
+            # Reporting "varies_per_run" over a fixture half of which does not vary would
+            # misdescribe the very property this field exists to disclose.
+            #
+            # There is no `credentials_included` flag beside it, and there must not be:
+            # `fixture` is `additionalProperties: false` in the FROZEN v1.0.0 schema, so a
+            # new key makes every report invalid. The fact is carried by `formats`, which
+            # the schema leaves open, and spelled out in `specimens_are_non_real` below.
+            "varies_per_run": fixture_seed is None and not include_credentials,
             "values_published": False,
-            "formats": dict(PROTECTED_VALUE_FORMATS),
+            # What was ACTUALLY sent, so a reader -- and the operator table in selfcheck --
+            # can tell "tested and contained" from "never tested". A constant three-type
+            # list here would report SSN as covered on a run that never sent one.
+            "formats": {
+                **PROTECTED_VALUE_FORMATS,
+                **(dict(CREDENTIAL_VALUE_FORMATS) if include_credentials else {}),
+            },
             "value_space_nominal": fixture_value_space(),
             "specimens_are_valid": (
                 "Every value is a valid specimen a validating detector recognises: "
@@ -1578,6 +1926,16 @@ def run_http_conformance(
             "specimens_are_non_real": (
                 "Reserved space only: example.com (RFC 2606 s3), the SSA "
                 "never-issued 900-999 SSN area, and published test card numbers."
+                + (
+                    " Credential specimens are FIXED, not generated, because each one's "
+                    "non-live basis is an exact literal: the AWS key ID is AWS's own "
+                    "published documentation example and authenticates nothing without "
+                    "the paired secret, and the GitHub and Slack values carry EXAMPLE and "
+                    "NOTAREAL tokens with zeroed regions. None was ever presented to any "
+                    "endpoint."
+                    if include_credentials
+                    else ""
+                )
             ),
             "ssn_ipv4_collision_rejection": (
                 "Generated SSNs whose digits any valid dotted-quad IPv4 address "
@@ -1594,16 +1952,7 @@ def run_http_conformance(
             "platform": platform.platform(),
             "processor": platform.processor(),
         },
-        "capture": {
-            "mode": capture_mode,
-            "bind_host": capture_host,
-            "port": actual_port,
-            "authentication_required": capture_token is not None,
-            "target_must_be_preconfigured_for": advertised_base_url,
-            # Proof the capture was reachable and recording at the address the target
-            # was configured with, taken before any target traffic.
-            "self_probe": self_probe,
-        },
+        "capture": session.capture_block(),
         "checks": checks,
         # The raw measurement: did all five checks pass. Never overwritten by the
         # claim logic, so a negative finding is preserved even when the outcome says

@@ -1,0 +1,82 @@
+.wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.term {
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 0.18em;
+}
+
+.bubble {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: 17rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--ifm-global-radius);
+  background: var(--ifm-color-emphasis-900);
+  color: var(--ifm-color-emphasis-0);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  box-shadow: var(--ifm-global-shadow-md);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+}
+
+/* A downward arrow, so the bubble reads as attached to the term. */
+.bubble::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 1rem;
+  border: 0.35rem solid transparent;
+  border-top-color: var(--ifm-color-emphasis-900);
+}
+
+/* `:focus` as well as `:focus-visible`, and the order matters for touch.
+   A tap focuses the button but commonly does NOT match `:focus-visible`, which browsers
+   reserve for keyboard intent, and a touch device has no reliable hover either. With
+   only the two original selectors a tap therefore showed nothing at all, so the
+   definition this component exists to provide was unreachable on a phone. `:focus`
+   covers tap and keyboard both; `:focus-visible` stays so nothing regresses if a
+   browser treats them differently. */
+.wrap:hover .bubble,
+.term:focus + .bubble,
+.term:focus-visible + .bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Near the right edge of a narrow screen a left-anchored bubble overflows. */
+@media (max-width: 600px) {
+  .bubble {
+    left: auto;
+    right: 0;
+    max-width: 13rem;
+  }
+
+  .bubble::after {
+    left: auto;
+    right: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble {
+    transition: none;
+  }
+}

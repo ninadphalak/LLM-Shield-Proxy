@@ -1,0 +1,110 @@
+{
+  "checks": {
+    "audit_integrity": {
+      "passed": true,
+      "record_content_included": false,
+      "records_verified": 2,
+      "sequence_continuity_verified": true,
+      "signatures_verified": 2,
+      "tamper_negative_control_detected": true
+    },
+    "fragmentation_safety": {
+      "failures": [],
+      "invariant": "protected placeholder fragments are retained until exact rehydration is possible",
+      "partitions_tested": 11,
+      "passed": true
+    },
+    "memory_bounded": {
+      "allocation_measurement_recorded": true,
+      "passed": true,
+      "retention_bound_verified": true,
+      "rss_threshold_enforced": false
+    },
+    "raw_pii_egress": {
+      "boundary": "serialized payload presented to the configured upstream",
+      "detected_entity_counts": {
+        "CREDIT_CARD": 1,
+        "EMAIL": 1,
+        "SSN": 1
+      },
+      "leaked_entity_types": [],
+      "passed": true,
+      "payload_content_included": false,
+      "protected_entity_types": [
+        "CREDIT_CARD",
+        "EMAIL",
+        "SSN"
+      ]
+    },
+    "rehydration_fidelity": {
+      "expected_value_reconstructed": true,
+      "passed": true,
+      "payload_content_included": false,
+      "protected_placeholder_present": false
+    },
+    "sse_validity": {
+      "done_markers": 1,
+      "invalid_json_events": 0,
+      "json_events_checked": 3,
+      "passed": true,
+      "provider_shape": "OpenAI-compatible SSE",
+      "stream_terminated_with_blank_line": true,
+      "utf8_mid_codepoint_split_preserved": true
+    }
+  },
+  "environment": {
+    "implementation": "cpython",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "python": "3.14.7"
+  },
+  "generated_at": "2026-09-04T18:24:19.088122Z",
+  "implementation": {
+    "name": "llm-shield-proxy",
+    "version": "1.6.0"
+  },
+  "limitations": [
+    "This local harness is not an end-to-end proxy throughput benchmark.",
+    "Synthetic vectors do not establish population-level PII detection accuracy.",
+    "Results from shared or power-managed hosts should not be compared as controlled measurements."
+  ],
+  "memory": {
+    "current_bytes": 0,
+    "iterations": 10000,
+    "peak_bytes": 32,
+    "retained_characters": 5,
+    "retention_bound_characters": 8,
+    "scope": "Python allocations during empty-vault buffer processing; not process RSS"
+  },
+  "microbenchmarks": {
+    "empty_vault_buffer": {
+      "mean": 986.08,
+      "p50": 900.0,
+      "p95": 1000.0,
+      "p99": 1600.0
+    },
+    "iterations": 10000,
+    "no_op": {
+      "mean": 114.8,
+      "p50": 100.0,
+      "p95": 200.0,
+      "p99": 200.0
+    },
+    "protected_token_buffer": {
+      "mean": 6597.88,
+      "p50": 6300.0,
+      "p95": 6800.0,
+      "p99": 14300.0
+    },
+    "scope": "in-process Python operations; excludes ASGI, HTTP, TLS, upstream, and model latency",
+    "unit": "nanoseconds"
+  },
+  "passed": true,
+  "schema": "llm-shield.streaming-privacy-conformance/v1.0.0",
+  "source_revision": "007994bf4e164cdd40f1b2eb0c8ac5d96df95d35",
+  "specification": {
+    "href": "https://project-0039f5fd-ac66-4a1c-9e0.web.app/docs/conformance/specification-v1",
+    "name": "Streaming Privacy Gateway Conformance Specification",
+    "version": "1.0.0"
+  }
+}

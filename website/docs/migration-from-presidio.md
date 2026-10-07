@@ -22,8 +22,13 @@ To test LLM-Shield-Proxy, simply point your LLM client at the proxy instead of t
 client = OpenAI(api_key="sk-...", base_url="https://api.openai.com/v1")
 
 # After (Routing through LLM-Shield-Proxy)
-client = OpenAI(api_key="sk-...", base_url="http://localhost:8000") 
+client = OpenAI(api_key="sk-my-client-key", base_url="http://localhost:8000/v1")
 ```
+
+The client now sends a key the proxy knows, listed in its `VALID_VIRTUAL_KEYS`, and the proxy
+sends your provider key upstream (`OPENAI_API_KEY`, or `UPSTREAM_API_KEY` for other hosts). A
+provider key sent by the client is rejected with a 401 unless `ENABLE_OPEN_BYOK_PASSTHROUGH` is
+on. See the [deployment guide](deployment.md).
 
 ## Step 2: Entity Mapping
 
