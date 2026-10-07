@@ -17,8 +17,13 @@ guardrails:
 ```
 
 It is on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; v1.105.0-rc.1
-and earlier do not include it. On those versions, use one of the two wirings below. Neither
-changes a file in LiteLLM's repository.
+and earlier do not include it. On a LiteLLM without the module, that config does not stop the proxy: LiteLLM logs one
+error line, `Skipping guardrail 'llm-shield': invalid configuration, proxy is starting WITHOUT
+this guardrail: Unsupported guardrail: llm_shield_proxy`, starts, and every request reaches the
+provider unredacted (seen on 1.105.0, the newest image). Check that line is absent from the
+startup log before sending anything real.
+On those versions, use one of the two wirings below. Neither changes a file in LiteLLM's
+repository.
 
 | | Built-in guardrail | In-process guardrail | Generic guardrail API |
 |---|---|---|---|
