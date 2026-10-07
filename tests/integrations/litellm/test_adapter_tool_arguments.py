@@ -723,6 +723,40 @@ async def test_an_unfinished_event_below_the_cap_is_held_then_emitted(harness):
 
 
 @pytest.mark.asyncio
+async def test_an_upstream_inventing_anthropic_block_indices_without_limit_fails_closed(harness):
+    """Windows are keyed by upstream-chosen indices, so the count is capped like the core
+    package's `MAX_STREAM_WINDOWS`; past it the stream fails closed rather than growing."""
+    module, guardrail, _ = harness
+    chunks = [_text_delta(index, "x") for index in range(module._MAX_STREAM_WINDOWS + 1)]
+
+    with pytest.raises(module.GuardrailRaisedException) as raised:
+        await _stream(module, guardrail, chunks)
+
+    assert "restoration windows" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_inventing_responses_items_without_limit_fails_closed(harness):
+    module, guardrail, _ = harness
+    events = [
+        {"type": "response.output_text.delta", "sequence_number": i, "item_id": f"msg_{i}", "output_index": i, "content_index": 0, "delta": "x"}
+        for i in range(module._MAX_STREAM_WINDOWS + 1)
+    ]
+
+    with pytest.raises(module.GuardrailRaisedException):
+        await _stream(module, guardrail, events)
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_inventing_tool_call_indices_without_limit_fails_closed(harness):
+    module, guardrail, _ = harness
+    chunks = [_Chunk([_Choice(_Delta(tool_calls=[_tool_call("{", index=i)]))]) for i in range(module._MAX_STREAM_WINDOWS + 1)]
+
+    with pytest.raises(module.GuardrailRaisedException):
+        await _stream(module, guardrail, chunks)
+
+
+@pytest.mark.asyncio
 async def test_streamed_anthropic_sse_is_restored(harness):
     """`/v1/messages` streams reach the hook as raw SSE text, one network chunk at a time.
 

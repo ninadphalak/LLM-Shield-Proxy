@@ -390,6 +390,26 @@ _RESPONSES_TERMINAL_EVENTS: Final = frozenset(("response.completed", "response.i
 # never sends a terminator must not grow this buffer without bound either.
 _MAX_SSE_PENDING_BYTES: Final = 1024 * 1024
 
+# How many restoration windows one stream may open. Windows are keyed by values the upstream
+# chooses (choice and tool-call indices, Anthropic block indices, Responses item ids), so an
+# upstream inventing keys without limit must hit a ceiling. The core package caps the same
+# thing at `MAX_STREAM_WINDOWS = 256` and fails closed past it; reusing another window
+# instead would splice one stream's held-back tail onto another.
+_MAX_STREAM_WINDOWS: Final = 256
+
+
+def _open_window(windows: dict, key: object, guardrail_name: str) -> None:
+    """Admits `key` into `windows`, failing closed once the stream holds too many."""
+    if key in windows or len(windows) < _MAX_STREAM_WINDOWS:
+        return
+    raise GuardrailRaisedException(
+        guardrail_name=guardrail_name,
+        message=(
+            f"LLM Shield Proxy: the stream opened more than {_MAX_STREAM_WINDOWS} restoration "
+            "windows; blocking the stream."
+        ),
+    )
+
 
 def _opens_like_sse(head: bytes) -> bool | None:
     """Whether a raw stream is SSE, judged by its opening bytes; None while undecidable.
@@ -580,6 +600,7 @@ class _AnthropicSSERestorer:
         text: Final = delta.get(field) if field is not None else None
         if field is None or not isinstance(text, str) or not text:
             return False
+        _open_window(self._carries, index, self._guardrail_name)
         emitted, remaining = await self._step(text, self._carries.get(index, ""), False)
         self._carries[index] = remaining
         self._delta_types[index] = delta_type
@@ -626,9 +647,10 @@ class _ResponsesStreamRestorer:
       restored the same way the non-streaming reply is.
     """
 
-    def __init__(self, step: _StreamStep, rehydrate: _Rehydrate) -> None:
+    def __init__(self, step: _StreamStep, rehydrate: _Rehydrate, guardrail_name: str = GUARDRAIL_NAME) -> None:
         self._step: Final = step
         self._rehydrate: Final = rehydrate
+        self._guardrail_name: Final = guardrail_name
         self._carries: Final[dict] = {}  # mutable-ok: per-stream windows advanced in place.
         self._last_deltas: Final[dict] = {}  # mutable-ok: newest delta per stream.
 
@@ -667,6 +689,7 @@ class _ResponsesStreamRestorer:
         if not isinstance(text, str) or not text:
             return
         key: Final = _responses_stream_key(event, kind)
+        _open_window(self._carries, key, self._guardrail_name)
         emitted, remaining = await self._step(text, self._carries.get(key, ""), False)
         self._carries[key] = remaining
         self._last_deltas[key] = event
@@ -1048,7 +1071,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         # as raw SSE frames, the Responses API as typed events. Each has its own restorer
         # with the same per-stream windows.
         sse: Final = _AnthropicSSERestorer(step, self.guardrail_name)
-        events: Final = _ResponsesStreamRestorer(step, rehydrate)
+        events: Final = _ResponsesStreamRestorer(step, rehydrate, self.guardrail_name)
         carries: Final[dict] = {}  # mutable-ok: per-stream windows, local to this generator.
         last_chunk = None  # rebind-ok: tracks the most recent chunk for the final flush.
 
@@ -1117,6 +1140,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         if not isinstance(text, str) or not text:
             if not (is_final and carry):
                 return
+        _open_window(carries, key, self.guardrail_name)
         emitted, remaining = await self._stream_step(text if isinstance(text, str) else "", carry, is_final, session_id)
         carries[key] = remaining  # rebind-ok: this stream's window advances.
         if emitted or text:
@@ -1143,6 +1167,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
                     delta.content = flushed
             return
 
+        _open_window(carries, key, self.guardrail_name)
         emitted, remaining = await self._stream_step(text, carry, is_final, session_id)
         carries[key] = remaining  # rebind-ok: this stream's window advances.
         delta.content = emitted
@@ -1171,6 +1196,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
             return
 
         key: Final = (choice_index, tool_index)
+        _open_window(carries, key, self.guardrail_name)
         emitted, remaining = await self._stream_step(arguments, carries.get(key, ""), False, session_id)
         carries[key] = remaining  # rebind-ok: this tool call's window advances.
         _write_field(function, "arguments", emitted)
