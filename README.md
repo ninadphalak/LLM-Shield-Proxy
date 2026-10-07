@@ -19,6 +19,11 @@ so LiteLLM keeps its own routing and calls the Shield to redact each request and
 See [LiteLLM's setup page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy). It is
 on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; until then, use one of the
 wirings in [Running behind LiteLLM](https://llmshieldproxy.com/docs/features/litellm-integration).
+On a LiteLLM without the module, that config does not stop the proxy: LiteLLM logs one
+error line, `Skipping guardrail 'llm-shield': invalid configuration, proxy is starting WITHOUT
+this guardrail: Unsupported guardrail: llm_shield_proxy`, starts, and every request reaches the
+provider unredacted (seen on 1.105.0, the newest image). Check that line is absent from the
+startup log before sending anything real.
 
 ## Try it in a minute, with no API key
 
