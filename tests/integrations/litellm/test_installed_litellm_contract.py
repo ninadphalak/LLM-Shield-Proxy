@@ -27,7 +27,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_DIR = REPO_ROOT / "examples" / "integrations" / "litellm"
 PLACEHOLDER = "<EMAIL_ADDRESS>"
 PLAIN = "jane.doe@example.com"
-SESSION_ID = "litellm-installed-contract-session"
 
 
 def _load(name: str, filename: str):
@@ -98,11 +97,14 @@ def adapter(monkeypatch):
     module = _load("litellm_guardrail_live", "litellm_guardrail.py")
     guardrail = module.LLMShieldProxyGuardrail(guardrail_name=module.GUARDRAIL_NAME, api_base="http://shield.invalid")
     calls = []
+    # Only an id this process minted is trusted back from the request dict (anything else is
+    # a caller-supplied id and gets a fresh vault), so the test id carries the process prefix.
+    module.TEST_SESSION_ID = f"{module._VAULT_PREFIX}-installed-contract"
 
     async def fake_call_shield(path, session_id, payload):
         # The id this test minted must reach every Shield call: that is the session plumbing
         # through the real hook signatures, and the part a stub-only test cannot see.
-        assert session_id == SESSION_ID, f"{path} was called with session {session_id!r}"
+        assert session_id == module.TEST_SESSION_ID, f"{path} was called with session {session_id!r}"
         calls.append(path)
         if path == module._REDACT_PATH:
             return {"texts": [t.replace(PLAIN, PLACEHOLDER) for t in payload["texts"]]}
@@ -136,7 +138,7 @@ def test_the_example_subclasses_litellms_real_base_and_overrides_hooks_that_exis
 
 def _request_data(module) -> dict:
     """The request dict as the pre-call hook leaves it: the minted id under `metadata`."""
-    return {"metadata": {module._SESSION_METADATA_KEY: SESSION_ID}}
+    return {"metadata": {module._SESSION_METADATA_KEY: module.TEST_SESSION_ID}}
 
 
 async def _stream(module, guardrail, chunks):
