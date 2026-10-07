@@ -268,6 +268,15 @@ class Settings(BaseSettings):
     MAX_SESSION_VAULTS: int = Field(default=10000, description="Maximum capacity of in-memory LRU session vault cache")
 
     # Redaction & Detection Cascade Settings
+    RELAY_UPSTREAM_ERROR_MESSAGES: bool = Field(
+        default=True,
+        description=(
+            "When the provider answers 4xx/5xx, pass its error message back to the client after "
+            "scrubbing it: every credential the proxy sent upstream is removed, the text goes "
+            "through the PII engine one-way, and it is cut at 512 characters. Off, the client "
+            "gets only 'Failed to communicate with upstream provider.' and the status."
+        ),
+    )
     ENABLE_RESPONSE_PII_REDACTION: bool = Field(
         default=False,
         description=(
