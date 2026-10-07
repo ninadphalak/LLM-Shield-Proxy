@@ -26,7 +26,7 @@ from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Any, Coroutine, Dict, Optional, Set
+from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -532,6 +532,113 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
         request.app.state.http_client = client
     return client
 
+
+
+# Provider error relay. The request that reached the provider was already redacted, so a
+# provider message that quotes it carries stand-ins, not the caller's values. What it can
+# carry is the credential the proxy itself attached, which is why every header value sent
+# upstream is removed literally before anything else, and the text then goes through the
+# PII engine one-way. Nothing here is logged.
+_UPSTREAM_ERROR_GENERIC = "Failed to communicate with upstream provider."
+_UPSTREAM_ERROR_MAX_BODY_BYTES = 64 * 1024
+_UPSTREAM_ERROR_MAX_MESSAGE_CHARS = 512
+_CREDENTIAL_HEADERS = ("authorization", "x-api-key", "x-goog-api-key", "api-key")
+
+
+def _sent_credentials(sent_headers: Optional[Dict[str, Any]]) -> List[str]:
+    """Every secret the proxy may have attached to the upstream request, longest first."""
+    values: List[str] = []
+    for name in _CREDENTIAL_HEADERS:
+        value = (sent_headers or {}).get(name)
+        if isinstance(value, str) and value.strip():
+            bare = value.strip()
+            values.append(bare)
+            if bare.lower().startswith("bearer "):
+                values.append(bare[7:].strip())
+    for configured in (settings.UPSTREAM_API_KEY, settings.FALLBACK_API_KEY, settings.OPENAI_API_KEY,
+                       settings.GEMINI_API_KEY, settings.ANTHROPIC_API_KEY, getattr(settings, "DEEPSEEK_API_KEY", None)):
+        if isinstance(configured, str) and configured.strip():
+            values.append(configured.strip())
+    return sorted({v for v in values if len(v) >= 4}, key=len, reverse=True)
+
+
+def _scrub_provider_text(text: str, sent_headers: Optional[Dict[str, Any]]) -> str:
+    """Removes the proxy's own credentials, redacts PII one-way, caps the length."""
+    from llm_shield_proxy.engines.masking import ScrubVault
+
+    cleaned = text
+    for secret in _sent_credentials(sent_headers):
+        cleaned = cleaned.replace(secret, "[REDACTED]")
+    try:
+        cleaned = pii_engine.redact_text(cleaned, ScrubVault(), restorable=False)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001  # the relay must never fail the error response itself
+        return _UPSTREAM_ERROR_GENERIC
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > _UPSTREAM_ERROR_MAX_MESSAGE_CHARS:
+        cleaned = cleaned[:_UPSTREAM_ERROR_MAX_MESSAGE_CHARS].rstrip() + " [truncated]"
+    return cleaned
+
+
+def _provider_error_fields(raw: bytes) -> Tuple[Optional[str], Dict[str, Any]]:
+    """The provider's message plus its type/code/param, from the shapes providers use.
+
+    OpenAI and DeepSeek: ``{"error": {"message", "type", "code", "param"}}``. Anthropic:
+    ``{"type": "error", "error": {"type", "message"}}``. Google: a one-element list around
+    ``{"error": {"code", "message", "status"}}``. Anything else: the body as text.
+    """
+    text = raw.decode("utf-8", "replace")
+    try:
+        parsed: Any = orjson.loads(raw)
+    except Exception:  # noqa: BLE001
+        parsed = None
+    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+        parsed = parsed[0]
+    error = parsed.get("error") if isinstance(parsed, dict) else None
+    if isinstance(error, str):
+        return error, {}
+    if isinstance(error, dict):
+        message = error.get("message")
+        details = {
+            key: error[key]
+            for key in ("type", "code", "param", "status")
+            if key in error and isinstance(error[key], (str, int)) and error[key] not in ("", None)
+        }
+        return (message if isinstance(message, str) else None), details
+    if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
+        return parsed["message"], {}
+    stripped = text.strip()
+    return (stripped or None), {}
+
+
+async def _read_error_body(upstream_res: Optional[httpx.Response]) -> Optional[bytes]:
+    """At most 64 KiB of a provider error body; None when there is none or it cannot be read."""
+    if upstream_res is None:
+        return None
+    try:
+        raw = await upstream_res.aread()
+    except Exception:  # noqa: BLE001  # a body that cannot be read leaves the generic message
+        return None
+    return raw[:_UPSTREAM_ERROR_MAX_BODY_BYTES]
+
+
+def _upstream_error_response(
+    raw: Optional[bytes],
+    status_code: int,
+    sent_headers: Optional[Dict[str, Any]],
+) -> JSONResponse:
+    """The client's view of a provider error: the status, and the provider's reason, scrubbed."""
+    content: Dict[str, Any] = {"error": {"message": _UPSTREAM_ERROR_GENERIC, "type": "upstream_error", "code": status_code}}
+    if not raw or not settings.RELAY_UPSTREAM_ERROR_MESSAGES:
+        return JSONResponse(status_code=status_code, content=content)
+    message, details = _provider_error_fields(raw)
+    if message:
+        content["error"]["message"] = f"Upstream provider answered HTTP {status_code}: {_scrub_provider_text(message, sent_headers)}"
+    if details:
+        content["error"]["upstream"] = {
+            key: (_scrub_provider_text(value, sent_headers) if isinstance(value, str) else value)
+            for key, value in details.items()
+        }
+    return JSONResponse(status_code=status_code, content=content)
 
 def build_target_url(upstream_base: str, path: str) -> str:
     """Construct sanitized upstream target URL, resolving provider-specific pathing."""
@@ -1224,6 +1331,7 @@ async def _proxy_catch_all_internal(
                 current_headers = dict(headers)
                 current_sni_hostname = sni_hostname
                 upstream_res = None
+                upstream_error_body: Optional[bytes] = None
                 is_fallback = False
 
                 while True:
@@ -1243,6 +1351,8 @@ async def _proxy_catch_all_internal(
 
                         if isinstance(err, httpx.HTTPStatusError):
                             upstream_res = err.response
+                            # The provider's reason, read before the stream is closed below.
+                            upstream_error_body = await _read_error_body(upstream_res)
                             # MUST explicitly close the leaked stream to free the HTTP/2 connection pool
                             await upstream_res.aclose()
 
@@ -1279,13 +1389,14 @@ async def _proxy_catch_all_internal(
                         break
 
                 if upstream_res is None or upstream_res.is_error:
+                    status_code = upstream_res.status_code if upstream_res is not None else 503
+                    error_response = _upstream_error_response(upstream_error_body, status_code, current_headers)
                     if upstream_res is not None:
                         try:
                             await upstream_res.aclose()
                         except Exception:  # nosec B110 noqa: S110
                             # Security Note: Silently dropping upstream connection closure errors to prevent worker crashes
                             pass
-                    status_code = upstream_res.status_code if upstream_res is not None else 503
                     AuditLogger.log_redaction_event(
                         x_session_id,
                         vault.type_counters,
@@ -1295,16 +1406,7 @@ async def _proxy_catch_all_internal(
                         request_id,
                         applied_role_name=applied_role_name,
                     )
-                    return JSONResponse(
-                        status_code=status_code,
-                        content={
-                            "error": {
-                                "message": "Failed to communicate with upstream provider.",
-                                "type": "upstream_error",
-                                "code": status_code,
-                            }
-                        },
-                    )
+                    return error_response
 
                 AuditLogger.log_redaction_event(
                     x_session_id,
@@ -1433,16 +1535,7 @@ async def _proxy_catch_all_internal(
                         request_id,
                         applied_role_name=applied_role_name,
                     )
-                    return JSONResponse(
-                        status_code=status_code,
-                        content={
-                            "error": {
-                                "message": "Failed to communicate with upstream provider.",
-                                "type": "upstream_error",
-                                "code": status_code,
-                            }
-                        },
-                    )
+                    return _upstream_error_response(await _read_error_body(upstream_res), status_code, current_headers)
 
                 AuditLogger.log_redaction_event(
                     x_session_id,
@@ -1575,17 +1668,8 @@ async def _proxy_catch_all_internal(
     )
 
     if upstream_res.status_code >= 400:
-        # Prevent upstream auth key leakage
-        return JSONResponse(
-            status_code=upstream_res.status_code,
-            content={
-                "error": {
-                    "message": "Failed to communicate with upstream provider.",
-                    "type": "upstream_error",
-                    "code": upstream_res.status_code,
-                }
-            },
-        )
+        # The provider's reason, with the credential the proxy attached removed first.
+        return _upstream_error_response(await _read_error_body(upstream_res), upstream_res.status_code, headers)
 
     return Response(
         content=upstream_res.content,
