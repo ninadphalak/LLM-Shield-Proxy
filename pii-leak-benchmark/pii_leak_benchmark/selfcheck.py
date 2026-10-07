@@ -148,7 +148,7 @@ def build_parser(prog: str = "pii-leak-benchmark selfcheck") -> argparse.Argumen
     return parser
 
 
-def _why_nothing_arrived(report: dict[str, Any]) -> str:
+def why_nothing_arrived(report: dict[str, Any]) -> str:
     """Say what the CLIENT side saw when nothing reached the capture.
 
     The capture cannot tell the causes apart, but the client often can: a gateway that
@@ -215,7 +215,7 @@ def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, 
     boundary = report["checks"][_BOUNDARY]
 
     if not boundary["correlated_requests"]:
-        return VERDICT_NOT_MEASURED, _why_nothing_arrived(report)
+        return VERDICT_NOT_MEASURED, why_nothing_arrived(report)
 
     if boundary["uninspectable_requests"] or boundary["unattributed_uninspectable_requests"]:
         return (
