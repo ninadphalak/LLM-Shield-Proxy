@@ -709,6 +709,19 @@ async def test_an_sse_event_that_never_ends_fails_closed_instead_of_buffering(ha
 
 
 @pytest.mark.asyncio
+async def test_whitespace_keep_alives_that_never_decide_the_stream_shape_hit_the_same_cap(harness):
+    """While the opening bytes are all whitespace the stream is still undecidable, and that
+    branch held bytes without the cap. Blank-line keep-alives past 1 MiB now fail closed too."""
+    module, guardrail, _ = harness
+    chunks = ["\n" * 4096] * (module._MAX_SSE_PENDING_BYTES // 4096 + 2)
+
+    with pytest.raises(module.GuardrailRaisedException) as raised:
+        await _stream(module, guardrail, chunks)
+
+    assert "without an event boundary" in str(raised.value)
+
+
+@pytest.mark.asyncio
 async def test_an_unfinished_event_below_the_cap_is_held_then_emitted(harness):
     """The cap is a ceiling, not a change of behaviour: a frame split across two network
     chunks is still held and emitted whole once its terminator arrives."""

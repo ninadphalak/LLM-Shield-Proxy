@@ -511,25 +511,16 @@ class _AnthropicSSERestorer:
         if self._is_sse is None:
             self._is_sse = _opens_like_sse(buffered)
             if self._is_sse is None:
-                self._pending = buffered
+                # Still undecidable (whitespace so far, or a partial field name): held under
+                # the same cap as an unfinished event, or whitespace keep-alives would grow it.
+                self._hold(buffered)
                 return ()
             if not self._is_sse:
                 self._pending = b""
                 return self._emit(buffered)
         boundaries: Final = tuple(_SSE_EVENT_BOUNDARY.finditer(buffered))
         if not boundaries:
-            if len(buffered) > _MAX_SSE_PENDING_BYTES:
-                # Fail closed, as the core package does: passing the bytes through would hand
-                # the client an unrestored stream, and holding them would grow without bound.
-                self._pending = b""
-                raise GuardrailRaisedException(
-                    guardrail_name=self._guardrail_name,
-                    message=(
-                        f"LLM Shield Proxy: an SSE event exceeded {_MAX_SSE_PENDING_BYTES} bytes "
-                        "without an event boundary; blocking the stream."
-                    ),
-                )
-            self._pending = buffered
+            self._hold(buffered)
             return ()
         cut: Final = boundaries[-1].end()
         self._pending = buffered[cut:]
@@ -549,6 +540,24 @@ class _AnthropicSSERestorer:
         flushed: Final = await self._flush_all()
         separator: Final = b"\n\n" if tail.strip() and flushed else b""
         return self._emit(tail + separator + flushed)
+
+    def _hold(self, buffered: bytes) -> None:
+        """Keeps bytes that do not yet complete an event, failing closed past the cap.
+
+        Every path that holds bytes goes through here, so there is one ceiling. Passing the
+        bytes through would hand the client an unrestored stream, and holding them without a
+        bound would let an upstream that never sends a terminator buffer its whole reply.
+        """
+        if len(buffered) > _MAX_SSE_PENDING_BYTES:
+            self._pending = b""
+            raise GuardrailRaisedException(
+                guardrail_name=self._guardrail_name,
+                message=(
+                    f"LLM Shield Proxy: an SSE event exceeded {_MAX_SSE_PENDING_BYTES} bytes "
+                    "without an event boundary; blocking the stream."
+                ),
+            )
+        self._pending = buffered
 
     def _emit(self, frames: bytes) -> tuple:
         if not frames:
