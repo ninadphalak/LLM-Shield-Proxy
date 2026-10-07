@@ -203,3 +203,26 @@ def test_a_compressed_error_body_on_the_streaming_path_is_decoded():
     message, details = proxy_main._provider_error_fields(raw)
     assert message == "Rate limit reached for gpt-test"
     assert details == {"type": "rate_limit_error"}
+
+
+def test_the_scrub_runs_off_the_event_loop_and_sees_a_bounded_prefix(httpx_mock, monkeypatch):
+    """Every engine call on this path goes through the executor; the relay must too, and the
+    engine must never be handed a whole 64 KiB error page."""
+    import threading
+
+    from llm_shield_proxy.api import main as proxy_main
+
+    seen = {}
+    real = proxy_main.pii_engine.redact_text
+
+    def spy(text, vault, *args, **kwargs):
+        seen["thread_is_main"] = threading.current_thread() is threading.main_thread()
+        seen["length"] = len(text)
+        return real(text, vault, *args, **kwargs)
+
+    monkeypatch.setattr(proxy_main.pii_engine, "redact_text", spy)
+    httpx_mock.add_response(method="POST", url=UPSTREAM, status_code=502, is_reusable=True, text="<html>" + "y" * 60000 + "</html>")
+    body = _chat().json()
+    assert body["error"]["message"].startswith("Upstream provider answered HTTP 502: <html>")
+    assert seen["thread_is_main"] is False, "the PII engine ran on the event loop thread"
+    assert seen["length"] <= proxy_main._UPSTREAM_ERROR_MAX_SCRUB_CHARS

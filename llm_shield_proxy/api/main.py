@@ -6,6 +6,7 @@ Redacts protected values from requests and rehydrates them in responses.
 from __future__ import annotations
 
 import asyncio
+import functools
 import random
 import sys
 import threading
@@ -542,6 +543,9 @@ def get_http_client(request: Request) -> httpx.AsyncClient:
 _UPSTREAM_ERROR_GENERIC = "Failed to communicate with upstream provider."
 _UPSTREAM_ERROR_MAX_BODY_BYTES = 64 * 1024
 _UPSTREAM_ERROR_MAX_MESSAGE_CHARS = 512
+# What the PII engine is given to scrub: the output is cut at 512 characters, so nothing past
+# this prefix can appear in it, and a 64 KiB HTML error page never reaches the detectors.
+_UPSTREAM_ERROR_MAX_SCRUB_CHARS = 2048
 _CREDENTIAL_HEADERS = ("authorization", "x-api-key", "x-goog-api-key", "api-key")
 
 
@@ -562,15 +566,22 @@ def _sent_credentials(sent_headers: Optional[Dict[str, Any]]) -> List[str]:
     return sorted({v for v in values if len(v) >= 4}, key=len, reverse=True)
 
 
-def _scrub_provider_text(text: str, sent_headers: Optional[Dict[str, Any]]) -> str:
-    """Removes the proxy's own credentials, redacts PII one-way, caps the length."""
+async def _scrub_provider_text(text: str, sent_headers: Optional[Dict[str, Any]]) -> str:
+    """Removes the proxy's own credentials, redacts PII one-way, caps the length.
+
+    The engine runs in the executor like every other engine call on this path: a detection
+    cascade (and a Tier 3 model forward pass, when enabled) must not block the event loop
+    and the SSE streams on it.
+    """
     from llm_shield_proxy.engines.masking import ScrubVault
 
-    cleaned = text
+    cleaned = text[:_UPSTREAM_ERROR_MAX_SCRUB_CHARS]
     for secret in _sent_credentials(sent_headers):
         cleaned = cleaned.replace(secret, "[REDACTED]")
     try:
-        cleaned = pii_engine.redact_text(cleaned, ScrubVault(), restorable=False)  # type: ignore[arg-type]
+        cleaned = await asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(pii_engine.redact_text, cleaned, ScrubVault(), restorable=False)  # type: ignore[arg-type]
+        )
     except Exception:  # noqa: BLE001  # the relay must never fail the error response itself
         return _UPSTREAM_ERROR_GENERIC
     cleaned = " ".join(cleaned.split())
@@ -636,7 +647,7 @@ async def _read_error_body(upstream_res: Optional[httpx.Response]) -> Optional[b
     return b"".join(pieces)[:_UPSTREAM_ERROR_MAX_BODY_BYTES] or None
 
 
-def _upstream_error_response(
+async def _upstream_error_response(
     raw: Optional[bytes],
     status_code: int,
     sent_headers: Optional[Dict[str, Any]],
@@ -647,12 +658,13 @@ def _upstream_error_response(
         return JSONResponse(status_code=status_code, content=content)
     message, details = _provider_error_fields(raw)
     if message:
-        content["error"]["message"] = f"Upstream provider answered HTTP {status_code}: {_scrub_provider_text(message, sent_headers)}"
+        scrubbed = await _scrub_provider_text(message, sent_headers)
+        content["error"]["message"] = f"Upstream provider answered HTTP {status_code}: {scrubbed}"
     if details:
-        content["error"]["upstream"] = {
-            key: (_scrub_provider_text(value, sent_headers) if isinstance(value, str) else value)
-            for key, value in details.items()
-        }
+        upstream: Dict[str, Any] = {}
+        for key, value in details.items():
+            upstream[key] = await _scrub_provider_text(value, sent_headers) if isinstance(value, str) else value
+        content["error"]["upstream"] = upstream
     return JSONResponse(status_code=status_code, content=content)
 
 def build_target_url(upstream_base: str, path: str) -> str:
@@ -1410,7 +1422,7 @@ async def _proxy_catch_all_internal(
 
                 if upstream_res is None or upstream_res.is_error:
                     status_code = upstream_res.status_code if upstream_res is not None else 503
-                    error_response = _upstream_error_response(upstream_error_body, status_code, upstream_error_headers)
+                    error_response = await _upstream_error_response(upstream_error_body, status_code, upstream_error_headers)
                     if upstream_res is not None:
                         try:
                             await upstream_res.aclose()
@@ -1557,7 +1569,7 @@ async def _proxy_catch_all_internal(
                         request_id,
                         applied_role_name=applied_role_name,
                     )
-                    return _upstream_error_response(await _read_error_body(upstream_res), status_code, upstream_error_headers)
+                    return await _upstream_error_response(await _read_error_body(upstream_res), status_code, upstream_error_headers)
 
                 AuditLogger.log_redaction_event(
                     x_session_id,
@@ -1691,7 +1703,7 @@ async def _proxy_catch_all_internal(
 
     if upstream_res.status_code >= 400:
         # The provider's reason, with the credential the proxy attached removed first.
-        return _upstream_error_response(await _read_error_body(upstream_res), upstream_res.status_code, headers)
+        return await _upstream_error_response(await _read_error_body(upstream_res), upstream_res.status_code, headers)
 
     return Response(
         content=upstream_res.content,
