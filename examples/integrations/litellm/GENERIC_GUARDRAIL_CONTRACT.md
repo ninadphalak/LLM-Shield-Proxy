@@ -155,7 +155,12 @@ the accumulated text alone — so the shim needs no per-stream state. Concretely
 - the **withheld length** comes from `/v1/guard/rehydrate/stream`, called with the whole accumulated
   text and an empty carry;
 - the **restored text** comes from `/v1/guard/rehydrate`;
-- the shim returns `texts = [restored]` with `stream_holdback_chars = len(carry)`.
+- the shim returns `texts = [restored, ...]` with `stream_holdback_chars = [len(carry), ...]`, one
+  entry per text. LiteLLM types the field `list[int]` and applies it per choice
+  (`GenericGuardrailAPIResponse.from_dict`: a value that is not a list becomes `None`). The shim
+  used to return a single int; on the official image at 1.105.0 that was silently ignored, so the
+  stream went out with no holdback and the client's reply ended mid-stand-in once the restored
+  text was shorter than what had already been emitted.
 
 The second call is not redundant. LiteLLM forces the holdback to 0 on the final round, so whatever
 the shim withholds there is emitted verbatim — and if that region held the raw placeholder, every

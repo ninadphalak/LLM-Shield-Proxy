@@ -121,8 +121,10 @@ class GuardrailResponse(BaseModel):
     action: Literal["BLOCKED", "NONE", "GUARDRAIL_INTERVENED"]
     blocked_reason: Optional[str] = None
     texts: Optional[list[str]] = None
-    # Present for contract completeness. Unused until streaming is validated.
-    stream_holdback_chars: Optional[int] = None
+    # One entry per text, in order: LiteLLM reads this as a per-choice list
+    # (`GenericGuardrailAPIResponse.stream_holdback_chars: list[int]`) and drops any other
+    # shape, which then emits the stream with no holdback at all.
+    stream_holdback_chars: Optional[list[int]] = None
 
 
 app = FastAPI(title="LLM Shield Proxy - LiteLLM generic guardrail shim")
@@ -176,7 +178,7 @@ async def _restore_streaming(request: GuardrailRequest, session_id: str) -> Guar
     holdback, hands LiteLLM exactly the newly-safe prefix and nothing more.
     """
     restored: list[str] = []
-    holdback = 0
+    holdbacks: list[int] = []
 
     for text in request.texts:
         try:
@@ -216,13 +218,15 @@ async def _restore_streaming(request: GuardrailRequest, session_id: str) -> Guar
         restored.append(restored_texts[0])
         # The withheld length is measured on the raw text, so applying it to the restored
         # text can only ever withhold MORE than strictly necessary -- which delays a
-        # value but never emits one early. One holdback covers every choice in LiteLLM's
-        # response, so take the widest.
-        holdback = max(holdback, len(carry))
+        # value but never emits one early. LiteLLM applies the holdback per choice, from a
+        # list aligned with `texts`; a scalar is not a list and is ignored, so the stream
+        # would go out with no holdback and end truncated once the restored text is
+        # shorter than what was already emitted.
+        holdbacks.append(len(carry))
 
-    if restored == request.texts and holdback == 0:
+    if restored == request.texts and not any(holdbacks):
         return GuardrailResponse(action="NONE")
-    return GuardrailResponse(action="GUARDRAIL_INTERVENED", texts=restored, stream_holdback_chars=holdback)
+    return GuardrailResponse(action="GUARDRAIL_INTERVENED", texts=restored, stream_holdback_chars=holdbacks)
 
 
 @app.post("/beta/litellm_basic_guardrail_api")
