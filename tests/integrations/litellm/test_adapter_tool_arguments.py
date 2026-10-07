@@ -694,6 +694,35 @@ def _anthropic_texts(frames) -> str:
 
 
 @pytest.mark.asyncio
+async def test_an_sse_event_that_never_ends_fails_closed_instead_of_buffering(harness):
+    """An upstream that never sends a blank-line terminator must not grow the held tail
+    without bound (invariant 1). Past 1 MiB the adapter raises, as the core package does
+    with `StreamCapacityExceeded`, rather than buffering or passing the bytes through
+    unrestored."""
+    module, guardrail, _ = harness
+    chunks = ["event: content_block_delta\ndata: " + "x" * (module._MAX_SSE_PENDING_BYTES + 1)]
+
+    with pytest.raises(module.GuardrailRaisedException) as raised:
+        await _stream(module, guardrail, chunks)
+
+    assert "without an event boundary" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_an_unfinished_event_below_the_cap_is_held_then_emitted(harness):
+    """The cap is a ceiling, not a change of behaviour: a frame split across two network
+    chunks is still held and emitted whole once its terminator arrives."""
+    module, guardrail, _ = harness
+    frame = _text_delta(0, "Echo: <EMAIL_ADDRESS> please")
+    cut = len(frame) // 2
+    chunks = [frame[:cut], frame[cut:], _sse("content_block_stop", {"type": "content_block_stop", "index": 0})]
+
+    emitted = await _stream(module, guardrail, chunks)
+
+    assert _anthropic_texts(emitted) == f"Echo: {PLAIN} please"
+
+
+@pytest.mark.asyncio
 async def test_streamed_anthropic_sse_is_restored(harness):
     """`/v1/messages` streams reach the hook as raw SSE text, one network chunk at a time.
 

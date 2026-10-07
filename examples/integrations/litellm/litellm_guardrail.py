@@ -385,6 +385,11 @@ _RESPONSES_STRUCTURAL_FIELDS: Final = frozenset(
 
 _RESPONSES_TERMINAL_EVENTS: Final = frozenset(("response.completed", "response.incomplete"))
 
+# An SSE event is held until its blank-line terminator arrives. The core package caps its own
+# line accumulator at 1 MiB (`MAX_SSE_LINE_LENGTH`) and fails closed past it; an upstream that
+# never sends a terminator must not grow this buffer without bound either.
+_MAX_SSE_PENDING_BYTES: Final = 1024 * 1024
+
 
 def _opens_like_sse(head: bytes) -> bool | None:
     """Whether a raw stream is SSE, judged by its opening bytes; None while undecidable.
@@ -466,8 +471,9 @@ class _AnthropicSSERestorer:
     does not open like SSE at all is passed through chunk by chunk, never buffered.
     """
 
-    def __init__(self, step: _StreamStep) -> None:
+    def __init__(self, step: _StreamStep, guardrail_name: str = GUARDRAIL_NAME) -> None:
         self._step: Final = step
+        self._guardrail_name: Final = guardrail_name
         self._carries: Final[dict] = {}  # mutable-ok: per-block windows advanced in place.
         self._delta_types: Final[dict] = {}  # mutable-ok: each block's delta type, for its flush.
         self._pending = b""
@@ -492,6 +498,17 @@ class _AnthropicSSERestorer:
                 return self._emit(buffered)
         boundaries: Final = tuple(_SSE_EVENT_BOUNDARY.finditer(buffered))
         if not boundaries:
+            if len(buffered) > _MAX_SSE_PENDING_BYTES:
+                # Fail closed, as the core package does: passing the bytes through would hand
+                # the client an unrestored stream, and holding them would grow without bound.
+                self._pending = b""
+                raise GuardrailRaisedException(
+                    guardrail_name=self._guardrail_name,
+                    message=(
+                        f"LLM Shield Proxy: an SSE event exceeded {_MAX_SSE_PENDING_BYTES} bytes "
+                        "without an event boundary; blocking the stream."
+                    ),
+                )
             self._pending = buffered
             return ()
         cut: Final = boundaries[-1].end()
@@ -1030,7 +1047,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         # The two native stream shapes have no `choices`: Anthropic `/v1/messages` arrives
         # as raw SSE frames, the Responses API as typed events. Each has its own restorer
         # with the same per-stream windows.
-        sse: Final = _AnthropicSSERestorer(step)
+        sse: Final = _AnthropicSSERestorer(step, self.guardrail_name)
         events: Final = _ResponsesStreamRestorer(step, rehydrate)
         carries: Final[dict] = {}  # mutable-ok: per-stream windows, local to this generator.
         last_chunk = None  # rebind-ok: tracks the most recent chunk for the final flush.
