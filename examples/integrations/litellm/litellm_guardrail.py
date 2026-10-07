@@ -45,9 +45,15 @@ interpreter this package still supports.
 from __future__ import annotations
 
 import copy
+import functools
+import itertools
+import json
 import os
+import re
 import uuid
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
+from enum import Enum
+from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
     Any,  # noqa: TID251  # **kwargs forwards verbatim to CustomGuardrail.__init__
@@ -324,6 +330,358 @@ def _carry_sort_key(key: tuple) -> tuple:
     return (choice_index, -1 if tool_index is None else tool_index)
 
 
+def _read_list(holder: object, name: str) -> Sequence[object]:
+    """Reads a list field from a dict or an object; anything else reads as empty.
+
+    The entries are the reply's own objects, so writing through them edits the reply.
+    """
+    value: Final = _read_field(holder, name)
+    if isinstance(value, (list, tuple)):
+        return value
+    return ()
+
+
+def _collect_response_item(item: object, slots: _SlotSink) -> None:
+    """Restorable spans in one Responses API output item, dict or object.
+
+    Mirrors `_collect_responses_fields` on the request side -- a function_call or
+    mcp_call item holds `arguments`, their outputs `output`, a reasoning item `summary`
+    parts -- so the two directions stay symmetric. A custom tool call carries `input` and
+    a code interpreter call `code`, both model-written.
+    """
+    for block in _read_list(item, "content"):
+        for field in ("text", "refusal"):
+            text = _read_field(block, field)
+            if isinstance(text, str) and text:
+                slots.append((text, lambda new, b=block, f=field: _write_field(b, f, new)))
+    for part in _read_list(item, "summary"):
+        text = _read_field(part, "text")
+        if isinstance(text, str) and text:
+            slots.append((text, lambda new, p=part: _write_field(p, "text", new)))
+    for field in ("arguments", "output", "input", "code"):
+        value = _read_field(item, field)
+        if isinstance(value, str) and value:
+            slots.append((value, lambda new, i=item, f=field: _write_field(i, f, new)))
+
+
+# The two native stream shapes have no `choices`. Anthropic `/v1/messages` reaches the
+# streaming hook as raw SSE text, one network chunk at a time; the Responses API reaches it
+# as typed events. Each gets a restorer with the same per-stream windows the chat path uses.
+
+_StreamStep: TypeAlias = Callable[[str, str, bool], Awaitable[tuple[str, str]]]  # mutable-ok: Callable's param list.
+_Rehydrate: TypeAlias = Callable[[Sequence[str]], Awaitable[Sequence[str]]]  # mutable-ok: Callable's param list.
+
+_ANTHROPIC_DELTA_FIELDS: Final = MappingProxyType({"text_delta": "text", "input_json_delta": "partial_json"})
+
+_SSE_EVENT_BOUNDARY: Final = re.compile(rb"(\r?\n\r?\n)")
+
+_SSE_OPENINGS: Final = (b"event:", b"data:", b"id:", b"retry:", b":")
+
+_RESPONSES_BINARY_DELTAS: Final = frozenset(("response.audio.delta",))
+
+_RESPONSES_STRUCTURAL_FIELDS: Final = frozenset(
+    ("type", "id", "item_id", "call_id", "name", "server_label", "status", "obfuscation")
+)
+
+_RESPONSES_TERMINAL_EVENTS: Final = frozenset(("response.completed", "response.incomplete"))
+
+
+def _opens_like_sse(head: bytes) -> bool | None:
+    """Whether a raw stream is SSE, judged by its opening bytes; None while undecidable.
+
+    An SSE stream opens with a field name or a `:` comment. Anything else -- a JSON array
+    streamed in pieces, say -- has no event boundaries to wait for. A chunk that ends
+    partway through a field name decides nothing yet, so that case waits for more.
+    """
+    opening: Final = head.lstrip()
+    if not opening:
+        return None
+    if opening.startswith(_SSE_OPENINGS):
+        return True
+    if any(field.startswith(opening) for field in _SSE_OPENINGS):
+        return None
+    return False
+
+
+def _responses_event_type(chunk: object) -> str | None:
+    """The event type of a Responses API stream event, or None for any other chunk.
+
+    The type arrives as a plain string on dicts and as a str-valued Enum on LiteLLM's
+    event models. The Enum is unwrapped because it does not hash like its value.
+    """
+    if isinstance(chunk, (bytes, str)):
+        return None
+    kind: Final = _read_field(chunk, "type")
+    value: Final = kind.value if isinstance(kind, Enum) else kind
+    return value if isinstance(value, str) and value.startswith("response.") else None
+
+
+def _responses_stream_key(event: object, kind: str) -> tuple:
+    """Identifies the delta stream an event belongs to, the same for its delta and done.
+
+    The family is the event type without its `.delta` / `.done` suffix, so an output_text
+    stream and a refusal stream on the same part never share a window.
+    """
+    family: Final = kind.rsplit(".", 1)[0]
+    part_index: Final = _read_field(event, "content_index")
+    summary_index: Final = _read_field(event, "summary_index")
+    return (
+        family,
+        _read_field(event, "item_id"),
+        _read_field(event, "output_index"),
+        part_index if part_index is not None else summary_index,
+    )
+
+
+def _collect_event_text(event: object, slots: _SlotSink) -> None:
+    """Collects every top-level text field of a Responses API event, dict or model.
+
+    Scan by default, with identifiers excluded, rather than a list of known fields: the
+    `.done` event of each stream family names its text differently (`text`, `refusal`,
+    `arguments`, ...), and a family added upstream would otherwise leak a placeholder.
+    """
+    fields: Final = event if isinstance(event, dict) else getattr(event, "__dict__", None)
+    if not isinstance(fields, dict):
+        return
+    for name, value in tuple(fields.items()):
+        if name in _RESPONSES_STRUCTURAL_FIELDS or name.endswith("_id"):
+            continue
+        if isinstance(value, str) and value:
+            slots.append((value, functools.partial(_write_field, event, name)))
+
+
+class _AnthropicSSERestorer:
+    """Restores an Anthropic `/v1/messages` stream, which reaches the hook as raw SSE.
+
+    Each content block is its own token stream with its own window, keyed by the block's
+    `index`: `text_delta` carries prose and `input_json_delta` a tool call's arguments.
+    When a block stops, whatever its window still holds is emitted as one more delta for
+    that block, just ahead of the `content_block_stop` frame, so the client has the whole
+    block before it is told the block is complete.
+
+    Frames are processed whole. A network chunk can end in the middle of an event, so the
+    unfinished tail is kept until the rest arrives; that delays one partial event, never
+    a completed one. A frame that is not an Anthropic event -- another endpoint's SSE, or
+    anything that fails to parse -- is passed through byte for byte, and a raw stream that
+    does not open like SSE at all is passed through chunk by chunk, never buffered.
+    """
+
+    def __init__(self, step: _StreamStep) -> None:
+        self._step: Final = step
+        self._carries: Final[dict] = {}  # mutable-ok: per-block windows advanced in place.
+        self._delta_types: Final[dict] = {}  # mutable-ok: each block's delta type, for its flush.
+        self._pending = b""
+        self._as_text = False
+        self._is_sse: bool | None = None
+
+    async def feed(self, chunk: bytes | str) -> tuple:
+        """Restores every event this chunk completes; holds back an unfinished tail."""
+        if isinstance(chunk, str):
+            self._as_text = True
+        if self._is_sse is False:
+            return (chunk,)
+        raw: Final = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+        buffered: Final = self._pending + raw
+        if self._is_sse is None:
+            self._is_sse = _opens_like_sse(buffered)
+            if self._is_sse is None:
+                self._pending = buffered
+                return ()
+            if not self._is_sse:
+                self._pending = b""
+                return self._emit(buffered)
+        boundaries: Final = tuple(_SSE_EVENT_BOUNDARY.finditer(buffered))
+        if not boundaries:
+            self._pending = buffered
+            return ()
+        cut: Final = boundaries[-1].end()
+        self._pending = buffered[cut:]
+        parts: Final = _SSE_EVENT_BOUNDARY.split(buffered[:cut])
+        restored: Final = tuple(
+            [await self._restore_event(parts[index]) + parts[index + 1] for index in range(0, len(parts) - 1, 2)]
+        )
+        return self._emit(b"".join(restored))
+
+    async def finish(self) -> tuple:
+        """Emits an unterminated final event and any window a block never closed."""
+        held: Final = self._pending
+        self._pending = b""
+        if not self._is_sse:
+            return self._emit(held)
+        tail: Final = await self._restore_event(held) if held.strip() else held
+        flushed: Final = await self._flush_all()
+        separator: Final = b"\n\n" if tail.strip() and flushed else b""
+        return self._emit(tail + separator + flushed)
+
+    def _emit(self, frames: bytes) -> tuple:
+        if not frames:
+            return ()
+        return (frames.decode("utf-8") if self._as_text else frames,)
+
+    async def _restore_event(self, block: bytes) -> bytes:
+        """Rewrites one SSE event, or returns it untouched if it carries nothing to restore."""
+        try:
+            lines: Final = block.decode("utf-8").split("\n")
+        except UnicodeDecodeError:
+            return block
+        data_lines: Final = tuple(index for index, line in enumerate(lines) if line.startswith("data:"))
+        if len(data_lines) != 1:
+            return block
+        line: Final = lines[data_lines[0]]
+        try:
+            event: Final = json.loads(line[len("data:") :])
+        except ValueError:
+            return block
+        if not isinstance(event, dict):
+            return block
+        kind: Final = event.get("type")
+        index: Final = event.get("index")
+        if kind == "content_block_stop" and isinstance(index, int):
+            return await self._flush(index) + block
+        if kind == "message_stop":
+            return await self._flush_all() + block
+        if kind != "content_block_delta" or not await self._restore_delta(event):
+            return block
+        ending: Final = "\r" if line.endswith("\r") else ""
+        rewritten: Final = (
+            *lines[: data_lines[0]],
+            f"data: {json.dumps(event, ensure_ascii=False)}{ending}",
+            *lines[data_lines[0] + 1 :],
+        )
+        return "\n".join(rewritten).encode("utf-8")
+
+    async def _restore_delta(self, event: MutableRequest) -> bool:
+        """Advances one block's window through this delta. False if it holds no text."""
+        index: Final = event.get("index")
+        delta: Final = event.get("delta")
+        if not isinstance(index, int) or not isinstance(delta, dict):
+            return False
+        delta_type: Final = delta.get("type")
+        if not isinstance(delta_type, str):
+            return False
+        field: Final = _ANTHROPIC_DELTA_FIELDS.get(delta_type)
+        text: Final = delta.get(field) if field is not None else None
+        if field is None or not isinstance(text, str) or not text:
+            return False
+        emitted, remaining = await self._step(text, self._carries.get(index, ""), False)
+        self._carries[index] = remaining
+        self._delta_types[index] = delta_type
+        delta[field] = emitted
+        return True
+
+    async def _flush(self, index: int) -> bytes:
+        """One synthetic delta frame carrying whatever `index`'s window still holds."""
+        carry: Final = self._carries.pop(index, "")
+        delta_type: Final = self._delta_types.pop(index, None)
+        field: Final = _ANTHROPIC_DELTA_FIELDS.get(delta_type) if isinstance(delta_type, str) else None
+        if not carry or field is None:
+            return b""
+        text, _ = await self._step("", carry, True)
+        if not text:
+            return b""
+        event: Final[JsonBody] = {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": delta_type, field: text},
+        }
+        return f"event: content_block_delta\ndata: {json.dumps(event, ensure_ascii=False)}\n\n".encode()
+
+    async def _flush_all(self) -> bytes:
+        flushed: Final = tuple([await self._flush(index) for index in tuple(self._carries)])
+        return b"".join(flushed)
+
+
+class _ResponsesStreamRestorer:
+    """Restores a Responses API event stream.
+
+    The event families are matched by shape rather than listed, so a text stream the
+    API adds later is restored by default instead of leaking a placeholder:
+
+    - Any `*.delta` event whose `delta` is a string is a token stream (output_text,
+      refusal, function-call and MCP arguments, reasoning summaries, ...). Each gets its
+      own window, keyed by the family, the item id and the part index.
+    - Any `*.done` event closes the stream of the same family. Whatever its window still
+      holds goes out first, as a copy of that stream's last delta event -- so it carries
+      the stream's own ids, and repeats that event's `sequence_number`. Then every text
+      field on the done event is restored in full: its string fields other than
+      identifiers, plus any `part` or `item` it repeats.
+    - `response.completed` / `response.incomplete` repeat the whole reply, and are
+      restored the same way the non-streaming reply is.
+    """
+
+    def __init__(self, step: _StreamStep, rehydrate: _Rehydrate) -> None:
+        self._step: Final = step
+        self._rehydrate: Final = rehydrate
+        self._carries: Final[dict] = {}  # mutable-ok: per-stream windows advanced in place.
+        self._last_deltas: Final[dict] = {}  # mutable-ok: newest delta per stream.
+
+    async def restore(self, event: object) -> tuple:
+        """The events to emit in place of `event`: any flush, then the event itself."""
+        kind: Final = _responses_event_type(event)
+        if kind is None:
+            return (event,)
+        if kind.endswith(".delta") and kind not in _RESPONSES_BINARY_DELTAS:
+            await self._restore_delta(event, kind)
+            return (event,)
+        slots: Final[list] = []  # mutable-ok: accumulator, frozen before use.
+        flushed: Final = await self._flush(_responses_stream_key(event, kind)) if kind.endswith(".done") else ()
+        if kind.endswith(".done"):
+            _collect_event_text(event, slots)
+            part: Final = _read_field(event, "part")
+            if part is not None:
+                _collect_response_item({"content": [part]}, slots)
+            _collect_response_item(_read_field(event, "item"), slots)
+        elif kind in _RESPONSES_TERMINAL_EVENTS:
+            for item in _read_list(_read_field(event, "response"), "output"):
+                _collect_response_item(item, slots)
+        if slots:
+            restored: Final = await self._rehydrate(tuple(text for text, _ in slots))
+            for (_, write), replacement in zip(slots, restored):
+                write(replacement)
+        return (*flushed, event)
+
+    async def finish(self) -> tuple:
+        """Flushes every stream the provider never closed, e.g. a truncated reply."""
+        flushed: Final = tuple([await self._flush(key) for key in tuple(self._carries)])
+        return tuple(itertools.chain.from_iterable(flushed))
+
+    async def _restore_delta(self, event: object, kind: str) -> None:
+        text: Final = _read_field(event, "delta")
+        if not isinstance(text, str) or not text:
+            return
+        key: Final = _responses_stream_key(event, kind)
+        emitted, remaining = await self._step(text, self._carries.get(key, ""), False)
+        self._carries[key] = remaining
+        self._last_deltas[key] = event
+        _write_field(event, "delta", emitted)
+
+    async def _flush(self, key: tuple) -> tuple:
+        carry: Final = self._carries.pop(key, "")
+        template: Final = self._last_deltas.pop(key, None)
+        if not carry or template is None:
+            return ()
+        text, _ = await self._step("", carry, True)
+        if not text:
+            return ()
+        flush: Final = copy.deepcopy(template)
+        _write_field(flush, "delta", text)
+        return (flush,)
+
+
+def _is_text_choice(choice: object) -> bool:
+    """A Completions choice: a `text` field and no `delta` (LiteLLM's TextChoices).
+
+    Judged by the field's presence, not its value: the chunk that carries the
+    finish_reason arrives with `text` set to None, and it is the chunk the held-back tail
+    has to flush into.
+    """
+    if getattr(choice, "delta", None) is not None:
+        return False
+    if isinstance(choice, dict):
+        return "text" in choice
+    return hasattr(choice, "text")
+
+
 class LLMShieldProxyGuardrail(CustomGuardrail):
     """Redacts PII before it leaves the proxy and restores it in the response.
 
@@ -555,6 +913,10 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         for choice in choices:
             message: Final = getattr(choice, "message", None)
             if message is None:
+                # `/v1/completions` answers with `text` on the choice and no message.
+                text: Final = _read_field(choice, "text")
+                if isinstance(text, str) and text:
+                    pending.append((text, functools.partial(_write_field, choice, "text")))
                 continue
             content: Final = getattr(message, "content", None)
             if isinstance(content, str) and content:
@@ -631,14 +993,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         """
         slots: Final[list] = []  # mutable-ok: accumulator, frozen on return.
         for item in getattr(response, "output", None) or ():
-            for block in getattr(item, "content", None) or ():
-                text: Final = _read_field(block, "text")
-                if isinstance(text, str) and text:
-                    slots.append((text, lambda new, b=block: _write_field(b, "text", new)))
-            for field in ("arguments", "output"):
-                value: Final = _read_field(item, field)
-                if isinstance(value, str) and value:
-                    slots.append((value, lambda new, i=item, f=field: _write_field(i, f, new)))
+            _collect_response_item(item, slots)
         return tuple(slots)
 
     async def _restore_responses_api_response(
@@ -670,15 +1025,34 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
             return
 
         session_id: Final = self._session_id(request_data)
+        step: Final = functools.partial(self._stream_step, session_id=session_id)
+        rehydrate: Final = functools.partial(self._rehydrate, session_id=session_id)
+        # The two native stream shapes have no `choices`: Anthropic `/v1/messages` arrives
+        # as raw SSE frames, the Responses API as typed events. Each has its own restorer
+        # with the same per-stream windows.
+        sse: Final = _AnthropicSSERestorer(step)
+        events: Final = _ResponsesStreamRestorer(step, rehydrate)
         carries: Final[dict] = {}  # mutable-ok: per-stream windows, local to this generator.
         last_chunk = None  # rebind-ok: tracks the most recent chunk for the final flush.
 
         async for chunk in response:
+            if isinstance(chunk, (bytes, str)):
+                for frames in await sse.feed(chunk):
+                    yield frames
+                continue
+            if _responses_event_type(chunk) is not None:
+                for event in await events.restore(chunk):
+                    yield event
+                continue
             last_chunk = chunk
             for choice in getattr(chunk, "choices", None) or ():
                 await self._restore_choice(choice, carries, session_id)
             yield chunk
 
+        for frames in await sse.finish():
+            yield frames
+        for event in await events.finish():
+            yield event
         # A stream that ended without a finish_reason can still leave text held back.
         if last_chunk is not None and any(carries.values()):
             async for trailing in self._flush_trailing(last_chunk, carries, session_id):
@@ -693,10 +1067,13 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         held back for one stream onto another.
         """
         delta: Final = getattr(choice, "delta", None)
-        if delta is None:
-            return
         index: Final = _choice_index(choice)
         is_final: Final = bool(getattr(choice, "finish_reason", None))
+        if _is_text_choice(choice):
+            await self._restore_text_window(choice, (index, None), carries, session_id, is_final)
+            return
+        if delta is None:
+            return
 
         await self._restore_content_window(delta, (index, None), carries, session_id, is_final)
 
@@ -708,6 +1085,25 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
             # every window this choice still holds has to land in *this* chunk. Flushing
             # after it produces argument JSON the client has already stopped waiting for.
             await self._flush_finished_choice(delta, index, carries, session_id)
+
+    async def _restore_text_window(
+        self,
+        choice: Any,
+        key: tuple,
+        carries: _CarryWindows,
+        session_id: str,
+        is_final: bool,
+    ) -> None:
+        """Restores a Completions stream choice's `text` through its window."""
+        carry: Final = carries.get(key, "")
+        text: Final = _read_field(choice, "text")
+        if not isinstance(text, str) or not text:
+            if not (is_final and carry):
+                return
+        emitted, remaining = await self._stream_step(text if isinstance(text, str) else "", carry, is_final, session_id)
+        carries[key] = remaining  # rebind-ok: this stream's window advances.
+        if emitted or text:
+            _write_field(choice, "text", emitted)
 
     async def _restore_content_window(
         self,
@@ -822,7 +1218,9 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
             chunk = self._chunk_for_choice(last_chunk, choice_index)
             if chunk is None:
                 continue
-            if tool_index is None:
+            if _is_text_choice(chunk.choices[0]):
+                _write_field(chunk.choices[0], "text", text)
+            elif tool_index is None:
                 chunk.choices[0].delta.content = text
             else:
                 # The copy carried this chunk's own content and tool calls, both already
@@ -846,7 +1244,7 @@ class LLMShieldProxyGuardrail(CustomGuardrail):
         choices: Final[tuple] = tuple(raw_choices)
         matching: Final = tuple(choice for choice in choices if _choice_index(choice) == index)
         kept: Final = matching[0] if matching else choices[0]
-        if getattr(kept, "delta", None) is None:
+        if getattr(kept, "delta", None) is None and not _is_text_choice(kept):
             return None
         kept.index = index
         # The terminal signal, if there was one, already went out with the real chunk.

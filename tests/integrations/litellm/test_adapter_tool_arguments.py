@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -546,3 +547,175 @@ async def test_streamed_content_is_still_restored_per_choice(harness):
     emitted = await _stream(module, guardrail, chunks)
 
     assert _content_by_choice(emitted) == {0: f"Sending to {PLAIN}", 1: f"cc {PLAIN}"}
+
+
+# --- the other reply surfaces: Completions text, Responses events, Anthropic SSE ------
+#
+# Found by the 2026-10-06 clean-install audit: through this adapter on the official LiteLLM
+# image, `/v1/completions` replies and streamed `/v1/responses` and `/v1/messages` replies
+# reached the caller still carrying the stand-ins. The request side had redacted them, so
+# nothing leaked; the caller saw a fake address where theirs should have been.
+
+
+class _TextChoice:
+    """A Completions choice: `text` and no `delta`, the shape LiteLLM's TextChoices has."""
+
+    def __init__(self, text=None, finish_reason=None, index=0):
+        self.text = text
+        self.finish_reason = finish_reason
+        self.index = index
+
+
+def _text_by_choice(chunks) -> dict:
+    accumulated: dict = {}
+    for chunk in chunks:
+        for choice in chunk.choices:
+            fragment = getattr(choice, "text", None)
+            if fragment:
+                accumulated[choice.index] = accumulated.get(choice.index, "") + fragment
+    return accumulated
+
+
+@pytest.mark.asyncio
+async def test_completions_text_is_restored(harness):
+    """`/v1/completions` answers with `choices[].text` and no `message`."""
+    module, guardrail, calls = harness
+    response = types.SimpleNamespace(choices=[_TextChoice(text="Echo: <EMAIL_ADDRESS> please")])
+
+    assert await _non_streaming(module, guardrail, response) is response
+
+    assert response.choices[0].text == f"Echo: {PLAIN} please"
+    assert _batch(calls) == ["Echo: <EMAIL_ADDRESS> please"]
+
+
+@pytest.mark.asyncio
+async def test_streamed_completions_text_is_restored_across_chunks(harness):
+    module, guardrail, _ = harness
+    chunks = [
+        _Chunk([_TextChoice(text="Echo: <EMAIL_")]),
+        _Chunk([_TextChoice(text="ADDRESS> please")]),
+        _Chunk([_TextChoice(text="", finish_reason="stop")]),
+    ]
+
+    emitted = await _stream(module, guardrail, chunks)
+
+    assert _text_by_choice(emitted) == {0: f"Echo: {PLAIN} please"}
+    assert all("<EMAIL_" not in (choice.text or "") for chunk in emitted for choice in chunk.choices)
+
+
+@pytest.mark.asyncio
+async def test_the_completions_finish_chunk_carries_text_none_and_still_flushes(harness):
+    """LiteLLM's finishing TextChoices has `text=None`, not "". Seen live: without this the
+    reply ended at `... about card ` and the held-back card number never arrived."""
+    module, guardrail, _ = harness
+    chunks = [
+        _Chunk([_TextChoice(text="Echo: card <EMAIL_")]),
+        _Chunk([_TextChoice(text="ADDRESS>")]),
+        _Chunk([_TextChoice(text=None, finish_reason="stop")]),
+    ]
+
+    emitted = await _stream(module, guardrail, chunks)
+
+    assert _text_by_choice(emitted) == {0: f"Echo: card {PLAIN}"}
+
+
+@pytest.mark.asyncio
+async def test_a_completions_stream_without_a_finish_reason_still_gets_its_tail(harness):
+    module, guardrail, _ = harness
+    chunks = [_Chunk([_TextChoice(text="Echo: <EMAIL_ADDRESS>")])]
+
+    emitted = await _stream(module, guardrail, chunks)
+
+    assert _text_by_choice(emitted) == {0: f"Echo: {PLAIN}"}
+
+
+def _responses_delta(piece: str, sequence: int) -> dict:
+    return {
+        "type": "response.output_text.delta",
+        "sequence_number": sequence,
+        "item_id": "msg_1",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": piece,
+    }
+
+
+@pytest.mark.asyncio
+async def test_streamed_responses_events_are_restored(harness):
+    """Responses streams are typed events, not `choices`: each `*.delta` family is a token
+    stream of its own, the `.done` event repeats the whole text, and `response.completed`
+    repeats the whole reply."""
+    module, guardrail, _ = harness
+    full = "Echo: <EMAIL_ADDRESS> please"
+    completed = {
+        "type": "response.completed",
+        "sequence_number": 5,
+        "response": {"output": [{"type": "message", "content": [{"type": "output_text", "text": full}]}]},
+    }
+    events = [
+        {"type": "response.created", "sequence_number": 0, "response": {"output": []}},
+        _responses_delta("Echo: <EMAIL_", 1),
+        _responses_delta("ADDRESS> ple", 2),
+        _responses_delta("ase", 3),
+        {"type": "response.output_text.done", "sequence_number": 4, "item_id": "msg_1", "output_index": 0, "content_index": 0, "text": full},
+        completed,
+    ]
+
+    emitted = await _stream(module, guardrail, events)
+
+    deltas = [e["delta"] for e in emitted if e.get("type") == "response.output_text.delta"]
+    assert "".join(deltas) == f"Echo: {PLAIN} please"
+    assert all("<EMAIL_" not in d for d in deltas), deltas
+    done = next(e for e in emitted if e.get("type") == "response.output_text.done")
+    assert done["text"] == f"Echo: {PLAIN} please"
+    finished = next(e for e in emitted if e.get("type") == "response.completed")
+    assert finished["response"]["output"][0]["content"][0]["text"] == f"Echo: {PLAIN} please"
+    assert emitted[-1] is finished or emitted[-1]["type"] == "response.completed"
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _text_delta(index: int, text: str) -> str:
+    return _sse("content_block_delta", {"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": text}})
+
+
+def _anthropic_texts(frames) -> str:
+    out = []
+    for frame in frames:
+        for block in frame.split("\n\n"):
+            for line in block.splitlines():
+                if line.startswith("data:"):
+                    event = json.loads(line[5:])
+                    if event.get("type") == "content_block_delta" and event["delta"].get("type") == "text_delta":
+                        out.append(event["delta"]["text"])
+    return "".join(out)
+
+
+@pytest.mark.asyncio
+async def test_streamed_anthropic_sse_is_restored(harness):
+    """`/v1/messages` streams reach the hook as raw SSE text, one network chunk at a time.
+
+    Each content block is its own token stream; a stand-in split across two `text_delta`
+    frames is held back and emitted whole, and the block's remainder goes out before
+    `content_block_stop`, so the client has the whole block before it is told it ended.
+    """
+    module, guardrail, _ = harness
+    chunks = [
+        _sse("message_start", {"type": "message_start", "message": {"id": "msg_1", "content": []}}),
+        _sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+        _text_delta(0, "Echo: <EMAIL_"),
+        _text_delta(0, "ADDRESS> ple"),
+        _text_delta(0, "ase"),
+        _sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        _sse("message_stop", {"type": "message_stop"}),
+    ]
+
+    emitted = await _stream(module, guardrail, chunks)
+
+    joined = "".join(emitted)
+    assert _anthropic_texts(emitted) == f"Echo: {PLAIN} please"
+    assert "<EMAIL_" not in joined
+    assert joined.index(PLAIN) < joined.index("content_block_stop")
+    assert joined.rstrip().endswith('data: {"type": "message_stop"}'), "frames the adapter does not rewrite pass through"
