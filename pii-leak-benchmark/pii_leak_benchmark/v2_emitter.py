@@ -3277,6 +3277,36 @@ def first_run_hint(
     )
 
 
+ONE_WAY_SITES = ("system-content", "tool-description")
+
+
+def one_way_sites_hint(report: dict[str, Any]) -> str | None:
+    """One sentence when `no-leak-profile-not-met` is explained entirely by one-way sites.
+
+    A gateway that redacts the system prompt and tool descriptions but never restores
+    values echoed from them (the application wrote that text, not the caller) scores
+    fidelity 0 on those two request sites and 1 on the caller's own. The outcome is
+    correct and unchanged; this names the reason beside it so a reader does not go
+    looking for a restoration bug in the caller's turns.
+    """
+    if report.get("outcome") != "no-leak-profile-not-met":
+        return None
+    sites = (report.get("metrics") or {}).get("by_axis", {}).get("request_site") or {}
+    if not sites:
+        return None
+    missed = {name for name, row in sites.items() if row.get("echo_observable") and row.get("fidelity_rate", 1.0) < 1.0}
+    restored = {name for name, row in sites.items() if row.get("echo_observable") and row.get("fidelity_rate") == 1.0}
+    if not missed or not missed <= set(ONE_WAY_SITES) or not restored:
+        return None
+    return (
+        "Nothing leaked. Every value the gateway did not restore came from "
+        + " and ".join(sorted(missed))
+        + " (text the application wrote, not the caller); "
+        + " and ".join(sorted(restored))
+        + " restored in full. A gateway that keeps those sites one-way on purpose scores this outcome on this profile."
+    )
+
+
 def summary_row(name: str, seed: str, report: dict[str, Any], errors: list[str] | None) -> dict[str, Any]:
     """One `--json-out` row: the keys `benchmarks/v2_seed_sweep.py` records per seed.
 
@@ -3388,6 +3418,9 @@ def main(argv: list[str] | None = None, prog: str | None = None) -> int:
         hint = first_run_hint(report, summary, gateway_url=args.gateway_url, upstream_port=args.upstream_port)
         if hint:
             print("      ->", hint)
+        one_way = one_way_sites_hint(report)
+        if one_way:
+            print("      ->", one_way)
         if args.partial_emission:
             from pii_leak_benchmark.partial_emission import run_partial_emission
 

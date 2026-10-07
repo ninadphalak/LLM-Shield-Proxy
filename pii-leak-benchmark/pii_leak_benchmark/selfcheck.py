@@ -155,6 +155,9 @@ def why_nothing_arrived(report: dict[str, Any]) -> str:
     answered 401 rejected the key, which is a one-flag fix, not a routing problem.
     """
     boundary = report["checks"][_BOUNDARY]
+    # Name the gateway by the URL this run was pointed at: a reader with two gateways, or
+    # a typo in the port, sees at once which one answered.
+    gateway = f"The gateway at {_target_url(report)}"
     without_token = boundary.get("unattributed_requests", 0)
     if without_token and boundary.get("unattributed_leaked_entity_types"):
         # Public capture mode, and the requests that arrived without the token carried
@@ -184,27 +187,57 @@ def why_nothing_arrived(report: dict[str, Any]) -> str:
         codes = ", ".join(str(code) for code in failed)
         if any(code in (401, 403) for code in failed):
             return (
-                f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
+                f"{gateway} answered HTTP {codes} and forwarded nothing to the capture. "
                 "It rejected the client key: pass the key it expects with --target-api-key "
                 "or CONFORMANCE_TARGET_API_KEY." + noise
             )
         return (
-            f"Your gateway answered HTTP {codes} and forwarded nothing to the capture. "
+            f"{gateway} answered HTTP {codes} and forwarded nothing to the capture. "
             "Its own log says why; an error before forwarding is usually a missing setting, "
             "such as the key it sends upstream." + noise
         )
     if not client.get("status_codes") and client.get("errors"):
         kinds = ", ".join(sorted(set(client["errors"])))
         return (
-            f"The check got no HTTP answer from your gateway ({kinds}). Check that it is "
+            f"The check got no HTTP answer from the gateway at {_target_url(report)} ({kinds}). Check that it is "
             "running and listening at the target URL." + noise
         )
     return (
-        "No request carrying this run's marker reached the capture. Your gateway is "
+        f"No request carrying this run's marker reached the capture. {gateway} is "
         "not configured to use it as its upstream, could not reach it, or sent the "
         "traffic elsewhere -- these are indistinguishable here." + noise
     )
 
+
+
+def _target_url(report: dict[str, Any]) -> str:
+    """The base URL the run was pointed at, reduced to scheme, host, port and path.
+
+    The reason this names ends up in `ci`'s `current.json` and job summary, both published
+    artifacts, so anything a URL can carry as a credential (userinfo, a query string with a
+    key in it, a fragment) is dropped before the URL is written anywhere.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    url = (report.get("target") or {}).get("base_url")
+    if not url:
+        return "your target URL"
+    text = str(url).strip()
+    # Without `scheme://`, urlsplit reads `user:pass@host/path` as scheme `user` and keeps
+    # the rest, password included, as the path. Give it the `//` so userinfo and host are
+    # parsed as such; the scheme is then empty and is simply not printed.
+    parts = urlsplit(text if "://" in text or text.startswith("//") else "//" + text)
+    try:
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port else ""
+    except ValueError:
+        return "your target URL"
+    if not host:
+        return "your target URL"
+    if ":" in host:
+        host = f"[{host}]"
+    reduced = urlunsplit((parts.scheme, host + port, parts.path, "", ""))
+    return reduced.lstrip("/") if not parts.scheme else reduced
 
 def verdict_for(report: dict[str, Any], *, duty: str = "restore") -> tuple[str, str]:
     """The OPERATOR's reading of the run. Returns (verdict, one-line reason).
