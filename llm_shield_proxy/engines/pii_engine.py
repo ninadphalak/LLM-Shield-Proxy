@@ -151,8 +151,63 @@ def _is_payment_iin(digits: str) -> bool:
     return False
 
 
+# IBAN length per country code (ISO 13616, SWIFT IBAN registry, including the territories
+# that use their parent's format), and whether the national part may contain letters.
+_IBAN_FORMATS: Dict[str, Tuple[int, bool]] = {
+    "AD": (24, True), "AE": (23, False), "AL": (28, True), "AT": (20, False), "AX": (18, False),
+    "AZ": (28, True), "BA": (20, False), "BE": (16, False), "BG": (22, True), "BH": (22, True),
+    "BI": (27, False), "BL": (27, True), "BR": (29, True), "BY": (28, True), "CH": (21, True),
+    "CR": (22, False), "CY": (28, True), "CZ": (24, False), "DE": (22, False), "DJ": (27, False),
+    "DK": (18, False), "DO": (28, True), "EE": (20, False), "EG": (29, False), "ES": (24, False),
+    "FI": (18, False), "FK": (18, True), "FO": (18, False), "FR": (27, True), "GB": (22, True),
+    "GE": (22, True), "GF": (27, True), "GG": (22, True), "GI": (23, True), "GL": (18, False),
+    "GP": (27, True), "GR": (27, True), "GT": (28, True), "HN": (28, True), "HR": (21, False),
+    "HU": (28, False), "IE": (22, True), "IL": (23, False), "IM": (22, True), "IQ": (23, True),
+    "IS": (26, False), "IT": (27, True), "JE": (22, True), "JO": (30, True), "KW": (30, True),
+    "KZ": (20, True), "LB": (28, True), "LC": (32, True), "LI": (21, True), "LT": (20, False),
+    "LU": (20, True), "LV": (21, True), "LY": (25, False), "MC": (27, True), "MD": (24, True),
+    "ME": (22, False), "MF": (27, True), "MK": (19, True), "MN": (20, False), "MQ": (27, True),
+    "MR": (27, False), "MT": (31, True), "MU": (30, True), "NC": (27, True), "NI": (28, True),
+    "NL": (18, True), "NO": (15, False), "OM": (23, True), "PF": (27, True), "PK": (24, True),
+    "PL": (28, False), "PM": (27, True), "PS": (29, True), "PT": (25, False), "QA": (29, True),
+    "RE": (27, True), "RO": (24, True), "RS": (22, False), "RU": (33, True), "SA": (24, True),
+    "SC": (31, True), "SD": (18, False), "SE": (24, False), "SI": (19, False), "SK": (24, False),
+    "SM": (27, True), "SO": (23, False), "ST": (25, False), "SV": (28, True), "TF": (27, True),
+    "TL": (23, False), "TN": (24, False), "TR": (26, True), "UA": (29, True), "VA": (22, False),
+    "VG": (24, True), "WF": (27, True), "XK": (20, False), "YE": (30, True), "YT": (27, True),
+}
+
+
+def _iban_pattern() -> str:
+    """Every registered IBAN at its country's exact length, uppercase, written either
+    without spaces or in the printed form (groups of four, one space between groups)."""
+    groups: Dict[Tuple[int, bool], List[str]] = {}
+    for country, shape in _IBAN_FORMATS.items():
+        groups.setdefault(shape, []).append(country)
+    alternatives = []
+    for (length, alphanumeric), countries in sorted(groups.items()):
+        char = "[0-9A-Z]" if alphanumeric else r"\d"
+        whole_groups, remainder = divmod(length - 4, 4)
+        body = f"(?: ?{char}{{4}}){{{whole_groups}}}"
+        if remainder:
+            body += f" ?{char}{{{remainder}}}"
+        alternatives.append(f"(?:{'|'.join(sorted(countries))})\\d{{2}}{body}")
+    return "(?:" + "|".join(alternatives) + ")"
+
+
+def _iban_mod97_ok(value: str) -> bool:
+    compact = value.replace(" ", "")
+    rearranged = compact[4:] + compact[:4]
+    return int("".join(str(int(character, 36)) for character in rearranged)) % 97 == 1
+
+
 def classify_tier1_match(entity_type: str, matched: str) -> Tuple[bool, str]:
     """Return (keep_the_span, confidence)."""
+    if entity_type == "IBAN":
+        # MOD-97 raises confidence only: a real IBAN with one mistyped character fails the
+        # check and must still be redacted.
+        return True, "high" if _iban_mod97_ok(matched) else "medium"
+
     if entity_type == "CREDIT_CARD":
         digits = "".join(character for character in matched if character.isdigit())
         if not _CARD_MIN_DIGITS <= len(digits) <= _CARD_MAX_DIGITS:
@@ -254,6 +309,12 @@ TIER1_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
             + _ASCII_RIGHT_BOUNDARY
         ),
     ),
+    # International bank account number. The shape is the precision control: a registered
+    # country code, two check digits and that country's exact length, digits only where
+    # the country allows no letters. Uppercase only, as with UK_NINO, so prose such as
+    # "be12 the best teams" is never rewritten. It starts before any card-shaped digit run
+    # inside it, so the earliest-start rule gives the whole value to this span.
+    ("IBAN", re.compile(_ASCII_LEFT_BOUNDARY + _iban_pattern() + _ASCII_RIGHT_BOUNDARY)),
 ]
 
 # ---------------------------------------------------------------------------

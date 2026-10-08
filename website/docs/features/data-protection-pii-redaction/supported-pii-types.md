@@ -21,6 +21,8 @@ Tier 1 uses highly optimized `google-re2` regular expressions to detect determin
 9. **`SSH_PRIVATE_KEY`**: Private-key PEM/OpenSSH header boundaries.
 10. **`JWT_TOKEN`**: Three-segment JWT-shaped strings (signatures/claims are not cryptographically validated).
 11. **`MRN`**: Project-specific Medical Record Number shapes (e.g., `NNN-NN-NNX`).
+12. **`UK_NINO`**: UK National Insurance numbers (e.g., `AB 12 34 56 C`), uppercase, with HMRC's excluded prefix letters and pairs rejected.
+13. **`IBAN`**: International Bank Account Numbers for every country in the IBAN registry, at that country's exact length, written without spaces or in groups of four (e.g., `DE89 3704 0044 0532 0130 00`). Uppercase only. The MOD-97 check digits only raise confidence: an IBAN with a typo is still redacted.
 
 ### Validation is a Signal, Not a Gate
 Tier 1 structural checks are confidence signals, not definitive gates. A ledger code formatted as `ddd-dd-dddd` will trigger the SSN redaction rule. A 16-digit order number will trigger the Credit Card rule. The pattern alone cannot safely distinguish them.

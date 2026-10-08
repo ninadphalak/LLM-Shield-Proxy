@@ -43,6 +43,8 @@ If your compliance policies depend on specific Presidio entity types, use this t
 | `CREDIT_CARD` | `CREDIT_CARD` | Tier 1 (google-re2 Regex) |
 | `IP_ADDRESS` | `IP_ADDRESS` | Tier 1 (google-re2 Regex) |
 | `MEDICAL_LICENSE` | `MRN` | Tier 1 (google-re2 Regex) |
+| `IBAN_CODE` | `IBAN` | Tier 1 (google-re2 Regex) |
+| `UK_NINO` | `UK_NINO` | Tier 1 (google-re2 Regex) |
 | `CRYPTO` | `AWS_API_KEY`, `GITHUB_PAT`, `JWT_TOKEN` | Tier 1 (google-re2 Regex) |
 | Custom (high-entropy) | `SECRET_KEY` | Tier 2 (Shannon Entropy) |
 

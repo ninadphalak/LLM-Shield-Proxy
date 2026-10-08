@@ -230,6 +230,122 @@ def test_pii_tier1_uk_nino_leaves_ordinary_prose_untouched():
         assert redacted == sentence, sentence
 
 
+# Example IBANs from the SWIFT IBAN registry (not real accounts): printed and electronic forms,
+# digit-only and alphanumeric national parts, the shortest (NO, 15) and a long one (MT, 31).
+REGISTRY_IBANS = (
+    "DE89 3704 0044 0532 0130 00",
+    "DE89370400440532013000",
+    "GB29 NWBK 6016 1331 9268 19",
+    "FR14 2004 1010 0505 0001 3M02 606",
+    "NL91 ABNA 0417 1643 00",
+    "NO93 8601 1117 947",
+    "MT84 MALT 0110 0001 2345 MTLC AST0 01S",
+)
+
+
+def test_pii_tier1_iban_redaction():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+
+    for secret in REGISTRY_IBANS:
+        vault = Vault(synthetic=False)
+        sample_text = f"Please pay {secret} by Friday."
+
+        redacted = engine.redact_text(sample_text, vault)
+
+        assert redacted == "Please pay [IBAN_1] by Friday.", secret
+        assert vault.rehydrate(redacted) == sample_text, secret
+
+
+def test_pii_tier1_iban_owns_the_card_shaped_run_inside_it():
+    """"3704 0044 0532 0130 00" inside a German IBAN is also a card-shaped run. The IBAN
+    starts first, so it must win the whole value instead of leaving "DE89" behind."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+
+    redacted = engine.redact_text("IBAN DE89 3704 0044 0532 0130 00 end", vault)
+
+    assert redacted == "IBAN [IBAN_1] end"
+
+
+def test_pii_tier1_iban_matches_when_glued_to_non_latin_script():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=False)
+    sample_text = "账号DE89370400440532013000谢谢"
+
+    redacted = engine.redact_text(sample_text, vault)
+
+    assert "[IBAN_1]" in redacted
+    assert "DE89370400440532013000" not in redacted
+    assert vault.rehydrate(redacted) == sample_text
+
+
+def test_pii_tier1_iban_failing_mod97_is_still_redacted():
+    """MOD-97 is a confidence signal, not a gate: one mistyped digit in a real IBAN fails
+    the checksum and must still never reach the upstream."""
+    from llm_shield_proxy.engines.pii_engine import classify_tier1_match
+
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    typo = "DE88 3704 0044 0532 0130 00"
+
+    assert engine.redact_text(f"pay {typo} now", Vault(synthetic=False)) == "pay [IBAN_1] now"
+    assert classify_tier1_match("IBAN", typo) == (True, "medium")
+    assert classify_tier1_match("IBAN", "DE89 3704 0044 0532 0130 00") == (True, "high")
+
+
+def test_pii_tier1_iban_rejects_invalid_shapes():
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+
+    rejected = (
+        "DE89 3704 0044 0532 0130 0",      # one character short for DE
+        "DE89 3704 0044 0532 0130 000",    # one character long for DE
+        "XX89370400440532013000",          # not a registered country code
+        "DE89 3704 0044 0532 0130 0A",     # a letter where Germany allows only digits
+        "DE89 37 04 00 44 05 32 01 30 00", # not the printed grouping of four
+        "de89370400440532013000",          # lower case is treated as prose, as for UK_NINO
+    )
+
+    for candidate in rejected:
+        redacted = engine.redact_text(f"value {candidate} end", Vault(synthetic=False))
+        assert "IBAN" not in redacted, candidate
+
+
+def test_pii_tier1_iban_synthetic_stand_in_is_an_iban_and_restores():
+    """In synthetic mode the model should see a plausible IBAN, not a random word."""
+    from llm_shield_proxy.engines.pii_engine import TIER1_PATTERNS
+
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+    vault = Vault(synthetic=True)
+    sample_text = "Please pay DE89 3704 0044 0532 0130 00 by Friday."
+
+    redacted = engine.redact_text(sample_text, vault)
+    (stand_in,) = vault.token_to_original
+
+    assert "DE89 3704 0044 0532 0130 00" not in redacted
+    assert dict(TIER1_PATTERNS)["IBAN"].fullmatch(stand_in), stand_in
+    assert vault.rehydrate(redacted) == sample_text
+
+
+def test_pii_tier1_iban_leaves_ordinary_prose_untouched():
+    """Many registered country codes are also English words or common abbreviations
+    (NO, AT, BE, IS, IT, ME, SO, PL, GB). Uppercase plus the exact per-country length keeps
+    them out of ordinary text."""
+    engine = PIIEngine(enable_tier2=False, enable_tier3=False)
+
+    prose = (
+        "NO 12 items shipped",
+        "AT 2024 we met",
+        "BE12 the best teams",
+        "IT 2025 budget",
+        "ISO 13616 IS the IBAN standard",
+        "PL 2025 Q3 report: 28 pages",
+        "GB 2026 sales up 22%",
+        "SO 12 OF THEM LEFT EARLY",
+    )
+
+    for sentence in prose:
+        assert engine.redact_text(sentence, Vault(synthetic=False)) == sentence, sentence
+
+
 def test_pii_tier2_shannon_entropy_redaction():
     """Tests Tier 2 Shannon entropy detection for raw unformatted high-entropy secrets."""
     engine = PIIEngine(enable_tier2=True, enable_tier3=False, entropy_threshold=4.5)
