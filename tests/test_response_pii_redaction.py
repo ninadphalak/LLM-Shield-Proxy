@@ -89,6 +89,24 @@ def test_every_split_point_of_a_model_value_is_caught(split, response_redaction_
     assert USER_EMAIL in seen, f"fidelity lost when split after {split} characters"
 
 
+MODEL_IBANS = ("DE89 3704 0044 0532 0130 00", "DE89370400440532013000")
+
+
+@pytest.mark.parametrize(
+    ("value", "split"),
+    [(value, split) for value in MODEL_IBANS for split in range(1, len(value))],
+)
+def test_every_split_point_of_a_model_iban_is_caught(value, split, response_redaction_on):
+    """The printed form has spaces inside the value, and the retention boundary prefers a
+    space, so every cut is checked rather than assumed."""
+    vault, token = _vault_with_user_email()
+    seen = _drive([f"You sent: {token}. Pay ", value[:split], value[split:], " today"], vault)
+
+    assert value not in seen, f"leaked when split after {split} characters"
+    assert value.replace(" ", "") not in seen.replace(" ", ""), f"leaked when split after {split}"
+    assert USER_EMAIL in seen, f"fidelity lost when split after {split} characters"
+
+
 def test_value_at_the_very_end_of_the_stream_is_caught(response_redaction_on):
     """The retained tail is never scanned until the stream ends, so a value placed last
     is exactly where an attacker would put it."""

@@ -84,6 +84,8 @@ def _synthetic_for(fake: Any, entity_type: str, seed: int) -> str:
         return fake.ipv4()
     if "CREDIT_CARD" in entity_type:
         return fake.credit_card_number()
+    if "IBAN" in entity_type:
+        return fake.iban()
     if "KEY" in entity_type or "SECRET" in entity_type or "TOKEN" in entity_type or "PAT" in entity_type:
         # Synthetic identifier generation, not a cryptographic operation.
         alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
