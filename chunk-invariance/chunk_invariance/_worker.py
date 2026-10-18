@@ -13,7 +13,6 @@ import inspect
 import json
 import os
 import sys
-import traceback
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -109,11 +108,7 @@ def check(request: Dict[str, Any]) -> Dict[str, Any]:
                 splits_checked=exc.splits_tried,
             )
         except Exception as exc:
-            entry.update(
-                passed=False,
-                raised=f"{type(exc).__name__}: {exc}",
-                traceback="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)[-3:]),
-            )
+            entry.update(passed=False, raised=f"{type(exc).__name__}: {exc}")
         results.append(entry)
     return {"ok": True, "results": results}
 
@@ -128,6 +123,16 @@ def main() -> None:
         reply = {"ok": False, "error": str(exc)}
     except Exception as exc:
         reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    except SystemExit as exc:
+        # The code may be a message, and a message can hold anything, so only an int is repeated.
+        code = exc.code if isinstance(exc.code, int) else "with a message"
+        reply = {
+            "ok": False,
+            "error": f"the target called sys.exit ({code}) while it was imported or run. What it printed is "
+            "not shown, because it can hold anything your code wrote. Import the module yourself to see it.",
+        }
+    except BaseException as exc:
+        reply = {"ok": False, "error": f"the check stopped on {type(exc).__name__}"}
     finally:
         sys.stdout = real_stdout
     real_stdout.write(json.dumps(reply))

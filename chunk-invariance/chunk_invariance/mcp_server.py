@@ -35,8 +35,9 @@ else:
 _SAFETY = (
     "It imports and runs the user's own code from project_dir on this machine, in a separate "
     "process that is stopped after timeout_seconds. The server makes no network calls and writes no "
-    "files. Its result repeats the samples and any value the filter leaked, and that result goes into "
-    "this conversation, so use synthetic samples only, never a real secret or real personal data."
+    "files. Its result repeats the samples, any value the filter leaked and the message of any exception "
+    "the user's code raised, and that result goes into this conversation, so use synthetic samples only, "
+    "never a real secret or real personal data. What the user's code prints is never returned."
 )
 
 INSTRUCTIONS = (

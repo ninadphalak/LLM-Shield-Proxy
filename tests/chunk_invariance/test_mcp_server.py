@@ -163,6 +163,34 @@ def test_a_bad_target_gives_a_clear_error(target, message):
         run_check(str(LIBRARY_DIST), target)
 
 
+@pytest.mark.parametrize(
+    ("exit_call", "message"),
+    [
+        ("sys.exit(1)", "the target called sys.exit (1) while it was imported or run"),
+        ('sys.exit("bad config: " + TOKEN)', "the target called sys.exit (with a message)"),
+        ("os._exit(3)", "exited with code 3 before it reported a result"),
+    ],
+)
+def test_what_a_crashing_import_printed_is_never_returned(tmp_path, exit_call, message):
+    # A config module that prints a value and exits is ordinary; the value must not reach the
+    # assistant through the error message.
+    project = _project(
+        tmp_path,
+        "badconfig",
+        f"""
+        import os, sys
+
+        TOKEN = "printed-" + "value-0123"
+        print("bad config:", TOKEN)
+        print("bad config:", TOKEN, file=sys.stderr)
+        {exit_call}
+        """,
+    )
+    with pytest.raises(CheckError, match=re.escape(message)) as caught:
+        run_check(str(project), "badconfig:stream", samples=["abc"])
+    assert "printed-value-0123" not in str(caught.value)
+
+
 def test_a_bad_project_dir_or_splits_value_is_refused_before_running():
     with pytest.raises(CheckError, match="is not a directory"):
         run_check(str(LIBRARY_DIST / "missing"), f"{EXAMPLES}:design_a")

@@ -175,9 +175,12 @@ def run_check(
     try:
         reply = json.loads(completed.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError):
-        tail = "\n".join(completed.stderr.strip().splitlines()[-8:])
+        # Its output is not repeated: it can hold anything the user's code printed, and this
+        # message goes back to the assistant.
         raise CheckError(
-            f"the check process exited with code {completed.returncode} and no result. Last lines of its output:\n{tail}"
+            f"the check process exited with code {completed.returncode} before it reported a result (for "
+            "example os._exit, or a crash in native code). Its output is not shown, because it can hold "
+            "anything your code printed. Import the module yourself in project_dir to see it."
         ) from None
     if not reply.get("ok"):
         raise CheckError(reply.get("error", "unknown error"))

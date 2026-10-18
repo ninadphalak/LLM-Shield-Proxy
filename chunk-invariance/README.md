@@ -95,7 +95,8 @@ your provider's format. A sample the filter does not change tests nothing, and t
 
 Never pass a real secret or real personal data as a sample. The samples, and any value your filter
 leaks, come back in the tool's result, and your assistant sends that result to its model provider
-like the rest of the conversation. The same samples also end up in the generated test file.
+like the rest of the conversation. So does the message of any exception your code raises, but
+nothing your code prints. The same samples also end up in the generated test file.
 
 Checking a function runs your code. The server imports your module on your own machine, in a
 separate process that is stopped after a timeout (60 seconds by default). If your project has a
