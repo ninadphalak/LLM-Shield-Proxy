@@ -441,6 +441,18 @@ jobs:
           # --confcutdir keeps pytest from loading tests/conftest.py, which imports the gateway.
           python -m pytest --confcutdir=tests/chunk_invariance tests/chunk_invariance -v -p no:cacheprovider
 
+      - name: Run the MCP server tests with the mcp extra
+        run: |
+          pip install "./chunk-invariance[mcp]"
+          if python -c "import sys; sys.exit(sys.version_info < (3, 10))"; then
+            python -c "import mcp.server.mcpserver"
+            python -m pytest --confcutdir=tests/chunk_invariance tests/chunk_invariance -v -p no:cacheprovider
+          else
+            # The MCP SDK needs 3.10+, so on 3.9 the extra installs nothing and the command says why.
+            if chunk-invariance-mcp 2> mcp.err; then exit 1; fi
+            grep -q "needs Python 3.10 or later" mcp.err
+          fi
+
   chunk-invariance-js:
     name: chunk-invariance (TypeScript) on Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
