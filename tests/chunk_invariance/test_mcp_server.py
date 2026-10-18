@@ -247,6 +247,10 @@ def test_the_server_lists_three_tools_and_says_it_runs_local_code():
     assert sorted(by_name) == ["check_stream_filter", "explain", "write_regression_test"]
     for name in ("check_stream_filter", "write_regression_test"):
         assert "runs the user's own code from project_dir on this machine" in by_name[name].description
+        # The result reaches the assistant's model provider, so real values must never be samples.
+        assert "use synthetic samples only, never a real secret" in by_name[name].description
+        samples = by_name[name].input_schema["properties"]["samples"]["description"]
+        assert "Never real secrets or personal data" in samples
         assert by_name[name].input_schema["required"] == ["project_dir", "target"]
 
 

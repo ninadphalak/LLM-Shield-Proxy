@@ -90,13 +90,17 @@ example that `'sk-AbCd1234'` came out unredacted when the input was cut into `'u
 so the check stays in your CI. `explain` is one paragraph on why per-chunk filtering leaks.
 
 The default samples (an email, an SSN, a card number and a few API-key shapes) are all fake. Pass
-your own samples holding what your filter really redacts. A sample the filter does not change
-tests nothing, and the tool says so.
+your own made-up samples in the formats your filter redacts, such as a key you typed yourself in
+your provider's format. A sample the filter does not change tests nothing, and the tool says so.
+
+Never pass a real secret or real personal data as a sample. The samples, and any value your filter
+leaks, come back in the tool's result, and your assistant sends that result to its model provider
+like the rest of the conversation. The same samples also end up in the generated test file.
 
 Checking a function runs your code. The server imports your module on your own machine, in a
 separate process that is stopped after a timeout (60 seconds by default). If your project has a
-`.venv`, that is the Python it uses. It makes no network calls, sends no telemetry and writes no files. Saving
-the test file is up to you and your assistant.
+`.venv`, that is the Python it uses. The server itself makes no network calls, sends no telemetry
+and writes no files. Saving the test file is up to you and your assistant.
 
 ## API
 

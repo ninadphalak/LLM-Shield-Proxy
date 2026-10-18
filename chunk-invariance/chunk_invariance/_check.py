@@ -261,7 +261,7 @@ def format_report(reply: Dict[str, Any]) -> str:
     if unchanged:
         lines.append(
             f"Samples {', '.join(map(str, unchanged))} were not changed by the whole-text filter, so they test "
-            "nothing for this filter. Pass samples holding values it redacts."
+            "nothing for this filter. Pass made-up samples in the formats it redacts (never real values)."
         )
         lines.append("")
     if failed:

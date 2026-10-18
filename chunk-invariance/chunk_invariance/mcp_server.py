@@ -3,7 +3,8 @@
 Needs the ``mcp`` extra (``pip install "chunk-invariance[mcp]"``); this is the only module that
 imports the MCP SDK. ``chunk-invariance-mcp`` starts it on stdio. It runs on the user's machine:
 checking a filter imports and runs the user's own code there, in a subprocess with a timeout.
-It makes no network calls and writes no files.
+The server makes no network calls and writes no files, but its results go back to the assistant,
+which sends them to its model provider: the samples must be synthetic.
 """
 
 import sys
@@ -33,7 +34,9 @@ else:
 
 _SAFETY = (
     "It imports and runs the user's own code from project_dir on this machine, in a separate "
-    "process that is stopped after timeout_seconds. No network calls; it writes no files."
+    "process that is stopped after timeout_seconds. The server makes no network calls and writes no "
+    "files. Its result repeats the samples and any value the filter leaked, and that result goes into "
+    "this conversation, so use synthetic samples only, never a real secret or real personal data."
 )
 
 INSTRUCTIONS = (
@@ -89,7 +92,9 @@ def _build() -> "MCPServer":
             description=(
                 "Input texts that contain values the filter should redact or rewrite. Default: synthetic "
                 f"samples (an email, an SSN, a card number, API-key shapes; all fake): {list(DEFAULT_SAMPLES)!r}. "
-                "Pass samples holding the values this filter actually matches, or the check proves nothing."
+                "Pass made-up values in the formats this filter matches (for example a key typed in the "
+                "provider's format), or the check proves nothing. Never real secrets or personal data: "
+                "samples are echoed in the result and in the generated test file."
             )
         ),
     ]
