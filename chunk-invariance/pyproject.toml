@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chunk-invariance"
-version = "0.1.0"
+version = "0.2.0"
 description = "Assert that a streaming filter gives the same output however its input is split into chunks."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,7 @@ keywords = [
     "guardrails",
     "chunk-boundary",
     "property-based-testing",
+    "mcp",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -42,6 +43,11 @@ dependencies = []
 
 [project.optional-dependencies]
 hypothesis = ["hypothesis>=6"]
+# The MCP server for AI coding assistants. Only chunk_invariance.mcp_server imports it; the SDK needs Python 3.10+.
+mcp = ["mcp>=2.3.0,<3; python_version >= '3.10'"]
+
+[project.scripts]
+chunk-invariance-mcp = "chunk_invariance.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/ninadphalak/LLM-Shield-Proxy/tree/main/chunk-invariance"

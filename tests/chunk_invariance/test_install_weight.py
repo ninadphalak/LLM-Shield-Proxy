@@ -19,6 +19,8 @@ sys.path.insert(0, {dist!r})
 before = set(sys.modules)
 import chunk_invariance
 import chunk_invariance.examples
+import chunk_invariance._check
+import chunk_invariance._worker
 third = set()
 for name, module in list(sys.modules.items()):
     if name in before or module is None:
@@ -47,6 +49,20 @@ def test_no_module_names_the_gateway():
 def test_only_the_strategies_module_imports_hypothesis():
     importers = sorted(p.name for p in LIBRARY_PACKAGE.glob("*.py") if "import hypothesis" in p.read_text(encoding="utf-8") or "from hypothesis" in p.read_text(encoding="utf-8"))
     assert importers == ["strategies.py"], importers
+
+
+def test_only_the_mcp_server_module_imports_mcp():
+    import re
+
+    pattern = re.compile(r"^\s*(from|import) (mcp|pydantic)\b", re.MULTILINE)
+    importers = sorted(p.name for p in LIBRARY_PACKAGE.glob("*.py") if pattern.search(p.read_text(encoding="utf-8")))
+    assert importers == ["mcp_server.py"], importers
+
+
+def test_the_mcp_extra_and_its_command_are_declared():
+    text = (LIBRARY_DIST / "pyproject.toml").read_text(encoding="utf-8")
+    assert "mcp = [\"mcp>=2.3.0,<3; python_version >= '3.10'\"]" in text
+    assert 'chunk-invariance-mcp = "chunk_invariance.mcp_server:main"' in text
 
 
 def test_declares_no_runtime_dependencies():
