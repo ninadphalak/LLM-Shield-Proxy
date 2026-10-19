@@ -94,3 +94,19 @@ def test_the_typescript_sources_import_only_each_other():
     for path in (JS_DIST / "src").glob("*.ts"):
         for spec in re.findall(r'from\s+"([^"]+)"', path.read_text(encoding="utf-8")):
             assert spec.startswith("./"), f"{path.name} imports {spec}"
+
+
+def test_the_mcp_registry_entry_matches_the_package():
+    # The MCP Registry checks that the PyPI description (this README) names the server, and a
+    # published PyPI description cannot be changed, so a mismatch costs a release.
+    import re
+
+    entry = json.loads((LIBRARY_DIST / "server.json").read_text(encoding="utf-8"))
+    readme = (LIBRARY_DIST / "README.md").read_text(encoding="utf-8")
+    assert f"<!-- mcp-name: {entry['name']} -->" in readme
+    version = re.search(r'\nversion = "([^"]+)"\n', (LIBRARY_DIST / "pyproject.toml").read_text(encoding="utf-8")).group(1)
+    (package,) = entry["packages"]
+    assert entry["version"] == package["version"] == version
+    assert package["identifier"] == "chunk-invariance"
+    assert [a["value"] for a in package["runtimeArguments"]] == [f"chunk-invariance[mcp]=={version}", "chunk-invariance-mcp"]
+    assert len(entry["description"]) <= 100

@@ -60,6 +60,8 @@ lists runs exactly those. It cannot prove a filter correct for inputs you did no
 
 ## Use it from your AI assistant
 
+<!-- mcp-name: io.github.ninadphalak/chunk-invariance -->
+
 Do you use Claude Code, Cursor or Claude Desktop? The package has an optional MCP server. With it
 you can ask the assistant to run the every-split check on your own streaming function, and then
 to add the test to your repo.

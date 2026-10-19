@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chunk-invariance"
 version = "0.2.0"
-description = "Assert that a streaming filter gives the same output however its input is split into chunks."
+description = "Test that a streaming redactor or LLM guardrail cannot leak a secret split across chunks."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
@@ -23,6 +23,10 @@ keywords = [
     "chunk-boundary",
     "property-based-testing",
     "mcp",
+    "mcp-server",
+    "pii",
+    "secrets",
+    "llm",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
