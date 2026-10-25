@@ -69,6 +69,9 @@ jobs:
   presidio-reproduction:
     name: Pinned Presidio Integration Reproduction
     runs-on: ubuntu-latest
+    # The run takes about two minutes. A stalled image download from mcr.microsoft.com
+    # once held this job for the six-hour default, so it is bounded.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -77,8 +80,15 @@ jobs:
       - run: python -m pip install './pii-leak-benchmark[validate]'
       - name: Start the pinned detector
         run: |
-          docker run -d --name benchmark-presidio -p 127.0.0.1:5002:3000 \
-            mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+          image=mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+          # Pulled explicitly, each try bounded: `docker run` pulls without a time limit,
+          # and a stalled registry download then waits forever. Same pinned digest.
+          for attempt in 1 2 3; do
+            if timeout 300 docker pull "$image"; then break; fi
+            if [ "$attempt" = 3 ]; then echo "Could not pull $image after 3 tries"; exit 1; fi
+            sleep 15
+          done
+          docker run -d --name benchmark-presidio -p 127.0.0.1:5002:3000 "$image"
           for i in $(seq 1 90); do
             if curl --fail --silent http://127.0.0.1:5002/health; then exit 0; fi
             sleep 2
