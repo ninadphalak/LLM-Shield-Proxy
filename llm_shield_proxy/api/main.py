@@ -39,7 +39,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
-from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.adapters.provider_factory import is_anthropic_host, resolve_provider
 from llm_shield_proxy.api.guard_router import guard_router
 from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.api.mcp_router import mcp_router, warn_if_mcp_policy_is_empty_at_startup
@@ -71,6 +71,7 @@ from llm_shield_proxy.security.tool_rbac import (
 from llm_shield_proxy.security.watermark import generate_watermark_text
 from llm_shield_proxy.streaming.streaming import (
     json_escaped_vault,
+    redact_model_originated_text,
     redact_model_originated_tree,
     rehydrate_sse_stream,
 )
@@ -762,19 +763,64 @@ PROVIDER_KEY_MAP: Dict[str, str] = {
 }
 
 
+def _provider_specific_key(hostname: str) -> Optional[str]:
+    """The key configured for one known provider host, without the UPSTREAM_API_KEY fallback."""
+    from llm_shield_proxy.security.vault_client import vault_provider
+
+    attr_name = PROVIDER_KEY_MAP.get(hostname)
+    if not attr_name:
+        return None
+    if settings.ENABLE_VAULT_SECRETS:
+        key = vault_provider.get_secret(attr_name)
+        if key:
+            return key
+    return getattr(settings, attr_name, None) or None
+
+
+def proxy_key_for_client_chosen_host(hostname: Optional[str]) -> Optional[str]:
+    """The proxy-held key a host named by the CLIENT may receive, or None for none.
+
+    X-Upstream-Base-Url and X-Shield-Fallback-Url let a caller pick the destination. A
+    virtual key exists so callers never hold the provider key, so a caller-picked host
+    gets a proxy-held key only when it is a known provider's own API host (that
+    provider's key and nothing else) or the operator's configured upstream host.
+    Anything else gets no key: the IP pinning stops SSRF to internal hosts, not a key
+    being handed to a public host the caller runs.
+    """
+    host = (hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return None
+    configured = (urlparse(settings.UPSTREAM_BASE_URL).hostname or "").lower().rstrip(".")
+    if configured and host == configured:
+        # The host the proxy sends to anyway, with the key it would use anyway.
+        return resolve_upstream_key(host)
+    if host in PROVIDER_KEY_MAP:
+        return _provider_specific_key(host)
+    return None
+
+
+def _replace_upstream_credential(headers: Dict[str, Any], key: str, host: Optional[str]) -> None:
+    """Puts `key` on a request as the ONLY credential, in the header `host` reads.
+
+    A failover switches provider. Replacing only `authorization` left the first
+    provider's key in `x-api-key` (the Anthropic adapter's header), so it went to the
+    fallback as well.
+    """
+    for name in _CREDENTIAL_HEADERS:
+        headers.pop(name, None)
+    if is_anthropic_host(host):
+        headers["x-api-key"] = key
+    else:
+        headers["authorization"] = f"Bearer {key}"
+
+
 def resolve_upstream_key(hostname: str) -> Optional[str]:
     """Resolve centralized enterprise provider key."""
     from llm_shield_proxy.security.vault_client import vault_provider
 
-    attr_name = PROVIDER_KEY_MAP.get(hostname)
-    if attr_name:
-        if settings.ENABLE_VAULT_SECRETS:
-            key = vault_provider.get_secret(attr_name)
-            if key:
-                return key
-        key = getattr(settings, attr_name, None)
-        if key:
-            return key
+    key = _provider_specific_key(hostname)
+    if key:
+        return key
 
     if settings.ENABLE_VAULT_SECRETS:
         key = vault_provider.get_secret("UPSTREAM_API_KEY")
@@ -870,12 +916,23 @@ async def _proxy_catch_all_internal(
     else:
         upstream_base = settings.UPSTREAM_BASE_URL
 
+    # The host the CLIENT picked, when it picked one; see proxy_key_for_client_chosen_host.
+    client_chosen_host: Optional[str] = None
+
     # SSRF Protection on Dynamic Client Upstream Override
     if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
         if x_upstream_base_url.startswith(("http://", "https://")):
             parsed = urlparse(x_upstream_base_url)
             hostname = parsed.hostname or ""
             target_host = parsed.netloc
+            try:
+                parsed.port  # parses the port; a malformed one raises here, not later
+            except ValueError:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}},
+                )
+            client_chosen_host = hostname
             is_safe, resolved_ip = await _resolve_and_validate_hostname(hostname)
             if not is_safe or not resolved_ip:
                 return JSONResponse(
@@ -950,11 +1007,31 @@ async def _proxy_catch_all_internal(
         else:
             virtual_key_id = "anonymous"
 
+    # Set when the proxy, not the caller, supplies the credential on this request.
+    proxy_key_in_use = is_virtual_key or (settings.OVERRIDE_CLIENT_AUTH and bool(settings.UPSTREAM_API_KEY))
+    if proxy_key_in_use and client_chosen_host and proxy_key_for_client_chosen_host(client_chosen_host) is None:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "message": (
+                        "X-Upstream-Base-Url names a host that may not receive the proxy's provider key. "
+                        "Use a known provider host, the configured upstream, or your own provider key."
+                    ),
+                    "type": "security_error",
+                }
+            },
+        )
+
     # Centralized Virtual Key Swapping
     if is_virtual_key:
         parsed_url = urlparse(upstream_base)
         hostname = parsed_url.hostname or ""
-        resolved_key = resolve_upstream_key(hostname)
+        resolved_key = (
+            proxy_key_for_client_chosen_host(client_chosen_host)
+            if client_chosen_host
+            else resolve_upstream_key(hostname)
+        )
 
         if resolved_key:
             headers["authorization"] = f"Bearer {resolved_key}"
@@ -976,7 +1053,8 @@ async def _proxy_catch_all_internal(
                 },
             )
     elif settings.OVERRIDE_CLIENT_AUTH and settings.UPSTREAM_API_KEY:
-        headers["authorization"] = f"Bearer {settings.UPSTREAM_API_KEY}"
+        injected = proxy_key_for_client_chosen_host(client_chosen_host) if client_chosen_host else None
+        headers["authorization"] = f"Bearer {injected or settings.UPSTREAM_API_KEY}"
         headers.pop("x-api-key", None)
         headers.pop("x-goog-api-key", None)
         headers.pop("api-key", None)
@@ -1248,16 +1326,23 @@ async def _proxy_catch_all_internal(
                             headers={"Retry-After": "60"},
                         )
 
-                # Inject Canary Tripwire Token after PII redaction to prevent stripping invisible Unicode
+                # Inject the canary after PII redaction, so redaction cannot rewrite it. The
+                # response check looks for CANARY_TOKEN, so CANARY_TOKEN is what goes in: the
+                # invisible watermark alone could never be matched, and the tripwire never
+                # fired. The watermark still follows it when a secret is set, so an echoed
+                # prompt also says which key and session it came from.
                 if enable_canary_tripwire and settings.CANARY_TOKEN:
-                    directive = generate_watermark_text(
-                        secret=settings.SHIELD_WATERMARK_SECRET,
-                        session_id=x_session_id or "unknown_session",
-                        virtual_key_id=virtual_key_id,
-                    )
+                    directive = f"\n{settings.CANARY_TOKEN}"
+                    if settings.SHIELD_WATERMARK_SECRET:
+                        directive += generate_watermark_text(
+                            secret=settings.SHIELD_WATERMARK_SECRET,
+                            session_id=x_session_id or "unknown_session",
+                            virtual_key_id=virtual_key_id,
+                        )
                     if isinstance(redacted_payload, dict):
                         if "messages" in redacted_payload and isinstance(redacted_payload["messages"], list):
-                            if redacted_payload["messages"] and redacted_payload["messages"][0].get("role") == "system" and isinstance(redacted_payload["messages"][0].get("content"), str):
+                            first = redacted_payload["messages"][0] if redacted_payload["messages"] else None
+                            if isinstance(first, dict) and first.get("role") == "system" and isinstance(first.get("content"), str):
                                 redacted_payload["messages"][0]["content"] += directive
                             else:
                                 redacted_payload["messages"].insert(0, {"role": "system", "content": directive})
@@ -1281,7 +1366,12 @@ async def _proxy_catch_all_internal(
                     # "traffic goes where UPSTREAM_BASE_URL says" absolute.
                     target_url = build_target_url(upstream_base, "v1/messages")
                     headers["anthropic-version"] = settings.ANTHROPIC_API_VERSION
-                    headers["x-api-key"] = headers.get("authorization", "").replace("Bearer ", "").strip()
+                    # Move a bearer credential into x-api-key. An Anthropic SDK caller sends
+                    # x-api-key and no Authorization; overwriting it unconditionally replaced
+                    # the caller's own key with "" and every such request answered 401.
+                    bearer = headers.get("authorization", "").replace("Bearer ", "").strip()
+                    if bearer:
+                        headers["x-api-key"] = bearer
                     headers.pop("authorization", None)
                 else:
                     redacted_bytes = orjson.dumps(redacted_payload)
@@ -1320,7 +1410,9 @@ async def _proxy_catch_all_internal(
             # UPSTREAM_BASE_URL) and is used directly.
             fallback_url_override: Optional[str] = None
             fallback_sni_hostname: Optional[str] = None
-            if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
+            # With failover off the header can never be acted on, so it is not inspected
+            # either: an inert header must not refuse an otherwise valid request.
+            if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE and settings.ENABLE_RETRY_FAILOVER:
                 parsed_fallback = urlparse(x_shield_fallback_url)
                 hostname = parsed_fallback.hostname or ""
                 # `.port` PARSES, and raises ValueError on a non-numeric or out-of-range
@@ -1349,6 +1441,38 @@ async def _proxy_catch_all_internal(
                 ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
                 port_str = f":{fallback_port}" if fallback_port else ""
                 fallback_url_override = f"{parsed_fallback.scheme}://{ip_str}{port_str}{parsed_fallback.path}"
+
+            # The credential a failover attempt carries. A client-picked fallback follows the
+            # same rule as X-Upstream-Base-Url: it never receives a proxy-held key it may not
+            # have. The configured FALLBACK_BASE_URL is the operator's and gets FALLBACK_API_KEY.
+            fallback_key: Optional[str] = None
+            if fallback_url_override:
+                configured_fallback_host = (
+                    (urlparse(settings.FALLBACK_BASE_URL).hostname or "").lower().rstrip(".")
+                    if settings.FALLBACK_BASE_URL
+                    else ""
+                )
+                if configured_fallback_host and (fallback_sni_hostname or "").lower().rstrip(".") == configured_fallback_host:
+                    # The caller named the operator's own fallback host: it gets what the
+                    # configured fallback gets, FALLBACK_API_KEY when one is set.
+                    fallback_key = settings.FALLBACK_API_KEY
+                elif proxy_key_in_use:
+                    fallback_key = proxy_key_for_client_chosen_host(fallback_sni_hostname)
+                    if fallback_key is None:
+                        return JSONResponse(
+                            status_code=403,
+                            content={
+                                "error": {
+                                    "message": (
+                                        "X-Shield-Fallback-Url names a host that may not receive the "
+                                        "proxy's provider key."
+                                    ),
+                                    "type": "security_error",
+                                }
+                            },
+                        )
+            elif settings.FALLBACK_API_KEY:
+                fallback_key = settings.FALLBACK_API_KEY
 
             max_retries = settings.MAX_RETRIES if settings.ENABLE_RETRY_FAILOVER else 0
 
@@ -1410,9 +1534,9 @@ async def _proxy_catch_all_internal(
                                 # hostname for TLS SNI; a configured fallback is a plain FQDN with
                                 # normal httpx hostname-based TLS.
                                 current_sni_hostname = fallback_sni_hostname
-                                if settings.FALLBACK_API_KEY:
-                                    current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
                                 fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_key:
+                                    _replace_upstream_credential(current_headers, fallback_key, fallback_host)
                                 if fallback_host:
                                     current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
@@ -1450,10 +1574,7 @@ async def _proxy_catch_all_internal(
                     applied_role_name=applied_role_name,
                 )
 
-                res_headers = dict(upstream_res.headers)
-                res_headers.pop("content-encoding", None)
-                res_headers.pop("content-length", None)
-                res_headers.pop("transfer-encoding", None)
+                res_headers = _without_framing_headers(upstream_res.headers)
 
                 async def wrapped_stream() -> AsyncGenerator[bytes, None]:
                     if upstream_res is None:
@@ -1548,9 +1669,9 @@ async def _proxy_catch_all_internal(
                                 # hostname for TLS SNI; a configured fallback is a plain FQDN with
                                 # normal httpx hostname-based TLS.
                                 current_sni_hostname = fallback_sni_hostname
-                                if settings.FALLBACK_API_KEY:
-                                    current_headers["authorization"] = f"Bearer {settings.FALLBACK_API_KEY}"
                                 fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_key:
+                                    _replace_upstream_credential(current_headers, fallback_key, fallback_host)
                                 if fallback_host:
                                     current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
@@ -1581,10 +1702,7 @@ async def _proxy_catch_all_internal(
                     applied_role_name=applied_role_name,
                 )
 
-                res_headers = dict(upstream_res.headers)
-                res_headers.pop("content-encoding", None)
-                res_headers.pop("content-length", None)
-                res_headers.pop("transfer-encoding", None)
+                res_headers = _without_framing_headers(upstream_res.headers)
 
                 try:
                     if enable_canary_tripwire and settings.CANARY_TOKEN and settings.CANARY_TOKEN in upstream_res.text:
@@ -1667,9 +1785,23 @@ async def _proxy_catch_all_internal(
                     )
                 except Exception as exc:
                     # Structured rehydration failed; fall back to rehydrating the raw body.
-                    logger.warning(f"Structured response rehydration failed, using raw-text fallback: {exc}")
+                    # Type name only: the message of a JSON error can quote the body.
+                    logger.warning(
+                        "Structured response rehydration failed (%s), using raw-text fallback",
+                        type(exc).__name__,
+                    )
                     loop = asyncio.get_running_loop()
-                    rehydrated_text = await loop.run_in_executor(None, vault.rehydrate, upstream_res.text)
+                    raw_text = upstream_res.text
+                    if settings.ENABLE_RESPONSE_PII_REDACTION:
+                        # The structured path scans model-originated text before restoring
+                        # the caller's values. The fallback must too, or a reply that is not
+                        # one JSON document (NDJSON, plain text) goes back unscanned.
+                        # A scanner error behaves as on the streaming path: logged, and the
+                        # text forwarded (see redact_model_originated_text).
+                        raw_text = await loop.run_in_executor(
+                            None, redact_model_originated_text, raw_text, vault
+                        )
+                    rehydrated_text = await loop.run_in_executor(None, vault.rehydrate, raw_text)
                     return Response(
                         content=rehydrated_text,
                         status_code=upstream_res.status_code,
@@ -1708,8 +1840,19 @@ async def _proxy_catch_all_internal(
     return Response(
         content=upstream_res.content,
         status_code=upstream_res.status_code,
-        headers=dict(upstream_res.headers),
+        headers=_without_framing_headers(upstream_res.headers),
     )
+
+
+# httpx decodes the body it was sent (the proxy drops the client's Accept-Encoding, so
+# httpx asks for gzip itself) and the proxy re-frames what it returns. The provider's
+# framing headers describe bytes the client never receives.
+_FRAMING_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding"})
+
+
+def _without_framing_headers(upstream_headers: Any) -> Dict[str, str]:
+    """The provider's response headers minus the ones that describe its wire encoding."""
+    return {name: value for name, value in upstream_headers.items() if name.lower() not in _FRAMING_HEADERS}
 
 
 def _append_watermark(res: Dict[str, Any], watermark_text: str) -> None:

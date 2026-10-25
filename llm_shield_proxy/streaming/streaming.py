@@ -26,6 +26,10 @@ class StreamCapacityExceeded(ValueError):
     """A deliberate safety limit was hit, which must never be forgiven by FAIL_OPEN."""
 
 
+class CanaryTripped(StreamCapacityExceeded):
+    """The canary token appeared in the decoded reply text. Never forgiven by FAIL_OPEN."""
+
+
 # Event keys whose values are structural.
 _SSE_STRUCTURAL_KEYS = frozenset(
     {"id", "object", "model", "role", "type", "finish_reason", "index", "created"}
@@ -138,12 +142,13 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
 
     try:
         spans = pii_engine.detect_spans(text)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         # Deliberately NOT fail-closed, unlike the request path. Failing closed here
         # means emitting nothing to the client, which breaks the response for a
         # scanner error rather than for a leak. The text is forwarded and the failure
         # is logged, so the gap is visible rather than silent.
-        logger.warning("Response PII scan failed; forwarding unscanned text", exc_info=True)
+        # Type name only: a traceback renders the exception message, which can quote the text.
+        logger.warning("Response PII scan failed (%s); forwarding unscanned text", type(exc).__name__)
         return text
 
     known = getattr(vault, "token_to_original", None) or {}
@@ -170,8 +175,8 @@ def redact_model_originated_text(text: str, vault: "Vault") -> str:
     if normalized != text:
         try:
             normalized_spans = pii_engine.detect_spans(normalized)
-        except Exception:  # noqa: BLE001
-            logger.warning("Normalized response scan failed; forwarding raw scan", exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Normalized response scan failed (%s); forwarding raw scan", type(exc).__name__)
             return redacted
         # Compare OCCURRENCE COUNTS, not membership. The test used to be "does this
         # value appear anywhere in the raw text", which a duplicate defeats: a response
@@ -485,11 +490,18 @@ class SSERehydrationBuffer:
 
     MAX_TAG_LENGTH: int = 64
 
-    def __init__(self, vault: Vault, max_output_bytes: Optional[int] = None) -> None:
+    def __init__(
+        self, vault: Vault, max_output_bytes: Optional[int] = None, canary: Optional[str] = None
+    ) -> None:
         self.vault: Vault = vault
         self.content_buffer: str = ""
         self.lexer: StreamingJSONLexer = StreamingJSONLexer()
         self.max_output_bytes = max_output_bytes
+        # The canary token, when the tripwire is on. A model streams it in pieces, one
+        # JSON event per piece, so the raw-bytes check upstream of this never sees it
+        # whole. It is matched here, in the decoded text, and any tail that could be its
+        # start is held back so no part of it is emitted before the match.
+        self.canary: Optional[str] = canary or None
 
     def _rehydrate(self, text: str, retention_length: int) -> str:
         # Only the built-in implementation declares the allocation-time cap.
@@ -544,6 +556,12 @@ class SSERehydrationBuffer:
                 if is_word_char and len(token) <= len(text) and is_word_char(token[-1]) and text.endswith(token):
                     max_k = max(max_k, len(token))
 
+        if self.canary:
+            for k in range(min(len(text), len(self.canary) - 1), max_k, -1):
+                if text.endswith(self.canary[:k]):
+                    max_k = k
+                    break
+
         # Check for partial [ENC_v1_ tokens for StatelessCryptoVault
         if type(self.vault).__name__ == "StatelessCryptoVault":
             last_bracket_idx = text.rfind("[")
@@ -564,6 +582,9 @@ class SSERehydrationBuffer:
 
         if delta_text:
             self.content_buffer += delta_text
+
+            if self.canary and self.canary in self.content_buffer:
+                raise CanaryTripped("Canary token found in the streamed reply")
 
             # Enforce maximum safety length on the buffer
             if len(self.content_buffer) > 64 * 1024:
@@ -686,7 +707,7 @@ async def rehydrate_sse_stream(
                     f"SSE stream opened more than {MAX_STREAM_WINDOWS} retention windows"
                 )
             created = SSERehydrationBuffer(
-                _channel_vault(key), max_output_bytes=max_output_piece_bytes
+                _channel_vault(key), max_output_bytes=max_output_piece_bytes, canary=canary_token
             )
             buffers[key] = created
             return created
@@ -1141,6 +1162,26 @@ async def rehydrate_sse_stream(
 
                 except Exception as e:
                     import logging
+
+                    if isinstance(e, CanaryTripped):
+                        # Same as the raw-bytes match above: abort, emit nothing more.
+                        from llm_shield_proxy.observability.audit import AuditLogger
+
+                        logging.getLogger("llm_shield").critical(
+                            "Canary Tripwire triggered in SSE content. Aborting connection natively."
+                        )
+                        AuditLogger.log_tripwire_event(
+                            session_id=getattr(vault, "session_id", "ephemeral"),
+                            path=path,
+                            virtual_key_id=getattr(vault, "virtual_key_id", "unknown"),
+                            request_id=request_id,
+                        )
+                        stream_aborted = True
+                        # What was queued before the match is already restored and safe: the
+                        # canary's possible start is held back in the window, never queued.
+                        for ready in outgoing.drain():
+                            yield ready
+                        return
 
                     buffered = outgoing.drain()
                     if buffered:

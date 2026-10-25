@@ -54,7 +54,12 @@ def test_dynamic_upstream_override_pins_ip_but_preserves_sni(sni_override_settin
     must still be presented as the TLS SNI/certificate-verification hostname --
     otherwise any real HTTPS upstream would fail certificate validation against the
     bare IP (or force operators onto INSECURE_SKIP_VERIFY to work around it).
+
+    The override names the configured upstream host: a virtual key's proxy-held
+    credential only goes to that host or a known provider's, never to an arbitrary one
+    (tests/test_proxy_key_canary_and_reply_paths.py).
     """
+    monkeypatch.setattr(settings, "UPSTREAM_BASE_URL", "https://custom-upstream.example.com")
 
     async def mock_resolve(hostname):
         assert hostname == "custom-upstream.example.com"
