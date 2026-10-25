@@ -1864,14 +1864,16 @@ class PIIEngine:
         # `code`.
         for tool_field in ("arguments", "output", "input", "code"):
             if isinstance(item_copy.get(tool_field), str):
-                item_copy[tool_field] = self.redact_text(item_copy[tool_field], vault, active_profile)
+                item_copy[tool_field] = self.redact_text(
+                    item_copy[tool_field], vault, active_profile, restorable=restorable
+                )
             elif isinstance(item_copy.get(tool_field), list) and tool_field == "output":
                 # A function_call_output can return a list of input_text / input_image parts.
                 item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile, restorable)
             elif item_copy.get(tool_field) is not None:
                 # These are handled keys, so an object or list here is scanned or not at all.
                 item_copy[tool_field] = self._redact_unexpected(
-                    item_copy[tool_field], vault, active_profile, 0, 20, f"input.{tool_field}"
+                    item_copy[tool_field], vault, active_profile, 0, 20, f"input.{tool_field}", restorable
                 )
 
         # A replayed code_interpreter_call carries what its code printed.
@@ -1880,7 +1882,7 @@ class PIIEngine:
             item_copy["outputs"] = self._redact_unexpected(outputs, vault, active_profile, 0, 20, "input.outputs", restorable)
         elif isinstance(outputs, list):
             item_copy["outputs"] = [
-                {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile)}
+                {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile, restorable=restorable)}
                 if isinstance(entry, dict) and isinstance(entry.get("logs"), str)
                 else entry
                 for entry in outputs

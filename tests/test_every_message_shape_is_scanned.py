@@ -267,3 +267,22 @@ def test_prompt_variable_media_parts_pass_unchanged(engine):
     payload = {"prompt": {"id": "pmpt_1", "variables": variables}}
 
     assert engine.redact_payload(payload, Vault()) == payload
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"type": "function_call", "call_id": "c1", "name": "f", "arguments": {"ssn": SSN}},
+        {"type": "function_call", "call_id": "c1", "name": "f", "arguments": f'{{"ssn": "{SSN}"}}'},
+        {"type": "code_interpreter_call", "id": "ci", "outputs": [{"type": "logs", "logs": f"ssn {SSN}"}]},
+    ],
+    ids=["arguments-object", "arguments-text", "interpreter-logs"],
+)
+def test_tool_fields_of_an_instructions_item_are_one_way(engine, item):
+    """`instructions` is the application's, like `system`: its values never come back."""
+    vault = Vault(synthetic=False)
+    redacted = engine.redact_payload({"instructions": [item]}, vault)
+
+    assert SSN not in json.dumps(redacted)
+    assert SSN in vault.one_way_original_to_token
+    assert SSN not in vault.token_to_original.values()
