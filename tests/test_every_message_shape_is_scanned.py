@@ -246,3 +246,24 @@ def test_signatures_and_media_in_newly_scanned_fields_pass_unchanged(engine, pay
     monkeypatch.setattr(settings, "UNMAPPED_BLOB_POLICY", policy)
 
     assert engine.redact_payload(payload, Vault()) == payload
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [{"ssn": SSN}, {"type": "input_text", "value": f"ssn {SSN}"}, {"type": "input_text", "text": f"ssn {SSN}"}],
+    ids=["object-without-text", "text-under-another-key", "input-text"],
+)
+def test_a_prompt_variable_object_of_any_shape_is_scanned(engine, variable):
+    redacted = engine.redact_payload({"prompt": {"id": "pmpt_1", "variables": {"v": variable}}}, Vault())
+
+    assert SSN not in json.dumps(redacted)
+
+
+def test_prompt_variable_media_parts_pass_unchanged(engine):
+    variables = {
+        "img": {"type": "input_image", "image_url": SIGNED_URL},
+        "doc": {"type": "input_file", "file_id": "file-AbC123xYz789QwE456"},
+    }
+    payload = {"prompt": {"id": "pmpt_1", "variables": variables}}
+
+    assert engine.redact_payload(payload, Vault()) == payload

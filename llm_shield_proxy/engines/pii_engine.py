@@ -1916,16 +1916,10 @@ class PIIEngine:
         for name, value in variables.items():
             if isinstance(value, str):
                 value = self.redact_text(value, vault, active_profile)
-            elif isinstance(value, dict) and isinstance(value.get("text"), str):
-                value = {**value, "text": self.redact_text(value["text"], vault, active_profile)}
-            elif isinstance(value, dict) and value.get("text") is not None:
-                value = {
-                    **value,
-                    "text": self._redact_unexpected(
-                        value["text"], vault, active_profile, depth + 1, max_depth, "prompt.variables.text"
-                    ),
-                }
-            elif not isinstance(value, dict):
+            else:
+                # A typed part (`input_text`, `input_image`, `input_file`) or anything else:
+                # every field is scanned, with the media-shape and opaque-id checks, so an
+                # image URL or file id goes out unchanged and text of any shape is scanned.
                 value = self._redact_unexpected(value, vault, active_profile, depth + 1, max_depth, "prompt.variables")
             redacted[name] = value
         return {**prompt, "variables": redacted}
