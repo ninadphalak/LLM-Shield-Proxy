@@ -266,3 +266,110 @@ def test_a_bearer_key_is_still_moved_into_x_api_key_for_anthropic(httpx_mock, mo
     sent = httpx_mock.get_requests()[0].headers
     assert sent.get("x-api-key") == "sk-ant-api03-bearer-key"
     assert "authorization" not in sent
+
+
+# Review round: failover credentials, the configured upstream host, the streamed canary.
+
+
+def test_a_failover_carries_only_the_fallback_providers_key(httpx_mock, virtual_key, monkeypatch):
+    """Replacing `authorization` alone left the first provider's key in `x-api-key`."""
+    monkeypatch.setattr(settings, "UPSTREAM_BASE_URL", "https://api.anthropic.com")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-proxy-key")
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "sk-deepseek-key", raising=False)
+    monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", True)
+    monkeypatch.setattr(settings, "MAX_RETRIES", 0)
+
+    async def _public(hostname):
+        return True, "203.0.113.9"
+
+    monkeypatch.setattr("llm_shield_proxy.api.main._resolve_and_validate_hostname", _public)
+    httpx_mock.add_response(method="POST", url="https://api.anthropic.com/v1/messages", status_code=503)
+    httpx_mock.add_response(method="POST", url="https://203.0.113.9/v1/chat/completions", json={"content": []})
+
+    client.post(
+        "/v1/chat/completions",
+        headers={**virtual_key, "X-Shield-Fallback-Url": "https://api.deepseek.com"},
+        json={"model": "claude-sonnet-4-5", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    fallback = httpx_mock.get_requests()[-1]
+    assert fallback.url.host == "203.0.113.9"
+    assert "sk-ant-proxy-key" not in str(dict(fallback.headers))
+    assert fallback.headers["authorization"] == "Bearer sk-deepseek-key"
+
+
+def test_the_configured_upstream_host_keeps_its_key_when_named_in_the_override(httpx_mock, virtual_key, monkeypatch):
+    """The default upstream is api.openai.com, keyed only by UPSTREAM_API_KEY."""
+    monkeypatch.setattr(settings, "UPSTREAM_BASE_URL", "https://api.openai.com")
+
+    async def _public(hostname):
+        return True, "162.159.140.245"
+
+    monkeypatch.setattr("llm_shield_proxy.api.main._resolve_and_validate_hostname", _public)
+    httpx_mock.add_response(method="POST", url="https://162.159.140.245/v1/chat/completions", json={"choices": []})
+
+    response = client.post(
+        "/v1/chat/completions", headers={**virtual_key, "X-Upstream-Base-Url": "https://api.openai.com/v1"}, json=CHAT
+    )
+
+    assert response.status_code == 200
+    assert httpx_mock.get_requests()[0].headers["authorization"] == "Bearer sk-proxy-master-key"
+
+
+def _sse(*deltas: str) -> str:
+    events = "".join(
+        "data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": d}}]}) + "\n\n" for d in deltas
+    )
+    return events + "data: [DONE]\n\n"
+
+
+@pytest.mark.parametrize(
+    "deltas",
+    [
+        ("My prompt: [SHIELD_", "TRIPWIRE_test]", " and more"),
+        ("My prompt: [", "SHIELD_TRIP", "WIRE_te", "st] end"),
+        ("My prompt: ", "[SHIELD_TRIPWIRE_test] whole"),
+    ],
+    ids=["two-pieces", "four-pieces", "one-piece"],
+)
+def test_a_streamed_canary_trips_and_no_part_of_it_reaches_the_client(httpx_mock, monkeypatch, deltas):
+    monkeypatch.setattr(settings, "ENABLE_CANARY_TRIPWIRE", True)
+    monkeypatch.setattr(settings, "CANARY_TOKEN", "[SHIELD_TRIPWIRE_test]")
+    monkeypatch.setattr(settings, "SHIELD_WATERMARK_SECRET", "watermark-secret")
+    httpx_mock.add_response(
+        method="POST", url=OPENAI_CHAT, text=_sse(*deltas), headers={"content-type": "text/event-stream"}
+    )
+
+    response = client.post(
+        "/v1/chat/completions", headers=BYOK, json={"model": "m", "stream": True, "messages": [{"role": "user", "content": "hi"}]}
+    )
+
+    assert "TRIPWIRE" not in response.text
+    assert "[SHIELD_" not in response.text
+    if len(deltas[0]) > len("My prompt: "):
+        # Split across events, the token is caught in the decoded text, and what came
+        # before it is still delivered. Whole in one event, the raw-bytes check stops the
+        # chunk before anything in it is sent.
+        assert "My prompt:" in response.text
+    assert "more" not in response.text and "end" not in response.text and "whole" not in response.text
+
+
+def test_a_stream_without_the_canary_is_delivered_whole(httpx_mock, monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_CANARY_TRIPWIRE", True)
+    monkeypatch.setattr(settings, "CANARY_TOKEN", "[SHIELD_TRIPWIRE_test]")
+    monkeypatch.setattr(settings, "SHIELD_WATERMARK_SECRET", "watermark-secret")
+    httpx_mock.add_response(
+        method="POST", url=OPENAI_CHAT, text=_sse("A list: [", "SHIELD", "_x] done"), headers={"content-type": "text/event-stream"}
+    )
+
+    response = client.post(
+        "/v1/chat/completions", headers=BYOK, json={"model": "m", "stream": True, "messages": [{"role": "user", "content": "hi"}]}
+    )
+
+    text = "".join(
+        json.loads(line[6:])["choices"][0]["delta"].get("content", "")
+        for line in response.text.splitlines()
+        if line.startswith("data: {")
+    )
+    assert text == "A list: [SHIELD_x] done"
+    assert response.text.rstrip().endswith("data: [DONE]")

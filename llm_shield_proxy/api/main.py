@@ -39,7 +39,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from llm_shield_proxy.adapters.anthropic_adapter import AnthropicAdapter
-from llm_shield_proxy.adapters.provider_factory import resolve_provider
+from llm_shield_proxy.adapters.provider_factory import is_anthropic_host, resolve_provider
 from llm_shield_proxy.api.guard_router import guard_router
 from llm_shield_proxy.api.health import health_router
 from llm_shield_proxy.api.mcp_router import mcp_router, warn_if_mcp_policy_is_empty_at_startup
@@ -790,12 +790,28 @@ def proxy_key_for_client_chosen_host(hostname: Optional[str]) -> Optional[str]:
     host = (hostname or "").strip().lower().rstrip(".")
     if not host:
         return None
-    if host in PROVIDER_KEY_MAP:
-        return _provider_specific_key(host)
     configured = (urlparse(settings.UPSTREAM_BASE_URL).hostname or "").lower().rstrip(".")
     if configured and host == configured:
+        # The host the proxy sends to anyway, with the key it would use anyway.
         return resolve_upstream_key(host)
+    if host in PROVIDER_KEY_MAP:
+        return _provider_specific_key(host)
     return None
+
+
+def _replace_upstream_credential(headers: Dict[str, Any], key: str, host: Optional[str]) -> None:
+    """Puts `key` on a request as the ONLY credential, in the header `host` reads.
+
+    A failover switches provider. Replacing only `authorization` left the first
+    provider's key in `x-api-key` (the Anthropic adapter's header), so it went to the
+    fallback as well.
+    """
+    for name in _CREDENTIAL_HEADERS:
+        headers.pop(name, None)
+    if is_anthropic_host(host):
+        headers["x-api-key"] = key
+    else:
+        headers["authorization"] = f"Bearer {key}"
 
 
 def resolve_upstream_key(hostname: str) -> Optional[str]:
@@ -1427,7 +1443,7 @@ async def _proxy_catch_all_internal(
             # The credential a failover attempt carries. A client-picked fallback follows the
             # same rule as X-Upstream-Base-Url: it never receives a proxy-held key it may not
             # have. The configured FALLBACK_BASE_URL is the operator's and gets FALLBACK_API_KEY.
-            fallback_authorization: Optional[str] = None
+            fallback_key: Optional[str] = None
             if fallback_url_override:
                 if proxy_key_in_use:
                     fallback_key = proxy_key_for_client_chosen_host(fallback_sni_hostname)
@@ -1444,9 +1460,8 @@ async def _proxy_catch_all_internal(
                                 }
                             },
                         )
-                    fallback_authorization = f"Bearer {fallback_key}"
             elif settings.FALLBACK_API_KEY:
-                fallback_authorization = f"Bearer {settings.FALLBACK_API_KEY}"
+                fallback_key = settings.FALLBACK_API_KEY
 
             max_retries = settings.MAX_RETRIES if settings.ENABLE_RETRY_FAILOVER else 0
 
@@ -1508,9 +1523,9 @@ async def _proxy_catch_all_internal(
                                 # hostname for TLS SNI; a configured fallback is a plain FQDN with
                                 # normal httpx hostname-based TLS.
                                 current_sni_hostname = fallback_sni_hostname
-                                if fallback_authorization:
-                                    current_headers["authorization"] = fallback_authorization
                                 fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_key:
+                                    _replace_upstream_credential(current_headers, fallback_key, fallback_host)
                                 if fallback_host:
                                     current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
@@ -1643,9 +1658,9 @@ async def _proxy_catch_all_internal(
                                 # hostname for TLS SNI; a configured fallback is a plain FQDN with
                                 # normal httpx hostname-based TLS.
                                 current_sni_hostname = fallback_sni_hostname
-                                if fallback_authorization:
-                                    current_headers["authorization"] = fallback_authorization
                                 fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
+                                if fallback_key:
+                                    _replace_upstream_credential(current_headers, fallback_key, fallback_host)
                                 if fallback_host:
                                     current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
@@ -1770,24 +1785,11 @@ async def _proxy_catch_all_internal(
                         # The structured path scans model-originated text before restoring
                         # the caller's values. The fallback must too, or a reply that is not
                         # one JSON document (NDJSON, plain text) goes back unscanned.
-                        try:
-                            raw_text = await loop.run_in_executor(
-                                None, redact_model_originated_text, raw_text, vault
-                            )
-                        except Exception as scan_exc:  # noqa: BLE001
-                            logger.error(
-                                "Response PII scan failed on the raw-text fallback (%s); reply withheld",
-                                type(scan_exc).__name__,
-                            )
-                            return JSONResponse(
-                                status_code=502,
-                                content={
-                                    "error": {
-                                        "message": "The provider's reply could not be safely processed.",
-                                        "type": "dlp_failure",
-                                    }
-                                },
-                            )
+                        # A scanner error behaves as on the streaming path: logged, and the
+                        # text forwarded (see redact_model_originated_text).
+                        raw_text = await loop.run_in_executor(
+                            None, redact_model_originated_text, raw_text, vault
+                        )
                     rehydrated_text = await loop.run_in_executor(None, vault.rehydrate, raw_text)
                     return Response(
                         content=rehydrated_text,
