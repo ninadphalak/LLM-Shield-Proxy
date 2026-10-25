@@ -67,6 +67,20 @@ UNEXPECTED_SHAPES = {
         "role": "assistant",
         "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}, "extra": f"ssn {SSN}"}],
     },
+    "tool-calls-as-single-object": {
+        "role": "assistant",
+        "tool_calls": {"id": "call_1", "type": "function", "function": {"name": "f", "arguments": f"ssn {SSN}"}},
+    },
+    "tool-call-arguments-as-object": {
+        "role": "assistant",
+        "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": {"ssn": SSN}}}],
+    },
+    "legacy-function-call-arguments-as-object": {
+        "role": "assistant",
+        "content": None,
+        "function_call": {"name": "f", "arguments": {"ssn": SSN}},
+    },
+    "legacy-function-call-as-string": {"role": "assistant", "function_call": f"ssn {SSN}"},
 }
 
 

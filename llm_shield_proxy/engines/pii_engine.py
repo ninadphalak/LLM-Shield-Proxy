@@ -599,6 +599,7 @@ _MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
 # `custom` object. Every other field of either is scanned.
 _TOOL_CALL_HANDLED_KEYS: frozenset[str] = frozenset({"id", "type", "function", "custom"})
 _CUSTOM_TOOL_CALL_HANDLED_KEYS: frozenset[str] = frozenset({"name", "input"})
+_FUNCTION_HANDLED_KEYS: frozenset[str] = frozenset({"name", "arguments"})
 
 # What the content-block walks handle by shape. A document's `title` and `context` belong
 # here too; they are added for document blocks only.
@@ -1216,50 +1217,28 @@ class PIIEngine:
                             mint = _token_minter(vault, restorable)
                             msg_copy["name"] = mint(raw_name, "PERSON").replace(" ", "_")
 
-                    # 3. Redact OpenAI tool_calls function arguments in multi-turn agent history
-                    if "tool_calls" in msg_copy and isinstance(msg_copy["tool_calls"], list):
-                        new_tool_calls = []
-                        for tc in msg_copy["tool_calls"]:
-                            if isinstance(tc, dict):
-                                tc_copy = tc.copy()
-                                if "function" in tc_copy and isinstance(tc_copy["function"], dict):
-                                    fn_copy = tc_copy["function"].copy()
-                                    if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                                        fn_copy["arguments"] = self.redact_text(
-                                            fn_copy["arguments"], vault, active_profile
-                                        )
-                                    tc_copy["function"] = fn_copy
-                                # A custom (free-form) tool call carries its text in
-                                # `custom.input`, not in `function.arguments`.
-                                if isinstance(tc_copy.get("custom"), dict):
-                                    custom_copy = tc_copy["custom"].copy()
-                                    if isinstance(custom_copy.get("input"), str):
-                                        custom_copy["input"] = self.redact_text(
-                                            custom_copy["input"], vault, active_profile
-                                        )
-                                    self._redact_remaining_fields(
-                                        custom_copy, _CUSTOM_TOOL_CALL_HANDLED_KEYS, vault, active_profile,
-                                        depth + 3, max_depth, "messages.tool_calls.custom",
-                                    )
-                                    tc_copy["custom"] = custom_copy
-                                # Whatever kind of call comes next is scanned too.
-                                self._redact_remaining_fields(
-                                    tc_copy, _TOOL_CALL_HANDLED_KEYS, vault, active_profile,
-                                    depth + 2, max_depth, "messages.tool_calls",
-                                )
-                                new_tool_calls.append(tc_copy)
-                            else:
-                                new_tool_calls.append(
-                                    self._redact_unexpected(tc, vault, active_profile, depth + 2, max_depth, "messages.tool_calls")
-                                )
-                        msg_copy["tool_calls"] = new_tool_calls
+                    # 3. Redact OpenAI tool_calls in multi-turn agent history. `tool_calls` and
+                    # `function_call` are handled keys, so whatever shape they have is scanned
+                    # here or not at all.
+                    if "tool_calls" in msg_copy:
+                        tool_calls = msg_copy["tool_calls"]
+                        if isinstance(tool_calls, list):
+                            msg_copy["tool_calls"] = [
+                                self._redact_tool_call(tc, vault, active_profile, depth + 2, max_depth)
+                                for tc in tool_calls
+                            ]
+                        else:
+                            # One call where a list was expected, or another type.
+                            msg_copy["tool_calls"] = self._redact_tool_call(
+                                tool_calls, vault, active_profile, depth + 2, max_depth
+                            )
 
                     # 4. Redact legacy OpenAI function_call
-                    if "function_call" in msg_copy and isinstance(msg_copy["function_call"], dict):
-                        fn_copy = msg_copy["function_call"].copy()
-                        if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                            fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
-                        msg_copy["function_call"] = fn_copy
+                    if "function_call" in msg_copy:
+                        msg_copy["function_call"] = self._redact_function_object(
+                            msg_copy["function_call"], vault, active_profile, depth + 2, max_depth,
+                            "messages.function_call",
+                        )
 
                     # 5. Everything else a client replays: `reasoning_content`, `refusal`,
                     # `audio.transcript` and whatever a provider adds next.
@@ -1431,6 +1410,78 @@ class PIIEngine:
             text_keys=_REPLAYED_TEXT_KEYS,
             reference_keys=_NESTED_REFERENCE_KEYS,
         )
+
+    def _redact_function_object(
+        self,
+        function: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+        json_path: str,
+    ) -> Any:
+        """Redacts a `function` / `function_call` object: `arguments` text, then every other field.
+
+        `arguments` is JSON text when a client follows the API, and is scanned as a string.
+        An object or list there, or a `function` that is not an object, is scanned too.
+        """
+        if not isinstance(function, dict):
+            return self._redact_unexpected(function, vault, active_profile, depth, max_depth, json_path)
+        fn_copy = function.copy()
+        arguments = fn_copy.get("arguments")
+        if isinstance(arguments, str):
+            fn_copy["arguments"] = self.redact_text(arguments, vault, active_profile)
+        elif arguments is not None:
+            fn_copy["arguments"] = self._redact_unexpected(
+                arguments, vault, active_profile, depth + 1, max_depth, f"{json_path}.arguments"
+            )
+        self._redact_remaining_fields(
+            fn_copy, _FUNCTION_HANDLED_KEYS, vault, active_profile, depth, max_depth, json_path
+        )
+        return fn_copy
+
+    def _redact_tool_call(
+        self,
+        tool_call: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+    ) -> Any:
+        """Redacts one entry of a message's `tool_calls`, a copy of it."""
+        if not isinstance(tool_call, dict):
+            return self._redact_unexpected(tool_call, vault, active_profile, depth, max_depth, "messages.tool_calls")
+        tc_copy = tool_call.copy()
+        if "function" in tc_copy:
+            tc_copy["function"] = self._redact_function_object(
+                tc_copy["function"], vault, active_profile, depth + 1, max_depth, "messages.tool_calls.function"
+            )
+        # A custom (free-form) tool call carries its text in `custom.input`, not in
+        # `function.arguments`.
+        if "custom" in tc_copy:
+            custom = tc_copy["custom"]
+            if isinstance(custom, dict):
+                custom_copy = custom.copy()
+                if isinstance(custom_copy.get("input"), str):
+                    custom_copy["input"] = self.redact_text(custom_copy["input"], vault, active_profile)
+                elif custom_copy.get("input") is not None:
+                    custom_copy["input"] = self._redact_unexpected(
+                        custom_copy["input"], vault, active_profile, depth + 2, max_depth, "messages.tool_calls.custom.input"
+                    )
+                self._redact_remaining_fields(
+                    custom_copy, _CUSTOM_TOOL_CALL_HANDLED_KEYS, vault, active_profile,
+                    depth + 1, max_depth, "messages.tool_calls.custom",
+                )
+                tc_copy["custom"] = custom_copy
+            else:
+                tc_copy["custom"] = self._redact_unexpected(
+                    custom, vault, active_profile, depth + 1, max_depth, "messages.tool_calls.custom"
+                )
+        # Whatever kind of call comes next is scanned too.
+        self._redact_remaining_fields(
+            tc_copy, _TOOL_CALL_HANDLED_KEYS, vault, active_profile, depth, max_depth, "messages.tool_calls"
+        )
+        return tc_copy
 
     def _redact_message_block(
         self,
