@@ -373,3 +373,37 @@ def test_a_stream_without_the_canary_is_delivered_whole(httpx_mock, monkeypatch)
     )
     assert text == "A list: [SHIELD_x] done"
     assert response.text.rstrip().endswith("data: [DONE]")
+
+
+def test_naming_the_configured_fallback_host_gets_the_configured_fallback_key(httpx_mock, virtual_key, monkeypatch):
+    monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", True)
+    monkeypatch.setattr(settings, "MAX_RETRIES", 0)
+    monkeypatch.setattr(settings, "FALLBACK_BASE_URL", "https://backup.corp-gateway.example")
+    monkeypatch.setattr(settings, "FALLBACK_API_KEY", "sk-backup")
+
+    async def _public(hostname):
+        return True, "203.0.113.20"
+
+    monkeypatch.setattr("llm_shield_proxy.api.main._resolve_and_validate_hostname", _public)
+    httpx_mock.add_response(method="POST", url=OPENAI_CHAT, status_code=503)
+    httpx_mock.add_response(method="POST", url="https://203.0.113.20/v1/chat/completions", json={"choices": []})
+
+    response = client.post(
+        "/v1/chat/completions", headers={**virtual_key, "X-Shield-Fallback-Url": "https://backup.corp-gateway.example"}, json=CHAT
+    )
+
+    assert response.status_code == 200
+    assert httpx_mock.get_requests()[-1].headers["authorization"] == "Bearer sk-backup"
+
+
+def test_an_inert_fallback_header_does_not_refuse_the_request(httpx_mock, virtual_key, monkeypatch):
+    """With failover off, X-Shield-Fallback-Url is never acted on, so it cannot refuse."""
+    monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", False)
+    httpx_mock.add_response(method="POST", url=OPENAI_CHAT, json={"choices": []})
+
+    response = client.post(
+        "/v1/chat/completions", headers={**virtual_key, "X-Shield-Fallback-Url": OUTSIDE_HOST}, json=CHAT
+    )
+
+    assert response.status_code == 200
+    assert all(request.url.host == "api.openai.com" for request in httpx_mock.get_requests())

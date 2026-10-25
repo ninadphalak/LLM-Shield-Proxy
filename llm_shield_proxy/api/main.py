@@ -1410,7 +1410,9 @@ async def _proxy_catch_all_internal(
             # UPSTREAM_BASE_URL) and is used directly.
             fallback_url_override: Optional[str] = None
             fallback_sni_hostname: Optional[str] = None
-            if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
+            # With failover off the header can never be acted on, so it is not inspected
+            # either: an inert header must not refuse an otherwise valid request.
+            if x_shield_fallback_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE and settings.ENABLE_RETRY_FAILOVER:
                 parsed_fallback = urlparse(x_shield_fallback_url)
                 hostname = parsed_fallback.hostname or ""
                 # `.port` PARSES, and raises ValueError on a non-numeric or out-of-range
@@ -1445,7 +1447,16 @@ async def _proxy_catch_all_internal(
             # have. The configured FALLBACK_BASE_URL is the operator's and gets FALLBACK_API_KEY.
             fallback_key: Optional[str] = None
             if fallback_url_override:
-                if proxy_key_in_use:
+                configured_fallback_host = (
+                    (urlparse(settings.FALLBACK_BASE_URL).hostname or "").lower().rstrip(".")
+                    if settings.FALLBACK_BASE_URL
+                    else ""
+                )
+                if configured_fallback_host and (fallback_sni_hostname or "").lower().rstrip(".") == configured_fallback_host:
+                    # The caller named the operator's own fallback host: it gets what the
+                    # configured fallback gets, FALLBACK_API_KEY when one is set.
+                    fallback_key = settings.FALLBACK_API_KEY
+                elif proxy_key_in_use:
                     fallback_key = proxy_key_for_client_chosen_host(fallback_sni_hostname)
                     if fallback_key is None:
                         return JSONResponse(
