@@ -490,7 +490,10 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 # `redacted_thinking` `data`, `encrypted_content`). Rewriting them breaks the request, and
 # their high entropy is what Tier 2 flags.
 _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
-    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content", "file_id"}
+    {
+        "id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "thought_signature", "data",
+        "encrypted_content", "file_id",
+    }
 )
 
 # Media payloads, by shape (see _is_media_field): the exact fields an image, audio or file
@@ -537,7 +540,11 @@ _MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
 # one breaks the reference, a high-entropy id is what Tier 2 flags, and these names hold ids,
 # not personal data. `name` and `data` are not here: below a direct field they are ordinary
 # data (`metadata.name`), so they are only skipped as direct fields.
-_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"id", "call_id", "tool_call_id", "tool_use_id", "file_id"})
+# `thought_signature` is Gemini's: its OpenAI-compatible API carries it in a tool call's
+# `extra_content.google`, and rejects a replayed call whose signature changed.
+_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset(
+    {"id", "call_id", "tool_call_id", "tool_use_id", "file_id", "thought_signature"}
+)
 
 
 _MEDIA_FIELD_PATTERNS: Dict[str, "re.Pattern[str]"] = {
@@ -594,6 +601,19 @@ _REPLAYED_TEXT_KEYS: frozenset[str] = frozenset(
 _MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
     {"role", "content", "name", "tool_calls", "function_call", "messages"}
 )
+
+# Handled keys whose value is a string when a client follows the API. A shape walk only
+# touches the string form, so an object or list under one of them is scanned by
+# _redact_remaining_fields instead of being skipped as handled.
+_TEXT_VALUED_HANDLED_KEYS: frozenset[str] = frozenset({"role", "type", "text", "name", "id", "title", "context", "url"})
+
+# What the message walk handles by shape inside one `tool_calls` entry, and inside its
+# `custom` object. Every other field of either is scanned.
+_TOOL_CALL_HANDLED_KEYS: frozenset[str] = frozenset({"id", "type", "function", "custom"})
+_CUSTOM_TOOL_CALL_HANDLED_KEYS: frozenset[str] = frozenset({"name", "input"})
+_FUNCTION_HANDLED_KEYS: frozenset[str] = frozenset({"name", "arguments"})
+_INTERPRETER_OUTPUT_HANDLED_KEYS: frozenset[str] = frozenset({"type", "logs", "url"})
+_DOCUMENT_SOURCE_HANDLED_KEYS: frozenset[str] = frozenset({"type", "media_type", "data", "content"})
 
 # What the content-block walks handle by shape. A document's `title` and `context` belong
 # here too; they are added for document blocks only.
@@ -1185,41 +1205,18 @@ class PIIEngine:
                             content_str, vault, active_profile, restorable=restorable
                         )
                     elif "content" in msg_copy and isinstance(msg_copy["content"], list):
-                        new_content_blocks = []
-                        for block in msg_copy["content"]:
-                            if isinstance(block, dict):
-                                block_copy = block.copy()
-                                if "text" in block_copy and isinstance(block_copy["text"], str):
-                                    text_val = block_copy["text"]
-                                    if role in ("tool", "function"):
-                                        text_val = INDIRECT_PROMPT_INJECTION_PATTERN.sub(
-                                            "[SYSTEM_OVERRIDE_BLOCKED]", text_val
-                                        )
-                                    block_copy["text"] = self.redact_text(
-                                        text_val, vault, active_profile, restorable=restorable
-                                    )
-                                if block_copy.get("type") == "document":
-                                    self._redact_document_block(block_copy, vault, active_profile, restorable)
-                                # A replayed Anthropic tool call carries its arguments as a
-                                # JSON object in `input`, not as a string.
-                                if block_copy.get("type") == "tool_use" and "input" in block_copy:
-                                    block_copy["input"] = self._redact_tool_input(
-                                        block_copy["input"], vault, active_profile
-                                    )
-                                # An Anthropic tool_result nests its own content, as a
-                                # string or as further blocks.
-                                if "content" in block_copy:
-                                    block_copy["content"] = self._redact_nested_content(
-                                        block_copy["content"], vault, active_profile, restorable=restorable
-                                    )
-                                self._redact_remaining_fields(
-                                    block_copy, _block_handled_keys(block_copy), vault, active_profile,
-                                    depth + 2, max_depth, "messages.content", restorable,
-                                )
-                                new_content_blocks.append(block_copy)
-                            else:
-                                new_content_blocks.append(block)
-                        msg_copy["content"] = new_content_blocks
+                        msg_copy["content"] = [
+                            self._redact_message_block(
+                                block, vault, active_profile, role, restorable, depth + 2, max_depth
+                            )
+                            for block in msg_copy["content"]
+                        ]
+                    elif isinstance(msg_copy.get("content"), dict):
+                        # One block where a list was expected. A provider rejects it, but
+                        # only after the body has arrived, so it is scanned like a block.
+                        msg_copy["content"] = self._redact_message_block(
+                            msg_copy["content"], vault, active_profile, role, restorable, depth + 2, max_depth
+                        )
 
                     # 2. Redact message participant name if present
                     if "name" in msg_copy and isinstance(msg_copy["name"], str):
@@ -1234,30 +1231,28 @@ class PIIEngine:
                             mint = _token_minter(vault, restorable)
                             msg_copy["name"] = mint(raw_name, "PERSON").replace(" ", "_")
 
-                    # 3. Redact OpenAI tool_calls function arguments in multi-turn agent history
-                    if "tool_calls" in msg_copy and isinstance(msg_copy["tool_calls"], list):
-                        new_tool_calls = []
-                        for tc in msg_copy["tool_calls"]:
-                            if isinstance(tc, dict):
-                                tc_copy = tc.copy()
-                                if "function" in tc_copy and isinstance(tc_copy["function"], dict):
-                                    fn_copy = tc_copy["function"].copy()
-                                    if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                                        fn_copy["arguments"] = self.redact_text(
-                                            fn_copy["arguments"], vault, active_profile
-                                        )
-                                    tc_copy["function"] = fn_copy
-                                new_tool_calls.append(tc_copy)
-                            else:
-                                new_tool_calls.append(tc)
-                        msg_copy["tool_calls"] = new_tool_calls
+                    # 3. Redact OpenAI tool_calls in multi-turn agent history. `tool_calls` and
+                    # `function_call` are handled keys, so whatever shape they have is scanned
+                    # here or not at all.
+                    if "tool_calls" in msg_copy:
+                        tool_calls = msg_copy["tool_calls"]
+                        if isinstance(tool_calls, list):
+                            msg_copy["tool_calls"] = [
+                                self._redact_tool_call(tc, vault, active_profile, depth + 2, max_depth)
+                                for tc in tool_calls
+                            ]
+                        else:
+                            # One call where a list was expected, or another type.
+                            msg_copy["tool_calls"] = self._redact_tool_call(
+                                tool_calls, vault, active_profile, depth + 2, max_depth
+                            )
 
                     # 4. Redact legacy OpenAI function_call
-                    if "function_call" in msg_copy and isinstance(msg_copy["function_call"], dict):
-                        fn_copy = msg_copy["function_call"].copy()
-                        if "arguments" in fn_copy and isinstance(fn_copy["arguments"], str):
-                            fn_copy["arguments"] = self.redact_text(fn_copy["arguments"], vault, active_profile)
-                        msg_copy["function_call"] = fn_copy
+                    if "function_call" in msg_copy:
+                        msg_copy["function_call"] = self._redact_function_object(
+                            msg_copy["function_call"], vault, active_profile, depth + 2, max_depth,
+                            "messages.function_call",
+                        )
 
                     # 5. Everything else a client replays: `reasoning_content`, `refusal`,
                     # `audio.transcript` and whatever a provider adds next.
@@ -1268,20 +1263,33 @@ class PIIEngine:
 
                     redacted_messages.append(msg_copy)
                 else:
-                    redacted_messages.append(msg)
+                    redacted_messages.append(
+                        self._redact_unexpected(msg, vault, active_profile, depth + 1, max_depth, "messages")
+                    )
             new_payload["messages"] = redacted_messages
+        elif new_payload.get("messages") is not None:
+            # `messages` is skipped by deep redaction, so a value of any other type is
+            # scanned here or not at all.
+            new_payload["messages"] = self._redact_unexpected(
+                new_payload["messages"], vault, active_profile, depth + 1, max_depth, "messages"
+            )
 
         # Redact legacy OpenAI prompt field
         if "prompt" in new_payload:
             if isinstance(new_payload["prompt"], str):
                 new_payload["prompt"] = self.redact_text(new_payload["prompt"], vault, active_profile)
             elif isinstance(new_payload["prompt"], list):
+                # Token-id lists hold only integers, which the fallback leaves alone.
                 new_payload["prompt"] = [
-                    self.redact_text(p, vault, active_profile) if isinstance(p, str) else p
+                    self.redact_text(p, vault, active_profile)
+                    if isinstance(p, str)
+                    else self._redact_unexpected(p, vault, active_profile, depth + 1, max_depth, "prompt")
                     for p in new_payload["prompt"]
                 ]
             elif isinstance(new_payload["prompt"], dict):
-                new_payload["prompt"] = self._redact_prompt_object(new_payload["prompt"], vault, active_profile)
+                new_payload["prompt"] = self._redact_prompt_object(
+                    new_payload["prompt"], vault, active_profile, depth + 1, max_depth
+                )
 
         # Redact system prompt if separated at top level. One-way: see _PRIVILEGED_ROLES.
         if "system" in new_payload:
@@ -1292,6 +1300,10 @@ class PIIEngine:
             elif isinstance(new_payload["system"], list):
                 new_payload["system"] = self._redact_text_blocks(
                     new_payload["system"], vault, active_profile, restorable=False
+                )
+            else:
+                new_payload["system"] = self._redact_unexpected(
+                    new_payload["system"], vault, active_profile, depth + 1, max_depth, "system", restorable=False
                 )
 
         # Redact the Responses API instructions field, one-way like `system`.
@@ -1305,6 +1317,11 @@ class PIIEngine:
                     self._redact_input_item(item, vault, active_profile, restorable=False)
                     for item in new_payload["instructions"]
                 ]
+            else:
+                new_payload["instructions"] = self._redact_unexpected(
+                    new_payload["instructions"], vault, active_profile, depth + 1, max_depth, "instructions",
+                    restorable=False,
+                )
 
         # Redact embeddings / moderation / responses input field
         if "input" in new_payload:
@@ -1317,6 +1334,8 @@ class PIIEngine:
                     else self._redact_input_item(item, vault, active_profile)
                     for item in new_payload["input"]
                 ]
+            elif isinstance(new_payload["input"], dict):
+                new_payload["input"] = self._redact_input_item(new_payload["input"], vault, active_profile)
 
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         ceiling = settings.PAYLOAD_MAX_REDACT_STRING_LENGTH
@@ -1371,6 +1390,151 @@ class PIIEngine:
 
         return new_payload
 
+    def _redact_unexpected(
+        self,
+        value: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+        json_path: str,
+        restorable: bool = True,
+    ) -> Any:
+        """Scans a value the shape walk did not expect, instead of passing it through.
+
+        The shape walk owns the keys in _TARGETED_PAYLOAD_KEYS and deep redaction skips
+        them, so a value of a type the walk does not handle (a string where a block was
+        expected, an object where a list was) is scanned here or reaches the provider in
+        clear. A provider may reject the shape, but only after it has received the body.
+        """
+        if depth > max_depth:
+            raise ValueError("Maximum payload nesting depth exceeded")
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            return self.redact_text(value, vault, active_profile, restorable=restorable)
+        if isinstance(value, list):
+            return [
+                self._redact_unexpected(item, vault, active_profile, depth + 1, max_depth, f"{json_path}[{index}]", restorable)
+                for index, item in enumerate(value)
+            ]
+        if isinstance(value, dict):
+            # The same rules as any other field: media payloads by shape, opaque ids and
+            # signatures, operator- and policy-protected keys all go out unchanged.
+            copy = value.copy()
+            self._redact_remaining_fields(copy, frozenset(), vault, active_profile, depth, max_depth, json_path, restorable)
+            return copy
+        return value
+
+    def _redact_function_object(
+        self,
+        function: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+        json_path: str,
+    ) -> Any:
+        """Redacts a `function` / `function_call` object: `arguments` text, then every other field.
+
+        `arguments` is JSON text when a client follows the API, and is scanned as a string.
+        An object or list there, or a `function` that is not an object, is scanned too.
+        """
+        if not isinstance(function, dict):
+            return self._redact_unexpected(function, vault, active_profile, depth, max_depth, json_path)
+        fn_copy = function.copy()
+        arguments = fn_copy.get("arguments")
+        if isinstance(arguments, str):
+            fn_copy["arguments"] = self.redact_text(arguments, vault, active_profile)
+        elif arguments is not None:
+            fn_copy["arguments"] = self._redact_unexpected(
+                arguments, vault, active_profile, depth + 1, max_depth, f"{json_path}.arguments"
+            )
+        self._redact_remaining_fields(
+            fn_copy, _FUNCTION_HANDLED_KEYS, vault, active_profile, depth, max_depth, json_path
+        )
+        return fn_copy
+
+    def _redact_tool_call(
+        self,
+        tool_call: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        depth: int,
+        max_depth: int,
+    ) -> Any:
+        """Redacts one entry of a message's `tool_calls`, a copy of it."""
+        if not isinstance(tool_call, dict):
+            return self._redact_unexpected(tool_call, vault, active_profile, depth, max_depth, "messages.tool_calls")
+        tc_copy = tool_call.copy()
+        if "function" in tc_copy:
+            tc_copy["function"] = self._redact_function_object(
+                tc_copy["function"], vault, active_profile, depth + 1, max_depth, "messages.tool_calls.function"
+            )
+        # A custom (free-form) tool call carries its text in `custom.input`, not in
+        # `function.arguments`.
+        if "custom" in tc_copy:
+            custom = tc_copy["custom"]
+            if isinstance(custom, dict):
+                custom_copy = custom.copy()
+                if isinstance(custom_copy.get("input"), str):
+                    custom_copy["input"] = self.redact_text(custom_copy["input"], vault, active_profile)
+                elif custom_copy.get("input") is not None:
+                    custom_copy["input"] = self._redact_unexpected(
+                        custom_copy["input"], vault, active_profile, depth + 2, max_depth, "messages.tool_calls.custom.input"
+                    )
+                self._redact_remaining_fields(
+                    custom_copy, _CUSTOM_TOOL_CALL_HANDLED_KEYS, vault, active_profile,
+                    depth + 1, max_depth, "messages.tool_calls.custom",
+                )
+                tc_copy["custom"] = custom_copy
+            else:
+                tc_copy["custom"] = self._redact_unexpected(
+                    custom, vault, active_profile, depth + 1, max_depth, "messages.tool_calls.custom"
+                )
+        # Whatever kind of call comes next is scanned too.
+        self._redact_remaining_fields(
+            tc_copy, _TOOL_CALL_HANDLED_KEYS, vault, active_profile, depth, max_depth, "messages.tool_calls"
+        )
+        return tc_copy
+
+    def _redact_message_block(
+        self,
+        block: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        role: str,
+        restorable: bool,
+        depth: int,
+        max_depth: int,
+    ) -> Any:
+        """Redacts one content block of a chat message, a copy of it."""
+        if not isinstance(block, dict):
+            return self._redact_unexpected(block, vault, active_profile, depth, max_depth, "messages.content", restorable)
+        block_copy = block.copy()
+        if "text" in block_copy and isinstance(block_copy["text"], str):
+            text_val = block_copy["text"]
+            if role in ("tool", "function"):
+                text_val = INDIRECT_PROMPT_INJECTION_PATTERN.sub("[SYSTEM_OVERRIDE_BLOCKED]", text_val)
+            block_copy["text"] = self.redact_text(text_val, vault, active_profile, restorable=restorable)
+        if block_copy.get("type") == "document":
+            self._redact_document_block(block_copy, vault, active_profile, restorable)
+        # A replayed tool call carries its arguments as a JSON object in `input`: `tool_use`,
+        # and also `server_tool_use` (web search, code execution) and `mcp_tool_use`.
+        # `input` is a handled key, so every block that has one is scanned here.
+        if "input" in block_copy:
+            block_copy["input"] = self._redact_tool_input(block_copy["input"], vault, active_profile)
+        # An Anthropic tool_result nests its own content, as a string or as further blocks.
+        if "content" in block_copy:
+            block_copy["content"] = self._redact_nested_content(
+                block_copy["content"], vault, active_profile, restorable=restorable
+            )
+        self._redact_remaining_fields(
+            block_copy, _block_handled_keys(block_copy), vault, active_profile,
+            depth, max_depth, "messages.content", restorable,
+        )
+        return block_copy
+
     def _redact_remaining_fields(
         self,
         node: Dict[str, Any],
@@ -1394,7 +1558,13 @@ class PIIEngine:
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         for key, value in node.items():
-            if key in handled or key in protected:
+            if key in protected:
+                continue
+            if key in handled:
+                if key in _TEXT_VALUED_HANDLED_KEYS and isinstance(value, (dict, list)):
+                    node[key] = self._redact_unexpected(
+                        value, vault, active_profile, depth + 1, max_depth, f"{json_path}.{key}", restorable
+                    )
                 continue
             if _is_media_field(key, value, lambda text: bool(self.detect_spans(text, active_profile))):
                 # A file's name is the one text field in a media payload.
@@ -1585,8 +1755,11 @@ class PIIEngine:
         """
         if isinstance(content, str):
             return self.redact_text(content, vault, active_profile, restorable=restorable)
+        if isinstance(content, dict):
+            # One block where a list was expected: scanned as a one-block list.
+            return self._redact_nested_content([content], vault, active_profile, max_depth, restorable)[0]
         if not isinstance(content, list):
-            return content
+            return self._redact_unexpected(content, vault, active_profile, 0, 20, "tool_result.content", restorable)
 
         root: List[Any] = [block.copy() if isinstance(block, dict) else block for block in content]
         pending: List[Tuple[List[Any], int]] = [(root, 0)]
@@ -1596,19 +1769,30 @@ class PIIEngine:
             cursor += 1
             for position, block in enumerate(blocks):
                 if not isinstance(block, dict):
+                    blocks[position] = self._redact_unexpected(
+                        block, vault, active_profile, 0, 20, "tool_result.content", restorable
+                    )
                     continue
                 if isinstance(block.get("text"), str):
                     block["text"] = self.redact_text(block["text"], vault, active_profile, restorable=restorable)
                 if block.get("type") == "document":
                     self._redact_document_block(block, vault, active_profile, restorable)
-                if block.get("type") == "tool_use" and "input" in block:
+                if "input" in block:
                     block["input"] = self._redact_tool_input(block["input"], vault, active_profile)
                 self._redact_remaining_fields(
                     block, _block_handled_keys(block), vault, active_profile, 0, 20, "tool_result.content",
                     restorable,
                 )
                 nested = block.get("content")
-                if isinstance(nested, str):
+                if isinstance(nested, dict):
+                    # One block where a list was expected. Walked through a one-element
+                    # holder so the object keeps its shape; the walk edits it in place.
+                    if depth + 1 >= max_depth:
+                        raise ValueError("Maximum payload nesting depth exceeded")
+                    single = nested.copy()
+                    block["content"] = single
+                    pending.append(([single], depth + 1))
+                elif isinstance(nested, str):
                     block["content"] = self.redact_text(nested, vault, active_profile, restorable=restorable)
                 elif isinstance(nested, list) and nested:
                     if depth + 1 >= max_depth:
@@ -1630,7 +1814,7 @@ class PIIEngine:
         redacted: List[Any] = []
         for block in blocks:
             if not isinstance(block, dict):
-                redacted.append(block)
+                redacted.append(self._redact_unexpected(block, vault, active_profile, 0, 20, "content", restorable))
                 continue
             block_copy = block.copy()
             if isinstance(block_copy.get("text"), str):
@@ -1658,7 +1842,7 @@ class PIIEngine:
         if isinstance(item, str):
             return self.redact_text(item, vault, active_profile, restorable=restorable)
         if not isinstance(item, dict):
-            return item
+            return self._redact_unexpected(item, vault, active_profile, 0, 20, "input", restorable)
 
         item_copy = item.copy()
         restorable = restorable and item_copy.get("role") not in _PRIVILEGED_ROLES
@@ -1667,31 +1851,40 @@ class PIIEngine:
             item_copy["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
         elif isinstance(content, list):
             item_copy["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
+        elif isinstance(content, dict):
+            item_copy["content"] = self._redact_text_blocks([content], vault, active_profile, restorable)[0]
 
         # A replayed reasoning item quotes the conversation in its summary parts.
         summary = item_copy.get("summary")
         if isinstance(summary, list):
             item_copy["summary"] = self._redact_text_blocks(summary, vault, active_profile, restorable)
+        elif summary is not None:
+            item_copy["summary"] = self._redact_unexpected(summary, vault, active_profile, 0, 20, "input.summary", restorable)
 
         # function_call / mcp_call hold `arguments`, their outputs `output`, a
         # custom_tool_call holds its free-form `input`, and a code_interpreter_call its
         # `code`.
         for tool_field in ("arguments", "output", "input", "code"):
             if isinstance(item_copy.get(tool_field), str):
-                item_copy[tool_field] = self.redact_text(item_copy[tool_field], vault, active_profile)
-
-        # A function_call_output can return a list of input_text / input_image parts.
-        if isinstance(item_copy.get("output"), list):
-            item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile, restorable)
+                item_copy[tool_field] = self.redact_text(
+                    item_copy[tool_field], vault, active_profile, restorable=restorable
+                )
+            elif isinstance(item_copy.get(tool_field), list) and tool_field == "output":
+                # A function_call_output can return a list of input_text / input_image parts.
+                item_copy["output"] = self._redact_text_blocks(item_copy["output"], vault, active_profile, restorable)
+            elif item_copy.get(tool_field) is not None:
+                # These are handled keys, so an object or list here is scanned or not at all.
+                item_copy[tool_field] = self._redact_unexpected(
+                    item_copy[tool_field], vault, active_profile, 0, 20, f"input.{tool_field}", restorable
+                )
 
         # A replayed code_interpreter_call carries what its code printed.
         outputs = item_copy.get("outputs")
-        if isinstance(outputs, list):
+        if outputs is not None and not isinstance(outputs, list):
+            item_copy["outputs"] = self._redact_unexpected(outputs, vault, active_profile, 0, 20, "input.outputs", restorable)
+        elif isinstance(outputs, list):
             item_copy["outputs"] = [
-                {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile)}
-                if isinstance(entry, dict) and isinstance(entry.get("logs"), str)
-                else entry
-                for entry in outputs
+                self._redact_interpreter_output(entry, vault, active_profile, restorable) for entry in outputs
             ]
 
         self._redact_remaining_fields(
@@ -1699,11 +1892,37 @@ class PIIEngine:
         )
         return item_copy
 
+    def _redact_interpreter_output(
+        self,
+        entry: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        restorable: bool,
+    ) -> Any:
+        """Redacts one code interpreter output: `logs` text, then every other field.
+
+        An image output's `url` is the provider's own file reference and goes out as sent.
+        """
+        if not isinstance(entry, dict):
+            return self._redact_unexpected(entry, vault, active_profile, 0, 20, "input.outputs", restorable)
+        entry_copy = entry.copy()
+        logs = entry_copy.get("logs")
+        if isinstance(logs, str):
+            entry_copy["logs"] = self.redact_text(logs, vault, active_profile, restorable=restorable)
+        elif logs is not None:
+            entry_copy["logs"] = self._redact_unexpected(logs, vault, active_profile, 1, 20, "input.outputs.logs", restorable)
+        self._redact_remaining_fields(
+            entry_copy, _INTERPRETER_OUTPUT_HANDLED_KEYS, vault, active_profile, 0, 20, "input.outputs", restorable
+        )
+        return entry_copy
+
     def _redact_prompt_object(
         self,
         prompt: Dict[str, Any],
         vault: Vault,
         active_profile: Optional[CompiledProfile] = None,
+        depth: int = 0,
+        max_depth: int = 20,
     ) -> Dict[str, Any]:
         """Redacts a Responses API prompt object's `variables`, which are the caller's values.
 
@@ -1711,14 +1930,22 @@ class PIIEngine:
         stored prompt's `id` and `version` pass through.
         """
         variables = prompt.get("variables")
-        if not isinstance(variables, dict):
+        if variables is None:
             return prompt
+        if not isinstance(variables, dict):
+            return {
+                **prompt,
+                "variables": self._redact_unexpected(variables, vault, active_profile, depth + 1, max_depth, "prompt.variables"),
+            }
         redacted: Dict[str, Any] = {}
         for name, value in variables.items():
             if isinstance(value, str):
                 value = self.redact_text(value, vault, active_profile)
-            elif isinstance(value, dict) and isinstance(value.get("text"), str):
-                value = {**value, "text": self.redact_text(value["text"], vault, active_profile)}
+            else:
+                # A typed part (`input_text`, `input_image`, `input_file`) or anything else:
+                # every field is scanned, with the media-shape and opaque-id checks, so an
+                # image URL or file id goes out unchanged and text of any shape is scanned.
+                value = self._redact_unexpected(value, vault, active_profile, depth + 1, max_depth, "prompt.variables")
             redacted[name] = value
         return {**prompt, "variables": redacted}
 
@@ -1739,16 +1966,30 @@ class PIIEngine:
                 block[prose_key] = self.redact_text(block[prose_key], vault, active_profile, restorable=restorable)
 
         source = block.get("source")
-        if not isinstance(source, dict) or source.get("type") not in _TEXT_DOCUMENT_SOURCES:
+        if source is None:
             return
+        if not isinstance(source, dict):
+            block["source"] = self._redact_unexpected(source, vault, active_profile, 1, 20, "document.source", restorable)
+            return
+        if source.get("type") in _MEDIA_SOURCE_NEEDS:
+            return  # base64, url and file sources hold binary or a reference
+        # A text or content source, or a type this walk does not know: its text is scanned.
         source = source.copy()
-        if isinstance(source.get("data"), str):
-            source["data"] = self.redact_text(source["data"], vault, active_profile, restorable=restorable)
+        data = source.get("data")
+        if isinstance(data, str):
+            source["data"] = self.redact_text(data, vault, active_profile, restorable=restorable)
+        elif data is not None:
+            source["data"] = self._redact_unexpected(data, vault, active_profile, 2, 20, "document.source.data", restorable)
         content = source.get("content")
         if isinstance(content, str):
             source["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
         elif isinstance(content, list):
             source["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
+        elif isinstance(content, dict):
+            source["content"] = self._redact_text_blocks([content], vault, active_profile, restorable)[0]
+        self._redact_remaining_fields(
+            source, _DOCUMENT_SOURCE_HANDLED_KEYS, vault, active_profile, 1, 20, "document.source", restorable
+        )
         block["source"] = source
 
     def _redact_tool_input(
