@@ -1781,7 +1781,7 @@ async def _proxy_catch_all_internal(
                     )
                     loop = asyncio.get_running_loop()
                     raw_text = upstream_res.text
-                    if settings.ENABLE_RESPONSE_PII_REDACTION and not (is_v3 and v3_cipher):
+                    if settings.ENABLE_RESPONSE_PII_REDACTION:
                         # The structured path scans model-originated text before restoring
                         # the caller's values. The fallback must too, or a reply that is not
                         # one JSON document (NDJSON, plain text) goes back unscanned.
