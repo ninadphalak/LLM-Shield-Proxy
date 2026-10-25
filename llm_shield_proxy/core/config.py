@@ -190,7 +190,13 @@ class Settings(BaseSettings):
     )
     CORS_ALLOWED_ORIGINS: str = Field(default="", description="Comma-separated allowed CORS origins (empty allows same-origin / configured)")
     ALLOW_CLIENT_UPSTREAM_OVERRIDE: bool = Field(
-        default=False, description="Whether to permit clients to override upstream URL via X-Upstream-Base-Url header"
+        default=False,
+        description=(
+            "Whether to permit clients to override the upstream URL via X-Upstream-Base-Url (and the "
+            "failover target via X-Shield-Fallback-Url). A host picked this way gets a proxy-held key "
+            "only if it is a known provider's API host (that provider's key) or the configured upstream "
+            "host; any other host is refused for virtual keys, and a caller's own key is forwarded as sent."
+        ),
     )
     OVERRIDE_CLIENT_AUTH: bool = Field(default=False, description="Strip client auth and inject UPSTREAM_API_KEY")
     ENABLE_OPEN_BYOK_PASSTHROUGH: bool = Field(
