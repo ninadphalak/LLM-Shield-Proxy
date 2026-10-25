@@ -165,3 +165,84 @@ def test_token_ids_in_a_prompt_list_pass_through(engine):
     redacted = engine.redact_payload({"prompt": [[101, 2023, 102], "plain"]}, Vault())
 
     assert redacted["prompt"][0] == [101, 2023, 102]
+
+
+# Values of an unexpected type under a key the walk handles as a string.
+HANDLED_KEY_SHAPES = {
+    "block-text-as-list": {"messages": [{"role": "user", "content": [{"type": "text", "text": [f"ssn {SSN}"]}]}]},
+    "block-text-as-object": {"messages": [{"role": "user", "content": [{"type": "text", "text": {"value": f"ssn {SSN}"}}]}]},
+    "message-name-as-object": {"messages": [{"role": "user", "name": {"n": EMAIL}, "content": "hi"}]},
+    "tool-call-id-as-object": {
+        "messages": [{"role": "assistant", "tool_calls": [{"id": {"x": EMAIL}, "type": "function", "function": {"name": "f", "arguments": "{}"}}]}]
+    },
+    "function-name-as-object": {
+        "messages": [{"role": "assistant", "tool_calls": [{"id": "c", "type": "function", "function": {"name": {"x": EMAIL}, "arguments": "{}"}}]}]
+    },
+    "document-title-as-list": {
+        "messages": [
+            {"role": "user", "content": [{"type": "document", "title": [EMAIL], "source": {"type": "text", "media_type": "text/plain", "data": "x"}}]}
+        ]
+    },
+    "responses-input-text-as-list": {"input": [{"role": "user", "content": [{"type": "input_text", "text": [EMAIL]}]}]},
+    "prompt-variables-as-list": {"prompt": {"id": "pmpt_1", "variables": [EMAIL]}},
+    "prompt-variable-text-as-list": {"prompt": {"id": "pmpt_1", "variables": {"v": {"type": "input_text", "text": [EMAIL]}}}},
+    "code-interpreter-outputs-as-object": {"input": [{"type": "code_interpreter_call", "id": "ci", "outputs": {"logs": EMAIL}}]},
+}
+
+
+@pytest.mark.parametrize("payload", list(HANDLED_KEY_SHAPES.values()), ids=list(HANDLED_KEY_SHAPES))
+def test_an_object_or_list_under_a_handled_text_key_is_scanned(engine, payload):
+    redacted = engine.redact_payload(payload, Vault())
+
+    dumped = json.dumps(redacted)
+    assert SSN not in dumped
+    assert EMAIL not in dumped
+
+
+# What scanning must leave byte for byte: a provider verifies these.
+SIGNATURE = "EqQBCkgIARABGAIiQLm3pZ7qXq9vT2kJd8fH3sK1mN0bV6cX4zA9yW2uR5tE8oI7pL3jG1hF0dS6aQ4wE9rT2yU5iO8pA3sD6fG9hJ1kL4zX7cV0bN3mQ=="
+SIGNED_URL = (
+    "https://bucket.s3.amazonaws.com/shot.png?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+    "&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261025%2Fus-east-1%2Fs3%2Faws4_request"
+    "&X-Amz-Signature=fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024"
+)
+PASS_THROUGH = {
+    # Gemini's OpenAI-compatible API rejects a replayed call whose signature changed.
+    "gemini-thought-signature": {
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "c",
+                        "type": "function",
+                        "function": {"name": "f", "arguments": "{}"},
+                        "extra_content": {"google": {"thought_signature": SIGNATURE}},
+                    }
+                ],
+            }
+        ]
+    },
+    "responses-screenshot-signed-url": {
+        "input": [{"type": "computer_call_output", "call_id": "c1", "output": {"type": "computer_screenshot", "image_url": SIGNED_URL}}]
+    },
+    "responses-screenshot-data-uri": {
+        "input": [
+            {
+                "type": "computer_call_output",
+                "call_id": "c1",
+                "output": {"type": "computer_screenshot", "image_url": "data:image/png;base64," + "iVBORw0KGgo" * 2000},
+            }
+        ]
+    },
+}
+
+
+@pytest.mark.parametrize("policy", ["warn", "block"])
+@pytest.mark.parametrize("payload", list(PASS_THROUGH.values()), ids=list(PASS_THROUGH))
+def test_signatures_and_media_in_newly_scanned_fields_pass_unchanged(engine, payload, policy, monkeypatch):
+    from llm_shield_proxy.core.config import settings
+
+    monkeypatch.setattr(settings, "UNMAPPED_BLOB_POLICY", policy)
+
+    assert engine.redact_payload(payload, Vault()) == payload

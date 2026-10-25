@@ -490,7 +490,10 @@ _SCHEMA_VALUE_KEYWORDS: frozenset[str] = frozenset({"enum", "const", "examples",
 # `redacted_thinking` `data`, `encrypted_content`). Rewriting them breaks the request, and
 # their high entropy is what Tier 2 flags.
 _OPAQUE_MESSAGE_KEYS: frozenset[str] = frozenset(
-    {"id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "data", "encrypted_content", "file_id"}
+    {
+        "id", "tool_call_id", "tool_use_id", "call_id", "name", "signature", "thought_signature", "data",
+        "encrypted_content", "file_id",
+    }
 )
 
 # Media payloads, by shape (see _is_media_field): the exact fields an image, audio or file
@@ -537,7 +540,11 @@ _MEDIA_BYTES_KEYS: frozenset[str] = frozenset({"data", "file_data"})
 # one breaks the reference, a high-entropy id is what Tier 2 flags, and these names hold ids,
 # not personal data. `name` and `data` are not here: below a direct field they are ordinary
 # data (`metadata.name`), so they are only skipped as direct fields.
-_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset({"id", "call_id", "tool_call_id", "tool_use_id", "file_id"})
+# `thought_signature` is Gemini's: its OpenAI-compatible API carries it in a tool call's
+# `extra_content.google`, and rejects a replayed call whose signature changed.
+_NESTED_REFERENCE_KEYS: frozenset[str] = frozenset(
+    {"id", "call_id", "tool_call_id", "tool_use_id", "file_id", "thought_signature"}
+)
 
 
 _MEDIA_FIELD_PATTERNS: Dict[str, "re.Pattern[str]"] = {
@@ -594,6 +601,11 @@ _REPLAYED_TEXT_KEYS: frozenset[str] = frozenset(
 _MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
     {"role", "content", "name", "tool_calls", "function_call", "messages"}
 )
+
+# Handled keys whose value is a string when a client follows the API. A shape walk only
+# touches the string form, so an object or list under one of them is scanned by
+# _redact_remaining_fields instead of being skipped as handled.
+_TEXT_VALUED_HANDLED_KEYS: frozenset[str] = frozenset({"role", "type", "text", "name", "id", "title", "context"})
 
 # What the message walk handles by shape inside one `tool_calls` entry, and inside its
 # `custom` object. Every other field of either is scanned.
@@ -1393,23 +1405,24 @@ class PIIEngine:
         expected, an object where a list was) is scanned here or reaches the provider in
         clear. A provider may reject the shape, but only after it has received the body.
         """
+        if depth > max_depth:
+            raise ValueError("Maximum payload nesting depth exceeded")
         if value is None or isinstance(value, (bool, int, float)):
             return value
         if isinstance(value, str):
             return self.redact_text(value, vault, active_profile, restorable=restorable)
-        return self._deep_redact(
-            value,
-            vault,
-            active_profile,
-            settings.payload_protected_keys_set | _policy_skip_keys(),
-            settings.PAYLOAD_MAX_REDACT_STRING_LENGTH,
-            depth,
-            max_depth,
-            json_path,
-            restorable=restorable,
-            text_keys=_REPLAYED_TEXT_KEYS,
-            reference_keys=_NESTED_REFERENCE_KEYS,
-        )
+        if isinstance(value, list):
+            return [
+                self._redact_unexpected(item, vault, active_profile, depth + 1, max_depth, f"{json_path}[{index}]", restorable)
+                for index, item in enumerate(value)
+            ]
+        if isinstance(value, dict):
+            # The same rules as any other field: media payloads by shape, opaque ids and
+            # signatures, operator- and policy-protected keys all go out unchanged.
+            copy = value.copy()
+            self._redact_remaining_fields(copy, frozenset(), vault, active_profile, depth, max_depth, json_path, restorable)
+            return copy
+        return value
 
     def _redact_function_object(
         self,
@@ -1543,7 +1556,13 @@ class PIIEngine:
         """
         protected = settings.payload_protected_keys_set | _policy_skip_keys()
         for key, value in node.items():
-            if key in handled or key in protected:
+            if key in protected:
+                continue
+            if key in handled:
+                if key in _TEXT_VALUED_HANDLED_KEYS and isinstance(value, (dict, list)):
+                    node[key] = self._redact_unexpected(
+                        value, vault, active_profile, depth + 1, max_depth, f"{json_path}.{key}", restorable
+                    )
                 continue
             if _is_media_field(key, value, lambda text: bool(self.detect_spans(text, active_profile))):
                 # A file's name is the one text field in a media payload.
@@ -1857,7 +1876,9 @@ class PIIEngine:
 
         # A replayed code_interpreter_call carries what its code printed.
         outputs = item_copy.get("outputs")
-        if isinstance(outputs, list):
+        if outputs is not None and not isinstance(outputs, list):
+            item_copy["outputs"] = self._redact_unexpected(outputs, vault, active_profile, 0, 20, "input.outputs", restorable)
+        elif isinstance(outputs, list):
             item_copy["outputs"] = [
                 {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile)}
                 if isinstance(entry, dict) and isinstance(entry.get("logs"), str)
@@ -1884,14 +1905,26 @@ class PIIEngine:
         stored prompt's `id` and `version` pass through.
         """
         variables = prompt.get("variables")
-        if not isinstance(variables, dict):
+        if variables is None:
             return prompt
+        if not isinstance(variables, dict):
+            return {
+                **prompt,
+                "variables": self._redact_unexpected(variables, vault, active_profile, depth + 1, max_depth, "prompt.variables"),
+            }
         redacted: Dict[str, Any] = {}
         for name, value in variables.items():
             if isinstance(value, str):
                 value = self.redact_text(value, vault, active_profile)
             elif isinstance(value, dict) and isinstance(value.get("text"), str):
                 value = {**value, "text": self.redact_text(value["text"], vault, active_profile)}
+            elif isinstance(value, dict) and value.get("text") is not None:
+                value = {
+                    **value,
+                    "text": self._redact_unexpected(
+                        value["text"], vault, active_profile, depth + 1, max_depth, "prompt.variables.text"
+                    ),
+                }
             elif not isinstance(value, dict):
                 value = self._redact_unexpected(value, vault, active_profile, depth + 1, max_depth, "prompt.variables")
             redacted[name] = value
