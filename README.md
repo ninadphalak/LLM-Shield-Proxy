@@ -14,16 +14,19 @@ data and secrets it detects (emails, card numbers, SSNs, API keys and more) befo
 to the model provider, and puts the original values back into the streamed response before your
 application sees it. Your application changes only its `base_url` and the key it sends.
 
-Already running LiteLLM? LiteLLM includes it as a built-in guardrail, `guardrail: llm_shield_proxy`,
-so LiteLLM keeps its own routing and calls the Shield to redact each request and restore each reply.
-See [LiteLLM's setup page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy). It is
-on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; until then, use one of the
-wirings in [Running behind LiteLLM](https://llmshieldproxy.com/docs/features/litellm-integration).
-On a LiteLLM without the module, that config does not stop the proxy: LiteLLM logs one
-error line, `Skipping guardrail 'llm-shield': invalid configuration, proxy is starting WITHOUT
-this guardrail: Unsupported guardrail: llm_shield_proxy`, starts, and every request reaches the
-provider unredacted (seen on 1.105.0, the newest image). Check that line is absent from the
-startup log before sending anything real.
+Already running LiteLLM? From LiteLLM 1.106.0 (released 2026-10-18) the Shield is a built-in
+guardrail, `guardrail: llm_shield_proxy`: LiteLLM keeps its own routing and calls the Shield to
+redact each request and restore each reply. See
+[LiteLLM's setup page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy). An older
+LiteLLM does not stop on that config: it logs one error line, `Skipping guardrail 'llm-shield':
+invalid configuration, proxy is starting WITHOUT this guardrail: Unsupported guardrail:
+llm_shield_proxy`, starts, and every request reaches the provider unredacted. Check that line is
+absent from the startup log, or on an older LiteLLM use one of the wirings in
+[Running behind LiteLLM](https://llmshieldproxy.com/docs/features/litellm-integration).
+
+Testing a gateway you already run, rather than adding this one? The
+[benchmark](#the-benchmark-does-a-gateway-leak-in-streams) checks whether it sends personal data
+to its model provider, with no model account and no install of this proxy.
 
 ## Try it in a minute, with no API key
 
@@ -129,7 +132,10 @@ The maintained component map and deployment diagrams live in the
 ## Deployment choices
 
 In standard mode, detection, masking, policy checks, and value restoration run inside your gateway.
-Only the masked request is sent to the external model provider:
+Only the masked request is sent to the external model provider. Out of the box the proxy makes no
+other outbound call: trace export, audit telemetry, HashiCorp Vault, Redis and a fallback provider
+each stay off until you configure them.
+
 
 <a href="website/docs/assets/diagram-standard.svg?v=3">
   <img src="website/docs/assets/diagram-standard.svg?v=3" alt="Standard LLM privacy gateway deployment" width="900" />

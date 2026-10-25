@@ -16,19 +16,19 @@ guardrails:
       api_key: os.environ/LLM_SHIELD_PROXY_API_KEY
 ```
 
-It is on LiteLLM's `main` branch and not yet in a tagged LiteLLM release; v1.105.0-rc.1
-and earlier do not include it. On a LiteLLM without the module, that config does not stop the proxy: LiteLLM logs one
+It ships in LiteLLM 1.106.0 (released 2026-10-18) and later; 1.105.x and earlier do not include
+it. On a LiteLLM without the module, that config does not stop the proxy: LiteLLM logs one
 error line, `Skipping guardrail 'llm-shield': invalid configuration, proxy is starting WITHOUT
 this guardrail: Unsupported guardrail: llm_shield_proxy`, starts, and every request reaches the
-provider unredacted (seen on 1.105.0, the newest image). Check that line is absent from the
-startup log before sending anything real.
+provider unredacted (seen on 1.105.0). Check that line is absent from the startup log before
+sending anything real.
 On those versions, use one of the two wirings below. Neither changes a file in LiteLLM's
 repository.
 
 | | Built-in guardrail | In-process guardrail | Generic guardrail API |
 |---|---|---|---|
 | Wiring | `guardrail: llm_shield_proxy` | LiteLLM loads a class from this repository's example by dotted path | LiteLLM calls an HTTP endpoint that follows its contract |
-| LiteLLM version | a build of LiteLLM `main` that contains commit `d9467067`; no tagged release yet | any with custom guardrails | any with `generic_guardrail_api` |
+| LiteLLM version | 1.106.0 or later (first release with commit `d9467067`) | any with custom guardrails | any with `generic_guardrail_api` |
 | What runs beside the proxy | nothing | nothing (you mount one file) | a small shim process |
 | Guardrails dashboard card | yes | no | no |
 | Listed in LiteLLM's docs | yes | no | no |

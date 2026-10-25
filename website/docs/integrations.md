@@ -22,8 +22,8 @@ The table above covers pointing LiteLLM *at* the proxy, so the proxy owns the up
 LiteLLM can also call the proxy as a guardrail and keep its own model path, routing, retries and
 budgets. LiteLLM includes this as a built-in guardrail, `guardrail: llm_shield_proxy`, documented
 on [LiteLLM's guardrail page](https://docs.litellm.ai/docs/proxy/guardrails/llm_shield_proxy); it
-is on LiteLLM's `main` branch and not yet in a tagged release. On earlier LiteLLM versions, load a
-guardrail class from this repository by dotted path, or use LiteLLM's `generic_guardrail_api`.
+ships in LiteLLM 1.106.0 and later. On earlier LiteLLM versions, load a guardrail class from this
+repository by dotted path, or use LiteLLM's `generic_guardrail_api`.
 All three wirings, what each costs, and the streaming settings that have to move together are in
 [Running behind LiteLLM](./features/litellm-integration.md).
 
