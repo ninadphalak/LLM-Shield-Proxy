@@ -156,12 +156,26 @@ def test_published_outputs_and_ancestors_are_refused(destination):
 
 
 def test_existing_output_including_hard_links_is_refused(tmp_path):
+    import errno
     import os
+    import tempfile
 
-    target = tmp_path / "chunk-local.json"
-    os.link(PUBLISHED / "chunk-local.json", target)
-    with pytest.raises(ValueError, match="already exists"):
-        checker.load_baselines(list(POLICIES), tmp_path)
+    def _refused(destination):
+        os.link(PUBLISHED / "chunk-local.json", destination / "chunk-local.json")
+        with pytest.raises(ValueError, match="already exists"):
+            checker.load_baselines(list(POLICIES), destination)
+
+    try:
+        _refused(tmp_path)
+    except OSError as exc:
+        # A hard link cannot cross filesystems, and on some runners (ubuntu-24.04 and later
+        # images) the temp directory is its own filesystem. Link from a scratch directory
+        # beside the checkout instead, which is on the same one as the published file.
+        if exc.errno != errno.EXDEV:
+            raise
+        beside_checkout = Path(__file__).resolve().parents[2].parent
+        with tempfile.TemporaryDirectory(dir=beside_checkout) as scratch:
+            _refused(Path(scratch))
 
 
 def test_baselines_are_read_before_the_experiment(tmp_path, monkeypatch):
