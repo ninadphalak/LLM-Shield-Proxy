@@ -286,3 +286,46 @@ def test_tool_fields_of_an_instructions_item_are_one_way(engine, item):
     assert SSN not in json.dumps(redacted)
     assert SSN in vault.one_way_original_to_token
     assert SSN not in vault.token_to_original.values()
+
+
+INTERPRETER_AND_DOCUMENT_SHAPES = {
+    "interpreter-logs-as-object": {"input": [{"type": "code_interpreter_call", "id": "ci", "outputs": [{"type": "logs", "logs": {"ssn": SSN}}]}]},
+    "interpreter-output-as-string": {"input": [{"type": "code_interpreter_call", "id": "ci", "outputs": [f"ssn {SSN}"]}]},
+    "interpreter-output-extra-field": {
+        "input": [{"type": "code_interpreter_call", "id": "ci", "outputs": [{"type": "logs", "logs": "ok", "note": f"ssn {SSN}"}]}]
+    },
+    "document-text-data-as-list": {
+        "messages": [{"role": "user", "content": [{"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": [f"ssn {SSN}"]}}]}]
+    },
+    "document-source-of-unknown-type": {
+        "messages": [{"role": "user", "content": [{"type": "document", "source": {"type": "markdown", "data": f"ssn {SSN}"}}]}]
+    },
+    "document-content-source-object": {
+        "messages": [{"role": "user", "content": [{"type": "document", "source": {"type": "content", "content": {"type": "text", "text": f"ssn {SSN}"}}}]}]
+    },
+}
+
+
+@pytest.mark.parametrize("payload", list(INTERPRETER_AND_DOCUMENT_SHAPES.values()), ids=list(INTERPRETER_AND_DOCUMENT_SHAPES))
+def test_interpreter_outputs_and_document_sources_of_any_shape_are_scanned(engine, payload):
+    redacted = engine.redact_payload(payload, Vault())
+
+    assert SSN not in json.dumps(redacted)
+
+
+def test_media_document_sources_and_interpreter_images_pass_unchanged(engine):
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjcK" * 400}},
+                    {"type": "document", "source": {"type": "url", "url": SIGNED_URL}},
+                    {"type": "document", "source": {"type": "file", "file_id": "file_011CNha8iCJcU1wXNR6q4V8w"}},
+                ],
+            }
+        ],
+        "input": [{"type": "code_interpreter_call", "id": "ci", "outputs": [{"type": "image", "url": SIGNED_URL}]}],
+    }
+
+    assert engine.redact_payload(payload, Vault()) == payload

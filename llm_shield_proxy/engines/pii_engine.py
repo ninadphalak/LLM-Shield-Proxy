@@ -605,13 +605,15 @@ _MESSAGE_HANDLED_KEYS: frozenset[str] = frozenset(
 # Handled keys whose value is a string when a client follows the API. A shape walk only
 # touches the string form, so an object or list under one of them is scanned by
 # _redact_remaining_fields instead of being skipped as handled.
-_TEXT_VALUED_HANDLED_KEYS: frozenset[str] = frozenset({"role", "type", "text", "name", "id", "title", "context"})
+_TEXT_VALUED_HANDLED_KEYS: frozenset[str] = frozenset({"role", "type", "text", "name", "id", "title", "context", "url"})
 
 # What the message walk handles by shape inside one `tool_calls` entry, and inside its
 # `custom` object. Every other field of either is scanned.
 _TOOL_CALL_HANDLED_KEYS: frozenset[str] = frozenset({"id", "type", "function", "custom"})
 _CUSTOM_TOOL_CALL_HANDLED_KEYS: frozenset[str] = frozenset({"name", "input"})
 _FUNCTION_HANDLED_KEYS: frozenset[str] = frozenset({"name", "arguments"})
+_INTERPRETER_OUTPUT_HANDLED_KEYS: frozenset[str] = frozenset({"type", "logs", "url"})
+_DOCUMENT_SOURCE_HANDLED_KEYS: frozenset[str] = frozenset({"type", "media_type", "data", "content"})
 
 # What the content-block walks handle by shape. A document's `title` and `context` belong
 # here too; they are added for document blocks only.
@@ -1882,16 +1884,37 @@ class PIIEngine:
             item_copy["outputs"] = self._redact_unexpected(outputs, vault, active_profile, 0, 20, "input.outputs", restorable)
         elif isinstance(outputs, list):
             item_copy["outputs"] = [
-                {**entry, "logs": self.redact_text(entry["logs"], vault, active_profile, restorable=restorable)}
-                if isinstance(entry, dict) and isinstance(entry.get("logs"), str)
-                else entry
-                for entry in outputs
+                self._redact_interpreter_output(entry, vault, active_profile, restorable) for entry in outputs
             ]
 
         self._redact_remaining_fields(
             item_copy, _INPUT_ITEM_HANDLED_KEYS, vault, active_profile, 0, 20, "input", restorable
         )
         return item_copy
+
+    def _redact_interpreter_output(
+        self,
+        entry: Any,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile],
+        restorable: bool,
+    ) -> Any:
+        """Redacts one code interpreter output: `logs` text, then every other field.
+
+        An image output's `url` is the provider's own file reference and goes out as sent.
+        """
+        if not isinstance(entry, dict):
+            return self._redact_unexpected(entry, vault, active_profile, 0, 20, "input.outputs", restorable)
+        entry_copy = entry.copy()
+        logs = entry_copy.get("logs")
+        if isinstance(logs, str):
+            entry_copy["logs"] = self.redact_text(logs, vault, active_profile, restorable=restorable)
+        elif logs is not None:
+            entry_copy["logs"] = self._redact_unexpected(logs, vault, active_profile, 1, 20, "input.outputs.logs", restorable)
+        self._redact_remaining_fields(
+            entry_copy, _INTERPRETER_OUTPUT_HANDLED_KEYS, vault, active_profile, 0, 20, "input.outputs", restorable
+        )
+        return entry_copy
 
     def _redact_prompt_object(
         self,
@@ -1943,16 +1966,30 @@ class PIIEngine:
                 block[prose_key] = self.redact_text(block[prose_key], vault, active_profile, restorable=restorable)
 
         source = block.get("source")
-        if not isinstance(source, dict) or source.get("type") not in _TEXT_DOCUMENT_SOURCES:
+        if source is None:
             return
+        if not isinstance(source, dict):
+            block["source"] = self._redact_unexpected(source, vault, active_profile, 1, 20, "document.source", restorable)
+            return
+        if source.get("type") in _MEDIA_SOURCE_NEEDS:
+            return  # base64, url and file sources hold binary or a reference
+        # A text or content source, or a type this walk does not know: its text is scanned.
         source = source.copy()
-        if isinstance(source.get("data"), str):
-            source["data"] = self.redact_text(source["data"], vault, active_profile, restorable=restorable)
+        data = source.get("data")
+        if isinstance(data, str):
+            source["data"] = self.redact_text(data, vault, active_profile, restorable=restorable)
+        elif data is not None:
+            source["data"] = self._redact_unexpected(data, vault, active_profile, 2, 20, "document.source.data", restorable)
         content = source.get("content")
         if isinstance(content, str):
             source["content"] = self.redact_text(content, vault, active_profile, restorable=restorable)
         elif isinstance(content, list):
             source["content"] = self._redact_text_blocks(content, vault, active_profile, restorable)
+        elif isinstance(content, dict):
+            source["content"] = self._redact_text_blocks([content], vault, active_profile, restorable)[0]
+        self._redact_remaining_fields(
+            source, _DOCUMENT_SOURCE_HANDLED_KEYS, vault, active_profile, 1, 20, "document.source", restorable
+        )
         block["source"] = source
 
     def _redact_tool_input(
