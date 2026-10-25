@@ -266,7 +266,9 @@ jobs:
 
   benchmark-floor:
     name: pii-leak-benchmark on Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, which has no Python 3.9 build for setup-python. The
+    # 3.9 floor is a published claim, so that one job runs on 24.04 rather than being dropped.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     # The harness is the one thing a stranger installs, so its supported Python floor
     # is a claim that has to be tested rather than declared. Each job installs ONLY the
     # benchmark -- if anything but httpx's tree appears, the neutral measurer has
@@ -404,7 +406,9 @@ jobs:
 
   chunk-invariance-python:
     name: chunk-invariance on Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, which has no Python 3.9 build for setup-python. The
+    # 3.9 floor is a published claim, so that one job runs on 24.04 rather than being dropped.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     # Installed alone, as a user installs it: nothing may arrive with it but the optional
     # Hypothesis extra, and its tests must run without the gateway's conftest.
     strategy:
