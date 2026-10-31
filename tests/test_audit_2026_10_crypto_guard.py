@@ -242,6 +242,13 @@ def upstream(monkeypatch):
     monkeypatch.setattr(settings, "ENABLE_RESPONSE_PII_REDACTION", False)
     monkeypatch.setattr(settings, "ENABLE_FINOPS_METERING", False)
     monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", False)
+    # A canary system message would be prepended to the upstream body; pin it off so a
+    # setting leaked by another test cannot shift the user message.
+    monkeypatch.setattr(settings, "ENABLE_CANARY_TRIPWIRE", False)
+
+
+def _user_content(sent: dict) -> str:
+    return next(m["content"] for m in sent["messages"] if m.get("role") == "user")
 
 
 @pytest.mark.parametrize("header", ["SYNTHETIC", "STRUCTURAL_TAG", "HMAC"])
@@ -256,7 +263,7 @@ def test_proxy_header_cannot_override_an_enforced_scrub_role(two_keys, policies,
     res = client.post("/v1/chat/completions", headers=_h(KEY_A, f"s-scrub-{header}", header), json=body)
     assert res.status_code == 200, res.text
     sent = _json.loads(httpx_mock.get_requests()[0].content)
-    assert sent["messages"][0]["content"] == "Email [REDACTED] today"
+    assert _user_content(sent) == "Email [REDACTED] today"
     sessions = getattr(vault_store, "_sessions", {})
     mine = [v for k, v in sessions.items() if k.endswith(f":s-scrub-{header}")]
     assert not any(EMAIL in v.token_to_original.values() for v in mine)
