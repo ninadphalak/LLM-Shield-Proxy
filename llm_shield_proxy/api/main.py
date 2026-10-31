@@ -2001,7 +2001,7 @@ async def _proxy_catch_all_internal(
                             # Model-originated PII is scanned on this branch too, before the
                             # caller's own values are restored from their ciphertext siblings.
                             v3_target = await loop.run_in_executor(
-                                None, _redact_v3_model_originated_tree, res_json, vault
+                                None, _redact_v3_model_originated_tree, res_json, vault, 0, v3_cipher
                             )
                         rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, v3_target)
                     else:
@@ -2434,26 +2434,41 @@ def _redact_model_originated_json_response(res_json: Any, vault: Any) -> Any:
     return res_json
 
 
-def _redact_v3_model_originated_tree(node: Any, vault: Any, depth: int = 0) -> Any:
+def _v3_pair_is_authentic(node: Dict[str, Any], cipher: Any) -> bool:
+    """True when {_shield_val, _shield_ctx} decrypts exactly as the rehydrator tries it."""
+    value, token = node.get("_shield_val"), node.get("_shield_ctx")
+    if cipher is None or not isinstance(value, str) or not isinstance(token, str):
+        return False
+    return cipher.decrypt(token, "") != "[CORRUPTED]" or cipher.decrypt(token, value) != "[CORRUPTED]"
+
+
+def _redact_v3_model_originated_tree(node: Any, vault: Any, depth: int = 0, cipher: Any = None) -> Any:
     """Response PII scan for the stateless (JSON-RPC) branch.
 
     Like `_redact_model_originated_json_response`, except that the AES-GCM siblings the
     stateless rehydrator restores from (`_ctx_hash_*`, `_shield_ctx`) are left intact:
-    rewriting ciphertext would only break the restore, it discloses nothing.
+    rewriting ciphertext would only break the restore, it discloses nothing. A
+    {_shield_val, _shield_ctx} array proxy is one unit: `_shield_val` is the AAD of its
+    ciphertext, so it is kept when the pair authenticates under `cipher` (rewriting it
+    broke the restore). A pair that does not authenticate falls back to `_shield_val`
+    in the rehydrator, so its value is scanned like any model text.
     """
     if depth > _MAX_TOOL_INPUT_DEPTH:
         raise ValueError("Response nesting exceeds the scan bound")
     if isinstance(node, dict):
         out: Dict[str, Any] = {}
+        authentic_pair = _v3_pair_is_authentic(node, cipher)
         for key, value in node.items():
             if isinstance(key, str) and (key.startswith("_ctx_hash_") or key == "_shield_ctx"):
                 out[key] = value
+            elif key == "_shield_val" and authentic_pair:
+                out[key] = value
             elif isinstance(value, (dict, list)):
-                out[key] = _redact_v3_model_originated_tree(value, vault, depth + 1)
+                out[key] = _redact_v3_model_originated_tree(value, vault, depth + 1, cipher)
             else:
                 # A one-key view keeps the structural-key exceptions (id, model, ...).
                 out[key] = redact_model_originated_tree({key: value}, vault)[key]
         return out
     if isinstance(node, list):
-        return [_redact_v3_model_originated_tree(item, vault, depth + 1) for item in node]
+        return [_redact_v3_model_originated_tree(item, vault, depth + 1, cipher) for item in node]
     return redact_model_originated_tree(node, vault)

@@ -175,3 +175,37 @@ def test_proxy_forwards_tool_schema_numbers_unchanged(httpx_mock, vk):
     assert sent["tools"] == [SCHEMA_TOOL]
     assert sent["metadata"]["since"] == 1730332800
     assert sent["metadata"]["card"] != CARD and str(CARD) not in json.dumps(sent)
+
+
+# --- 2. v3 response scan keeps {_shield_val, _shield_ctx} pairs as a unit ---------------
+
+
+def _echo(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json=json.loads(request.content))
+
+
+def test_v3_round_trip_restores_array_elements_with_response_redaction(httpx_mock, vk, monkeypatch, stateless_key):
+    monkeypatch.setattr(settings, "ENABLE_RESPONSE_PII_REDACTION", True)
+    httpx_mock.add_callback(_echo, method="POST", url=OPENAI_CHAT)
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "model": "m",
+            "params": {"to": BOB, "cc": [CAROL]}}
+
+    response = client.post("/v1/chat/completions", headers=_auth(vk, **{"X-Session-ID": "s-v3"}), json=body)
+
+    assert response.status_code == 200, response.text
+    sent = httpx_mock.get_requests()[0].content.decode()
+    assert BOB not in sent and CAROL not in sent and "_shield_ctx" in sent
+    params = response.json()["params"]
+    assert params["to"] == BOB
+    assert params["cc"] == [CAROL]
+
+
+def test_v3_forged_pair_value_is_still_scanned():
+    cipher = StatelessPIICipher(key=b"k" * 32, virtual_key_id="vk", session_id="s")
+    vault = Vault(synthetic=False)
+    real = cipher.encrypt(CAROL, "fake@x.test")
+    tree = {"cc": [{"_shield_val": "fake@x.test", "_shield_ctx": real},
+                   {"_shield_val": "dave.dummy@example.net", "_shield_ctx": "AAAA"}]}
+    out = main_module._redact_v3_model_originated_tree(tree, vault, 0, cipher)
+    assert out["cc"][0] == tree["cc"][0]
+    assert "dave.dummy@example.net" not in json.dumps(out)
