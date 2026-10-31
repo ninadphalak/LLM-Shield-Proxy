@@ -1321,9 +1321,18 @@ async def _proxy_catch_all_internal(
     enable_finops_metering = settings.ENABLE_FINOPS_METERING
 
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
-    from llm_shield_proxy.engines.masking import MaskingMode, ScrubVault, resolve_masking_mode
+    from llm_shield_proxy.engines.masking import (
+        MaskingMode,
+        MaskingModeNotAllowed,
+        ScrubVault,
+        masking_mode_not_allowed_response,
+        resolve_masking_mode,
+    )
 
-    masking_mode = resolve_masking_mode(x_shield_masking_mode)
+    try:
+        masking_mode = resolve_masking_mode(x_shield_masking_mode)
+    except MaskingModeNotAllowed:
+        return masking_mode_not_allowed_response()
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
         # Tokens are bound to this key and session; another tenant's token stays opaque.

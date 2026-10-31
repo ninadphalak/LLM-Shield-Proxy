@@ -141,29 +141,38 @@ async def _resolve_vault(
     session_id: Optional[str],
     virtual_key_id: str,
     masking_mode_header: Optional[str],
-) -> Any:
-    """Selects the vault for this session, mirroring the proxy path's selection."""
+) -> Tuple[Any, Optional[Response]]:
+    """Selects the vault for this session, mirroring the proxy path's selection.
+
+    Returns ``(vault, None)``, or ``(None, response)`` when the role does not allow
+    the requested masking mode.
+    """
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
     from llm_shield_proxy.engines.masking import (
         HmacVault,
         MaskingMode,
+        MaskingModeNotAllowed,
         ScrubVault,
+        masking_mode_not_allowed_response,
         resolve_masking_mode,
     )
 
-    masking_mode = resolve_masking_mode(masking_mode_header)
+    try:
+        masking_mode = resolve_masking_mode(masking_mode_header)
+    except MaskingModeNotAllowed:
+        return None, masking_mode_not_allowed_response()
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
         # Bound to the caller's key and session: another tenant's token does not decrypt.
-        return StatelessCryptoVault(virtual_key_id, session_id)
+        return StatelessCryptoVault(virtual_key_id, session_id), None
     if masking_mode == MaskingMode.SCRUB:
-        return ScrubVault()
+        return ScrubVault(), None
     if masking_mode == MaskingMode.HMAC:
-        return HmacVault()
+        return HmacVault(), None
 
     vault = await vault_store.get_vault_async(session_id, virtual_key_id)
     vault.synthetic = masking_mode != MaskingMode.STRUCTURAL_TAG
-    return vault
+    return vault, None
 
 
 async def _read_json(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
@@ -248,7 +257,9 @@ async def guard_redact(
         return text_error
     assert texts is not None
 
-    vault = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    vault, mode_error = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    if mode_error is not None:
+        return mode_error
     profile = pii_engine.get_profile(virtual_key_id)
 
     try:
@@ -285,7 +296,9 @@ async def guard_rehydrate(
         return text_error
     assert texts is not None
 
-    vault = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    vault, mode_error = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    if mode_error is not None:
+        return mode_error
 
     try:
         # retention_length=0: these are complete texts, so there is no chunk
@@ -342,7 +355,9 @@ async def guard_rehydrate_stream(
             413, f"'text' exceeds {MAX_TOTAL_TEXT_CHARS} characters", "invalid_request_error"
         )
 
-    vault = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    vault, mode_error = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    if mode_error is not None:
+        return mode_error
 
     buffer = SSERehydrationBuffer(vault)
     buffer.content_buffer = carry

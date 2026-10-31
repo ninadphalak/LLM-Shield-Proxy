@@ -209,3 +209,79 @@ def test_guard_body_over_the_cap_is_413(two_keys, monkeypatch, path):
 
     res = client.post(path, headers={**_h(KEY_A, "s-cap"), "Content-Type": "application/json"}, content=chunks())
     assert res.status_code == 413, res.text
+
+
+# masking.py:resolve_masking_mode:client-header-overrides-role-policy
+
+
+def test_resolve_masking_mode_honours_role_enforcement_and_allow_list():
+    from llm_shield_proxy.engines.masking import MaskingMode, MaskingModeNotAllowed, resolve_masking_mode
+
+    token = request_policy_ctx.set({"enforced_masking_mode": "scrub", "SHIELD_DEFAULT_MASKING_MODE": "SCRUB"})
+    try:
+        assert resolve_masking_mode("SYNTHETIC") is MaskingMode.SCRUB
+        assert resolve_masking_mode(None) is MaskingMode.SCRUB
+        request_policy_ctx.set({"enforced_masking_mode": "NOT_A_MODE"})
+        assert resolve_masking_mode("SYNTHETIC") is MaskingMode.SCRUB  # fails closed
+        request_policy_ctx.set({"allowed_masking_modes": ["SCRUB", "HMAC"], "SHIELD_DEFAULT_MASKING_MODE": "SCRUB"})
+        assert resolve_masking_mode("hmac") is MaskingMode.HMAC
+        assert resolve_masking_mode(None) is MaskingMode.SCRUB
+        with pytest.raises(MaskingModeNotAllowed):
+            resolve_masking_mode("STRUCTURAL_TAG")
+        request_policy_ctx.set({})
+        assert resolve_masking_mode("STRUCTURAL_TAG") is MaskingMode.STRUCTURAL_TAG
+    finally:
+        request_policy_ctx.reset(token)
+
+
+@pytest.fixture
+def upstream(monkeypatch):
+    monkeypatch.setattr(settings, "UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr(settings, "UPSTREAM_API_KEY", "sk-proxy-global-key")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings, "ENABLE_RESPONSE_PII_REDACTION", False)
+    monkeypatch.setattr(settings, "ENABLE_FINOPS_METERING", False)
+    monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", False)
+
+
+@pytest.mark.parametrize("header", ["SYNTHETIC", "STRUCTURAL_TAG", "HMAC"])
+def test_proxy_header_cannot_override_an_enforced_scrub_role(two_keys, policies, upstream, httpx_mock, header):
+    import json as _json
+
+    from llm_shield_proxy.engines.vault import vault_store
+
+    policies({"roles": {"pinned": {"enforced_masking_mode": "SCRUB"}}, "virtual_keys": {KEY_A: "pinned"}})
+    httpx_mock.add_response(url="https://api.openai.com/v1/chat/completions", json={"choices": []})
+    body = {"model": "m", "messages": [{"role": "user", "content": f"Email {EMAIL} today"}]}
+    res = client.post("/v1/chat/completions", headers=_h(KEY_A, f"s-scrub-{header}", header), json=body)
+    assert res.status_code == 200, res.text
+    sent = _json.loads(httpx_mock.get_requests()[0].content)
+    assert sent["messages"][0]["content"] == "Email [REDACTED] today"
+    sessions = getattr(vault_store, "_sessions", {})
+    mine = [v for k, v in sessions.items() if k.endswith(f":s-scrub-{header}")]
+    assert not any(EMAIL in v.token_to_original.values() for v in mine)
+
+
+def test_header_outside_allowed_masking_modes_is_403(two_keys, policies, upstream, httpx_mock):
+    policies(
+        {
+            "roles": {"limited": {"allowed_masking_modes": ["SCRUB", "HMAC"], "SHIELD_DEFAULT_MASKING_MODE": "SCRUB"}},
+            "virtual_keys": {KEY_A: "limited"},
+        }
+    )
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    res = client.post("/v1/chat/completions", headers=_h(KEY_A, "s-lim", "SYNTHETIC"), json=body)
+    assert res.status_code == 403
+    assert httpx_mock.get_requests() == []
+    res = client.post("/v1/guard/redact", headers=_h(KEY_A, "s-lim", "STRUCTURAL_TAG"), json={"texts": [EMAIL]})
+    assert res.status_code == 403
+    res = client.post("/v1/guard/redact", headers=_h(KEY_A, "s-lim", "SCRUB"), json={"texts": [EMAIL]})
+    assert res.status_code == 200 and res.json()["texts"] == ["[REDACTED]"]
+
+
+def test_guard_honours_an_enforced_mode(two_keys, policies):
+    policies({"roles": {"pinned": {"enforced_masking_mode": "SCRUB"}}, "virtual_keys": {KEY_A: "pinned"}})
+    res = client.post(
+        "/v1/guard/redact", headers=_h(KEY_A, "s-g", "STRUCTURAL_TAG"), json={"texts": [f"mail {EMAIL}"]}
+    )
+    assert res.json()["texts"] == ["mail [REDACTED]"]
