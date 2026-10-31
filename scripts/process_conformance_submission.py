@@ -764,20 +764,43 @@ def render_comment(row: dict[str, Any], reason: str, evidence: str, problems: li
 # --------------------------------------------------------------------------- writing
 
 
+def canonical_run_key(run_url: str) -> str:
+    """`owner/repo/run-id` with owner and repository lowercased, or empty when not a run link.
+
+    GitHub owner and repository names are case-insensitive, and anything after the run id
+    (`/attempts/2`, `?pr=1`, `#summary`) names the same run, so neither may make one run
+    look like two.
+    """
+    match = RUN_URL.match(str(run_url or "").strip())
+    if not match:
+        return ""
+    owner, repo, run_id = match.groups()
+    return f"{owner.casefold()}/{repo.casefold()}/{int(run_id)}"
+
+
 def row_identity(row: dict[str, Any]) -> tuple[str, ...]:
-    """Define row identity for deduplication (by run URL if present, otherwise by project/version)."""
+    """Define row identity for deduplication (by run if present, otherwise by project/version)."""
     run_url = str(row.get("runUrl") or "")
     if run_url:
-        return ("run", run_url)
+        return ("run", canonical_run_key(run_url) or run_url)
     return ("target", str(row.get("project", "")).casefold(), str(row.get("version", "")).casefold())
 
 
+def _submitter(row: dict[str, Any]) -> str:
+    return str((row.get("_submission") or {}).get("submitter") or "").casefold()
+
+
+def _issue(row: dict[str, Any]) -> Any:
+    return (row.get("_submission") or {}).get("issue")
+
+
 def is_replacement(row: dict[str, Any], entries: list[Any]) -> bool:
-    """True when `row` replaces an existing entry: the same run, or the same issue.
+    """True when `row` replaces an existing entry: the same issue, or the same submitter's run.
 
     An issue edited to link a rerun replaces that issue's row: one issue, one row. The
     wall's badge endpoint is keyed by issue number and refuses two rows for one issue.
     The row cap and the write both use this, so a rerun at the cap is not refused.
+    Another account's row is never replaced: see `run_claimed_by_other`.
     """
     return any(_same_row(existing, row) for existing in entries)
 
@@ -785,10 +808,27 @@ def is_replacement(row: dict[str, Any], entries: list[Any]) -> bool:
 def _same_row(existing: Any, row: dict[str, Any]) -> bool:
     if not isinstance(existing, dict):
         return False
-    if row_identity(existing) == row_identity(row):
+    issue = _issue(row)
+    if issue and _issue(existing) == issue:
         return True
-    issue = (row.get("_submission") or {}).get("issue")
-    return bool(issue) and (existing.get("_submission") or {}).get("issue") == issue
+    # Identity alone is public (run links are on the wall), so it must be the same account too.
+    return row_identity(existing) == row_identity(row) and _submitter(existing) == _submitter(row)
+
+
+def run_claimed_by_other(row: dict[str, Any], entries: list[Any]) -> Optional[dict[str, Any]]:
+    """The row of another account, on another issue, that already holds this row's run."""
+    key = canonical_run_key(str(row.get("runUrl") or ""))
+    if not key:
+        return None
+    for existing in entries:
+        if (
+            isinstance(existing, dict)
+            and canonical_run_key(str(existing.get("runUrl") or "")) == key
+            and _submitter(existing) != _submitter(row)
+            and _issue(existing) != _issue(row)
+        ):
+            return existing
+    return None
 
 
 def submissions_by(entries: list[Any], submitter: str) -> int:
@@ -1145,6 +1185,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Enforce row limit, allowing replacements. Read after catching up, not before.
     existing = json.loads(ROWS_FILE.read_text(encoding="utf-8")).get("entries", [])
     submitter = (row.get("_submission") or {}).get("submitter", "")
+    # A run already backing another account's row is refused, not moved: run links are
+    # public on the wall, and replacing on the link alone let anyone take a row over.
+    if run_claimed_by_other(row, existing) is not None:
+        comment(
+            issue_number,
+            "The run this issue links already backs a row submitted by another account, so "
+            "this one was not published and that row was left as it is. If the run is yours, "
+            "say so here and a maintainer will sort it out.",
+        )
+        label(issue_number, "needs-info")
+        return 1
     replacing = is_replacement(row, existing)
     if not replacing and submissions_by(existing, submitter) >= MAX_ROWS_PER_SUBMITTER:
         comment(
