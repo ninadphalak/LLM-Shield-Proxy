@@ -16,10 +16,11 @@ documented in `security/egress_guard.py`:
     "allowed_resources": ["file:///docs/*", "https://kb.example.com/*"]
 
 `resources/read` is default-deny: the requested `uri` must match one of these
-`fnmatch` patterns (case-sensitive; `*` also matches `/`). A URI with a `..` path
-segment is always refused. A fail-closed policy (`_FAIL_CLOSED_` sentinel from a
-resolver failure or an empty allowlist under MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL)
-refuses every method, including tools/list and resources/read, before any upstream call.
+`fnmatch` patterns (case-sensitive; `*` also matches `/`), compared against the URI
+percent-decoded until stable. A URI with a `.` or `..` segment (in any encoding), an
+encoded `/` or `\\`, or a backslash is always refused. A fail-closed policy
+(`_FAIL_CLOSED_` sentinel from a resolver failure or an empty allowlist under
+MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL) refuses every method, including tools/list and resources/read, before any upstream call.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 import orjson
@@ -108,6 +109,10 @@ FAIL_CLOSED_SENTINEL = "_FAIL_CLOSED_"
 
 # A `..` path segment, literal or percent-encoded, with slash or backslash separators.
 _DOT_DOT_SEGMENT = re.compile(r"(?:^|[/\\])(?:\.|%2e){2}(?:[/\\?#]|$)", re.IGNORECASE)
+# A percent-encoded separator: `..%2f` is a traversal to a server that decodes it.
+_ENCODED_SEPARATOR = re.compile(r"%(?:2f|5c)", re.IGNORECASE)
+# Decoding rounds before a URI that keeps changing is refused (`%252e` is two rounds).
+_MAX_URI_DECODE_ROUNDS = 4
 
 
 def _get_mcp_policy_resolver_for_app(app: Any) -> BasePolicyResolver:
@@ -273,16 +278,47 @@ def _is_fail_closed(allowed: set) -> bool:
     return FAIL_CLOSED_SENTINEL in allowed
 
 
+def _normalized_resource_uri(uri: str) -> Optional[str]:
+    """The fully percent-decoded URI to match patterns against, or None to refuse it.
+
+    The URI is decoded until it stops changing, because an upstream may decode once or
+    several times (`%252e%252e` -> `%2e%2e` -> `..`). Refused: an encoded `/` or `\\` at
+    any round, a backslash or control character in the decoded form, any `.` or `..`
+    segment, and a URI still changing after _MAX_URI_DECODE_ROUNDS.
+    """
+    current = uri
+    for _ in range(_MAX_URI_DECODE_ROUNDS + 1):
+        if _ENCODED_SEPARATOR.search(current):
+            return None
+        decoded = unquote(current, errors="strict")
+        if decoded == current:
+            break
+        current = decoded
+    else:
+        return None
+    if "\\" in current or any(ord(char) < 0x20 or ord(char) == 0x7F for char in current):
+        return None
+    if any(segment in (".", "..") for segment in current.split("/")):
+        return None
+    return current
+
+
 def _is_resource_forbidden(uri: Any, policy: Dict[str, Any]) -> bool:
     """Default-deny check for resources/read against the policy's `allowed_resources` patterns."""
     if not isinstance(uri, str) or not uri:
         return True
     if _DOT_DOT_SEGMENT.search(uri):
         return True
+    try:
+        normalized = _normalized_resource_uri(uri)
+    except UnicodeDecodeError:
+        return True  # an escape that is not UTF-8
+    if normalized is None:
+        return True
     patterns = policy.get("allowed_resources") or []
     if not isinstance(patterns, (list, tuple)):
         return True
-    return not any(isinstance(p, str) and p and fnmatch.fnmatchcase(uri, p) for p in patterns)
+    return not any(isinstance(p, str) and p and fnmatch.fnmatchcase(normalized, p) for p in patterns)
 
 
 def _check_depth(value: Any, depth: int = 0) -> None:

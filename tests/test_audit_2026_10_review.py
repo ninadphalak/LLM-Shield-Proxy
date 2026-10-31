@@ -209,3 +209,38 @@ def test_v3_forged_pair_value_is_still_scanned():
     out = main_module._redact_v3_model_originated_tree(tree, vault, 0, cipher)
     assert out["cc"][0] == tree["cc"][0]
     assert "dave.dummy@example.net" not in json.dumps(out)
+
+
+# --- 3. resources/read: decode until stable, refuse traversal and encoded separators ----
+
+POLICY = {"allowed_resources": ["file:///docs/*"]}
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "file:///docs/..%2fetc/passwd",
+        "file:///docs/%2e%2e%2fetc/passwd",
+        "file:///docs/..%5cetc/passwd",
+        "file:///docs/%252e%252e/etc/passwd",
+        "file:///docs/%25252e%25252e/etc/passwd",
+        "file:///docs/a%2fb.txt",
+        "file:///docs/..\\etc/passwd",
+        "file:///docs/./a.txt",
+        "file:///docs/%2E/a.txt",
+        "file:///docs/a%00.txt",
+        "file:///docs/%ff.txt",
+    ],
+)
+def test_encoded_traversal_is_refused(uri):
+    assert _is_resource_forbidden(uri, POLICY)
+
+
+@pytest.mark.parametrize("uri", ["file:///docs/a.txt", "file:///docs/sub/b%20c.md", "file:///docs/%61.txt"])
+def test_ordinary_resource_is_allowed(uri):
+    assert not _is_resource_forbidden(uri, POLICY)
+
+
+def test_decoded_form_is_what_the_pattern_must_match():
+    assert _is_resource_forbidden("file:///%64ocs-private/x", {"allowed_resources": ["file:///docs*"]}) is False
+    assert _is_resource_forbidden("file:///%64ocs/x", {"allowed_resources": ["file:///internal/*"]})
