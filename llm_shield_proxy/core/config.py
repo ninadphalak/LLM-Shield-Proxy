@@ -403,6 +403,7 @@ class Settings(BaseSettings):
     # Internal dynamic cache
     _valid_virtual_keys_set: frozenset[str] = frozenset()
     _flattened_policies: Any = {}
+    _policies_loaded: bool = False  # a policies file is in force, even with an empty map
     _policies_mtime: float = 0.0
     _policies_path: str = ""  # Track last-seen path to invalidate mtime cache on path change
 
@@ -636,6 +637,7 @@ class Settings(BaseSettings):
                         new_policies[vk] = roles[role_name]
 
                 self._flattened_policies = types.MappingProxyType(new_policies)
+                self._policies_loaded = True
                 self._policies_mtime = current_mtime
                 logger.info("Successfully hot-reloaded policies.yaml")
         except Exception as exc:

@@ -152,9 +152,11 @@ async def test_key_immutability_and_stateless(mutator):
     mutated_bytes = await mutator.mutate(raw_bytes)
     mutated = orjson.loads(mutated_bytes)
 
-    # Keys should remain immutable
-    assert "123-45-6789" in mutated["params"]
-    assert mutated["params"]["123-45-6789"] == "this string is completely safe"
+    # A key is forwarded like a value, so an SSN used as a key is masked (one-way); the
+    # value under it is kept. (This test used to assert the key went out unchanged.)
+    assert "123-45-6789" not in mutated["params"]
+    assert "123-45-6789" not in mutated_bytes.decode()
+    assert "this string is completely safe" in mutated["params"].values()
 
     # Values containing PII are mutated
     assert isinstance(mutated["params"]["safe_key"], str)
