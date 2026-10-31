@@ -3,7 +3,8 @@
 - pr-review-workflow:fallback-review-runs-after-claude-write-check-refusal: `/review` counts only
   from OWNER/MEMBER/COLLABORATOR, in the job condition and again on both fallback steps.
 - pr-review-workflow:claude-allowed-gh-pr-comment-body-file-disclosure: the review checkout keeps
-  no credentials, and the model's comment tool cannot take a body from a file.
+  no credentials, and the model has no comment command at all: a fixed workflow step posts its
+  final message (flag deny patterns refused honest summaries that mention ` -e` or `--body-file`).
 - The prompt-linter composite action passes its inputs through the environment, not the script.
 """
 
@@ -44,14 +45,30 @@ def test_review_checkout_does_not_persist_credentials():
 
 
 def test_review_comment_tool_cannot_read_a_file_into_the_body():
-    args = _step(_review_job(), "Review")["with"]["claude_args"]
-    assert "Bash(gh pr comment:*)" not in args
-    assert "Bash(gh pr comment * --body *)" in args
+    review = _step(_review_job(), "Review")["with"]
+    args = review["claude_args"]
+    allowed = next(line for line in args.splitlines() if line.startswith("--allowedTools"))
     disallowed = next(line for line in args.splitlines() if line.startswith("--disallowedTools"))
-    for flag in ("--body-file", "-F", "--editor", "-e", "--web", "-w"):
-        assert flag in disallowed, flag
-    # And the model is told so, since a deny rule it does not know about just fails the step.
-    assert "use `--body-file`" in _step(_review_job(), "Review")["with"]["prompt"]
+    # No comment command for the model, and the whole command is denied as a backstop.
+    assert "gh pr comment" not in allowed
+    assert "Bash(gh pr comment:*)" in disallowed
+    # No flag-substring deny patterns that would refuse an honest summary's text.
+    assert "-e*" not in disallowed and "--body-file" not in disallowed
+    # And the model is told to end with the summary rather than post it.
+    assert "final message" in review["prompt"] and "Verdict: MERGEABLE" in review["prompt"]
+
+
+def test_review_summary_is_posted_by_a_fixed_step():
+    job = _review_job()
+    names = [step.get("name") for step in job["steps"]]
+    assert names.index("Post review summary") == names.index("Review") + 1
+    step = _step(job, "Post review summary")
+    assert "steps.review.outcome == 'success'" in step["if"]
+    assert step["env"]["EXECUTION_FILE"] == "${{ steps.review.outputs.execution_file }}"
+    # Workflow values reach the script through the environment only.
+    assert "${{" not in step["run"]
+    assert 'gh pr comment "$PR_NUMBER" --body-file "$summary"' in step["run"]
+    assert '"$RUNNER_TEMP/review-summary.md"' in step["run"]
 
 
 def test_prompt_linter_inputs_never_reach_the_script_text():
