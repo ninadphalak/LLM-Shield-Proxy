@@ -10,6 +10,7 @@ import time
 
 import jwt
 import pytest
+from cachetools import TTLCache
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 
@@ -197,6 +198,7 @@ def idp(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_IDENTITY_ENFORCER", "strict")
     monkeypatch.setattr(settings, "ALLOWED_ISSUERS", [ISSUER])
     monkeypatch.setattr(settings, "ALLOWED_AUDIENCES", [PROXY_AUD])
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "")
     request_policy_ctx.set({})
     ident._dpop_replay_cache.clear()
 
@@ -257,3 +259,59 @@ async def test_access_token_without_exp_rejected(idp):
     access, proof = idp
     with pytest.raises(HTTPException):
         await _verify(_Req(access(exp=None), proof()))
+
+
+@pytest.mark.asyncio
+async def test_dpop_replay_rejected_for_whole_freshness_window(idp, monkeypatch):
+    access, proof = idp
+    t0 = time.time() - 400  # minted in the real past so PyJWT's own iat check passes
+    clock = {"now": t0}
+
+    class _FakeTime:
+        @staticmethod
+        def time():
+            return clock["now"]
+
+    monkeypatch.setattr(ident, "time", _FakeTime)
+    monkeypatch.setattr(
+        ident,
+        "_dpop_replay_cache",
+        TTLCache(maxsize=1000, ttl=ident._DPOP_REPLAY_CACHE_TTL_SECONDS, timer=lambda: clock["now"]),
+    )
+    tok = access()
+
+    # iat at T0, first use at T0
+    p = proof(iat=t0, jti="dummy-jti-1")
+    assert await _verify(_Req(tok, p)) == "agent-dummy"
+    for offset in (299, 301, 359):
+        clock["now"] = t0 + offset
+        with pytest.raises(HTTPException) as exc:
+            await _verify(_Req(tok, p))
+        assert exc.value.detail == "DPoP proof replayed"
+
+    # iat 60s ahead of the server clock, first use at T0: acceptable until T0+420
+    clock["now"] = t0
+    p2 = proof(iat=t0 + 60, jti="dummy-jti-2")
+    assert await _verify(_Req(tok, p2)) == "agent-dummy"
+    clock["now"] = t0 + 419
+    with pytest.raises(HTTPException) as exc:
+        await _verify(_Req(tok, p2))
+    assert exc.value.detail == "DPoP proof replayed"
+
+
+@pytest.mark.asyncio
+async def test_public_base_url_binds_htu_to_canonical_origin(idp, monkeypatch):
+    access, proof = idp
+    monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "https://shield.dummy/")
+    foreign = "http://other-rs.dummy/v1/chat/completions"
+    # Proof minted for another resource server, presented with a forged Host header.
+    with pytest.raises(HTTPException):
+        await _verify(_Req(access(), proof(htu=foreign), url=foreign))
+    canonical = "https://shield.dummy/v1/chat/completions"
+    assert await _verify(_Req(access(), proof(htu=canonical), url=foreign)) == "agent-dummy"
+
+
+@pytest.mark.asyncio
+async def test_without_public_base_url_htu_uses_request_url(idp):
+    access, proof = idp
+    assert await _verify(_Req(access(), proof())) == "agent-dummy"

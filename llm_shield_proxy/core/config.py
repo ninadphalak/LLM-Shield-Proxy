@@ -366,6 +366,15 @@ class Settings(BaseSettings):
             "list; when the effective list is empty the Agent Identity Enforcer rejects every token."
         ),
     )
+    PUBLIC_BASE_URL: str = Field(
+        default="",
+        description=(
+            "Canonical external origin of the proxy, plus any external path prefix (e.g. "
+            "https://shield.example.com). When set, the "
+            "DPoP htu is checked against this origin plus the request path instead of a URL built from "
+            "the client-supplied Host header. Empty keeps the request-URL behaviour."
+        ),
+    )
     MAX_PAYLOAD_SIZE_BYTES: int = Field(
         default=10 * 1024 * 1024, description="Maximum allowed request payload size in bytes (10MB default)"
     )

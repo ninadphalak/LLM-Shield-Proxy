@@ -28,10 +28,16 @@ logger = logging.getLogger(__name__)
 _jwks_clients: Dict[str, jwt.PyJWKClient] = {}
 _jwks_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 
+# DPoP freshness: a proof is accepted while iat is within [now - MAX_AGE - SKEW, now + SKEW].
+_DPOP_MAX_AGE_SECONDS = 300
+_DPOP_CLOCK_SKEW_SECONDS = 60
+
 # RFC 9449 SS11.1 replay cache: each (jkt, jti) pair may be consumed exactly once
-# within a DPoP proof's freshness window. TTL matches the 300s (5 minute) freshness
-# ceiling enforced below, so an entry never needs to outlive the proof it guards.
-_DPOP_REPLAY_CACHE_TTL_SECONDS = 300
+# within a DPoP proof's freshness window. An entry is inserted no earlier than
+# iat - SKEW and the proof stays acceptable until iat + MAX_AGE + SKEW, so the TTL
+# must cover MAX_AGE + 2*SKEW. A shorter TTL (it was 300s) let a consumed proof be
+# replayed after the entry expired but before the proof went stale.
+_DPOP_REPLAY_CACHE_TTL_SECONDS = _DPOP_MAX_AGE_SECONDS + 2 * _DPOP_CLOCK_SKEW_SECONDS
 _dpop_replay_cache: TTLCache = TTLCache(maxsize=100_000, ttl=_DPOP_REPLAY_CACHE_TTL_SECONDS)
 _dpop_replay_lock = asyncio.Lock()
 
@@ -188,9 +194,9 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             raise jwt.InvalidTokenError("DPoP proof missing iat")
 
         now = time.time()
-        if iat > now + 60:
+        if iat > now + _DPOP_CLOCK_SKEW_SECONDS:
             raise jwt.InvalidTokenError("DPoP proof iat is in the future")
-        if now - iat > 360:
+        if now - iat > _DPOP_MAX_AGE_SECONDS + _DPOP_CLOCK_SKEW_SECONDS:
             raise jwt.InvalidTokenError("DPoP proof expired (older than 5 minutes)")
 
         # RFC 9449 SS11.1: reject replayed proofs. A cryptographically valid, fresh
@@ -208,7 +214,13 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             _dpop_replay_cache[replay_key] = True
 
         # Finding 3: 3-Tier Replay validation (Strict vs Lenient vs None)
-        expected_htu = str(request.url.replace(query=""))
+        # With PUBLIC_BASE_URL set, htu is bound to the operator's canonical origin
+        # rather than to a URL whose host comes from the client's Host header.
+        public_base_url = (settings.PUBLIC_BASE_URL or "").strip()
+        if public_base_url:
+            expected_htu = public_base_url.rstrip("/") + request.url.path
+        else:
+            expected_htu = str(request.url.replace(query=""))
         is_dpop_valid = True
         dpop_error_msg = ""
 
