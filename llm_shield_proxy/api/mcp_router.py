@@ -4,14 +4,33 @@ Terminates JSON-RPC 2.0 traffic bound for downstream MCP tool servers, enforcing
 Virtual Key RBAC (fail-closed), 3-Tier PII/secret sanitization of tool arguments
 and tool outputs, and dynamic tools/list catalog pruning. Supports both single
 requests and JSON-RPC 2.0 batch arrays per spec.
+
+Callers authenticate exactly as on the guard API: the X-Shield-Virtual-Key (or Bearer)
+value must match VALID_VIRTUAL_KEYS, else the request is refused with HTTP 401 before
+the body is read. OVERRIDE_CLIENT_AUTH=true admits unmatched callers as "anonymous"
+(policy looked up as "anonymous", X-Shield-Upstream-URL ignored).
+
+Policy keys honoured here, beyond `allowed_tools` / `blocked_tools` and the egress keys
+documented in `security/egress_guard.py`:
+
+    "allowed_resources": ["file:///docs/*", "https://kb.example.com/*"]
+
+`resources/read` is default-deny: the requested `uri` must match one of these
+`fnmatch` patterns (case-sensitive; `*` also matches `/`). A URI with a `..` path
+segment is always refused. A fail-closed policy (`_FAIL_CLOSED_` sentinel from a
+resolver failure or an empty allowlist under MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL)
+refuses every method, including tools/list and resources/read, before any upstream call.
 """
 
 from __future__ import annotations
 
 import asyncio
+import fnmatch
+import hmac
 import inspect
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
@@ -24,6 +43,7 @@ from llm_shield_proxy.engines.masking import ScrubVault
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
 from llm_shield_proxy.security.egress_guard import (
     EgressPolicyViolationError,
     PinnedTarget,
@@ -73,6 +93,7 @@ JSONRPC_PARSE_ERROR = -32700
 JSONRPC_INVALID_REQUEST = -32600
 JSONRPC_METHOD_NOT_FOUND = -32601
 JSONRPC_UPSTREAM_ERROR = -32000
+JSONRPC_UNAUTHORIZED = -32001
 JSONRPC_TOOL_FORBIDDEN = -32003
 # Same reserved code as JSONRPC_TOOL_FORBIDDEN (both are server-error range policy
 # denials); named separately so call sites read as what they actually reject.
@@ -80,6 +101,13 @@ JSONRPC_EGRESS_FORBIDDEN = -32003
 
 MAX_SANITIZE_DEPTH = 20
 MAX_BATCH_SIZE = 100
+
+# Sentinel `_resolve_role` / the RBAC resolvers put in allowed_tools when the caller
+# must be denied everything. It is never a grantable tool name.
+FAIL_CLOSED_SENTINEL = "_FAIL_CLOSED_"
+
+# A `..` path segment, literal or percent-encoded, with slash or backslash separators.
+_DOT_DOT_SEGMENT = re.compile(r"(?:^|[/\\])(?:\.|%2e){2}(?:[/\\?#]|$)", re.IGNORECASE)
 
 
 def _get_mcp_policy_resolver_for_app(app: Any) -> BasePolicyResolver:
@@ -168,14 +196,112 @@ def _extract_virtual_key(
     return "anonymous"
 
 
-def _resolve_upstream_url(x_shield_upstream_url: Optional[str]) -> Optional[str]:
-    """Resolves upstream MCP target from X-Shield-Upstream-URL or UPSTREAM_MCP_BASE_URL env var."""
-    if x_shield_upstream_url and x_shield_upstream_url.strip():
+def _authenticate_caller(
+    x_shield_virtual_key: Optional[str], authorization: Optional[str]
+) -> Tuple[Optional[str], bool]:
+    """Fail-closed authentication against VALID_VIRTUAL_KEYS, mirroring the guard API.
+
+    Returns ``(policy_key, authenticated)``. ``policy_key`` is the MATCHED configured
+    key (the existing Redis/OPA/Vault policy stores are keyed by it), "anonymous" when
+    OVERRIDE_CLIENT_AUTH admits an unmatched caller, or None when the caller must be
+    refused. A caller-asserted string is never used as an identity on its own.
+    """
+    from llm_shield_proxy.core.config import settings
+
+    presented = _extract_virtual_key(x_shield_virtual_key, authorization)
+    valid_keys = settings.valid_virtual_keys_set
+    if valid_keys and presented != "anonymous":
+        presented_bytes = presented.encode("utf-8")
+        matched: Optional[str] = None
+        # Compare as bytes: compare_digest rejects non-ASCII str with TypeError (a 500).
+        # No early exit, so timing does not reveal which configured key was close.
+        for vk in valid_keys:
+            if hmac.compare_digest(presented_bytes, vk.encode("utf-8")):
+                matched = vk
+        if matched is not None:
+            return matched, True
+    if settings.OVERRIDE_CLIENT_AUTH:
+        return "anonymous", False
+    return None, False
+
+
+def _resolve_upstream_url(x_shield_upstream_url: Optional[str], *, authenticated: bool = True) -> Optional[str]:
+    """Resolves upstream MCP target from X-Shield-Upstream-URL or UPSTREAM_MCP_BASE_URL env var.
+
+    Only an authenticated caller may redirect the gateway with the header (the target is
+    still egress-checked); an anonymous OVERRIDE_CLIENT_AUTH caller gets the operator's.
+    """
+    if authenticated and x_shield_upstream_url and x_shield_upstream_url.strip():
         return x_shield_upstream_url.strip()
     return os.environ.get("UPSTREAM_MCP_BASE_URL")
 
 
+class _PayloadTooLarge(Exception):
+    pass
+
+
+async def _read_body_capped(request: Request, limit: int) -> bytes:
+    """Reads the body enforcing `limit` bytes (Content-Length pre-check + streaming total).
+
+    Local equivalent of main.read_body_with_limit (importing main here would be
+    circular). Raises _PayloadTooLarge; a bad Content-Length raises ValueError.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        declared_length = int(declared)  # ValueError on garbage -> caller's 400
+        if declared_length < 0:
+            raise ValueError("negative Content-Length")
+        if declared_length > limit:
+            raise _PayloadTooLarge()
+
+    body = bytearray()
+    stream_iter = request.stream()
+    while True:
+        try:
+            # Per-chunk deadline, as on the proxy path, so a trickled body cannot pin the worker.
+            async with asyncio.timeout(5.0):
+                chunk = await anext(stream_iter)
+        except StopAsyncIteration:
+            break
+        if len(body) + len(chunk) > limit:
+            raise _PayloadTooLarge()
+        body.extend(chunk)
+    return bytes(body)
+
+
+def _is_fail_closed(allowed: set) -> bool:
+    return FAIL_CLOSED_SENTINEL in allowed
+
+
+def _is_resource_forbidden(uri: Any, policy: Dict[str, Any]) -> bool:
+    """Default-deny check for resources/read against the policy's `allowed_resources` patterns."""
+    if not isinstance(uri, str) or not uri:
+        return True
+    if _DOT_DOT_SEGMENT.search(uri):
+        return True
+    patterns = policy.get("allowed_resources") or []
+    if not isinstance(patterns, (list, tuple)):
+        return True
+    return not any(isinstance(p, str) and p and fnmatch.fnmatchcase(uri, p) for p in patterns)
+
+
+def _check_depth(value: Any, depth: int = 0) -> None:
+    """Raises ValueError when `value` nests deeper than MAX_SANITIZE_DEPTH (same rule as _sanitize_json)."""
+    if depth > MAX_SANITIZE_DEPTH:
+        raise ValueError("Maximum payload nesting depth exceeded")
+    if isinstance(value, dict):
+        for v in value.values():
+            _check_depth(v, depth + 1)
+    elif isinstance(value, list):
+        for v in value:
+            _check_depth(v, depth + 1)
+
+
 def _is_tool_forbidden(tool_name: str, allowed: set, blocked: set) -> bool:
+    # The fail-closed sentinel denies everything; it must not act as a grant for a
+    # tool that happens to be named "_FAIL_CLOSED_".
+    if FAIL_CLOSED_SENTINEL in allowed:
+        return True
     if tool_name in blocked:
         return True
     if allowed and tool_name not in allowed:
@@ -258,6 +384,9 @@ async def _process_single_call(
     if method not in SUPPORTED_METHODS:
         return _jsonrpc_error(req_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}") if has_id else None
 
+    # Audit records carry only the key fingerprint, never the credential itself.
+    audit_id = get_virtual_key_id(virtual_key)
+
     # Fail-Closed Gate: tool authorization is checked BEFORE any upstream routing,
     # sanitization, or attacker-controlled DNS resolution.
     #
@@ -273,9 +402,39 @@ async def _process_single_call(
                 event_type="mcp_tool_forbidden",
                 severity="CRITICAL",
                 details={"reason": "Tool forbidden for active role", "tool_name": tool_name, "method": method},
-                virtual_key_id=virtual_key,
+                virtual_key_id=audit_id,
             )
             return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Tool forbidden for active role") if has_id else None
+    elif _is_fail_closed(allowed):
+        # A fail-closed role has no grants at all, so tools/list and resources/read are
+        # refused here too rather than reaching the upstream server.
+        AuditLogger.log_security_event(
+            event_type="mcp_method_forbidden",
+            severity="CRITICAL",
+            details={"reason": "Fail-closed policy denies every method", "method": method},
+            virtual_key_id=audit_id,
+        )
+        return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Forbidden for active role") if has_id else None
+    elif method == "resources/read" and _is_resource_forbidden(params.get("uri"), egress_policy):
+        AuditLogger.log_security_event(
+            event_type="mcp_resource_forbidden",
+            severity="CRITICAL",
+            # The URI itself is caller-shaped and may carry identifiers; log only its form.
+            details={
+                "reason": "Resource not in allowed_resources",
+                "method": method,
+                "resource": _redact_url_for_audit(params.get("uri")) if isinstance(params.get("uri"), str) else None,
+            },
+            virtual_key_id=audit_id,
+        )
+        return _jsonrpc_error(req_id, JSONRPC_TOOL_FORBIDDEN, "Resource forbidden for active role") if has_id else None
+
+    # One depth limit over everything that will be forwarded, so the egress scan below
+    # can never be cut short by nesting (it fails closed past the same limit anyway).
+    try:
+        _check_depth(params)
+    except ValueError:
+        return _jsonrpc_error(req_id, JSONRPC_INVALID_REQUEST, "Payload nesting depth exceeded") if has_id else None
 
     # SSRF / DNS-rebinding gate, for EVERY supported method rather than only
     # `tools/call`. `resources/read` exists to fetch a URI, and it used to skip this
@@ -302,9 +461,9 @@ async def _process_single_call(
                 "blocked_host": exc.host,
                 "resolved_ip": exc.matched_ip,
                 "matched_rule": exc.matched_rule,
-                "applied_role_name": egress_policy.get("role_name", virtual_key),
+                "applied_role_name": egress_policy.get("role_name", audit_id),
             },
-            virtual_key_id=virtual_key,
+            virtual_key_id=audit_id,
         )
         return (
             _jsonrpc_error(
@@ -369,9 +528,9 @@ async def _process_single_call(
                 "blocked_host": exc.host,
                 "resolved_ip": exc.matched_ip,
                 "matched_rule": exc.matched_rule,
-                "applied_role_name": egress_policy.get("role_name", virtual_key),
+                "applied_role_name": egress_policy.get("role_name", audit_id),
             },
-            virtual_key_id=virtual_key,
+            virtual_key_id=audit_id,
         )
         return (
             _jsonrpc_error(
@@ -406,7 +565,7 @@ async def _process_single_call(
             event_type="mcp_upstream_failure",
             severity="CRITICAL",
             details={"reason": "MCP Upstream Unavailable", "error_type": type(exc).__name__, "method": method},
-            virtual_key_id=virtual_key,
+            virtual_key_id=audit_id,
         )
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "Upstream MCP server unreachable") if has_id else None
 
@@ -422,12 +581,16 @@ async def _process_single_call(
     # Outbound Scan: neutralize any leaked secrets/PII in upstream tool outputs before returning
     # to the client. Uses one-way ScrubVault ("[REDACTED]") since this is terminal, human/agent
     # facing text rather than a payload that must satisfy another schema validator.
-    if "result" in upstream_json and upstream_json["result"] is not None:
-        outbound_vault = ScrubVault()
-        try:
-            upstream_json["result"] = await _sanitize_async(upstream_json["result"], outbound_vault, active_profile)
-        except ValueError:
-            return _jsonrpc_error(req_id, JSONRPC_INVALID_REQUEST, "Upstream payload nesting depth exceeded") if has_id else None
+    # Every upstream-originated member is scrubbed, not only `result`: a tool can put the
+    # same data in `error.message` / `error.data` (or an unknown member) with HTTP 200.
+    outbound_vault = ScrubVault()
+    try:
+        for member in list(upstream_json):
+            if member in ("jsonrpc", "id") or upstream_json[member] is None:
+                continue
+            upstream_json[member] = await _sanitize_async(upstream_json[member], outbound_vault, active_profile)
+    except ValueError:
+        return _jsonrpc_error(req_id, JSONRPC_INVALID_REQUEST, "Upstream payload nesting depth exceeded") if has_id else None
 
     if not has_id:
         return None
@@ -442,7 +605,7 @@ async def _resolve_role(policy_resolver: BasePolicyResolver, virtual_key: str) -
     allowed = set(policy.get("allowed_tools", []))
     blocked = set(policy.get("blocked_tools", []))
     if not allowed and settings.MCP_EMPTY_ALLOWLIST_MODE == "DENY_ALL":
-        allowed.add("_FAIL_CLOSED_")
+        allowed.add(FAIL_CLOSED_SENTINEL)
     return allowed, blocked, policy
 
 
@@ -461,7 +624,23 @@ async def mcp_gateway(
     silently dropped from the response; if a batch yields no responses at all, an empty
     204 is returned rather than an empty JSON array (also per spec).
     """
-    raw_body = await request.body()
+    from llm_shield_proxy.core.config import settings
+
+    # Authenticate BEFORE reading or parsing the body, so an unauthenticated caller can
+    # make the worker do no body buffering, parsing, policy lookup or upstream work.
+    virtual_key, authenticated = _authenticate_caller(x_shield_virtual_key, authorization)
+    if virtual_key is None:
+        return _jsonrpc_error_response(None, JSONRPC_UNAUTHORIZED, "Unauthorized: invalid or missing virtual key", status_code=401)
+    audit_id = get_virtual_key_id(virtual_key)
+
+    try:
+        raw_body = await _read_body_capped(request, settings.MAX_PAYLOAD_SIZE_BYTES)
+    except _PayloadTooLarge:
+        return _jsonrpc_error_response(None, JSONRPC_INVALID_REQUEST, "Invalid Request: payload too large", status_code=413)
+    except ValueError:
+        return _jsonrpc_error_response(None, JSONRPC_INVALID_REQUEST, "Invalid Request: bad Content-Length", status_code=400)
+    except TimeoutError:
+        return _jsonrpc_error_response(None, JSONRPC_INVALID_REQUEST, "Invalid Request: body read timed out", status_code=408)
 
     try:
         req_data = orjson.loads(raw_body) if raw_body else {}
@@ -471,8 +650,7 @@ async def mcp_gateway(
     if not isinstance(req_data, (dict, list)):
         return _jsonrpc_error_response(None, JSONRPC_INVALID_REQUEST, "Invalid Request: malformed JSON-RPC 2.0 envelope")
 
-    virtual_key = _extract_virtual_key(x_shield_virtual_key, authorization)
-    upstream_url = _resolve_upstream_url(x_shield_upstream_url)
+    upstream_url = _resolve_upstream_url(x_shield_upstream_url, authenticated=authenticated)
     allowed, blocked, egress_policy = await _resolve_role(policy_resolver, virtual_key)
 
     # SSRF / DNS-Rebinding Gate: the upstream routing target itself is client-controlled
@@ -500,9 +678,9 @@ async def mcp_gateway(
                     "blocked_host": exc.host,
                     "resolved_ip": exc.matched_ip,
                     "matched_rule": exc.matched_rule,
-                    "applied_role_name": egress_policy.get("role_name", virtual_key),
+                    "applied_role_name": egress_policy.get("role_name", audit_id),
                 },
-                virtual_key_id=virtual_key,
+                virtual_key_id=audit_id,
             )
             return _jsonrpc_error_response(
                 None, JSONRPC_EGRESS_FORBIDDEN, "SSRF Policy Violation: Upstream target forbidden by egress policy"
