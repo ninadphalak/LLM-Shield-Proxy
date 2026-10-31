@@ -15,7 +15,6 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore
 
 import datetime
-import hashlib
 import hmac
 import logging
 import re
@@ -26,7 +25,6 @@ import uuid
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from functools import lru_cache
 from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
@@ -63,6 +61,13 @@ from llm_shield_proxy.observability.telemetry_dispatcher import dispatch_telemet
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
 from llm_shield_proxy.security.egress_guard import is_public_ip
+# Re-exported: existing importers of these names from main keep working.
+from llm_shield_proxy.security.key_fingerprint import (
+    _get_vkid_from_hash as _get_vkid_from_hash,
+)
+from llm_shield_proxy.security.key_fingerprint import (
+    get_virtual_key_id as get_virtual_key_id,
+)
 from llm_shield_proxy.security.tool_rbac import (
     BasePolicyResolver,
     BoundedLockMap,
@@ -100,19 +105,6 @@ app_state = AppState()
 
 
 _SAFE_REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-_.:]{1,64}$")
-
-
-@lru_cache(maxsize=4096)
-def _get_vkid_from_hash(key_hash: str) -> str:
-    return hmac.new(b"llm_shield_fingerprint_v2", key_hash.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
-
-
-def get_virtual_key_id(client_auth: str) -> str:
-    """Compute HMAC-SHA256 key fingerprint, caching via pre-hash to avoid storing plaintext keys."""
-    if not client_auth:
-        return "anonymous"
-    key_hash = hashlib.sha256(client_auth.encode("utf-8")).hexdigest()
-    return _get_vkid_from_hash(key_hash)
 
 
 def _is_safe_ip(ip_str: str) -> bool:
