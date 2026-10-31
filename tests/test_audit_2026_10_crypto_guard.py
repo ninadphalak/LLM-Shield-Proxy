@@ -285,3 +285,99 @@ def test_guard_honours_an_enforced_mode(two_keys, policies):
         "/v1/guard/redact", headers=_h(KEY_A, "s-g", "STRUCTURAL_TAG"), json={"texts": [f"mail {EMAIL}"]}
     )
     assert res.json()["texts"] == ["mail [REDACTED]"]
+
+
+# vault.py:VaultStore.get_vault:global-lru-eviction-cross-tenant
+
+
+def test_one_tenant_cannot_evict_another_tenants_vault():
+    from llm_shield_proxy.engines.vault import VaultStore
+
+    store = VaultStore(max_capacity=3, ttl_seconds=3600)
+    victim = store.get_vault("victim-sess", "vk-b")
+    token = victim.get_or_create_token("jane.dummy@example.com", "EMAIL")
+    for n in range(10):
+        store.get_vault(f"churn-{n}", "vk-a")
+    assert store.get_vault("victim-sess", "vk-b") is victim
+    assert victim.rehydrate(f"Contact {token}") == "Contact jane.dummy@example.com"
+    assert len(store._sessions) == 3
+    # The churning key keeps its newest vaults.
+    assert store.get_existing_vault("churn-9", "vk-a") is not None
+    assert store.get_existing_vault("churn-0", "vk-a") is None
+
+
+def test_fair_share_evicts_from_the_largest_tenant_and_per_key_cap():
+    from llm_shield_proxy.engines.vault import VaultStore
+
+    store = VaultStore(max_capacity=4, ttl_seconds=3600)
+    for n in range(3):
+        store.get_vault(f"b-{n}", "vk-b")
+    store.get_vault("a-0", "vk-a")
+    store.get_vault("c-0", "vk-c")  # full: the largest tenant (vk-b) gives up its oldest
+    assert store.get_existing_vault("b-0", "vk-b") is None
+    assert store.get_existing_vault("a-0", "vk-a") is not None
+
+    capped = VaultStore(max_capacity=100, ttl_seconds=3600, per_tenant_capacity=2)
+    for n in range(5):
+        capped.get_vault(f"s-{n}", "vk-a")
+    assert len(capped._sessions) == 2
+    capped.clear_session("s-4", "vk-a")
+    assert len(capped._sessions) == 1 and capped._tenant_keys["vk-a"]
+
+
+def test_guard_empty_redact_and_rehydrate_miss_do_not_allocate_vaults(two_keys):
+    from llm_shield_proxy.engines.vault import vault_store
+
+    before = len(vault_store._sessions)
+    res = client.post("/v1/guard/redact", headers=_h(KEY_A, "churn-empty"), json={"texts": []})
+    assert res.status_code == 200
+    res = client.post("/v1/guard/redact", headers=_h(KEY_A, "churn-empty2"), json={"texts": ["", ""]})
+    assert res.status_code == 200
+    res = client.post("/v1/guard/rehydrate", headers=_h(KEY_A, "churn-miss"), json={"texts": ["[EMAIL_1]"]})
+    assert res.json() == {"texts": ["[EMAIL_1]"]}
+    res = client.post(
+        "/v1/guard/rehydrate/stream", headers=_h(KEY_A, "churn-miss2"), json={"text": "x", "carry": "", "final": True}
+    )
+    assert res.status_code == 200
+    assert len(vault_store._sessions) == before
+    # A real redact still registers its session, and its rehydrate finds it.
+    red = client.post(
+        "/v1/guard/redact", headers=_h(KEY_A, "real", "STRUCTURAL_TAG"), json={"texts": [f"mail {EMAIL}"]}
+    ).json()["texts"]
+    res = client.post("/v1/guard/rehydrate", headers=_h(KEY_A, "real", "STRUCTURAL_TAG"), json={"texts": red})
+    assert res.json() == {"texts": [f"mail {EMAIL}"]}
+
+
+# vault:uncapped-nonstreaming-rehydrate-output
+
+
+def test_guard_rehydrate_has_an_output_ceiling(two_keys, monkeypatch):
+    import llm_shield_proxy.api.guard_router as gr
+
+    long_value = "longname." + "x" * 60 + "@example.com"
+    red = client.post(
+        "/v1/guard/redact", headers=_h(KEY_A, "amp", "STRUCTURAL_TAG"), json={"texts": [long_value]}
+    ).json()["texts"][0]
+    assert long_value not in red
+    monkeypatch.setattr(gr, "MAX_REHYDRATED_OUTPUT_BYTES", 10_000)
+    ok = client.post("/v1/guard/rehydrate", headers=_h(KEY_A, "amp", "STRUCTURAL_TAG"), json={"texts": [red] * 10})
+    assert ok.status_code == 200 and ok.json()["texts"] == [long_value] * 10
+    many = " ".join([red] * 2000)
+    res = client.post("/v1/guard/rehydrate", headers=_h(KEY_A, "amp", "STRUCTURAL_TAG"), json={"texts": [many]})
+    assert res.status_code == 413
+    res = client.post(
+        "/v1/guard/rehydrate/stream",
+        headers=_h(KEY_A, "amp", "STRUCTURAL_TAG"),
+        json={"text": " ".join([red] * 1000), "carry": "", "final": True},
+    )
+    assert res.status_code == 413
+
+
+def test_rehydrate_many_occurrences_is_exact():
+    from llm_shield_proxy.engines.vault import Vault
+
+    v = Vault(synthetic=False)
+    t = v.get_or_create_token("jane.dummy@example.com", "EMAIL")
+    text = " ".join([t] * 20000)
+    assert v.rehydrate(text) == " ".join(["jane.dummy@example.com"] * 20000)
+    assert v.rehydrate(text, retention_length=len(t)).endswith(" " + t)
