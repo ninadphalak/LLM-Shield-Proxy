@@ -507,3 +507,43 @@ def test_v3_lexer_still_rehydrates_and_prunes():
     parsed = _json.loads(out)["result"]
     assert parsed["email"] == EMAIL and parsed["phones"] == ["555-0100"] and parsed["other"] == "keep"
     assert "_ctx_hash_" not in out
+
+
+# mcp_router._process_single_call: the PII profile is looked up by fingerprint
+
+
+def test_mcp_profile_lookup_uses_the_key_fingerprint(monkeypatch, httpx_mock):
+    from llm_shield_proxy.api.mcp_router import get_mcp_policy_resolver
+    from llm_shield_proxy.engines.pii_engine import pii_engine
+    from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
+    from llm_shield_proxy.security.tool_rbac import BasePolicyResolver
+
+    class Allow(BasePolicyResolver):
+        async def resolve_policy(self, virtual_key: str) -> dict:
+            return {"allowed_tools": ["fetch"]}
+
+    upstream_url = "http://93.184.216.34/mcp"
+    monkeypatch.setattr(settings, "_valid_virtual_keys_set", frozenset({KEY_A}))
+    monkeypatch.setattr(settings, "OVERRIDE_CLIENT_AUTH", False)
+    monkeypatch.delenv("UPSTREAM_MCP_BASE_URL", raising=False)
+    seen = []
+    real = pii_engine.get_profile
+
+    def spy(vkid):
+        seen.append(vkid)
+        return real(vkid)
+
+    monkeypatch.setattr(pii_engine, "get_profile", spy)
+    app.dependency_overrides[get_mcp_policy_resolver] = lambda: Allow()
+    try:
+        httpx_mock.add_response(url=upstream_url, json={"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+        res = client.post(
+            "/v1/mcp",
+            headers={"X-Shield-Virtual-Key": KEY_A, "X-Shield-Upstream-URL": upstream_url},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "fetch", "arguments": {}}},
+        )
+    finally:
+        app.dependency_overrides.pop(get_mcp_policy_resolver, None)
+    assert res.status_code == 200, res.text
+    assert seen == [get_virtual_key_id(KEY_A)]
+    assert KEY_A not in seen
