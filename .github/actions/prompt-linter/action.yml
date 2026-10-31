@@ -33,9 +33,17 @@ runs:
 
     - name: Run Tier-1/Tier-2 Prompt Template Scan
       shell: bash
+      # Inputs arrive through the environment, never spliced into the script: a value
+      # holding a quote or `$(...)` would otherwise run as shell.
+      env:
+        LINTER_ACTION_PATH: ${{ github.action_path }}
+        LINTER_PATH: ${{ inputs.path }}
+        LINTER_ENTROPY_THRESHOLD: ${{ inputs.entropy-threshold }}
+        LINTER_MIN_TOKEN_LENGTH: ${{ inputs.min-token-length }}
+        LINTER_FAIL_ON_FINDING: ${{ inputs.fail-on-finding }}
       run: |
-        python "${{ github.action_path }}/scanner.py" \
-          --path "${{ inputs.path }}" \
-          --entropy-threshold "${{ inputs.entropy-threshold }}" \
-          --min-token-length "${{ inputs.min-token-length }}" \
-          --fail-on-finding "${{ inputs.fail-on-finding }}"
+        python "$LINTER_ACTION_PATH/scanner.py" \
+          --path "$LINTER_PATH" \
+          --entropy-threshold "$LINTER_ENTROPY_THRESHOLD" \
+          --min-token-length "$LINTER_MIN_TOKEN_LENGTH" \
+          --fail-on-finding "$LINTER_FAIL_ON_FINDING"
