@@ -6,8 +6,9 @@ import orjson
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.pii_engine import (
-    _MIN_SCANNED_NUMBER_DIGITS,
+    NO_NUMBER_SCAN_KEYS,
     _is_structural_key,
+    _token_minter,
     normalize_and_desmuggle,
     pii_engine,
 )
@@ -40,31 +41,36 @@ class StatelessASTVisitor:
         return self._count_pii(value) > 0
 
     @staticmethod
-    def _number_text(value: Any) -> Optional[str]:
-        """The decimal form of an integer leaf worth scanning, else None (bools excluded)."""
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, float):
-            if not value.is_integer() or abs(value) >= 1e21:
-                return None
-            value = int(value)
-        if not isinstance(value, int):
-            return None
-        text = str(value)
-        return text if len(text.lstrip("-")) >= _MIN_SCANNED_NUMBER_DIGITS else None
+    def _number_text(value: Any) -> Optional[Tuple[str, str]]:
+        """(decimal text, entity) for a validated identifier number, else None.
 
-    def _leaf_text(self, value: Any) -> Optional[str]:
-        """The text of a scalar leaf to scan: strings, and identifier-length integers."""
+        Only checksum/structure-validated detectors apply to a number (Luhn-valid card,
+        SSA-valid 9-digit SSN); the PHONE pattern matched every 7+ digit integer.
+        """
+        return pii_engine.detect_number(value)
+
+    def _scan_leaf(self, value: Any, numbers: bool) -> Optional[Tuple[str, str, int]]:
+        """(original text, faked text, span count) for a leaf carrying PII, else None."""
         if isinstance(value, str):
-            return value
-        return self._number_text(value)
+            hits = self._count_pii(value)
+            return (value, self._fake(value), hits) if hits else None
+        if not numbers:
+            return None
+        found = self._number_text(value)
+        if found is None:
+            return None
+        text, entity_type = found
+        return text, _token_minter(self._ephemeral_vault(), True)(text, entity_type), 1
 
     @staticmethod
-    def _fake(text: str) -> str:
+    def _ephemeral_vault() -> Any:
         from llm_shield_proxy.engines.vault import Vault
 
-        ephemeral_vault = Vault(synthetic=settings.ENABLE_SYNTHETIC_SWAPPING)
-        return pii_engine.redact_text(text, ephemeral_vault)
+        return Vault(synthetic=settings.ENABLE_SYNTHETIC_SWAPPING)
+
+    @classmethod
+    def _fake(cls, text: str) -> str:
+        return pii_engine.redact_text(text, cls._ephemeral_vault())
 
     async def mutate(self, payload: bytes) -> bytes:
         """Sanitizes a JSON-RPC/MCP payload off the event loop.
@@ -97,11 +103,12 @@ class StatelessASTVisitor:
         data = orjson.loads(payload)
         entities = 0
 
-        # Iterative stack tracking (node, path, depth)
-        stack = [(data, "$", 0)]
+        # Iterative stack tracking (node, path, depth, numbers). `numbers` is False below
+        # a JSON Schema keyword or schema container: bounds and enums are not identifiers.
+        stack = [(data, "$", 0, True)]
 
         while stack:
-            node, path, depth = stack.pop()
+            node, path, depth, numbers = stack.pop()
 
             if depth >= self.max_depth:
                 raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}")
@@ -118,30 +125,28 @@ class StatelessASTVisitor:
 
                     # A key is forwarded like a value: an identifier used as a property
                     # name is replaced one-way (there is nothing to restore it from).
+                    # Only high-confidence detectors run on a key (see detect_key_spans).
                     if not _is_structural_key(k):
-                        key_hits = self._count_pii(k)
+                        new_k, key_hits = pii_engine.redact_key_text(k, self._ephemeral_vault())
                         if key_hits:
                             entities += key_hits
-                            new_k = self._fake(k)
                             while new_k in node or new_k in context_fields:
                                 new_k = f"{new_k}_"
                             del node[k]
                             node[new_k] = v
                             k = new_k
 
+                    child_numbers = numbers and k not in NO_NUMBER_SCAN_KEYS
                     if isinstance(v, (dict, list)):
                         if depth + 1 >= self.max_depth:
                             raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}.{k}")
-                        stack.append((v, f"{path}.{k}", depth + 1))
+                        stack.append((v, f"{path}.{k}", depth + 1, child_numbers))
                         continue
 
-                    text = self._leaf_text(v)
-                    if text is None:
-                        continue
-                    hits = self._count_pii(text)
-                    if hits:
+                    scanned = self._scan_leaf(v, child_numbers)
+                    if scanned:
+                        text, faked_v, hits = scanned
                         entities += hits
-                        faked_v = self._fake(text)
                         ctx_key = f"_ctx_hash_{k}"
                         if ctx_key in node:
                             raise ValueError(f"Reserved stateless context field already present at {path}.{ctx_key}")
@@ -156,15 +161,12 @@ class StatelessASTVisitor:
                     if isinstance(v, (dict, list)):
                         if depth + 1 >= self.max_depth:
                             raise ASTDepthExceededException(f"Depth exceeded {self.max_depth} at {path}[{i}]")
-                        stack.append((v, f"{path}[{i}]", depth + 1))
+                        stack.append((v, f"{path}[{i}]", depth + 1, numbers))
                         continue
-                    text = self._leaf_text(v)
-                    if text is None:
-                        continue
-                    hits = self._count_pii(text)
-                    if hits:
+                    scanned = self._scan_leaf(v, numbers)
+                    if scanned:
+                        text, faked_v, hits = scanned
                         entities += hits
-                        faked_v = self._fake(text)
                         cipher_text = self.cipher.encrypt(text, faked_v)
                         node[i] = {"_shield_val": faked_v, "_shield_ctx": cipher_text}
 
