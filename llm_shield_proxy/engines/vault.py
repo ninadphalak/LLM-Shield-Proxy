@@ -24,7 +24,7 @@ import threading
 import time
 import unicodedata
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from faker import Faker
 
@@ -466,6 +466,10 @@ class Vault:
         return result
 
 
+# Capacity bucket shared by every fingerprint not derived from a configured key.
+_POOL_BUCKET = "\x00unconfigured-pool"
+
+
 class VaultStore:
     """Thread-safe in-memory session vault store with LRU and TTL eviction.
 
@@ -473,6 +477,12 @@ class VaultStore:
     vault evicted is the oldest one of the key holding the MOST vaults (the
     requesting key's own on a tie). One key minting fresh session ids therefore
     evicts its own vaults, not another tenant's live sessions.
+
+    Fingerprints not derived from a VALID_VIRTUAL_KEYS entry (BYOK, anonymous, any
+    key the operator did not configure) share ONE pooled bucket for this accounting:
+    minting many keys with one vault each grows the pool, not the number of tenants,
+    so it cannot evict configured tenants. Inside the pool the same largest-first
+    rule picks the victim.
 
     Attributes:
         max_capacity: Maximum number of active tenant session vaults.
@@ -496,11 +506,53 @@ class VaultStore:
         self.per_tenant_capacity: int = per_tenant_capacity or self.max_capacity
         self.ttl_seconds: int = ttl_seconds or settings.SESSION_TTL_SECONDS
         self._lock: threading.Lock = threading.Lock()
+        # Vaults held by unconfigured fingerprints (the pooled bucket). Membership is
+        # recorded per vault, so a reload of VALID_VIRTUAL_KEYS keeps the count exact.
+        self._pool_size: int = 0
+        self._pool_member: Dict[str, bool] = {}
+        self._configured_cache: Tuple[Any, frozenset] = (None, frozenset())
+
+    def _configured_tenants(self) -> frozenset:
+        """Fingerprints of the configured virtual keys, recomputed when the set changes."""
+        keys = settings.valid_virtual_keys_set
+        cached_keys, fingerprints = self._configured_cache
+        if cached_keys is not keys:
+            from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
+
+            fingerprints = frozenset(get_virtual_key_id(key) for key in keys)
+            self._configured_cache = (keys, fingerprints)
+        return fingerprints
+
+    def _bucket_sizes(self, configured: frozenset) -> Dict[str, int]:
+        """Vault count per capacity bucket: each configured tenant, plus the pool."""
+        sizes = {tenant: len(keys) for tenant, keys in self._tenant_keys.items() if tenant in configured}
+        if self._pool_size:
+            sizes[_POOL_BUCKET] = self._pool_size
+        return sizes
+
+    def _largest(self, sizes: Dict[str, int], preferred: str) -> Optional[str]:
+        victim = preferred if preferred in sizes else None
+        best = sizes[victim] if victim is not None else 0
+        for name, size in sizes.items():
+            if size > best:
+                victim, best = name, size
+        return victim
+
+    def _evict_from_pool(self, virtual_key_id: str, configured: frozenset) -> bool:
+        """Drops the oldest vault of the largest unconfigured tenant; False if none."""
+        sizes = {tenant: len(keys) for tenant, keys in self._tenant_keys.items() if tenant not in configured}
+        victim = self._largest(sizes, virtual_key_id)
+        if victim is None:
+            return False
+        self._drop(next(iter(self._tenant_keys[victim])))
+        return True
 
     def _drop(self, vault_key: str) -> None:
         """Removes one vault from every index. Caller holds the lock."""
         self._sessions.pop(vault_key, None)
         self._timestamps.pop(vault_key, None)
+        if self._pool_member.pop(vault_key, False):
+            self._pool_size -= 1
         tenant = self._key_tenant.pop(vault_key, None)
         if tenant is not None:
             keys = self._tenant_keys.get(tenant)
@@ -510,17 +562,18 @@ class VaultStore:
                     del self._tenant_keys[tenant]
 
     def _evict_one_for(self, virtual_key_id: str) -> None:
-        """Frees one slot at capacity: the oldest vault of the largest tenant."""
-        victim = virtual_key_id if virtual_key_id in self._tenant_keys else None
-        best = len(self._tenant_keys[victim]) if victim is not None else 0
-        for tenant, keys in self._tenant_keys.items():
-            if len(keys) > best:
-                victim, best = tenant, len(keys)
-        if victim is None:
-            if self._sessions:
-                self._drop(next(iter(self._sessions)))
+        """Frees one slot at capacity: the oldest vault of the largest bucket."""
+        configured = self._configured_tenants()
+        requester = virtual_key_id if virtual_key_id in configured else _POOL_BUCKET
+        victim = self._largest(self._bucket_sizes(configured), requester)
+        if victim == _POOL_BUCKET and self._evict_from_pool(virtual_key_id, configured):
             return
-        self._drop(next(iter(self._tenant_keys[victim])))
+        if victim is not None and victim in self._tenant_keys:
+            self._drop(next(iter(self._tenant_keys[victim])))
+            return
+        # Always free a slot (e.g. pool counts stale after a key reload).
+        if self._sessions:
+            self._drop(next(iter(self._sessions)))
 
     def _evict_expired(self) -> None:
         """Full O(active-sessions) sweep evicting every orphaned, TTL-expired vault.
@@ -610,9 +663,13 @@ class VaultStore:
 
             # Capacity: a key at its own cap evicts its own oldest vault; a full
             # store evicts from the largest tenant (fair share), never globally.
+            # The pool as a whole is held to the per-tenant cap too.
             own = self._tenant_keys.get(virtual_key_id)
             if own is not None and len(own) >= self.per_tenant_capacity:
                 self._drop(next(iter(own)))
+            pooled = virtual_key_id not in self._configured_tenants()
+            if pooled and self._pool_size >= self.per_tenant_capacity:
+                self._evict_from_pool(virtual_key_id, self._configured_tenants())
             while len(self._sessions) >= self.max_capacity:
                 self._evict_one_for(virtual_key_id)
 
@@ -621,6 +678,9 @@ class VaultStore:
             self._timestamps[vault_key] = now
             self._tenant_keys.setdefault(virtual_key_id, OrderedDict())[vault_key] = None
             self._key_tenant[vault_key] = virtual_key_id
+            if pooled:
+                self._pool_member[vault_key] = True
+                self._pool_size += 1
             return new_vault
 
     async def get_vault_async(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:

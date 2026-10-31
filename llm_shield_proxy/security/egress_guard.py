@@ -84,8 +84,17 @@ MAX_WALK_DEPTH = 20
 # Matches the scheme followed by ANY separator, not only `//`. WHATWG parsers (Node
 # fetch/undici, browsers) read `http:/host`, `http:host` and `http:\\host` as
 # `http://host`; requiring a literal `//` here let those forms skip the scan entirely.
-# `extract_host` then rejects every non-canonical form, so they fail closed.
-_URL_FINDER = re.compile(r"https?:[^\s\"'<>]+", re.IGNORECASE)
+# `extract_host` then rejects every non-canonical form, so they fail closed. Something
+# that can start an authority must follow the separators (a letter or digit in any
+# script, `[`, a percent escape, or userinfo's `@` / `:`), so prose such as `https:)`
+# is not a URL.
+_URL_FINDER = re.compile(r"https?:(?=[\\/]*(?:[^\W_]|[\[%@:]))[^\s\"'<>]+", re.IGNORECASE)
+# `https:443`, `https:8443.` in prose: a bare scheme-colon-digits token. WHATWG reads the
+# digits as an IPv4 number; one in 1..2^24-1 without a leading zero is 0.x.y.z, which is
+# unroutable, so the token is not treated as a URL. `http:0` (0.0.0.0) and larger values
+# such as `http:2130706433` (127.0.0.1) still are.
+_PROSE_PORT = re.compile(r"https?:([1-9][0-9]{0,7})[).,;:!?\]]*", re.IGNORECASE)
+_WHATWG_ZERO_NET_LIMIT = 1 << 24
 # The one separator both urlsplit and WHATWG agree on: exactly `//` then a host character.
 _CANONICAL_PREFIX = re.compile(r"https?://[^/\\]", re.IGNORECASE)
 # WHATWG deletes ASCII tab/LF/CR anywhere in a URL before parsing it.
@@ -368,6 +377,11 @@ async def resolve_pinned_target(
     return pin_url_to_ip(url, candidate_ips[0])
 
 
+def _is_prose_port(candidate: str) -> bool:
+    match = _PROSE_PORT.fullmatch(candidate)
+    return match is not None and int(match.group(1)) < _WHATWG_ZERO_NET_LIMIT
+
+
 def find_urls(value: Any, *, max_depth: int = MAX_WALK_DEPTH) -> List[str]:
     """Recursively AST-walks arbitrary JSON-RPC arguments, collecting http(s) URL substrings.
 
@@ -386,7 +400,13 @@ def find_urls(value: Any, *, max_depth: int = MAX_WALK_DEPTH) -> List[str]:
         if depth > max_depth:
             raise EgressPolicyViolationError(url="", host="", reason="max_depth_exceeded")
         if isinstance(v, str):
+            # JSON-escaped text (`https:\/\/host\/x`) is un-escaped rather than refused for
+            # its backslash. WHATWG treats `\` as `/` in http(s) URLs, so the host is the
+            # same either way; any other backslash is still refused by extract_host.
+            v = v.replace("\\/", "/")
             for match in _URL_FINDER.findall(v):
+                if _is_prose_port(match):
+                    continue
                 _add(match)
             # A whole value that WHATWG would read as one URL once tab/LF/CR are deleted
             # (`http://public.example\n@169.254.169.254/`) is evaluated in that form too.

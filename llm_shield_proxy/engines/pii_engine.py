@@ -452,10 +452,50 @@ def _is_privileged_role(role: Any) -> bool:
     return isinstance(role, str) and role in _PRIVILEGED_ROLES
 
 
-# Numbers are scanned on their decimal form, because a card or phone number sent as a JSON
-# integer is the same identifier as the string. Below this many digits no detector matches
-# (and token ids, counts and small settings stay cheap to walk).
-_MIN_SCANNED_NUMBER_DIGITS = 7
+# Numbers are scanned on their decimal form, because a card number sent as a JSON integer
+# is the same identifier as the string. Only structure-validated detectors apply to a
+# number (see PIIEngine.detect_number): the PHONE and digit-run patterns match any 7+ digit
+# integer, and turning ids, timestamps and schema bounds into strings broke tool schemas.
+_MIN_SCANNED_NUMBER_DIGITS = 9
+
+# Keys whose numeric values are never scanned: JSON Schema keywords (bounds, defaults,
+# enumerations) and the containers that hold a tool or response schema. A number there is
+# a constraint the provider validates, and rewriting it to a string breaks the schema.
+_SCHEMA_NUMBER_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+        "default", "const", "enum", "examples", "example",
+        "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties",
+        "minContains", "maxContains",
+    }
+)
+_SCHEMA_CONTAINER_KEYS: frozenset[str] = frozenset(
+    {
+        "parameters", "input_schema", "inputSchema", "parametersJsonSchema", "output_schema",
+        "outputSchema", "response_schema", "responseSchema", "responseJsonSchema", "json_schema",
+        "schema", "requestedSchema",
+    }
+)
+NO_NUMBER_SCAN_KEYS: frozenset[str] = _SCHEMA_NUMBER_KEYWORDS | _SCHEMA_CONTAINER_KEYS
+_PATH_SEGMENT = re.compile(r"[^.\[\]]+")
+
+
+def _path_scans_numbers(json_path: str) -> bool:
+    """False when any key along a walk label is a schema keyword or schema container."""
+    return not any(segment in NO_NUMBER_SCAN_KEYS for segment in _PATH_SEGMENT.findall(json_path))
+
+
+
+
+# Detectors trusted on an object key. A key is not prose: a numeric-string map key, a date
+# or a content hash matches PHONE, LONG_DIGIT_RUN or the entropy tier, and renaming it
+# changes the application's data. Card numbers in keys must also pass IIN and Luhn.
+_LOW_CONFIDENCE_KEY_ENTITIES: frozenset[str] = frozenset(
+    {
+        "PHONE", "LONG_DIGIT_RUN", "IP_ADDRESS", "MRN", "SECRET_KEY", "PERSON",
+        "BASE64_OBFUSCATED_PII", "PERCENT_OBFUSCATED_PII", "ENTITY_OBFUSCATED_PII",
+    }
+)
 
 # Numeric request settings whose value is never an identifier, wherever they appear. A
 # random `seed` is routinely 9+ digits and would otherwise read as a phone number.
@@ -1404,6 +1444,7 @@ class PIIEngine:
                     max_depth,
                     key,
                     one_way_keys=_TOOL_PROSE_KEYS,
+                    scan_numbers=False,  # schemas: bounds, defaults and enums are not PII
                 )
 
         # End-user identifiers; see _END_USER_ID_KEYS. Only a detected value is replaced,
@@ -1435,7 +1476,8 @@ class PIIEngine:
                 if _is_numeric_setting(key, new_payload[key]):
                     continue
                 new_payload[key] = self._deep_redact(
-                    new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key
+                    new_payload[key], vault, active_profile, protected, ceiling, depth + 1, max_depth, key,
+                    scan_numbers=key not in NO_NUMBER_SCAN_KEYS,
                 )
             # A key is forwarded like a value, so an identifier used as a key is scanned.
             new_payload = self._rename_pii_keys(
@@ -1457,21 +1499,73 @@ class PIIEngine:
         a detected number is replaced by the redacted text. Anything else is unchanged,
         type included.
         """
-        if isinstance(value, bool):
+        found = self.detect_number(value, active_profile)
+        if found is None:
             return value
+        text, entity_type = found
+        return _token_minter(vault, restorable)(text, entity_type)
+
+    def detect_number(
+        self, value: Any, active_profile: Optional[CompiledProfile] = None
+    ) -> Optional[Tuple[str, str]]:
+        """(decimal text, entity type) when an integer leaf is a validated identifier.
+
+        Only a checksum-validated detector runs on a number: a 13-19 digit value with a
+        payment IIN and a valid Luhn check digit (CREDIT_CARD). SSN, PHONE and the generic
+        digit-run patterns never do: as bare integers they are indistinguishable from
+        ordinary 9+ digit ids (account, order, GitHub ids), and rewriting those would
+        break tool calls. Bools, negatives and non-integral floats are not identifiers.
+        """
+        if isinstance(value, bool):
+            return None
         if isinstance(value, float):
             if not value.is_integer() or abs(value) >= 1e21:
-                return value
-            text = str(int(value))
-        elif isinstance(value, int):
-            text = str(value)
-        else:
-            return value
-        if len(text.lstrip("-")) < _MIN_SCANNED_NUMBER_DIGITS:
-            return value
-        if not self.detect_spans(text, active_profile):
-            return value
-        return self.redact_text(text, vault, active_profile, restorable=restorable)
+                return None
+            value = int(value)
+        if not isinstance(value, int) or value < 0:
+            return None
+        text = str(value)
+        if len(text) < _MIN_SCANNED_NUMBER_DIGITS:
+            return None
+        enabled = {name for name, _pattern in (active_profile or self._global_strict_profile).tier1_patterns}
+        if (
+            "CREDIT_CARD" in enabled
+            and _CARD_MIN_DIGITS <= len(text) <= _CARD_MAX_DIGITS
+            and _is_payment_iin(text)
+            and _luhn_ok(text)
+        ):
+            return text, "CREDIT_CARD"
+        return None
+
+    def detect_key_spans(
+        self, key: str, active_profile: Optional[CompiledProfile] = None
+    ) -> Tuple[str, List[Tuple[int, int, str, str]]]:
+        """(normalized key, high-confidence spans in it); see _LOW_CONFIDENCE_KEY_ENTITIES."""
+        working = normalize_and_desmuggle(key)
+        spans = [
+            span
+            for span in self.detect_spans(working, active_profile)
+            if span[2] not in _LOW_CONFIDENCE_KEY_ENTITIES
+            and (span[2] != "CREDIT_CARD" or classify_tier1_match("CREDIT_CARD", span[3])[1] == "high")
+        ]
+        return working, spans
+
+    def redact_key_text(
+        self,
+        key: str,
+        vault: Vault,
+        active_profile: Optional[CompiledProfile] = None,
+        restorable: bool = True,
+    ) -> Tuple[str, int]:
+        """(key with its high-confidence spans tokenised, span count); unchanged when none."""
+        working, spans = self.detect_key_spans(key, active_profile)
+        if not spans:
+            return key, 0
+        mint = _token_minter(vault, restorable)
+        result = working
+        for start, end, entity_type, matched_text in reversed(spans):
+            result = result[:start] + mint(matched_text, entity_type) + result[end:]
+        return result, len(spans)
 
     def _redact_key(
         self,
@@ -1483,9 +1577,7 @@ class PIIEngine:
         """The key itself when it carries nothing detectable, else its redacted text."""
         if _is_structural_key(key):
             return key
-        if not self.detect_spans(normalize_and_desmuggle(key), active_profile):
-            return key
-        return self.redact_text(key, vault, active_profile, restorable=restorable)
+        return self.redact_key_text(key, vault, active_profile, restorable)[0]
 
     def _rename_pii_keys(
         self,
@@ -1529,8 +1621,8 @@ class PIIEngine:
         if value is None or isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
-            if _TOKEN_ID_PATH.fullmatch(json_path):
-                return value  # token ids in `prompt` / embeddings `input`
+            if _TOKEN_ID_PATH.fullmatch(json_path) or not _path_scans_numbers(json_path):
+                return value  # token ids in `prompt` / embeddings `input`; schema numbers
             return self._redact_number(value, vault, active_profile, restorable)
         if isinstance(value, str):
             return self.redact_text(value, vault, active_profile, restorable=restorable)
@@ -1543,7 +1635,10 @@ class PIIEngine:
             # The same rules as any other field: media payloads by shape, opaque ids and
             # signatures, operator- and policy-protected keys all go out unchanged.
             copy = value.copy()
-            self._redact_remaining_fields(copy, frozenset(), vault, active_profile, depth, max_depth, json_path, restorable)
+            self._redact_remaining_fields(
+                copy, frozenset(), vault, active_profile, depth, max_depth, json_path, restorable,
+                scan_numbers=_path_scans_numbers(json_path),
+            )
             return copy
         return value
 
@@ -1666,6 +1761,7 @@ class PIIEngine:
         max_depth: int,
         json_path: str,
         restorable: bool = True,
+        scan_numbers: bool = True,
     ) -> None:
         """Scans, in place, every field of `node` the shape walk did not handle.
 
@@ -1711,6 +1807,7 @@ class PIIEngine:
                 restorable=restorable,
                 text_keys=_REPLAYED_TEXT_KEYS,
                 reference_keys=_NESTED_REFERENCE_KEYS,
+                scan_numbers=scan_numbers and key not in NO_NUMBER_SCAN_KEYS,
             )
         # Keys are forwarded too: an identifier used as a field name is scanned.
         renamed = self._rename_pii_keys(node, protected | handled, vault, active_profile, restorable)
@@ -1733,6 +1830,7 @@ class PIIEngine:
         restorable: bool = True,
         text_keys: frozenset[str] = frozenset(),
         reference_keys: frozenset[str] = frozenset(),
+        scan_numbers: bool = True,
     ) -> Any:
         """Redacts every string beneath `node`, skipping structure and opaque blobs.
 
@@ -1750,6 +1848,9 @@ class PIIEngine:
         A string directly under a key in `text_keys` is scanned in full, past the blob
         ceiling too. A string directly under a key in `reference_keys` goes out unchanged;
         an object under the same name is walked.
+
+        `scan_numbers` False (below a schema keyword or schema container, see
+        NO_NUMBER_SCAN_KEYS) leaves every number in the subtree unchanged.
         """
         if depth > max_depth:
             raise ValueError("Maximum payload nesting depth exceeded")
@@ -1792,6 +1893,7 @@ class PIIEngine:
                         restorable=restorable and (keys_are_names or key not in one_way_keys),
                         text_keys=text_keys,
                         reference_keys=reference_keys,
+                        scan_numbers=scan_numbers and (keys_are_names or key not in NO_NUMBER_SCAN_KEYS),
                     )
                 # A key is forwarded like a value: an email or card number used as a key
                 # (or as a schema property name) is scanned. Structural keywords are not.
@@ -1817,11 +1919,12 @@ class PIIEngine:
                     restorable=restorable,
                     text_keys=text_keys,
                     reference_keys=reference_keys,
+                    scan_numbers=scan_numbers,
                 )
                 for index, item in enumerate(node)
             ]
 
-        if isinstance(node, (int, float)):
+        if isinstance(node, (int, float)) and scan_numbers:
             return self._redact_number(node, vault, active_profile, restorable)
 
         return node

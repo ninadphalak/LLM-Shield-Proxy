@@ -2001,7 +2001,7 @@ async def _proxy_catch_all_internal(
                             # Model-originated PII is scanned on this branch too, before the
                             # caller's own values are restored from their ciphertext siblings.
                             v3_target = await loop.run_in_executor(
-                                None, _redact_v3_model_originated_tree, res_json, vault
+                                None, _redact_v3_model_originated_tree, res_json, vault, 0, v3_cipher
                             )
                         rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, v3_target)
                     else:
@@ -2068,6 +2068,9 @@ async def _proxy_catch_all_internal(
                         status_code=upstream_res.status_code,
                         headers=res_headers,
                     )
+                except RehydratedOutputTooLarge:
+                    logger.warning("Upstream reply rehydration passed the output ceiling; returning 502")
+                    return _rehydrated_too_large_response()
                 except Exception as exc:
                     # Structured rehydration failed; fall back to rehydrating the raw body.
                     # Type name only: the message of a JSON error can quote the body.
@@ -2086,7 +2089,13 @@ async def _proxy_catch_all_internal(
                         raw_text = await loop.run_in_executor(
                             None, redact_model_originated_text, raw_text, vault
                         )
-                    rehydrated_text = await loop.run_in_executor(None, vault.rehydrate, raw_text)
+                    try:
+                        rehydrated_text = await loop.run_in_executor(
+                            None, _RehydrateBudget().rehydrate, vault, raw_text
+                        )
+                    except RehydratedOutputTooLarge:
+                        logger.warning("Upstream reply rehydration passed the output ceiling; returning 502")
+                        return _rehydrated_too_large_response()
                     return Response(
                         content=rehydrated_text,
                         status_code=upstream_res.status_code,
@@ -2235,14 +2244,18 @@ async def _proxy_catch_all_internal(
     if content and (settings.ENABLE_RESPONSE_PII_REDACTION or entities_detected > 0):
         # Retrieval routes (GET /v1/responses/{id}, stored chat completions) return the
         # same model output the POST path redacts, so response redaction applies here too.
-        content = await loop.run_in_executor(
-            None,
-            _redact_passthrough_reply,
-            content,
-            vault,
-            bool(settings.ENABLE_RESPONSE_PII_REDACTION),
-            entities_detected > 0,
-        )
+        try:
+            content = await loop.run_in_executor(
+                None,
+                _redact_passthrough_reply,
+                content,
+                vault,
+                bool(settings.ENABLE_RESPONSE_PII_REDACTION),
+                entities_detected > 0,
+            )
+        except RehydratedOutputTooLarge:
+            logger.warning("Upstream reply rehydration passed the output ceiling; returning 502")
+            return _rehydrated_too_large_response()
 
     return Response(
         content=content,
@@ -2274,7 +2287,7 @@ def _redact_passthrough_reply(content: bytes, vault: Any, redact: bool, rehydrat
         if redact:
             text = redact_model_originated_text(text, vault)
         if rehydrate:
-            text = vault.rehydrate(text)
+            text = _RehydrateBudget().rehydrate(vault, text)
         return text.encode("utf-8")
     if redact:
         parsed = _redact_model_originated_json_response(parsed, vault)
@@ -2319,7 +2332,57 @@ def _append_watermark(res: Dict[str, Any], watermark_text: str) -> None:
 _MAX_TOOL_INPUT_DEPTH = 40
 
 
-def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0) -> Any:
+# Output ceiling for one non-streaming reply's rehydration (UTF-8 bytes across every
+# restored field), as the guard API's _rehydrate_bounded applies: short placeholders can
+# stand for long values, so a reply that repeats one is bounded on its own. Past it the
+# caller gets a 502 rather than an unbounded allocation.
+MAX_REHYDRATED_REPLY_BYTES = 16 * 1024 * 1024
+
+
+class RehydratedOutputTooLarge(ValueError):
+    """A non-streaming reply's rehydrated output passed MAX_REHYDRATED_REPLY_BYTES."""
+
+
+class _RehydrateBudget:
+    """The bytes a reply's rehydration may still add, shared across its fields."""
+
+    def __init__(self, limit: Optional[int] = None) -> None:
+        self.remaining = MAX_REHYDRATED_REPLY_BYTES if limit is None else limit
+
+    def rehydrate(self, vault: Any, text: str) -> str:
+        from llm_shield_proxy.engines.vault import Vault as _Vault
+
+        try:
+            if getattr(type(vault), "rehydrate", None) is _Vault.rehydrate:
+                out = vault.rehydrate(text, max_output_bytes=max(self.remaining, 0))
+            else:
+                out = vault.rehydrate(text)
+        except ValueError as exc:
+            if "maximum safe length" in str(exc):
+                raise RehydratedOutputTooLarge(str(exc)) from exc
+            raise
+        if out is text or out == text:
+            return out  # nothing restored: no new allocation to account for
+        size = len(out.encode("utf-8"))
+        if size > self.remaining:
+            raise RehydratedOutputTooLarge("Rehydrated output exceeded maximum safe length")
+        self.remaining -= size
+        return out
+
+
+def _rehydrated_too_large_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=502,
+        content={
+            "error": {
+                "message": "The upstream reply expands past the gateway's rehydration limit.",
+                "type": "upstream_error",
+            }
+        },
+    )
+
+
+def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0, budget: Optional[_RehydrateBudget] = None) -> Any:
     """Rehydrates every string leaf of an already-decoded JSON value.
 
     Anthropic carries tool input as a decoded object rather than as JSON text, so the
@@ -2339,23 +2402,30 @@ def _rehydrate_decoded_leaves(node: Any, vault: Any, depth: int = 0) -> Any:
             _MAX_TOOL_INPUT_DEPTH,
         )
         return node
+    if budget is None:
+        budget = _RehydrateBudget()
     if isinstance(node, dict):
-        return {key: _rehydrate_decoded_leaves(value, vault, depth + 1) for key, value in node.items()}
+        return {key: _rehydrate_decoded_leaves(value, vault, depth + 1, budget) for key, value in node.items()}
     if isinstance(node, list):
-        return [_rehydrate_decoded_leaves(item, vault, depth + 1) for item in node]
+        return [_rehydrate_decoded_leaves(item, vault, depth + 1, budget) for item in node]
     if isinstance(node, str):
-        return vault.rehydrate(node)
+        return budget.rehydrate(vault, node)
     return node
 
 
-def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
+def _rehydrate_json_response(
+    res_json: Dict[str, Any], vault: Any, budget: Optional[_RehydrateBudget] = None
+) -> Dict[str, Any]:
     """Rehydrates tokens in the known OpenAI and Anthropic response shapes.
 
     This is shape-specific, not a general walk: anything outside the fields
-    enumerated below is returned unchanged.
+    enumerated below is returned unchanged. Every restored field draws on one
+    `budget` (MAX_REHYDRATED_REPLY_BYTES); RehydratedOutputTooLarge past it.
     """
     if not isinstance(res_json, dict):
         return res_json
+    if budget is None:
+        budget = _RehydrateBudget()
 
     import copy
 
@@ -2372,7 +2442,7 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
                 message = choice.get("message", {})
                 if isinstance(message, dict):
                     if "content" in message and isinstance(message["content"], str):
-                        message["content"] = vault.rehydrate(message["content"])
+                        message["content"] = budget.rehydrate(vault, message["content"])
 
                     # Rehydrate tool_calls function arguments if generated by LLM
                     if "tool_calls" in message and isinstance(message["tool_calls"], list):
@@ -2380,21 +2450,21 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
                             if isinstance(tc, dict) and "function" in tc and isinstance(tc["function"], dict):
                                 fn = tc["function"]
                                 if "arguments" in fn and isinstance(fn["arguments"], str):
-                                    fn["arguments"] = json_vault.rehydrate(fn["arguments"])
+                                    fn["arguments"] = budget.rehydrate(json_vault, fn["arguments"])
 
                     # Rehydrate legacy function_call arguments
                     if "function_call" in message and isinstance(message["function_call"], dict):
                         fn = message["function_call"]
                         if "arguments" in fn and isinstance(fn["arguments"], str):
-                            fn["arguments"] = json_vault.rehydrate(fn["arguments"])
+                            fn["arguments"] = budget.rehydrate(json_vault, fn["arguments"])
 
                 delta = choice.get("delta", {})
                 if isinstance(delta, dict) and "content" in delta and isinstance(delta["content"], str):
-                    delta["content"] = vault.rehydrate(delta["content"])
+                    delta["content"] = budget.rehydrate(vault, delta["content"])
 
                 # Legacy /v1/completions carries the reply in `choice.text`.
                 if isinstance(choice.get("text"), str):
-                    choice["text"] = vault.rehydrate(choice["text"])
+                    choice["text"] = budget.rehydrate(vault, choice["text"])
 
     # 2. Anthropic Claude top-level content blocks
     if "content" in res_copy and isinstance(res_copy["content"], list):
@@ -2402,12 +2472,12 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
             if not isinstance(block, dict):
                 continue
             if "text" in block and isinstance(block["text"], str):
-                block["text"] = vault.rehydrate(block["text"])
+                block["text"] = budget.rehydrate(vault, block["text"])
             elif block.get("type") == "tool_use":
                 # A tool_use block has no `text`, so a walk keyed on that field skipped it
                 # entirely and handed the caller a placeholder as a tool argument. Its
                 # `input` is a decoded object, so its leaves are restored in place.
-                block["input"] = _rehydrate_decoded_leaves(block.get("input"), vault)
+                block["input"] = _rehydrate_decoded_leaves(block.get("input"), vault, 0, budget)
 
     return res_copy
 
@@ -2434,26 +2504,41 @@ def _redact_model_originated_json_response(res_json: Any, vault: Any) -> Any:
     return res_json
 
 
-def _redact_v3_model_originated_tree(node: Any, vault: Any, depth: int = 0) -> Any:
+def _v3_pair_is_authentic(node: Dict[str, Any], cipher: Any) -> bool:
+    """True when {_shield_val, _shield_ctx} decrypts exactly as the rehydrator tries it."""
+    value, token = node.get("_shield_val"), node.get("_shield_ctx")
+    if cipher is None or not isinstance(value, str) or not isinstance(token, str):
+        return False
+    return cipher.decrypt(token, "") != "[CORRUPTED]" or cipher.decrypt(token, value) != "[CORRUPTED]"
+
+
+def _redact_v3_model_originated_tree(node: Any, vault: Any, depth: int = 0, cipher: Any = None) -> Any:
     """Response PII scan for the stateless (JSON-RPC) branch.
 
     Like `_redact_model_originated_json_response`, except that the AES-GCM siblings the
     stateless rehydrator restores from (`_ctx_hash_*`, `_shield_ctx`) are left intact:
-    rewriting ciphertext would only break the restore, it discloses nothing.
+    rewriting ciphertext would only break the restore, it discloses nothing. A
+    {_shield_val, _shield_ctx} array proxy is one unit: `_shield_val` is the AAD of its
+    ciphertext, so it is kept when the pair authenticates under `cipher` (rewriting it
+    broke the restore). A pair that does not authenticate falls back to `_shield_val`
+    in the rehydrator, so its value is scanned like any model text.
     """
     if depth > _MAX_TOOL_INPUT_DEPTH:
         raise ValueError("Response nesting exceeds the scan bound")
     if isinstance(node, dict):
         out: Dict[str, Any] = {}
+        authentic_pair = _v3_pair_is_authentic(node, cipher)
         for key, value in node.items():
             if isinstance(key, str) and (key.startswith("_ctx_hash_") or key == "_shield_ctx"):
                 out[key] = value
+            elif key == "_shield_val" and authentic_pair:
+                out[key] = value
             elif isinstance(value, (dict, list)):
-                out[key] = _redact_v3_model_originated_tree(value, vault, depth + 1)
+                out[key] = _redact_v3_model_originated_tree(value, vault, depth + 1, cipher)
             else:
                 # A one-key view keeps the structural-key exceptions (id, model, ...).
                 out[key] = redact_model_originated_tree({key: value}, vault)[key]
         return out
     if isinstance(node, list):
-        return [_redact_v3_model_originated_tree(item, vault, depth + 1) for item in node]
+        return [_redact_v3_model_originated_tree(item, vault, depth + 1, cipher) for item in node]
     return redact_model_originated_tree(node, vault)
