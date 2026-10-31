@@ -177,12 +177,12 @@ def test_ast_walk_scans_numbers_and_keys():
             "params": {"arguments": {"card": CARD, "bob@example.com": True, "ids": [123456789, 7], "flag": False}}}
     out, count = asyncio.run(visitor.mutate_counted(orjson.dumps(body)))
     text = out.decode()
-    # 123456789 is an SSA-valid SSN shape. A phone-shaped integer is not scanned (only
-    # structure-validated detectors run on numbers; see test_audit_2026_10_review).
-    assert str(CARD) not in text and "123456789" not in text and "bob@example.com" not in text
-    assert count >= 3
+    # Only the Luhn-validated card detector runs on numbers (see test_audit_2026_10_review),
+    # so the ordinary integer ids keep their value and type.
+    assert str(CARD) not in text and "bob@example.com" not in text
+    assert count >= 2
     args = orjson.loads(out)["params"]["arguments"]
-    assert args["flag"] is False and args["ids"][1] == 7
+    assert args["flag"] is False and args["ids"] == [123456789, 7]
 
 
 # main.py:_proxy_catch_all_internal:fail-open-on-client-shape-error

@@ -485,12 +485,6 @@ def _path_scans_numbers(json_path: str) -> bool:
     return not any(segment in NO_NUMBER_SCAN_KEYS for segment in _PATH_SEGMENT.findall(json_path))
 
 
-def _ssn_digits_ok(digits: str) -> bool:
-    """SSA structure: area not 000, 666 or 9xx; group not 00; serial not 0000."""
-    if len(digits) != 9 or not digits.isdigit():
-        return False
-    area, group, serial = digits[:3], digits[3:5], digits[5:]
-    return area not in ("000", "666") and area[0] != "9" and group != "00" and serial != "0000"
 
 
 # Detectors trusted on an object key. A key is not prose: a numeric-string map key, a date
@@ -1516,10 +1510,11 @@ class PIIEngine:
     ) -> Optional[Tuple[str, str]]:
         """(decimal text, entity type) when an integer leaf is a validated identifier.
 
-        Only checksum- or structure-validated detectors run on a number: a 13-19 digit
-        value with a payment IIN and a valid Luhn check digit (CREDIT_CARD), or a 9-digit
-        value with a valid SSA area/group/serial (SSN). PHONE and the generic digit-run
-        patterns never do. Bools, negatives and non-integral floats are not identifiers.
+        Only a checksum-validated detector runs on a number: a 13-19 digit value with a
+        payment IIN and a valid Luhn check digit (CREDIT_CARD). SSN, PHONE and the generic
+        digit-run patterns never do: as bare integers they are indistinguishable from
+        ordinary 9+ digit ids (account, order, GitHub ids), and rewriting those would
+        break tool calls. Bools, negatives and non-integral floats are not identifiers.
         """
         if isinstance(value, bool):
             return None
@@ -1540,8 +1535,6 @@ class PIIEngine:
             and _luhn_ok(text)
         ):
             return text, "CREDIT_CARD"
-        if "SSN" in enabled and _ssn_digits_ok(text):
-            return text, "SSN"
         return None
 
     def detect_key_spans(

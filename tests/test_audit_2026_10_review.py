@@ -111,13 +111,17 @@ def test_luhn_valid_card_number_as_an_integer_is_still_redacted():
     }
     out = pii_engine.redact_payload(payload, Vault(synthetic=False))
     assert str(CARD) not in json.dumps(out)
-    assert "123456789" not in json.dumps(out)  # an SSA-valid SSN shape
+    # A bare 9-digit integer is an ordinary id here, not an SSN: only the Luhn-validated
+    # card detector runs on numbers.
+    assert out["metadata"]["ssn_number"] == 123456789
     assert out["messages"][1]["content"][0]["input"]["ts"] == 1730332800
 
 
 def test_detect_number_runs_only_validated_detectors():
     assert pii_engine.detect_number(CARD) == (str(CARD), "CREDIT_CARD")
     assert pii_engine.detect_number(4111111111111112) is None  # Luhn fails
+    assert pii_engine.detect_number(123456789) is None  # 9-digit ids are not scanned
+    assert pii_engine.detect_number(5551234567) is None  # phone-shaped ids are not scanned
     assert pii_engine.detect_number(1730332800000) is None  # millisecond timestamp
     assert pii_engine.detect_number(5551234567) is None  # phone-shaped
     assert pii_engine.detect_number(666123456) is None and pii_engine.detect_number(900123456) is None
