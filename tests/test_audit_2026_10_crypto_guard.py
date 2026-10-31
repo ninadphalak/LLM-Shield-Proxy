@@ -151,3 +151,61 @@ def test_proxy_response_does_not_decrypt_another_tenants_token(two_keys, httpx_m
     res = client.post("/v1/chat/completions", headers=_h(KEY_A, "sess-A", "STATELESS_CRYPTO"), json=body)
     assert res.status_code == 200, res.text
     assert EMAIL in res.text
+
+
+# guard_router.py:_authenticate:per-key-role-policy-and-identity-not-enforced
+
+
+GUARD_ROUTES = [
+    ("/v1/guard/redact", {"texts": [f"mail {EMAIL}"]}),
+    ("/v1/guard/rehydrate", {"texts": ["x"]}),
+    ("/v1/guard/rehydrate/stream", {"text": "x", "carry": "", "final": True}),
+]
+
+
+@pytest.mark.parametrize("path,body", GUARD_ROUTES)
+def test_guard_refuses_a_key_the_policy_refuses(two_keys, policies, path, body):
+    # Only KEY_B is mapped, there is no default_role: KEY_A is refused under FAIL_CLOSED.
+    policies({"roles": {"r": {"ENABLE_FINOPS_METERING": False}}, "virtual_keys": {KEY_B: "r"}})
+    res = client.post(path, headers=_h(KEY_A, "s-pol"), json=body)
+    assert res.status_code == 403, res.text
+    res = client.post(path, headers=_h(KEY_B, "s-pol"), json=body)
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.parametrize("path,body", GUARD_ROUTES)
+def test_guard_applies_the_roles_agent_identity_enforcer(two_keys, policies, path, body):
+    policies({"roles": {"strict": {"agent_identity_enforcer": "strict"}}, "virtual_keys": {KEY_A: "strict"}})
+    res = client.post(path, headers=_h(KEY_A, "s-id"), json=body)
+    assert res.status_code == 401, res.text
+
+
+def test_guard_applies_the_per_key_rate_limiter(two_keys, monkeypatch):
+    from llm_shield_proxy.security.rate_limit import rate_limiter
+
+    async def deny(_key):
+        return False
+
+    monkeypatch.setattr(rate_limiter, "acquire", deny)
+    res = client.post("/v1/guard/redact", headers=_h(KEY_A, "s-rl"), json={"texts": ["x"]})
+    assert res.status_code == 429
+
+
+# api:uncapped-request-body:mcp_router.mcp_gateway+guard_router._read_json (guard half)
+
+
+@pytest.mark.parametrize("path", [p for p, _ in GUARD_ROUTES])
+def test_guard_body_over_the_cap_is_413(two_keys, monkeypatch, path):
+    monkeypatch.setattr(settings, "MAX_PAYLOAD_SIZE_BYTES", 1024)
+    big = {"texts": ["a" * 4096], "text": "a" * 4096, "carry": ""}
+    res = client.post(path, headers=_h(KEY_A, "s-cap"), json=big)
+    assert res.status_code == 413, res.text
+
+    # No Content-Length: the streamed cumulative limit still applies.
+    def chunks():
+        for _ in range(8):
+            yield b" " * 512
+        yield b"{}"
+
+    res = client.post(path, headers={**_h(KEY_A, "s-cap"), "Content-Type": "application/json"}, content=chunks())
+    assert res.status_code == 413, res.text

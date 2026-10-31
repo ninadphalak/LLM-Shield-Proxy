@@ -27,7 +27,10 @@ plaintext PII, which makes it an exfiltration oracle if exposed weakly. It is
 gated more strictly than the proxy path: a configured virtual key is mandatory,
 and the ``ENABLE_OPEN_BYOK_PASSTHROUGH`` prefix match the proxy honors is
 deliberately NOT honored here. Holding an arbitrary provider-shaped key must not
-grant the ability to drain a vault.
+grant the ability to drain a vault. After the key match every route runs the
+proxy's per-key policy layer (``enforce_key_policy``: role lookup with the
+FAIL_CLOSED 403, agent identity, rate limit), and bodies are read under
+``MAX_PAYLOAD_SIZE_BYTES``.
 """
 
 from __future__ import annotations
@@ -68,7 +71,7 @@ def _error(status: int, message: str, err_type: str) -> JSONResponse:
     )
 
 
-def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONResponse]]:
+def _authenticate(request: Request) -> Tuple[Optional[str], Optional[str], Optional[JSONResponse]]:
     """Resolves the caller to a virtual key id, fail-closed.
 
     Deliberately stricter than the proxy path in ``api/main.py``. The proxy may
@@ -79,7 +82,10 @@ def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONRespons
     treated as authentication.
 
     Returns:
-        ``(virtual_key_id, None)`` when authenticated, else ``(None, response)``.
+        ``(virtual_key_id, matched_key, None)`` when authenticated, else
+        ``(None, None, response)``. ``matched_key`` is the configured key the caller
+        presented (None under OVERRIDE_CLIENT_AUTH); it is only used for the policy
+        lookup and never logged.
     """
     headers = request.headers
     client_auth = headers.get("authorization", "").strip()
@@ -97,16 +103,38 @@ def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONRespons
             if hmac.compare_digest(client_auth, vk):
                 from llm_shield_proxy.api.main import get_virtual_key_id
 
-                return get_virtual_key_id(vk), None
+                return get_virtual_key_id(vk), vk, None
 
     # Local evaluation escape hatch, same flag the compose examples set. It is an
     # explicit operator decision, unlike a key-shape heuristic.
     if settings.OVERRIDE_CLIENT_AUTH:
-        return "anonymous", None
+        return "anonymous", None, None
 
     from llm_shield_proxy.api.main import INVALID_PROXY_KEY_MESSAGE
 
-    return None, _error(401, INVALID_PROXY_KEY_MESSAGE, "authentication_error")
+    return None, None, _error(401, INVALID_PROXY_KEY_MESSAGE, "authentication_error")
+
+
+async def _authorize(request: Request) -> Tuple[Optional[str], Optional[Response]]:
+    """Authenticates the caller, then runs the same per-key policy layer as the proxy.
+
+    enforce_key_policy applies the role lookup (FAIL_CLOSED 403 for an unmapped key),
+    sets request_policy_ctx so the role's settings apply here, verifies the agent
+    identity (JWT/DPoP) and takes a rate-limit token.
+    """
+    virtual_key_id, matched_key, auth_error = _authenticate(request)
+    if auth_error is not None:
+        return None, auth_error
+    assert virtual_key_id is not None
+    request.state.virtual_key_id = virtual_key_id
+
+    # Imported here: api.main imports this module.
+    from llm_shield_proxy.api.main import enforce_key_policy
+
+    _, policy_error = await enforce_key_policy(request, virtual_key_id, matched_key)
+    if policy_error is not None:
+        return None, policy_error
+    return virtual_key_id, None
 
 
 async def _resolve_vault(
@@ -139,9 +167,21 @@ async def _resolve_vault(
 
 
 async def _read_json(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
-    """Parses the request body as a JSON object."""
+    """Parses the request body as a JSON object, read under MAX_PAYLOAD_SIZE_BYTES."""
+    from fastapi import HTTPException
+
+    from llm_shield_proxy.api.main import read_body_with_limit
+
     try:
-        raw = await request.body()
+        raw = await read_body_with_limit(request)
+    except ValueError:
+        return None, _error(
+            413,
+            f"Request payload exceeds maximum allowed limit of {settings.MAX_PAYLOAD_SIZE_BYTES} bytes",
+            "invalid_request_error",
+        )
+    except HTTPException:
+        raise
     except Exception:
         return None, _error(400, "Could not read request body", "invalid_request_error")
 
@@ -193,7 +233,7 @@ async def guard_redact(
     caller must send a stable ``X-Session-ID`` for the lifetime of one LLM
     request/response pair.
     """
-    virtual_key_id, auth_error = _authenticate(request)
+    virtual_key_id, auth_error = await _authorize(request)
     if auth_error is not None:
         return auth_error
     assert virtual_key_id is not None
@@ -230,7 +270,7 @@ async def guard_rehydrate(
     x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
 ) -> Response:
     """Restores plaintext for a batch of complete, non-streaming texts."""
-    virtual_key_id, auth_error = _authenticate(request)
+    virtual_key_id, auth_error = await _authorize(request)
     if auth_error is not None:
         return auth_error
     assert virtual_key_id is not None
@@ -279,7 +319,7 @@ async def guard_rehydrate_stream(
         client immediately; ``carry`` must be sent back on the next delta. When
         ``final`` is true the carry is flushed and comes back empty.
     """
-    virtual_key_id, auth_error = _authenticate(request)
+    virtual_key_id, auth_error = await _authorize(request)
     if auth_error is not None:
         return auth_error
     assert virtual_key_id is not None
