@@ -1657,6 +1657,9 @@ async def _proxy_catch_all_internal(
             # same resolver. The configured FALLBACK_BASE_URL is operator-controlled (like
             # UPSTREAM_BASE_URL) and is used directly.
             fallback_url_override: Optional[str] = None
+            # Set together with fallback_url_override; read only when it is set.
+            fallback_scheme: str = ""
+            fallback_port: Optional[int] = None
             fallback_sni_hostname: Optional[str] = None
             # With failover off the header can never be acted on, so it is not inspected
             # either: an inert header must not refuse an otherwise valid request.
@@ -1688,6 +1691,7 @@ async def _proxy_catch_all_internal(
                 fallback_sni_hostname = hostname
                 ip_str = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
                 port_str = f":{fallback_port}" if fallback_port else ""
+                fallback_scheme = parsed_fallback.scheme.lower()
                 fallback_url_override = f"{parsed_fallback.scheme}://{ip_str}{port_str}{parsed_fallback.path}"
 
             # The credential a failover attempt carries. A client-picked fallback follows the
@@ -1713,8 +1717,8 @@ async def _proxy_catch_all_internal(
                     except ValueError:
                         configured_port = None
                     if proxy_key_in_use and (
-                        parsed_fallback.scheme.lower() != configured_scheme
-                        or (fallback_port or _DEFAULT_PORTS.get(parsed_fallback.scheme.lower())) != configured_port
+                        fallback_scheme != configured_scheme
+                        or (fallback_port or _DEFAULT_PORTS.get(fallback_scheme)) != configured_port
                     ):
                         fallback_forbidden = True
                 elif proxy_key_in_use:
@@ -1722,7 +1726,7 @@ async def _proxy_catch_all_internal(
                         None
                         if role_upstream_key  # the role pins its provider; no global key
                         else proxy_key_for_client_chosen_host(
-                            fallback_sni_hostname, parsed_fallback.scheme, fallback_port
+                            fallback_sni_hostname, fallback_scheme, fallback_port
                         )
                     )
                     fallback_forbidden = fallback_key is None

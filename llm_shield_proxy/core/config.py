@@ -12,6 +12,7 @@ import os
 import secrets
 import threading
 import types
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, Optional, Set
 
@@ -592,7 +593,8 @@ class Settings(BaseSettings):
                 errors = getattr(exc, "errors", None)
                 if callable(errors):
                     try:
-                        locs = ", ".join(".".join(map(str, e.get("loc", ()))) for e in errors(include_input=False))
+                        error_list: Any = errors(include_input=False)
+                        locs = ", ".join(".".join(map(str, e.get("loc", ()))) for e in error_list)
                     except Exception:  # nosec B110 noqa: S110
                         locs = ""
                 logger.warning("Rejected configuration reload (%s) %s", type(exc).__name__, locs)
@@ -694,10 +696,39 @@ class Settings(BaseSettings):
 request_policy_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar("request_policy_ctx", default={})
 agent_identity_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("agent_identity_ctx", default=None)
 
+class _BaseSettingsView(Mapping):
+    """Read-only mapping view of the wrapped Settings, exposed as the proxy's __dict__.
+
+    pytest >= 9.2 records an instance attribute's prior value from ``target.__dict__``
+    and *deletes* the attribute on undo when it is absent there. Every setting lives on
+    the wrapped Settings, so without this view ``monkeypatch.setattr(settings, ...)``
+    would undo with ``delattr`` and fail. Reporting the live value restores it instead.
+    """
+
+    def __init__(self, base: "Settings"):
+        self._base = base
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self._base, key)
+        except AttributeError:
+            raise KeyError(key) from None
+
+    def __iter__(self):
+        return iter(vars(self._base))
+
+    def __len__(self) -> int:
+        return len(vars(self._base))
+
+
 class DynamicSettingsProxy:
     """ContextVar-backed proxy for supported per-tenant configuration overrides."""
     def __init__(self, base_settings: Settings):
         object.__setattr__(self, "_base", base_settings)
+
+    @property
+    def __dict__(self) -> Mapping:  # type: ignore[override]
+        return _BaseSettingsView(object.__getattribute__(self, "_base"))
 
     def __getattr__(self, name: str) -> Any:
         ctx = request_policy_ctx.get()

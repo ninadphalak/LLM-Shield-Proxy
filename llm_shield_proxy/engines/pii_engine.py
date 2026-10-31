@@ -1964,7 +1964,8 @@ class PIIEngine:
             edge_scan = "pii_found" if self.detect_spans(probe, active_profile) else "clean"
         except Exception:  # noqa: BLE001  # nosec B110
             # A probe failure must not take down the request.
-            logger.warning("Unmapped-blob edge scan failed at %s", json_path or "<root>")
+            # No path in the log: object keys along it can carry the very data being scanned.
+            logger.warning("Unmapped-blob edge scan failed")
             edge_scan = "failed"
 
         AuditLogger.log_unmapped_blob(
