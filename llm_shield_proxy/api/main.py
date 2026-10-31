@@ -1462,7 +1462,10 @@ async def _proxy_catch_all_internal(
                             },
                         )
 
-                    v3_cipher = StatelessPIICipher(key=key, version=1, session_id=x_session_id)
+                    # Bound to the tenant as well as the session (HKDF info and AAD).
+                    v3_cipher = StatelessPIICipher(
+                        key=key, version=1, session_id=x_session_id, virtual_key_id=virtual_key_id
+                    )
                     mutator = StatelessASTVisitor(v3_cipher)
 
                     try:

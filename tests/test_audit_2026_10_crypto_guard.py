@@ -381,3 +381,40 @@ def test_rehydrate_many_occurrences_is_exact():
     text = " ".join([t] * 20000)
     assert v.rehydrate(text) == " ".join(["jane.dummy@example.com"] * 20000)
     assert v.rehydrate(text, retention_length=len(t)).endswith(" " + t)
+
+
+# stateless_mutation_engine/crypto.py:hkdf-info-client-session-only-no-vkid
+
+
+@pytest.mark.parametrize("session", [None, "shared-session"])
+def test_v3_cipher_is_bound_to_the_virtual_key(session):
+    from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+
+    master = b"m" * 32
+    a = StatelessPIICipher(key=master, session_id=session, virtual_key_id="vk-a")
+    b = StatelessPIICipher(key=master, session_id=session, virtual_key_id="vk-b")
+    token = a.encrypt(EMAIL, "email")
+    assert StatelessPIICipher(key=master, session_id=session, virtual_key_id="vk-a").decrypt(token, "email") == EMAIL
+    assert b.decrypt(token, "email") == "[CORRUPTED]"
+    # Neither the raw master key nor the legacy session-only key opens it.
+    assert StatelessPIICipher(key=master, session_id=session).decrypt(token, "email") == "[CORRUPTED]"
+
+
+def test_proxy_v3_cipher_receives_the_virtual_key(two_keys, monkeypatch, httpx_mock, upstream):
+    import llm_shield_proxy.api.main as main_mod
+
+    seen = []
+    real = main_mod.StatelessPIICipher
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(main_mod, "StatelessPIICipher", spy)
+    httpx_mock.add_response(
+        url="https://api.openai.com/v1/mcp-upstream", json={"jsonrpc": "2.0", "id": 1, "result": {}}
+    )
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"arguments": {"email": EMAIL}}}
+    res = client.post("/v1/mcp-upstream", headers=_h(KEY_A), json=body)
+    assert res.status_code == 200, res.text
+    assert seen and seen[0].get("virtual_key_id") not in (None, "")
