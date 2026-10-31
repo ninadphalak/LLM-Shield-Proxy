@@ -42,6 +42,26 @@ AGENT_IDENTITY_ENFORCER="off"
 * `"lenient"`: Verifies the base JWT/Identity and signature, but skips the strict DPoP URI (htu) and Method (htm) validations.
 * `"strict"`: Validates the configured JWT and DPoP checks, including `cnf.jkt`, method, URI, freshness, and replay state. It protects that authentication path only; issuer/audience policy, key discovery, cache behavior, proxies, and authorization remain separate boundaries.
 
+When the Enforcer is on (`"lenient"` or `"strict"`), it also needs:
+
+```env
+ALLOWED_ISSUERS=["https://issuer.example.com"]
+ALLOWED_AUDIENCES=["https://shield.example.com"]
+# Optional: the proxy's canonical external origin (plus any path prefix).
+PUBLIC_BASE_URL=https://shield.example.com
+```
+
+* **Issuer allowlist:** a token whose `iss` is not in `ALLOWED_ISSUERS` (or the role's
+  `allowed_issuers`) is rejected.
+* **Audience is mandatory:** the token's `aud` must match the role's `allowed_audiences`, or
+  the global `ALLOWED_AUDIENCES` when the role has none. If neither is set, every token is
+  rejected with `401`, so a token a trusted issuer minted for another service cannot be
+  replayed here.
+* **`PUBLIC_BASE_URL` (optional):** when set, the DPoP `htu` claim is checked against this
+  origin plus the request path. Without it, `htu` is compared with the request URL, whose host
+  comes from the client's `Host` header. Set it when the proxy runs behind a load balancer or
+  ingress, so the binding uses the URL clients actually call.
+
 For per-tenant enforcement, configure your `policies.yaml`:
 ```yaml
 virtual_keys:
@@ -50,7 +70,11 @@ virtual_keys:
 roles:
   strict_agent_role:
     agent_identity_enforcer: "strict"
+    allowed_issuers: ["https://issuer.example.com"]
+    allowed_audiences: ["https://shield.example.com"]
 ```
+
+The role's `agent_identity_enforcer` is applied on the proxy routes and on the `/v1/guard/*` API.
 
 ## DPoP Replay Protection (RFC 9449 §11.1)
 
@@ -63,8 +87,10 @@ cache:
 * Every DPoP proof should carry a `jti` claim. A proof with no `jti` is rejected outright,
   because the verifier cannot check that proof for reuse.
 * On each request, the proxy computes `f"{jkt}:{jti}"` (the JWK thumbprint bound to the
-  proof, plus its unique ID) and checks it against an in-memory `TTLCache` (300s TTL,
-  matching the proof's own maximum freshness window). A cache hit means this exact proof
+  proof, plus its unique ID) and checks it against an in-memory `TTLCache` with a 420s TTL.
+  A proof is fresh while its `iat` is at most 300s old, with 60s of clock skew allowed on
+  each side, so a proof stays acceptable for up to 300 + 2 x 60 = 420s after the earliest
+  moment it can be recorded. The TTL covers that whole window. A cache hit means this exact proof
   was already consumed -- the request is dropped with `HTTP 401 "DPoP proof replayed"`,
   even though the JWT, DPoP signature, `htm`/`htu` binding, and `cnf.jkt` thumbprint all
   check out.
@@ -77,7 +103,7 @@ cache:
 Replay protection is per process. A proof can be replayed against another replica during the
 TTL window because the cache is not shared through Redis. Use a single replica or sticky routing
 if that limitation is acceptable. Multi-replica deployments that require cross-pod replay
-detection need a shared store, such as Redis `SETNX` with the same 300-second TTL.
+detection need a shared store, such as Redis `SETNX` with the same 420-second TTL.
 
 ## In plain English
 
