@@ -478,7 +478,8 @@ async def _process_single_call(
     if upstream is None:
         return _jsonrpc_error(req_id, JSONRPC_UPSTREAM_ERROR, "No upstream MCP server configured") if has_id else None
 
-    active_profile = pii_engine.get_profile(virtual_key)
+    # Tenant profiles are keyed by the fingerprint, as on every other path.
+    active_profile = pii_engine.get_profile(audit_id)
 
     # Inbound Sanitization: 3-Tier cascade over params before forwarding upstream.
     # Uses Faker-backed synthetic substitution (not a literal "[REDACTED]" marker) so

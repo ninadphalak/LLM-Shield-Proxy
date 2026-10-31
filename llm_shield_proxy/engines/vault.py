@@ -301,6 +301,14 @@ class Vault:
 
         return True
 
+    def _is_boundary_safe_chars(self, before: str, after: str, token: str) -> bool:
+        """`_is_boundary_safe` given the characters around the match ('' at an edge)."""
+        if self._is_word_char(token[0]) and before and self._is_word_char(before):
+            return False
+        if self._is_word_char(token[-1]) and after and self._is_word_char(after):
+            return False
+        return True
+
     def _is_boundary_safe(self, text: str, start: int, end: int, token: str) -> bool:
         """Ensures token match occurs at word boundaries to prevent sub-word collisions.
 
@@ -328,7 +336,8 @@ class Vault:
         to prevent partial-token or prefix-free leakage across stream chunks.
         Applies word-boundary isolation to prevent sub-word corruptions (e.g. 'May' in 'Maybe').
 
-        Time Complexity: O(N * M) where N is text length and M is total token count.
+        Time Complexity: O(N * M) where N is text length and M is the number of
+        distinct tokens in the vault; each token is one linear pass.
         Space Complexity: O(N) string allocation.
 
         Args:
@@ -363,36 +372,56 @@ class Vault:
             sorted_tokens = sorted(list(self.token_to_original.keys()), key=len, reverse=True)
         result = text
 
+        # One left-to-right pass per token, spliced with a piece list: O(len(text)) per
+        # token rather than a full-string rebuild per occurrence (which was quadratic
+        # in the number of occurrences).
         for token in sorted_tokens:
             original = self.token_to_original[token]
+            if token not in result:
+                continue
+            token_len = len(token)
             token_bytes: Optional[int] = None
             original_bytes: Optional[int] = None
+            src = result
+            src_len = len(src)
+            pieces: list[str] = []
+            last = 0  # src index up to which pieces cover the output
+            cur_len = src_len  # length of the output so far plus the unspliced tail
+            # The character the output holds just before `last` when the previous
+            # replacement ended exactly there (the boundary check reads the output).
+            prev_out_char: Optional[str] = None
             pos = 0
-            while pos < len(result):
-                idx = result.find(token, pos)
+            while pos < src_len:
+                idx = src.find(token, pos)
                 if idx == -1:
                     break
 
-                end_idx = idx + len(token)
+                end_idx = idx + token_len
 
                 # Verify word boundary to avoid substring collisions
-                if not self._is_boundary_safe(result, idx, end_idx, token):
+                if idx > 0 and idx == last and prev_out_char is not None:
+                    before = prev_out_char
+                else:
+                    before = src[idx - 1] if idx > 0 else ""
+                if not self._is_boundary_safe_chars(before, src[end_idx] if end_idx < src_len else "", token):
                     pos = idx + 1
                     continue
 
                 # Check if token crosses into the trailing retention window
-                if retention_length > 0 and end_idx > len(result) - retention_length:
+                if retention_length > 0 and end_idx > src_len - retention_length:
                     # Defer replacement of this and subsequent overlapping matches
                     break
 
                 projected_bytes: Optional[int] = None
                 if max_output_bytes is not None:
-                    projected_characters = len(result) - len(token) + len(original)
+                    projected_characters = cur_len - token_len + len(original)
                     if projected_characters > max_output_bytes:
                         raise ValueError("Rehydrated output exceeded maximum safe length")
                     if result_bytes is not None or projected_characters * 4 > max_output_bytes:
                         if result_bytes is None:
-                            result_bytes = len(result.encode("utf-8"))
+                            result_bytes = len("".join(pieces).encode("utf-8")) + len(
+                                src[last:].encode("utf-8")
+                            )
                         if token_bytes is None:
                             token_bytes = len(token.encode("utf-8"))
                             original_bytes = len(original.encode("utf-8"))
@@ -400,10 +429,22 @@ class Vault:
                         projected_bytes = result_bytes - token_bytes + original_bytes
                     if projected_bytes is not None and projected_bytes > max_output_bytes:
                         raise ValueError("Rehydrated output exceeded maximum safe length")
-                result = result[:idx] + original + result[end_idx:]
+                pieces.append(src[last:idx])
+                pieces.append(original)
+                if original:
+                    prev_out_char = original[-1]
+                elif idx > last:
+                    prev_out_char = src[idx - 1]
+                elif idx == 0:
+                    prev_out_char = ""
+                last = end_idx
+                cur_len = cur_len - token_len + len(original)
                 if projected_bytes is not None:
                     result_bytes = projected_bytes
-                pos = idx + len(original)
+                pos = end_idx
+            if pieces:
+                pieces.append(src[last:])
+                result = "".join(pieces)
 
         # Neutralize Markdown Image Exfiltration payloads
         if retention_length == 0 and "![" in result:
@@ -428,17 +469,58 @@ class Vault:
 class VaultStore:
     """Thread-safe in-memory session vault store with LRU and TTL eviction.
 
+    Capacity is shared fairly between virtual keys: when the store is full, the
+    vault evicted is the oldest one of the key holding the MOST vaults (the
+    requesting key's own on a tie). One key minting fresh session ids therefore
+    evicts its own vaults, not another tenant's live sessions.
+
     Attributes:
         max_capacity: Maximum number of active tenant session vaults.
+        per_tenant_capacity: Maximum vaults one virtual key may hold (defaults to
+            max_capacity, i.e. only the fair-share rule applies).
         ttl_seconds: Rolling TTL in seconds after which inactive session vaults expire.
     """
 
-    def __init__(self, max_capacity: Optional[int] = None, ttl_seconds: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        max_capacity: Optional[int] = None,
+        ttl_seconds: Optional[int] = None,
+        per_tenant_capacity: Optional[int] = None,
+    ) -> None:
         self._sessions: OrderedDict[str, Vault] = OrderedDict()
         self._timestamps: Dict[str, float] = {}
+        # Per-virtual-key LRU index over the same keys, and each key's owner.
+        self._tenant_keys: Dict[str, OrderedDict[str, None]] = {}
+        self._key_tenant: Dict[str, str] = {}
         self.max_capacity: int = max_capacity or settings.MAX_SESSION_VAULTS
+        self.per_tenant_capacity: int = per_tenant_capacity or self.max_capacity
         self.ttl_seconds: int = ttl_seconds or settings.SESSION_TTL_SECONDS
         self._lock: threading.Lock = threading.Lock()
+
+    def _drop(self, vault_key: str) -> None:
+        """Removes one vault from every index. Caller holds the lock."""
+        self._sessions.pop(vault_key, None)
+        self._timestamps.pop(vault_key, None)
+        tenant = self._key_tenant.pop(vault_key, None)
+        if tenant is not None:
+            keys = self._tenant_keys.get(tenant)
+            if keys is not None:
+                keys.pop(vault_key, None)
+                if not keys:
+                    del self._tenant_keys[tenant]
+
+    def _evict_one_for(self, virtual_key_id: str) -> None:
+        """Frees one slot at capacity: the oldest vault of the largest tenant."""
+        victim = virtual_key_id if virtual_key_id in self._tenant_keys else None
+        best = len(self._tenant_keys[victim]) if victim is not None else 0
+        for tenant, keys in self._tenant_keys.items():
+            if len(keys) > best:
+                victim, best = tenant, len(keys)
+        if victim is None:
+            if self._sessions:
+                self._drop(next(iter(self._sessions)))
+            return
+        self._drop(next(iter(self._tenant_keys[victim])))
 
     def _evict_expired(self) -> None:
         """Full O(active-sessions) sweep evicting every orphaned, TTL-expired vault.
@@ -452,8 +534,7 @@ class VaultStore:
         now = time.time()
         expired_keys = [k for k, ts in self._timestamps.items() if now - ts > self.ttl_seconds]
         for k in expired_keys:
-            self._sessions.pop(k, None)
-            self._timestamps.pop(k, None)
+            self._drop(k)
 
     async def run_eviction_loop(self, interval_seconds: float, stop_event: asyncio.Event) -> None:
         """Periodically sweeps expired session vaults in the background.
@@ -472,6 +553,34 @@ class VaultStore:
                 await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
             except asyncio.TimeoutError:
                 pass
+
+    def _lookup(self, vault_key: str, now: float) -> Optional[Vault]:
+        """The live vault under `vault_key`, refreshed, or None. Caller holds the lock."""
+        ts = self._timestamps.get(vault_key)
+        if ts is not None and now - ts > self.ttl_seconds:
+            self._drop(vault_key)
+
+        vault = self._sessions.get(vault_key)
+        if vault is None:
+            return None
+        self._sessions.move_to_end(vault_key)
+        tenant = self._key_tenant.get(vault_key)
+        if tenant is not None and tenant in self._tenant_keys:
+            self._tenant_keys[tenant].move_to_end(vault_key)
+        self._timestamps[vault_key] = now
+        return vault
+
+    def get_existing_vault(self, session_id: Optional[str], virtual_key_id: str = "default") -> Optional[Vault]:
+        """The session's vault if one exists. Never allocates (for rehydration lookups)."""
+        if not session_id:
+            return None
+        with self._lock:
+            return self._lookup(f"{virtual_key_id}:{session_id}", time.time())
+
+    async def get_existing_vault_async(
+        self, session_id: Optional[str], virtual_key_id: str = "default"
+    ) -> Optional[Vault]:
+        return self.get_existing_vault(session_id, virtual_key_id)
 
     def get_vault(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
         """Retrieves or creates an in-memory session vault enforcing TTL eviction.
@@ -495,24 +604,23 @@ class VaultStore:
         vault_key = f"{virtual_key_id}:{session_id}"
         now = time.time()
         with self._lock:
-            ts = self._timestamps.get(vault_key)
-            if ts is not None and now - ts > self.ttl_seconds:
-                self._sessions.pop(vault_key, None)
-                self._timestamps.pop(vault_key, None)
+            existing = self._lookup(vault_key, now)
+            if existing is not None:
+                return existing
 
-            if vault_key in self._sessions:
-                self._sessions.move_to_end(vault_key)
-                self._timestamps[vault_key] = now
-                return self._sessions[vault_key]
-
-            # Evict oldest LRU vault if at capacity
-            if len(self._sessions) >= self.max_capacity:
-                oldest_key, _ = self._sessions.popitem(last=False)
-                self._timestamps.pop(oldest_key, None)
+            # Capacity: a key at its own cap evicts its own oldest vault; a full
+            # store evicts from the largest tenant (fair share), never globally.
+            own = self._tenant_keys.get(virtual_key_id)
+            if own is not None and len(own) >= self.per_tenant_capacity:
+                self._drop(next(iter(own)))
+            while len(self._sessions) >= self.max_capacity:
+                self._evict_one_for(virtual_key_id)
 
             new_vault = Vault(session_id=session_id, virtual_key_id=virtual_key_id)
             self._sessions[vault_key] = new_vault
             self._timestamps[vault_key] = now
+            self._tenant_keys.setdefault(virtual_key_id, OrderedDict())[vault_key] = None
+            self._key_tenant[vault_key] = virtual_key_id
             return new_vault
 
     async def get_vault_async(self, session_id: Optional[str] = None, virtual_key_id: str = "default") -> Vault:
@@ -523,8 +631,7 @@ class VaultStore:
         """Removes a session vault from the in-memory cache."""
         vault_key = f"{virtual_key_id}:{session_id}"
         with self._lock:
-            self._sessions.pop(vault_key, None)
-            self._timestamps.pop(vault_key, None)
+            self._drop(vault_key)
 
 
 class RedisVaultStore:
@@ -621,6 +728,16 @@ class RedisVaultStore:
 
         await self.async_client.expire(vault_key, self.ttl)
         return vault
+
+    async def get_existing_vault_async(
+        self, session_id: Optional[str], virtual_key_id: str = "default"
+    ) -> Optional[Vault]:
+        """The session's vault if Redis holds one, else None."""
+        if not session_id:
+            return None
+        if not await self.async_client.exists(f"{virtual_key_id}:{session_id}"):
+            return None
+        return await self.get_vault_async(session_id, virtual_key_id)
 
     def clear_session(self, session_id: str, virtual_key_id: str = "default") -> None:
         """Deletes session key from Redis."""

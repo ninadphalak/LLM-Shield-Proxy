@@ -1321,12 +1321,22 @@ async def _proxy_catch_all_internal(
     enable_finops_metering = settings.ENABLE_FINOPS_METERING
 
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
-    from llm_shield_proxy.engines.masking import MaskingMode, ScrubVault, resolve_masking_mode
+    from llm_shield_proxy.engines.masking import (
+        MaskingMode,
+        MaskingModeNotAllowed,
+        ScrubVault,
+        masking_mode_not_allowed_response,
+        resolve_masking_mode,
+    )
 
-    masking_mode = resolve_masking_mode(x_shield_masking_mode)
+    try:
+        masking_mode = resolve_masking_mode(x_shield_masking_mode)
+    except MaskingModeNotAllowed:
+        return masking_mode_not_allowed_response()
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
-        vault = StatelessCryptoVault()
+        # Tokens are bound to this key and session; another tenant's token stays opaque.
+        vault = StatelessCryptoVault(virtual_key_id, x_session_id)
     elif masking_mode == MaskingMode.SCRUB:
         vault = ScrubVault()  # type: ignore
     elif masking_mode == MaskingMode.HMAC:
@@ -1452,7 +1462,10 @@ async def _proxy_catch_all_internal(
                             },
                         )
 
-                    v3_cipher = StatelessPIICipher(key=key, version=1, session_id=x_session_id)
+                    # Bound to the tenant as well as the session (HKDF info and AAD).
+                    v3_cipher = StatelessPIICipher(
+                        key=key, version=1, session_id=x_session_id, virtual_key_id=virtual_key_id
+                    )
                     mutator = StatelessASTVisitor(v3_cipher)
 
                     try:

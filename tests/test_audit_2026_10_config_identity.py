@@ -105,14 +105,18 @@ def isolated_policies(tmp_path):
         settings._policies_mtime,
         settings._policies_path,
         settings._policies_digest,
+        getattr(settings, "_policies_loaded", False),
     )
     yield tmp_path / "policies.yaml"
+    # _policies_loaded too: left True, every later test runs under a loaded (empty)
+    # policy map and FAIL_CLOSED refuses every key with 403.
     (
         settings.POLICIES_FILE_PATH,
         settings._flattened_policies,
         settings._policies_mtime,
         settings._policies_path,
         settings._policies_digest,
+        settings._policies_loaded,
     ) = saved
 
 
