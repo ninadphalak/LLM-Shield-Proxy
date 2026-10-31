@@ -290,3 +290,34 @@ def test_json_escaped_url_is_unescaped_not_dropped():
 async def test_divergent_and_internal_forms_stay_blocked(url):
     with pytest.raises(EgressPolicyViolationError):
         await scan_arguments({"url": url}, None, resolver=_public)
+
+
+# --- 6. vault capacity: unconfigured fingerprints share one pooled bucket ---------------
+
+
+def test_minting_one_vault_tenants_cannot_evict_a_configured_tenant(monkeypatch):
+    from llm_shield_proxy.engines.vault import VaultStore
+    from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
+
+    monkeypatch.setattr(settings, "_valid_virtual_keys_set", frozenset({"vk-configured-dummy"}))
+    configured = get_virtual_key_id("vk-configured-dummy")
+    store = VaultStore(max_capacity=4, ttl_seconds=3600)
+    kept = [store.get_vault(f"live-{n}", configured) for n in range(2)]
+    token = kept[0].get_or_create_token(BOB, "EMAIL")
+    for n in range(50):
+        store.get_vault("s", get_virtual_key_id(f"byok-dummy-{n}"))
+    assert store.get_existing_vault("live-0", configured) is kept[0]
+    assert store.get_existing_vault("live-1", configured) is kept[1]
+    assert kept[0].rehydrate(token) == BOB
+    assert len(store._sessions) == 4
+
+
+def test_pool_still_shares_fairly_between_unconfigured_tenants(monkeypatch):
+    from llm_shield_proxy.engines.vault import VaultStore
+
+    monkeypatch.setattr(settings, "_valid_virtual_keys_set", frozenset())
+    store = VaultStore(max_capacity=3, ttl_seconds=3600)
+    victim = store.get_vault("victim", "vk-b")
+    for n in range(10):
+        store.get_vault(f"churn-{n}", "vk-a")
+    assert store.get_existing_vault("victim", "vk-b") is victim
