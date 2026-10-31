@@ -3,12 +3,18 @@
 Dummy keys and in-process ES256 keys only; JWKS lookup is stubbed.
 """
 
+import base64
 import logging
 import os
+import time
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from fastapi import HTTPException
 
-from llm_shield_proxy.core.config import Settings, settings
+import llm_shield_proxy.security.identity as ident
+from llm_shield_proxy.core.config import Settings, request_policy_ctx, settings
 
 _REVOCABLE = ("VALID_VIRTUAL_KEYS", "OVERRIDE_CLIENT_AUTH", "ENABLE_CANARY_TRIPWIRE", "SHIELD_WATERMARK_SECRET", "CANARY_TOKEN")
 
@@ -136,3 +142,118 @@ def test_policy_poll_skips_unchanged_content_and_force_still_reloads(isolated_po
         assert "Successfully hot-reloaded" not in caplog.text
         settings.reload_policies(force=True)
         assert "Successfully hot-reloaded" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# verify_agent_identity: real ES256 tokens, JWKS stubbed
+# ---------------------------------------------------------------------------
+
+ISSUER = "https://issuer.dummy"
+PROXY_AUD = "https://shield.dummy"
+URL = "http://proxy.dummy/v1/chat/completions"
+
+
+def _b64(i: int) -> str:
+    return base64.urlsafe_b64encode(i.to_bytes(32, "big")).rstrip(b"=").decode()
+
+
+class _URL(str):
+    def __new__(cls, value, path):
+        obj = str.__new__(cls, value)
+        obj.path = path
+        return obj
+
+    def replace(self, **kw):
+        return self
+
+
+class _Req:
+    def __init__(self, access, proof, url=URL, path="/v1/chat/completions"):
+        self.headers = {"Authorization": f"Bearer {access}", "DPoP": proof}
+        self.method = "POST"
+        self.url = _URL(url, path)
+
+        class S:
+            pass
+
+        self.state = S()
+
+
+@pytest.fixture
+def idp(monkeypatch):
+    iss_key = ec.generate_private_key(ec.SECP256R1())
+    cli_key = ec.generate_private_key(ec.SECP256R1())
+    pn = cli_key.public_key().public_numbers()
+    jwk = {"kty": "EC", "crv": "P-256", "x": _b64(pn.x), "y": _b64(pn.y)}
+    jkt = ident._get_jwk_thumbprint(jwk)
+
+    class _SK:
+        key = iss_key.public_key()
+
+    async def _fake_signing_key(issuer, token):
+        return _SK()
+
+    monkeypatch.setattr(ident, "_get_signing_key", _fake_signing_key)
+    monkeypatch.setattr(settings, "AGENT_IDENTITY_ENFORCER", "strict")
+    monkeypatch.setattr(settings, "ALLOWED_ISSUERS", [ISSUER])
+    monkeypatch.setattr(settings, "ALLOWED_AUDIENCES", [PROXY_AUD])
+    request_policy_ctx.set({})
+    ident._dpop_replay_cache.clear()
+
+    counter = {"n": 0}
+
+    def access(**overrides):
+        claims = {"iss": ISSUER, "aud": PROXY_AUD, "sub": "agent-dummy", "exp": int(time.time()) + 3600, "cnf": {"jkt": jkt}}
+        claims.update(overrides)
+        claims = {k: v for k, v in claims.items() if v is not None}
+        return jwt.encode(claims, iss_key, algorithm="ES256")
+
+    def proof(htu=URL, iat=None, jti=None):
+        counter["n"] += 1
+        claims = {"htm": "POST", "htu": htu, "iat": int(iat if iat is not None else time.time()), "jti": jti or f"jti-{counter['n']}"}
+        return jwt.encode(claims, cli_key, algorithm="ES256", headers={"typ": "dpop+jwt", "jwk": jwk})
+
+    return access, proof
+
+
+async def _verify(req, policy=None):
+    await ident.verify_agent_identity(req, policy)
+    return req.state.agent_identity_claim
+
+
+@pytest.mark.asyncio
+async def test_role_without_audiences_inherits_global_and_rejects_foreign_audience(idp):
+    access, proof = idp
+    role = {"allowed_issuers": [ISSUER]}  # no allowed_audiences
+    with pytest.raises(HTTPException) as exc:
+        await _verify(_Req(access(aud="https://other-service.dummy"), proof()), role)
+    assert exc.value.status_code == 401
+    assert await _verify(_Req(access(), proof()), role) == "agent-dummy"
+
+
+@pytest.mark.asyncio
+async def test_empty_effective_audience_list_rejects(idp, monkeypatch):
+    access, proof = idp
+    monkeypatch.setattr(settings, "ALLOWED_AUDIENCES", [])
+    with pytest.raises(HTTPException):
+        await _verify(_Req(access(), proof()))
+    with pytest.raises(HTTPException):
+        await _verify(_Req(access(), proof()), {"allowed_issuers": [ISSUER], "allowed_audiences": []})
+
+
+@pytest.mark.asyncio
+async def test_role_audience_list_takes_precedence(idp):
+    access, proof = idp
+    role = {"allowed_issuers": [ISSUER], "allowed_audiences": ["https://tenant.dummy"]}
+    with pytest.raises(HTTPException):
+        await _verify(_Req(access(), proof()), role)
+    assert await _verify(_Req(access(aud="https://tenant.dummy"), proof()), role) == "agent-dummy"
+    # A list-valued aud claim is accepted when it contains an allowed audience.
+    assert await _verify(_Req(access(aud=["x", "https://tenant.dummy"]), proof()), role) == "agent-dummy"
+
+
+@pytest.mark.asyncio
+async def test_access_token_without_exp_rejected(idp):
+    access, proof = idp
+    with pytest.raises(HTTPException):
+        await _verify(_Req(access(exp=None), proof()))

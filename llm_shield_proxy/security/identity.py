@@ -42,6 +42,15 @@ class DPoPReplayError(Exception):
 
 
 
+def _as_str_list(value: Any) -> list[str]:
+    """Normalize an audience setting or claim (str or list) to a list of strings."""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [v for v in value if isinstance(v, str) and v]
+    return []
+
+
 def _get_jwk_thumbprint(jwk_dict: dict) -> str:
     kty = jwk_dict.get("kty")
     if kty == "RSA":
@@ -121,10 +130,16 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         if not allowed_issuers or issuer not in allowed_issuers:
             raise jwt.InvalidIssuerError("Unauthorized issuer")
 
-        allowed_audiences = tenant_policy.get("allowed_audiences", []) if tenant_policy else settings.ALLOWED_AUDIENCES
+        # Audience binding is mandatory: a role without its own list inherits the global
+        # ALLOWED_AUDIENCES, and an empty effective list fails closed like the issuer
+        # allowlist. Otherwise a trusted issuer's token minted for another service passes.
+        role_audiences = tenant_policy.get("allowed_audiences") if tenant_policy else None
+        allowed_audiences = _as_str_list(role_audiences) or _as_str_list(settings.ALLOWED_AUDIENCES)
+        if not allowed_audiences:
+            raise jwt.InvalidAudienceError("No allowed audiences configured")
 
         # Finding 1: Check audience before fetching JWKS over network
-        if allowed_audiences and unverified_claims.get("aud") not in allowed_audiences:
+        if not any(aud in allowed_audiences for aud in _as_str_list(unverified_claims.get("aud"))):
             raise jwt.InvalidAudienceError("Unauthorized audience")
 
         # Step 2: Fetch JWKS (cached) and get signing key non-blockingly
@@ -133,7 +148,9 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         # Step 3: Verify the token signature and claims
         options_dict = {
             "verify_exp": True,
-            "verify_aud": bool(allowed_audiences),
+            "verify_aud": True,
+            "verify_iss": True,
+            "require": ["exp", "iss", "aud"],
         }
 
         # Finding 2: Offload CPU-bound PyJWT signature verification to avoid loop starvation
@@ -142,7 +159,8 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             token,
             signing_key.key,
             algorithms=["RS256", "ES256", "PS256"],
-            audience=allowed_audiences if allowed_audiences else None,
+            audience=allowed_audiences,
+            issuer=issuer,
             options=options_dict  # type: ignore
         )
 
