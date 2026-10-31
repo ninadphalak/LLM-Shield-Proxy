@@ -1326,7 +1326,8 @@ async def _proxy_catch_all_internal(
     masking_mode = resolve_masking_mode(x_shield_masking_mode)
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
-        vault = StatelessCryptoVault()
+        # Tokens are bound to this key and session; another tenant's token stays opaque.
+        vault = StatelessCryptoVault(virtual_key_id, x_session_id)
     elif masking_mode == MaskingMode.SCRUB:
         vault = ScrubVault()  # type: ignore
     elif masking_mode == MaskingMode.HMAC:

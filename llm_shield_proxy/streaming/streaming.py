@@ -16,6 +16,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, Dict, Iterator, Optional
 import orjson as json
 
 from llm_shield_proxy.core.config import settings
+from llm_shield_proxy.engines.crypto_vault import TOKEN_PREFIX as STATELESS_TOKEN_PREFIX
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.tracing import tracer
 from llm_shield_proxy.streaming.json_lexer import StreamingJSONLexer
@@ -562,12 +563,12 @@ class SSERehydrationBuffer:
                     max_k = k
                     break
 
-        # Check for partial [ENC_v1_ tokens for StatelessCryptoVault
+        # Check for partial stateless tokens for StatelessCryptoVault
         if type(self.vault).__name__ == "StatelessCryptoVault":
             last_bracket_idx = text.rfind("[")
             if last_bracket_idx != -1:
                 suffix = text[last_bracket_idx:]
-                prefix = "[ENC_v1_"
+                prefix = STATELESS_TOKEN_PREFIX
                 if prefix.startswith(suffix) or (suffix.startswith(prefix) and "]" not in suffix):
                     max_k = max(max_k, len(suffix))
 

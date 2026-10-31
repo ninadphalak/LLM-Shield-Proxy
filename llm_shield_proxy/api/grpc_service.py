@@ -44,7 +44,9 @@ class ExtProcService(ExternalProcessorBase):
         """Bidirectional async generator handling the Envoy stream."""
 
         # Instantiate a stateful SSERehydrationBuffer per Envoy stream
-        # Using StatelessCryptoVault by default for high-throughput UDS deployments
+        # Using StatelessCryptoVault by default for high-throughput UDS deployments.
+        # ext_proc carries no principal, so the vault gets a random per-stream context:
+        # tokens decrypt only on the stream that minted them.
         vault: "Vault" = StatelessCryptoVault()  # type: ignore
         sse_buffer = SSERehydrationBuffer(vault)
         # Stateful decoder to prevent multibyte UTF-8 character splitting across chunk boundaries

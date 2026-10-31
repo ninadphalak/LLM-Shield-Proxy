@@ -126,7 +126,8 @@ async def _resolve_vault(
     masking_mode = resolve_masking_mode(masking_mode_header)
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
-        return StatelessCryptoVault()
+        # Bound to the caller's key and session: another tenant's token does not decrypt.
+        return StatelessCryptoVault(virtual_key_id, session_id)
     if masking_mode == MaskingMode.SCRUB:
         return ScrubVault()
     if masking_mode == MaskingMode.HMAC:

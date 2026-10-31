@@ -1,0 +1,153 @@
+"""Regression tests for the October 2026 audit: stateless crypto binding, the guard API,
+masking-mode policy, vault capacity and streaming framing.
+
+Each test names the finding it pins. All keys and PII are dummies.
+"""
+
+from __future__ import annotations
+
+import base64
+import os
+
+import pytest
+import yaml
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from fastapi.testclient import TestClient
+
+from llm_shield_proxy.api.main import app
+from llm_shield_proxy.core.config import request_policy_ctx, settings
+from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault, zeroize_crypto_material
+
+client = TestClient(app)
+
+KEY_A = "vk-dummy-tenant-a-0001"
+KEY_B = "vk-dummy-tenant-b-0002"
+EMAIL = "carol.dummy@example.org"
+
+
+@pytest.fixture
+def two_keys(monkeypatch):
+    keys = f"{KEY_A},{KEY_B}"
+    monkeypatch.setattr(settings, "VALID_VIRTUAL_KEYS", keys)
+    monkeypatch.setattr(settings, "_valid_virtual_keys_set", frozenset({KEY_A, KEY_B}))
+    monkeypatch.setattr(settings, "OVERRIDE_CLIENT_AUTH", False)
+    monkeypatch.setattr(settings, "ENABLE_OPEN_BYOK_PASSTHROUGH", False)
+    monkeypatch.setattr(settings, "SHIELD_FAILURE_MODE", "FAIL_CLOSED")
+    zeroize_crypto_material()
+    monkeypatch.setattr(settings, "SHIELD_ENCRYPTION_KEY", "22" * 32)
+    yield
+    zeroize_crypto_material()
+
+
+@pytest.fixture
+def policies(tmp_path, monkeypatch):
+    """Load a policies.yaml for one test and put the previous policy state back after."""
+    saved = (settings._flattened_policies, getattr(settings, "_policies_loaded", False), settings._policies_mtime)
+    monkeypatch.setattr(settings, "POLICIES_FILE_PATH", str(tmp_path / "policies.yaml"))
+
+    def load(doc: dict) -> None:
+        (tmp_path / "policies.yaml").write_text(yaml.safe_dump(doc))
+        settings.reload_policies(force=True)
+
+    yield load
+    settings._flattened_policies, settings._policies_loaded, settings._policies_mtime = saved
+    request_policy_ctx.set({})
+
+
+def _h(key: str, session: str | None = None, mode: str | None = None) -> dict:
+    headers = {"Authorization": f"Bearer {key}"}
+    if session is not None:
+        headers["X-Session-ID"] = session
+    if mode is not None:
+        headers["X-Shield-Masking-Mode"] = mode
+    return headers
+
+
+# crypto_vault.py:stateless-token-not-bound-to-vkid-session
+
+
+def _mint_as_a() -> str:
+    res = client.post(
+        "/v1/guard/redact", headers=_h(KEY_A, "sess-A", "STATELESS_CRYPTO"), json={"texts": [f"contact {EMAIL}"]}
+    )
+    assert res.status_code == 200, res.text
+    redacted = res.json()["texts"][0]
+    assert EMAIL not in redacted and "[ENC_v2_" in redacted
+    return redacted
+
+
+def test_stateless_token_rehydrates_for_the_minting_key_and_session(two_keys):
+    redacted = _mint_as_a()
+    res = client.post(
+        "/v1/guard/rehydrate", headers=_h(KEY_A, "sess-A", "STATELESS_CRYPTO"), json={"texts": [redacted]}
+    )
+    assert res.json() == {"texts": [f"contact {EMAIL}"]}
+
+
+def test_other_tenant_cannot_rehydrate_a_stateless_token(two_keys):
+    redacted = _mint_as_a()
+    res = client.post(
+        "/v1/guard/rehydrate", headers=_h(KEY_B, "sess-B", "STATELESS_CRYPTO"), json={"texts": [redacted]}
+    )
+    assert res.status_code == 200
+    assert res.json() == {"texts": [redacted]}
+    # Same session id, other key: still bound to the key.
+    res = client.post(
+        "/v1/guard/rehydrate", headers=_h(KEY_B, "sess-A", "STATELESS_CRYPTO"), json={"texts": [redacted]}
+    )
+    assert EMAIL not in res.text
+    res = client.post(
+        "/v1/guard/rehydrate/stream",
+        headers=_h(KEY_B, mode="STATELESS_CRYPTO"),
+        json={"text": redacted, "carry": "", "final": True},
+    )
+    assert res.status_code == 200
+    assert EMAIL not in res.text
+
+
+def test_same_tenant_other_session_cannot_rehydrate(two_keys):
+    redacted = _mint_as_a()
+    res = client.post(
+        "/v1/guard/rehydrate", headers=_h(KEY_A, "sess-other", "STATELESS_CRYPTO"), json={"texts": [redacted]}
+    )
+    assert EMAIL not in res.text
+
+
+def test_unbound_v1_tokens_are_no_longer_decrypted(two_keys):
+    from llm_shield_proxy.engines.crypto_vault import get_crypto_dek
+
+    nonce = os.urandom(12)
+    ct = AESGCM(get_crypto_dek()).encrypt(nonce, EMAIL.encode(), None)
+    v1 = "[ENC_v1_" + base64.urlsafe_b64encode(nonce + ct).decode().rstrip("=") + "]"
+    assert StatelessCryptoVault("vk", "s").rehydrate(f"x {v1}") == f"x {v1}"
+
+
+def test_ext_proc_vaults_do_not_decrypt_each_others_tokens(two_keys):
+    a, b = StatelessCryptoVault(), StatelessCryptoVault()
+    token = a.get_or_create_token(EMAIL, "EMAIL")
+    assert a.rehydrate(token) == EMAIL
+    assert b.rehydrate(token) == token
+
+
+def test_proxy_response_does_not_decrypt_another_tenants_token(two_keys, httpx_mock, monkeypatch):
+    monkeypatch.setattr(settings, "UPSTREAM_BASE_URL", "https://api.openai.com")
+    monkeypatch.setattr(settings, "UPSTREAM_API_KEY", "sk-proxy-global-key")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(settings, "ENABLE_RESPONSE_PII_REDACTION", False)
+    monkeypatch.setattr(settings, "ENABLE_FINOPS_METERING", False)
+    monkeypatch.setattr(settings, "ENABLE_RETRY_FAILOVER", False)
+    redacted_by_a = _mint_as_a()
+
+    def reply(content: str) -> dict:
+        return {"choices": [{"index": 0, "message": {"role": "assistant", "content": content}}]}
+
+    httpx_mock.add_response(url="https://api.openai.com/v1/chat/completions", json=reply(redacted_by_a))
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    res = client.post("/v1/chat/completions", headers=_h(KEY_B, "sess-A", "STATELESS_CRYPTO"), json=body)
+    assert res.status_code == 200, res.text
+    assert EMAIL not in res.text
+
+    httpx_mock.add_response(url="https://api.openai.com/v1/chat/completions", json=reply(redacted_by_a))
+    res = client.post("/v1/chat/completions", headers=_h(KEY_A, "sess-A", "STATELESS_CRYPTO"), json=body)
+    assert res.status_code == 200, res.text
+    assert EMAIL in res.text
