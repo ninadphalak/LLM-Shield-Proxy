@@ -430,9 +430,24 @@ def test_proxy_v3_cipher_receives_the_virtual_key(two_keys, monkeypatch, httpx_m
 # streaming/streaming:sse-line-split-quadratic
 
 
+def _growth_ratio(fn, small, large, repeats=3):
+    """Best-of-N time(large)/time(small). Linear work gives ~large/small; quadratic
+    gives ~(large/small)**2. A ratio is robust to slow or loaded CI runners."""
+    import time
+
+    def best(n):
+        times = []
+        for _ in range(repeats):
+            started = time.perf_counter()
+            fn(n)
+            times.append(time.perf_counter() - started)
+        return max(min(times), 1e-6)
+
+    return best(large) / best(small)
+
+
 def test_sse_framing_is_linear_in_lines_per_chunk():
     import asyncio
-    import time
 
     from llm_shield_proxy.engines.vault import Vault
     from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
@@ -443,10 +458,11 @@ def test_sse_framing_is_linear_in_lines_per_chunk():
 
         return b"".join([c async for c in rehydrate_sse_stream(src(), Vault(synthetic=False))])
 
-    started = time.perf_counter()
-    out = asyncio.run(run(b"\n" * 1_000_000))  # ~16 s with the per-line split
-    assert time.perf_counter() - started < 4.0
-    assert out.count(b"\n") == 1_000_000
+    out = asyncio.run(run(b"\n" * 50_000))
+    assert out.count(b"\n") == 50_000
+    # 8x more lines: the old per-line split grew ~64x, linear framing ~8x.
+    ratio = _growth_ratio(lambda n: asyncio.run(run(b"\n" * n)), 25_000, 200_000)
+    assert ratio < 24, ratio
 
 
 def test_sse_framing_keeps_lines_split_across_chunks():
@@ -475,7 +491,6 @@ def test_sse_framing_keeps_lines_split_across_chunks():
 
 
 def test_v3_lexer_is_linear_and_capped(monkeypatch):
-    import time
 
     from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
     from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
@@ -484,10 +499,12 @@ def test_v3_lexer_is_linear_and_capped(monkeypatch):
     cipher = StatelessPIICipher(key=b"k" * 32)
     monkeypatch.setattr(settings, "MAX_SSE_LINE_LENGTH", 4 * 1024 * 1024)
     lexer = StatelessStreamingLexer(cipher)
-    chunk = "{" + '"_ctx_hash_a":"",' * 131072 + '"a":"x"}'  # ~22 s before
-    started = time.perf_counter()
-    lexer.feed_chunk(chunk)
-    assert time.perf_counter() - started < 3.0
+    def feed(n):
+        StatelessStreamingLexer(cipher).feed_chunk("{" + '"_ctx_hash_a":"",' * n + '"a":"x"}')
+
+    # 8x more matches: the old restart-from-zero search grew ~64x, one pass ~8x.
+    ratio = _growth_ratio(feed, 4096, 32768)
+    assert ratio < 24, ratio
 
     monkeypatch.setattr(settings, "MAX_SSE_LINE_LENGTH", 1024)
     lexer = StatelessStreamingLexer(cipher)
