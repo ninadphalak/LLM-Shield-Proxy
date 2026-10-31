@@ -418,3 +418,92 @@ def test_proxy_v3_cipher_receives_the_virtual_key(two_keys, monkeypatch, httpx_m
     res = client.post("/v1/mcp-upstream", headers=_h(KEY_A), json=body)
     assert res.status_code == 200, res.text
     assert seen and seen[0].get("virtual_key_id") not in (None, "")
+
+
+# streaming/streaming:sse-line-split-quadratic
+
+
+def test_sse_framing_is_linear_in_lines_per_chunk():
+    import asyncio
+    import time
+
+    from llm_shield_proxy.engines.vault import Vault
+    from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+
+    async def run(raw: bytes) -> bytes:
+        async def src():
+            yield raw
+
+        return b"".join([c async for c in rehydrate_sse_stream(src(), Vault(synthetic=False))])
+
+    started = time.perf_counter()
+    out = asyncio.run(run(b"\n" * 1_000_000))  # ~16 s with the per-line split
+    assert time.perf_counter() - started < 4.0
+    assert out.count(b"\n") == 1_000_000
+
+
+def test_sse_framing_keeps_lines_split_across_chunks():
+    import asyncio
+
+    from llm_shield_proxy.engines.vault import Vault
+    from llm_shield_proxy.streaming.streaming import rehydrate_sse_stream
+
+    vault = Vault(synthetic=False)
+    token = vault.get_or_create_token("jane.dummy@example.com", "EMAIL")
+    event = b'data: {"choices":[{"index":0,"delta":{"content":"hi ' + token.encode() + b' ok"}}]}\n\n'
+
+    async def run() -> bytes:
+        async def src():
+            yield b": keepalive\n" + event[:20]
+            yield event[20:] + b"data: [DONE]\n\n"
+
+        return b"".join([c async for c in rehydrate_sse_stream(src(), vault)])
+
+    out = asyncio.run(run())
+    assert b"jane.dummy@example.com" in out and token.encode() not in out
+    assert out.endswith(b"data: [DONE]\n\n")
+
+
+# stateless_mutation_engine/streaming_lexer:feed_chunk-uncapped-quadratic
+
+
+def test_v3_lexer_is_linear_and_capped(monkeypatch):
+    import time
+
+    from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+    from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
+    from llm_shield_proxy.streaming.streaming import StreamCapacityExceeded
+
+    cipher = StatelessPIICipher(key=b"k" * 32)
+    monkeypatch.setattr(settings, "MAX_SSE_LINE_LENGTH", 4 * 1024 * 1024)
+    lexer = StatelessStreamingLexer(cipher)
+    chunk = "{" + '"_ctx_hash_a":"",' * 131072 + '"a":"x"}'  # ~22 s before
+    started = time.perf_counter()
+    lexer.feed_chunk(chunk)
+    assert time.perf_counter() - started < 3.0
+
+    monkeypatch.setattr(settings, "MAX_SSE_LINE_LENGTH", 1024)
+    lexer = StatelessStreamingLexer(cipher)
+    lexer.feed_chunk("x" * 1000)  # 256 characters are retained
+    with pytest.raises(StreamCapacityExceeded):
+        lexer.feed_chunk("y" * 800)
+
+
+def test_v3_lexer_still_rehydrates_and_prunes():
+    from llm_shield_proxy.engines.stateless_mutation_engine.crypto import StatelessPIICipher
+    from llm_shield_proxy.engines.stateless_mutation_engine.streaming_lexer import StatelessStreamingLexer
+
+    cipher = StatelessPIICipher(key=b"k" * 32, virtual_key_id="vk", session_id="s")
+    enc_mail = cipher.encrypt(EMAIL, "email")
+    enc_item = cipher.encrypt("555-0100", "")
+    doc = (
+        '{"result": {"n": 1, "email": "fake@x.test", "_ctx_hash_email": "' + enc_mail + '", '
+        '"phones": [{"_shield_val": "000", "_shield_ctx": "' + enc_item + '"}], "other": "keep"}}'
+    )
+    lexer = StatelessStreamingLexer(cipher)
+    out = "".join(lexer.feed_chunk(doc[i : i + 7]) for i in range(0, len(doc), 7)) + lexer.flush()
+    import json as _json
+
+    parsed = _json.loads(out)["result"]
+    assert parsed["email"] == EMAIL and parsed["phones"] == ["555-0100"] and parsed["other"] == "keep"
+    assert "_ctx_hash_" not in out

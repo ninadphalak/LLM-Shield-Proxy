@@ -856,6 +856,8 @@ async def rehydrate_sse_stream(
 
                 # Lines produced from THIS upstream chunk, emitted in bounded writes.
                 outgoing = _BoundedOutputCoalescer(max_line_length)
+                # Start of the first unprocessed line in line_accumulator.
+                line_offset = 0
 
                 def _queue_output(piece: bytes) -> tuple[bytes, ...]:
                     return outgoing.push(_bounded_output(piece))
@@ -886,8 +888,14 @@ async def rehydrate_sse_stream(
                     if len(line_accumulator) > max_line_length:
                         raise StreamCapacityExceeded("Line accumulator exceeded maximum safe length (Slowloris protection)")
 
-                    while "\n" in line_accumulator:
-                        line, line_accumulator = line_accumulator.split("\n", 1)
+                    # Offset-based framing: split("\n", 1) per line re-copied the
+                    # remainder each time, quadratic in lines per chunk.
+                    while True:
+                        newline_at = line_accumulator.find("\n", line_offset)
+                        if newline_at == -1:
+                            break
+                        line = line_accumulator[line_offset:newline_at]
+                        line_offset = newline_at + 1
                         stripped = line.strip()
                         # Lines this event must emit BEFORE itself.
                         pre_lines: list = []
@@ -1158,11 +1166,18 @@ async def rehydrate_sse_stream(
                             for ready in _queue_output((line + "\n").encode("utf-8")):
                                 yield ready
 
+                    line_accumulator = line_accumulator[line_offset:]
+                    line_offset = 0
+
                     for ready in outgoing.drain():
                         yield ready
 
                 except Exception as e:
                     import logging
+
+                    # Lines before the offset were already handled.
+                    line_accumulator = line_accumulator[line_offset:]
+                    line_offset = 0
 
                     if isinstance(e, CanaryTripped):
                         # Same as the raw-bytes match above: abort, emit nothing more.
