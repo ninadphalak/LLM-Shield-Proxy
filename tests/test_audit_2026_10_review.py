@@ -321,3 +321,48 @@ def test_pool_still_shares_fairly_between_unconfigured_tenants(monkeypatch):
     for n in range(10):
         store.get_vault(f"churn-{n}", "vk-a")
     assert store.get_existing_vault("victim", "vk-b") is victim
+
+
+# --- 8. REST non-streaming rehydration has an output ceiling ----------------------------
+
+
+def _repeat_tokens(times: int, as_json: bool = True):
+    def callback(request: httpx.Request) -> httpx.Response:
+        content = json.loads(request.content)["messages"][0]["content"]
+        reply = " ".join([content] * times)
+        if as_json:
+            return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": reply}}]})
+        return httpx.Response(200, text=reply, headers={"content-type": "text/plain"})
+
+    return callback
+
+
+def test_rest_rehydration_within_the_ceiling_restores(httpx_mock, vk, monkeypatch):
+    monkeypatch.setattr(main_module, "MAX_REHYDRATED_REPLY_BYTES", 4096)
+    httpx_mock.add_callback(_repeat_tokens(3), method="POST", url=OPENAI_CHAT)
+    body = {"model": "m", "messages": [{"role": "user", "content": f"mail {BOB}"}]}
+    response = client.post("/v1/chat/completions", headers=_auth(vk, **{"X-Session-ID": "s-ok"}), json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["choices"][0]["message"]["content"].count(BOB) == 3
+
+
+@pytest.mark.parametrize("as_json", [True, False])
+def test_rest_rehydration_past_the_ceiling_is_502(httpx_mock, vk, monkeypatch, as_json):
+    monkeypatch.setattr(main_module, "MAX_REHYDRATED_REPLY_BYTES", 4096)
+    httpx_mock.add_callback(_repeat_tokens(400, as_json), method="POST", url=OPENAI_CHAT)
+    body = {"model": "m", "messages": [{"role": "user", "content": f"mail {BOB}"}]}
+    response = client.post(
+        "/v1/chat/completions", headers=_auth(vk, **{"X-Session-ID": f"s-big-{as_json}"}), json=body
+    )
+    assert response.status_code == 502, response.text
+    assert BOB not in response.text
+
+
+def test_rehydrate_json_response_shares_one_budget_across_fields(monkeypatch):
+    monkeypatch.setattr(main_module, "MAX_REHYDRATED_REPLY_BYTES", 256)
+    vault = Vault(synthetic=False)
+    token = vault.get_or_create_token("x" * 100 + "@example.com", "EMAIL")
+    reply = {"choices": [{"message": {"content": token}}, {"message": {"content": token}}, {"text": token}]}
+    with pytest.raises(main_module.RehydratedOutputTooLarge):
+        main_module._rehydrate_json_response(reply, vault)
+    assert main_module._rehydrate_json_response({"choices": [{"text": token}]}, vault)["choices"][0]["text"].startswith("x")
