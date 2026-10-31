@@ -274,8 +274,14 @@ async def test_unsupported_scheme_rejected():
 @pytest.mark.asyncio
 async def test_missing_host_rejected():
     with pytest.raises(EgressPolicyViolationError) as exc_info:
-        await evaluate_url("http:///path-only", policy=None)
+        await evaluate_url("http://:8080/path-only", policy=None)
     assert exc_info.value.reason == "missing_host"
+
+    # `http:///path-only` is still rejected, now earlier and for a truer reason: a
+    # WHATWG parser reads it as host `path-only`, so it is a non-canonical form.
+    with pytest.raises(EgressPolicyViolationError) as exc_info:
+        await evaluate_url("http:///path-only", policy=None)
+    assert exc_info.value.reason == "non_canonical_url_form"
 
 
 # ---------------------------------------------------------------------------

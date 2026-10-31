@@ -3,6 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import Any, AsyncGenerator, Dict, Optional, Set
+from urllib.parse import quote
 
 import httpx
 import orjson
@@ -10,6 +11,7 @@ import redis.asyncio as redis
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.observability.audit import AuditLogger
+from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
 
 
 class ToolAccessForbiddenException(Exception):
@@ -76,7 +78,7 @@ class AbstractCachingPolicyResolver(BasePolicyResolver):
                     event_type="rbac_background_fetch_critical_failure",
                     severity="CRITICAL",
                     details={"reason": "Background fetch task crashed", "error_type": type(e).__name__},
-                    virtual_key_id=virtual_key
+                    virtual_key_id=get_virtual_key_id(virtual_key)
                 )
                 policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
                 expiration = time.time() + 5.0
@@ -158,7 +160,7 @@ class OPAPolicyResolver(AbstractCachingPolicyResolver):
                 event_type="rbac_fetch_failure",
                 severity="WARNING",
                 details={"reason": "OPA fetch failed", "error_type": type(e).__name__},
-                virtual_key_id=virtual_key
+                virtual_key_id=get_virtual_key_id(virtual_key)
             )
             policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
             expiration = time.time() + 5.0
@@ -177,14 +179,25 @@ class VaultPolicyResolver(AbstractCachingPolicyResolver):
 
     async def _fetch_policy(self, virtual_key: str) -> None:
         try:
+            # The key is confined to exactly one path segment: percent-encoding stops
+            # `/`, `?version=`, `#` and `%` from steering the lookup, and dot segments
+            # (which encoding leaves intact and httpx normalises) are refused outright.
+            if not virtual_key or virtual_key in (".", ".."):
+                raise ValueError("virtual key is not a valid Vault path segment")
             response = await self.http_client.get(
-                f"{self.vault_url}/v1/secret/data/shield/tenant/{virtual_key}",
+                f"{self.vault_url}/v1/secret/data/shield/tenant/{quote(virtual_key, safe='')}",
                 headers={"X-Vault-Token": self.vault_token},
                 timeout=0.05
             )
             response.raise_for_status()
             data = response.json()
-            policy = data.get("data", {}).get("data", {}).get("policy", {})
+            # Fail closed on a response that is not a tenant policy (e.g. another Vault
+            # endpoint's JSON): a missing policy must not become the empty policy {}.
+            inner = data.get("data") if isinstance(data, dict) else None
+            inner = inner.get("data") if isinstance(inner, dict) else None
+            policy = inner.get("policy") if isinstance(inner, dict) else None
+            if not isinstance(policy, dict):
+                raise ValueError("Vault response has no policy object")
 
             expiration = time.time() + settings.RBAC_CACHE_TTL_SECONDS
             async with self._cache_lock:
@@ -196,7 +209,7 @@ class VaultPolicyResolver(AbstractCachingPolicyResolver):
                 event_type="rbac_fetch_failure",
                 severity="WARNING",
                 details={"reason": "Vault fetch failed", "error_type": type(e).__name__},
-                virtual_key_id=virtual_key
+                virtual_key_id=get_virtual_key_id(virtual_key)
             )
             policy = {"allowed_tools": ["_FAIL_CLOSED_"], "blocked_tools": []}
             expiration = time.time() + 5.0
@@ -315,7 +328,8 @@ class RBACValidator:
         self.resolver = resolver
 
     def check_tool(self, tool_name: str, allowed: set, blocked: set):
-        if tool_name in blocked:
+        # The fail-closed sentinel denies everything; it is never a grantable tool name.
+        if "_FAIL_CLOSED_" in allowed or tool_name in blocked:
             raise ToolAccessForbiddenException(tool_name)
         if allowed and tool_name not in allowed:
             raise ToolAccessForbiddenException(tool_name)
