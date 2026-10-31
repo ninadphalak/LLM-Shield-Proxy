@@ -102,8 +102,17 @@ nothing your code prints. The same samples also end up in the generated test fil
 
 Checking a function runs your code. The server imports your module on your own machine, in a
 separate process that is stopped after a timeout (60 seconds by default). If your project has a
-`.venv`, that is the Python it uses. The server itself makes no network calls, sends no telemetry
-and writes no files. Saving the test file is up to you and your assistant.
+`.venv` (or `venv`), that is the Python it uses; the `python` argument accepts only that
+interpreter or the server's own. The target, `flush_target` and `whole_target` must be Python
+functions defined in source files under `project_dir`: built-ins, the standard library and
+installed packages (anything in the interpreter's site-packages, including your `.venv`'s) are
+refused, and so is a `project_dir` that is or contains the interpreter's own library. The check
+process gets a minimal environment (`PATH`, `HOME`, temp and locale variables), not the server's,
+so a filter that reads its configuration from other environment variables will not see them.
+`project_dir` is chosen by the assistant's tool call, so whatever code lives under it is what can
+run: approve calls only for your own project. The server itself makes no network calls, sends no
+telemetry and writes no files, though the code it runs can do whatever that code does. Saving the
+test file is up to you and your assistant.
 
 ## API
 

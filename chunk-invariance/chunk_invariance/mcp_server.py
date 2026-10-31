@@ -2,8 +2,9 @@
 
 Needs the ``mcp`` extra (``pip install "chunk-invariance[mcp]"``); this is the only module that
 imports the MCP SDK. ``chunk-invariance-mcp`` starts it on stdio. It runs on the user's machine:
-checking a filter imports and runs the user's own code there, in a subprocess with a timeout.
-The server makes no network calls and writes no files, but its results go back to the assistant,
+checking a filter imports and runs the user's own code there, in a subprocess with a timeout. Only
+functions defined in source files under project_dir can be run (see ``_worker.resolve``). The
+server makes no network calls and writes no files itself, but its results go back to the assistant,
 which sends them to its model provider: the samples must be synthetic.
 """
 
@@ -34,8 +35,13 @@ else:
 
 _SAFETY = (
     "It imports and runs the user's own code from project_dir on this machine, in a separate "
-    "process that is stopped after timeout_seconds. The server makes no network calls and writes no "
-    "files. Its result repeats the samples, any value the filter leaked and the message of any exception "
+    "process that is stopped after timeout_seconds. target, flush_target and whole_target must be Python "
+    "functions defined in source files under project_dir; built-ins, the standard library and installed "
+    "packages are refused, and python may only be project_dir's .venv or venv interpreter or the server's own. "
+    "project_dir itself is a tool argument, so whatever code is under it is what can run: point it only at the "
+    "user's project. The check process gets a minimal environment, not the server's. The server makes no "
+    "network calls and does not write files itself, but the user's code it runs can do anything that code does. "
+    "Its result repeats the samples, any value the filter leaked and the message of any exception "
     "the user's code raised, and that result goes into this conversation, so use synthetic samples only, "
     "never a real secret or real personal data. What the user's code prints is never returned."
 )
@@ -109,8 +115,9 @@ def _build() -> "MCPServer":
         Optional[str],
         Field(
             description=(
-                "Interpreter that imports the user's code. Default: project_dir/.venv or project_dir/venv "
-                "if present, else the server's own Python."
+                "Interpreter that imports the user's code. Only project_dir/.venv or project_dir/venv's "
+                "interpreter, or the server's own Python, is accepted. Default: the virtualenv if present, "
+                "else the server's own Python."
             )
         ),
     ]

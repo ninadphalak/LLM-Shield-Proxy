@@ -84,18 +84,49 @@ _BOOTSTRAP = (
 )
 
 
+_VENV_PYTHONS = tuple(
+    (venv, relative) for venv in (".venv", "venv") for relative in ("Scripts/python.exe", "bin/python", "bin/python3")
+)
+
+
 def find_python(project_dir: str, python: Optional[str] = None) -> str:
-    """The interpreter that imports the user's code: the one given, the project's virtualenv, or ours."""
+    """The interpreter that imports the user's code: the project's virtualenv, or ours.
+
+    ``python`` is a tool argument, so it may only name one of those: project_dir/.venv or
+    project_dir/venv, or the server's own interpreter. Any other path is refused, so a tool call
+    cannot pick an arbitrary program to run.
+    """
+    allowed = [Path(project_dir) / venv / relative for venv, relative in _VENV_PYTHONS]
     if python:
+        chosen = os.path.normcase(os.path.abspath(python))
+        permitted = [os.path.normcase(os.path.abspath(p)) for p in [*allowed, Path(sys.executable)]]
+        if chosen not in permitted:
+            raise CheckError(
+                f"python {python!r} is not allowed; give project_dir/.venv or project_dir/venv's interpreter, "
+                "or leave it out to use that virtualenv if present, else the server's own Python"
+            )
         if not Path(python).is_file():
             raise CheckError(f"python {python!r} is not a file; give the path to an interpreter")
         return python
-    for venv in (".venv", "venv"):
-        for relative in ("Scripts/python.exe", "bin/python"):
-            candidate = Path(project_dir) / venv / relative
-            if candidate.is_file():
-                return str(candidate)
+    for candidate in allowed:
+        if candidate.is_file():
+            return str(candidate)
     return sys.executable
+
+
+# The worker gets only what an interpreter needs to start and find temp space, never the
+# server's whole environment (API keys, tokens), and no PYTHONPATH/PYTHONSTARTUP that could
+# load other code into it.
+_WORKER_ENV_KEYS = (
+    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "SystemRoot", "WINDIR", "COMSPEC",
+    "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+)
+
+
+def worker_env() -> Dict[str, str]:
+    env = {key: os.environ[key] for key in _WORKER_ENV_KEYS if key in os.environ}
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
 
 
 def validate(
@@ -105,11 +136,16 @@ def validate(
     splits: Splits,
     samples: Optional[Sequence[str]],
     timeout_seconds: float,
+    flush_target: Optional[str] = None,
+    whole_target: Optional[str] = None,
 ) -> List[str]:
     if not Path(project_dir).is_dir():
         raise CheckError(f"project_dir {project_dir!r} is not a directory")
     if ":" not in target:
         raise CheckError(f"target {target!r} must look like package.module:function")
+    for name, value in (("flush_target", flush_target), ("whole_target", whole_target)):
+        if value and (not isinstance(value, str) or ":" not in value):
+            raise CheckError(f"{name} {value!r} must look like package.module:function")
     if shape not in SHAPES:
         raise CheckError(f"shape {shape!r} is not one of {', '.join(SHAPES)}")
     if splits != "all-two-part" and not (isinstance(splits, int) and not isinstance(splits, bool) and 1 <= splits <= 3):
@@ -137,7 +173,7 @@ def run_check(
 ) -> Dict[str, Any]:
     """Import the target in a subprocess and run the every-split check on each sample."""
     project_dir = str(Path(project_dir).resolve()) if project_dir else ""
-    chosen = validate(project_dir, target, shape, splits, samples, timeout_seconds)
+    chosen = validate(project_dir, target, shape, splits, samples, timeout_seconds, flush_target, whole_target)
     if flush_target and shape != "per_chunk":
         raise CheckError("flush_target is only used with shape per_chunk")
     interpreter = find_python(project_dir, python)
@@ -153,7 +189,7 @@ def run_check(
     }
     started = time.monotonic()
     try:
-        # An argv list with no shell; the interpreter is the user's own.
+        # An argv list with no shell; the interpreter is the project's virtualenv or ours.
         completed = subprocess.run(  # nosec B603
             [interpreter, "-c", _BOOTSTRAP, _package_dir()],
             input=json.dumps(request),
@@ -162,7 +198,7 @@ def run_check(
             encoding="utf-8",
             cwd=project_dir,
             timeout=timeout_seconds,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            env=worker_env(),
         )
     except subprocess.TimeoutExpired:
         raise CheckError(
