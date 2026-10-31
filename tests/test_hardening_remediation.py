@@ -152,7 +152,11 @@ async def test_dpop_replay_rejected_on_reuse():
     cryptographically valid, fresh, and correctly bound to the access token.
     """
     request = _mock_dpop_request()
-    tenant_policy = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"]}
+    tenant_policy = {
+        "agent_identity_enforcer": "strict",
+        "allowed_issuers": ["https://issuer.com"],
+        "allowed_audiences": ["shield"],
+    }
 
     with patch("llm_shield_proxy.security.identity.jwt.decode") as mock_decode, \
          patch("llm_shield_proxy.security.identity._get_signing_key", new_callable=AsyncMock), \
@@ -161,7 +165,7 @@ async def test_dpop_replay_rejected_on_reuse():
          patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread, \
          patch("llm_shield_proxy.security.identity._get_jwk_thumbprint") as mock_thumbprint:
 
-        mock_decode.return_value = {"iss": "https://issuer.com"}
+        mock_decode.return_value = {"iss": "https://issuer.com", "aud": "shield"}
         mock_unverified_header.return_value = {"jwk": {"kty": "RSA"}}
         mock_thumbprint.return_value = "thumbprint-replay-test"
 
@@ -189,7 +193,11 @@ async def test_dpop_distinct_jti_not_treated_as_replay():
     """Two proofs from the same key (same jkt) but distinct jti values are
     independent and must both be accepted."""
     request = _mock_dpop_request()
-    tenant_policy = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"]}
+    tenant_policy = {
+        "agent_identity_enforcer": "strict",
+        "allowed_issuers": ["https://issuer.com"],
+        "allowed_audiences": ["shield"],
+    }
 
     with patch("llm_shield_proxy.security.identity.jwt.decode") as mock_decode, \
          patch("llm_shield_proxy.security.identity._get_signing_key", new_callable=AsyncMock), \
@@ -198,7 +206,7 @@ async def test_dpop_distinct_jti_not_treated_as_replay():
          patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread, \
          patch("llm_shield_proxy.security.identity._get_jwk_thumbprint") as mock_thumbprint:
 
-        mock_decode.return_value = {"iss": "https://issuer.com"}
+        mock_decode.return_value = {"iss": "https://issuer.com", "aud": "shield"}
         mock_unverified_header.return_value = {"jwk": {"kty": "RSA"}}
         mock_thumbprint.return_value = "thumbprint-distinct-test"
 
@@ -216,7 +224,11 @@ async def test_dpop_missing_jti_rejected():
     """A DPoP proof with no jti claim can never be replay-checked, so it must be
     rejected outright rather than silently accepted."""
     request = _mock_dpop_request()
-    tenant_policy = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"]}
+    tenant_policy = {
+        "agent_identity_enforcer": "strict",
+        "allowed_issuers": ["https://issuer.com"],
+        "allowed_audiences": ["shield"],
+    }
 
     with patch("llm_shield_proxy.security.identity.jwt.decode") as mock_decode, \
          patch("llm_shield_proxy.security.identity._get_signing_key", new_callable=AsyncMock), \
@@ -225,7 +237,7 @@ async def test_dpop_missing_jti_rejected():
          patch("llm_shield_proxy.security.identity.asyncio.to_thread") as mock_to_thread, \
          patch("llm_shield_proxy.security.identity._get_jwk_thumbprint") as mock_thumbprint:
 
-        mock_decode.return_value = {"iss": "https://issuer.com"}
+        mock_decode.return_value = {"iss": "https://issuer.com", "aud": "shield"}
         mock_unverified_header.return_value = {"jwk": {"kty": "RSA"}}
         mock_thumbprint.return_value = "thumbprint-missing-jti"
         mock_to_thread.side_effect = [

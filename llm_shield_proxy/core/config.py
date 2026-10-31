@@ -6,6 +6,7 @@ Centralizes documented environment variables and runtime settings using Pydantic
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import logging
 import os
 import secrets
@@ -358,7 +359,22 @@ class Settings(BaseSettings):
     # Security & Buffer Bounds
     AGENT_IDENTITY_ENFORCER: Literal["off", "lenient", "strict"] | bool = Field(default="off", description="Agent Identity Enforcer mode")
     ALLOWED_ISSUERS: list[str] = Field(default_factory=list, description="List of allowed OpenID Connect Issuers")
-    ALLOWED_AUDIENCES: list[str] = Field(default_factory=list, description="List of allowed JWT Audiences")
+    ALLOWED_AUDIENCES: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of allowed JWT Audiences. Roles without their own allowed_audiences inherit this "
+            "list; when the effective list is empty the Agent Identity Enforcer rejects every token."
+        ),
+    )
+    PUBLIC_BASE_URL: str = Field(
+        default="",
+        description=(
+            "Canonical external origin of the proxy, plus any external path prefix (e.g. "
+            "https://shield.example.com). When set, the "
+            "DPoP htu is checked against this origin plus the request path instead of a URL built from "
+            "the client-supplied Host header. Empty keeps the request-URL behaviour."
+        ),
+    )
     MAX_PAYLOAD_SIZE_BYTES: int = Field(
         default=10 * 1024 * 1024, description="Maximum allowed request payload size in bytes (10MB default)"
     )
@@ -405,7 +421,9 @@ class Settings(BaseSettings):
     _flattened_policies: Any = {}
     _policies_loaded: bool = False  # a policies file is in force, even with an empty map
     _policies_mtime: float = 0.0
-    _policies_path: str = ""  # Track last-seen path to invalidate mtime cache on path change
+    _policies_path: str = ""  # Track last-seen path to invalidate the change cache on path change
+    _policies_digest: str = ""  # SHA-256 of the last loaded policies file content
+    _canary_token_generated: bool = False
 
     # Assignment validation is intentionally disabled. Configuration-file values
     # are validated as one complete candidate in reload() before the live state is
@@ -431,6 +449,8 @@ class Settings(BaseSettings):
                 raise ValueError("SHIELD_WATERMARK_SECRET must be set if ENABLE_CANARY_TRIPWIRE is True.")
             if not self.CANARY_TOKEN:
                 self.CANARY_TOKEN = f"[SHIELD_TRIPWIRE_{secrets.token_urlsafe(32)}]"
+                # reload() keeps a generated token stable instead of minting a new one.
+                self._canary_token_generated = True
                 logger.info("Generated synthetic Canary Tripwire Token.")
         return self
 
@@ -518,59 +538,75 @@ class Settings(BaseSettings):
         self._valid_virtual_keys_set = frozenset(keys)
 
     def reload(self) -> None:
-        """Reload configuration from disk as one validated, all-or-nothing overlay."""
+        """Rebuild configuration from its sources as one validated, all-or-nothing swap.
+
+        The candidate is built the way a fresh start builds it (defaults, then .env,
+        then process env, then config.yaml), never from the live state. Overlaying
+        files onto the live state kept values whose line had been deleted, so a
+        revoked VALID_VIRTUAL_KEYS or OVERRIDE_CLIENT_AUTH stayed in force.
+        """
         with _config_reload_lock:
-            overrides: dict[str, Any] = {}
+            yaml_overrides: dict[str, Any] = {}
             field_names = type(self).model_fields
             config_path = "config.yaml"
-            if os.path.exists(config_path):
+            has_yaml = os.path.exists(config_path)
+            if has_yaml:
                 try:
                     import yaml
 
                     with open(config_path, "r", encoding="utf-8") as f:
                         yaml_config = yaml.safe_load(f)
-                        if not isinstance(yaml_config, dict):
-                            return
-                        for k, v in yaml_config.items():
-                            attr_name = k.upper()
-                            if attr_name in field_names and v is not None:
-                                overrides[attr_name] = v
                 except Exception as exc:
-                    # Validation errors may contain raw operator-supplied values.
-                    logger.debug("Failed loading YAML configuration (%s)", type(exc).__name__)
+                    # Do not log the exception text: it may quote raw operator values.
+                    logger.warning("Rejected configuration reload: config.yaml is unreadable (%s)", type(exc).__name__)
                     return
-            else:
-                try:
-                    from dotenv import dotenv_values, find_dotenv
+                if yaml_config is None:
+                    yaml_config = {}  # An empty file means no overrides.
+                if not isinstance(yaml_config, dict):
+                    logger.warning("config.yaml top level is not a mapping; applying no config.yaml overrides")
+                    yaml_config = {}
+                for k, v in yaml_config.items():
+                    attr_name = str(k).upper()
+                    # null leaves the key to its env/default value, like a deleted line.
+                    if attr_name in field_names and v is not None:
+                        yaml_overrides[attr_name] = v
 
-                    env_path = find_dotenv(usecwd=True) or _ENV_FILE_PATH
-                    if os.path.exists(env_path):
-                        env_vals = dotenv_values(env_path)
-                        for k, v in env_vals.items():
-                            attr_name = k.upper()
-                            # Process environment is authoritative over dotenv,
-                            # matching BaseSettings source precedence.
-                            if k not in os.environ and attr_name in field_names and v is not None:
-                                overrides[attr_name] = v
-                except Exception as exc:
-                    # Validation errors may contain raw operator-supplied values.
-                    logger.debug("Failed loading .env configuration (%s)", type(exc).__name__)
-                    return
+            # Same dotenv files as a fresh Settings(); without config.yaml the nearest
+            # .env above the working directory is also read, as reload() always did.
+            env_files: list[str] = [_ENV_FILE_PATH, ".env"]
+            if not has_yaml:
+                try:
+                    from dotenv import find_dotenv
+
+                    found = find_dotenv(usecwd=True)
+                    if found:
+                        env_files.append(found)
+                except Exception:  # nosec B110 noqa: S110
+                    pass
 
             try:
-                candidate_data = self.model_dump(mode="python")
-                candidate_data.update(overrides)
-                candidate = type(self).model_validate(candidate_data)
+                candidate = type(self)(_env_file=tuple(env_files), **yaml_overrides)  # type: ignore[call-arg]
             except Exception as exc:
-                # Do not expose the rejected input in logs, and do not mutate the
-                # last-known-good live state when any field or cross-field rule fails.
-                logger.debug("Rejected configuration reload (%s)", type(exc).__name__)
+                # Keep the last-known-good live state. Log field names only, never input.
+                locs = ""
+                errors = getattr(exc, "errors", None)
+                if callable(errors):
+                    try:
+                        locs = ", ".join(".".join(map(str, e.get("loc", ()))) for e in errors(include_input=False))
+                    except Exception:  # nosec B110 noqa: S110
+                        locs = ""
+                logger.warning("Rejected configuration reload (%s) %s", type(exc).__name__, locs)
                 return
+
+            # A token generated at startup stays stable across reloads unless one is configured.
+            if candidate._canary_token_generated and self._canary_token_generated and self.CANARY_TOKEN:
+                candidate.CANARY_TOKEN = self.CANARY_TOKEN
 
             # Every operation that can reject input happened above. Replacing the
             # field dictionary prevents requests from observing a partially applied
-            # overlay and preserves the Settings object's identity for importers.
+            # state and preserves the Settings object's identity for importers.
             object.__setattr__(self, "__dict__", candidate.__dict__)
+            self._canary_token_generated = candidate._canary_token_generated
 
             if self.VALID_VIRTUAL_KEYS:
                 keys = [k.strip() for k in self.VALID_VIRTUAL_KEYS.split(",") if k.strip()]
@@ -599,17 +635,26 @@ class Settings(BaseSettings):
         # the error text said the opposite of what had happened.
         current_mtime = os.path.getmtime(path)
 
+        # Change detection is by content digest. An mtime "newer than" test skipped a
+        # restored file carrying an older mtime (cp -p, rsync -a, mv of a backup), so a
+        # reverted grant stayed live. The digest is taken before parsing: if the file
+        # changes in between, the next poll sees a different digest and reloads again.
+        try:
+            with open(path, "rb") as fb:
+                current_digest = hashlib.sha256(fb.read()).hexdigest()
+        except OSError as exc:
+            logger.error("Failed reading policies file: %s", type(exc).__name__)
+            return
+
         if not force:
-            # Invalidate mtime cache if the file path itself has changed (e.g., new temp file in tests)
-            if path != self._policies_path:
-                self._policies_mtime = 0.0
-                self._policies_path = path
-            if current_mtime < self._policies_mtime:
+            if path == self._policies_path and current_digest == self._policies_digest:
                 return
+            self._policies_path = path
         else:
-            # Force-reload: reset mtime so next polling call also picks up any subsequent changes
+            # Force-reload: forget the cache so the next poll also re-checks the file
             self._policies_path = path
             self._policies_mtime = 0.0
+            self._policies_digest = ""
 
         if not _config_reload_lock.acquire(blocking=False):
             return
@@ -639,6 +684,7 @@ class Settings(BaseSettings):
                 self._flattened_policies = types.MappingProxyType(new_policies)
                 self._policies_loaded = True
                 self._policies_mtime = current_mtime
+                self._policies_digest = current_digest
                 logger.info("Successfully hot-reloaded policies.yaml")
         except Exception as exc:
             logger.error("Failed loading policies YAML configuration: %s", exc)
