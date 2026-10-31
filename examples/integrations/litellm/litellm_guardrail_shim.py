@@ -30,12 +30,15 @@ Security posture. This endpoint sits on the request path and speaks about PII, s
   characters). Invariant 1 applies to this surface exactly as it does to the proxy.
 - **No request or response body is ever logged**, and no text is echoed into an
   error message. Invariant 4.
-- **Session scope.** The session id is derived from ``litellm_call_id`` and namespaced
-  with a ``litellm-`` prefix. See the residual-risk note in
-  ``GENERIC_GUARDRAIL_CONTRACT.md``: the Shield scopes a vault by
-  ``(session_id, virtual_key_id)``, so every caller of this shim shares one virtual
-  key. Use a **dedicated** Shield virtual key for the shim, and treat the shim key
-  as equivalent in power to that Shield key.
+- **Session scope.** The Shield scopes a vault by ``(session_id, virtual_key_id)``,
+  and every caller of this shim shares one virtual key, so the session id is what
+  keeps LiteLLM users apart. It is an HMAC, keyed with the shim key, of the LiteLLM
+  caller's ``request_data.user_api_key_hash`` and ``litellm_call_id``: a request
+  that reuses another user's call id under a different LiteLLM key gets a different
+  vault. Only when LiteLLM sends no caller identity (a proxy with no auth) does it
+  fall back to ``litellm-<call id>``, which is as strong as the call id is secret.
+  Use a **dedicated** Shield virtual key for the shim, and treat the shim key as
+  equivalent in power to that Shield key.
 
 Streaming restoration is available, and off unless you ask for it. Set
 ``SHIM_STREAMING_REHYDRATION=true`` -- and only if LiteLLM's guardrail config also
@@ -66,6 +69,7 @@ the client has already seen.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -115,6 +119,9 @@ class GuardrailRequest(BaseModel):
     texts: list[str] = Field(default_factory=list)
     input_type: Literal["request", "response"]
     litellm_call_id: Optional[str] = None
+    # LiteLLM's caller metadata (user_api_key_hash, team id, ...). Only the key hash is
+    # read: it is what LiteLLM authenticated, and it is the same on both hooks of a call.
+    request_data: Optional[dict[str, Any]] = None
 
 
 class GuardrailResponse(BaseModel):
@@ -141,14 +148,32 @@ def _authorized(candidate: Optional[str]) -> bool:
     return hmac.compare_digest(candidate or "", SHIM_API_KEY)
 
 
-def _session_id(call_id: Optional[str]) -> Optional[str]:
-    """Namespaces a LiteLLM call id into a Shield session id.
+def _caller_identity(request_data: Optional[dict[str, Any]]) -> Optional[str]:
+    """The LiteLLM key the call was authenticated with, as LiteLLM's hash of it, or None."""
+    if not isinstance(request_data, dict):
+        return None
+    key_hash = request_data.get("user_api_key_hash")
+    if not isinstance(key_hash, str) or not key_hash or len(key_hash) > MAX_SESSION_ID_CHARS:
+        return None
+    return key_hash
 
-    The prefix keeps this surface's vaults from colliding with any other client
-    that happens to use the same Shield virtual key.
+
+def _session_id(call_id: Optional[str], identity: Optional[str] = None) -> Optional[str]:
+    """Namespaces a LiteLLM call id into a Shield session id, bound to the caller.
+
+    With a caller identity the id is ``litellm_u_`` plus HMAC-SHA256(shim key, identity,
+    call id) -- a prefix the fallback below can never produce -- so another LiteLLM user who learns or reuses this call id lands in a
+    different vault, and nobody without the shim key can compute the id. Without one
+    (LiteLLM running with no auth sends none) it falls back to ``litellm-<call id>``:
+    then the call id is the only secret, and a caller who can choose or learn another
+    caller's call id can read that caller's restored values. The prefix keeps this
+    surface's vaults from colliding with any other client of the same virtual key.
     """
     if not call_id or len(call_id) > MAX_SESSION_ID_CHARS:
         return None
+    if identity:
+        message = f"{len(identity)}:{identity}|{call_id}".encode("utf-8")
+        return "litellm_u_" + hmac.new(SHIM_API_KEY.encode("utf-8"), message, hashlib.sha256).hexdigest()
     return f"litellm-{call_id}"
 
 
@@ -254,7 +279,7 @@ async def basic_guardrail_api(
             content={"detail": f"texts exceeds {MAX_TOTAL_TEXT_CHARS} characters"},
         )
 
-    session_id = _session_id(request.litellm_call_id)
+    session_id = _session_id(request.litellm_call_id, _caller_identity(request.request_data))
     if session_id is None:
         # Without a call id the reply cannot be restored, and answering NONE would
         # send the caller placeholders. Block, and say why.

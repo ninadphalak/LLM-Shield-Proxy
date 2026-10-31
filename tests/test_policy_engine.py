@@ -17,6 +17,7 @@ from llm_shield_proxy.observability.audit import AuditLogger
 def reset_policy_settings():
     old_file_path = settings.POLICIES_FILE_PATH
     old_flattened = settings._flattened_policies
+    old_loaded = getattr(settings, "_policies_loaded", False)
     old_mtime = settings._policies_mtime
     old_failure_mode = settings.SHIELD_FAILURE_MODE
     old_override_auth = settings.OVERRIDE_CLIENT_AUTH
@@ -26,6 +27,7 @@ def reset_policy_settings():
     yield
     settings.POLICIES_FILE_PATH = old_file_path
     settings._flattened_policies = old_flattened
+    settings._policies_loaded = old_loaded
     settings._policies_mtime = old_mtime
     settings.SHIELD_FAILURE_MODE = old_failure_mode
     settings.OVERRIDE_CLIENT_AUTH = old_override_auth

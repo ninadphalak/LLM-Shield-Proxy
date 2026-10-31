@@ -3,33 +3,40 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault, decrypt_from_token, encrypt_to_token
+from llm_shield_proxy.engines.crypto_vault import (
+    StatelessCryptoVault,
+    decrypt_from_token,
+    encrypt_to_token,
+    token_context,
+)
 from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer
 
 
 @pytest.mark.asyncio
 async def test_stateless_synthetic_encryption_decryption():
     raw_pii = "test_user@example.com"
-    token = encrypt_to_token(raw_pii)
+    ctx = token_context("vk-a", "s1")
+    token = encrypt_to_token(raw_pii, ctx)
 
-    # Assert format
-    assert token.startswith("[ENC_v1_")
+    # Assert format (v2: bound to the minting key and session)
+    assert token.startswith("[ENC_v2_")
     assert token.endswith("]")
 
     # Assert decryption
-    decrypted = decrypt_from_token(token)
+    decrypted = decrypt_from_token(token, ctx)
     assert decrypted == raw_pii
 
 
 @pytest.mark.asyncio
 async def test_stateless_synthetic_invalid_decryption():
     # Invalid token (should return unmodified)
-    invalid_token = "[ENC_v1_invalid_base64_payload]"
-    decrypted = decrypt_from_token(invalid_token)
+    ctx = token_context("vk-a", "s1")
+    invalid_token = "[ENC_v2_invalid_base64_payload]"
+    decrypted = decrypt_from_token(invalid_token, ctx)
     assert decrypted == invalid_token
 
     # Not a token
-    assert decrypt_from_token("just normal text") == "just normal text"
+    assert decrypt_from_token("just normal text", ctx) == "just normal text"
 
 
 @pytest.mark.asyncio

@@ -19,31 +19,49 @@ class StatelessStreamingLexer:
         # Regex patterns to detect _ctx_hash_<prop> and array proxy objects natively in streams
         self.ctx_hash_pattern = re.compile(r'"_ctx_hash_([^"]+)"\s*:\s*"([^"]*)"\s*,?')
         self.shield_proxy_pattern = re.compile(r'\{\s*"_shield_val"\s*:\s*"([^"]*)"\s*,\s*"_shield_ctx"\s*:\s*"([^"]*)"\s*\}')
+        self.property_pattern = re.compile(r'"([^"]+)"\s*:\s*"([^"]*)"')
+
+    # Pending property rehydrations kept across chunks.
+    MAX_PENDING = 4096
+
+    @staticmethod
+    def _max_buffer() -> int:
+        from llm_shield_proxy.core.config import settings
+
+        return int(settings.MAX_SSE_LINE_LENGTH)
 
     def feed_chunk(self, chunk: str) -> str:
         """
         Ingests a chunk of the stream, processes closed JSON sibling pairs,
         prunes the context hashes, and yields safe rehydrated text.
+
+        Linear in the chunk: each pattern is applied in one left-to-right pass.
+        A buffer larger than MAX_SSE_LINE_LENGTH raises StreamCapacityExceeded
+        (fail closed), matching the SSE path's line cap.
         """
         self.buffer.seek(0, io.SEEK_END)
+        if self.buffer.tell() + len(chunk) > self._max_buffer():
+            from llm_shield_proxy.streaming.streaming import StreamCapacityExceeded
+
+            raise StreamCapacityExceeded("v3 stream chunk exceeded maximum safe length")
         self.buffer.write(chunk)
         content = self.buffer.getvalue()
 
         # 1. Prune and Rehydrate _ctx_hash_<prop> key-value pairs
-        while True:
-            match = self.ctx_hash_pattern.search(content)
-            if not match:
-                break
+        def _prune(match: "re.Match[str]") -> str:
             prop = match.group(1)
             token = match.group(2)
-
             pt = self.cipher.decrypt(token, prop)
             if pt != "[CORRUPTED]":
+                self.pending_rehydrations.pop(prop, None)
                 self.pending_rehydrations[prop] = pt
-
-            start, end = match.span()
             # Remove the _ctx_hash sibling from the buffer
-            content = content[:start] + content[end:]
+            return ""
+
+        content = self.ctx_hash_pattern.sub(_prune, content)
+        # Bounded: an upstream that names props it never sends cannot grow this forever.
+        while len(self.pending_rehydrations) > self.MAX_PENDING:
+            del self.pending_rehydrations[next(iter(self.pending_rehydrations))]
 
         # Clean any orphaned leading or duplicate commas caused by chunk boundaries
         content = re.sub(r'\{\s*,', '{', content)
@@ -51,29 +69,23 @@ class StatelessStreamingLexer:
         content = re.sub(r',\s*\}', '}', content)
 
         # 2. Rehydrate the corresponding actual properties
-        for prop, pt in list(self.pending_rehydrations.items()):
-            # `prop` is an upstream-chosen JSON property name, captured by
-            # `"_ctx_hash_([^"]+)"`, and `[^"]+` admits every regex metacharacter.
-            # Interpolating it raw compiled the upstream's text AS A PATTERN:
-            #   `foo(`    -> PatternError out of the streaming hot path
-            #   `(a+)+b`  -> exponential backtracking; 22 chars of padding took 0.143s,
-            #                40 did not finish in two minutes
-            #   `a.c`     -> a wildcard that rehydrated `abc`, a property nobody named
-            # It is data, so it is escaped.
-            prop_pattern = re.compile(rf'"{re.escape(prop)}"\s*:\s*"([^"]*)"')
-            match = prop_pattern.search(content)
-            if match:
-                start, end = match.span()
-                safe_pt = json.dumps(pt)
-                replacement = f'"{prop}": {safe_pt}'
-                content = content[:start] + replacement + content[end:]
-                del self.pending_rehydrations[prop]
+        # `prop` is an upstream-chosen JSON property name, captured by
+        # `"_ctx_hash_([^"]+)"`, and `[^"]+` admits every regex metacharacter, so it is
+        # never compiled as a pattern. One pass over every `"key": "value"` pair
+        # replaces the first occurrence of each pending property (it used to be one
+        # full search per pending property).
+        if self.pending_rehydrations:
+            def _restore(match: "re.Match[str]") -> str:
+                prop = match.group(1)
+                pt = self.pending_rehydrations.pop(prop, None)
+                if pt is None:
+                    return match.group(0)
+                return f'"{prop}": {json.dumps(pt)}'
+
+            content = self.property_pattern.sub(_restore, content)
 
         # 3. Prune and Rehydrate array proxy objects
-        while True:
-            match = self.shield_proxy_pattern.search(content)
-            if not match:
-                break
+        def _proxy(match: "re.Match[str]") -> str:
             fake_val = match.group(1)
             token = match.group(2)
 
@@ -82,10 +94,9 @@ class StatelessStreamingLexer:
             pt = self.cipher.decrypt(token, "")
             if pt == "[CORRUPTED]":
                 pt = self.cipher.decrypt(token, fake_val)
+            return json.dumps(pt if pt != "[CORRUPTED]" else fake_val)
 
-            start, end = match.span()
-            safe_pt = json.dumps(pt if pt != "[CORRUPTED]" else fake_val)
-            content = content[:start] + safe_pt + content[end:]
+        content = self.shield_proxy_pattern.sub(_proxy, content)
 
         # 4. Flush safe buffer
         # We retain up to 256 characters of the trailing buffer to avoid breaking JSON keys across chunks.

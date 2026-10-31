@@ -28,10 +28,16 @@ logger = logging.getLogger(__name__)
 _jwks_clients: Dict[str, jwt.PyJWKClient] = {}
 _jwks_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 
+# DPoP freshness: a proof is accepted while iat is within [now - MAX_AGE - SKEW, now + SKEW].
+_DPOP_MAX_AGE_SECONDS = 300
+_DPOP_CLOCK_SKEW_SECONDS = 60
+
 # RFC 9449 SS11.1 replay cache: each (jkt, jti) pair may be consumed exactly once
-# within a DPoP proof's freshness window. TTL matches the 300s (5 minute) freshness
-# ceiling enforced below, so an entry never needs to outlive the proof it guards.
-_DPOP_REPLAY_CACHE_TTL_SECONDS = 300
+# within a DPoP proof's freshness window. An entry is inserted no earlier than
+# iat - SKEW and the proof stays acceptable until iat + MAX_AGE + SKEW, so the TTL
+# must cover MAX_AGE + 2*SKEW. A shorter TTL (it was 300s) let a consumed proof be
+# replayed after the entry expired but before the proof went stale.
+_DPOP_REPLAY_CACHE_TTL_SECONDS = _DPOP_MAX_AGE_SECONDS + 2 * _DPOP_CLOCK_SKEW_SECONDS
 _dpop_replay_cache: TTLCache = TTLCache(maxsize=100_000, ttl=_DPOP_REPLAY_CACHE_TTL_SECONDS)
 _dpop_replay_lock = asyncio.Lock()
 
@@ -40,6 +46,15 @@ class DPoPReplayError(Exception):
     """Raised when a DPoP proof's (jkt, jti) pair has already been consumed."""
 
 
+
+
+def _as_str_list(value: Any) -> list[str]:
+    """Normalize an audience setting or claim (str or list) to a list of strings."""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [v for v in value if isinstance(v, str) and v]
+    return []
 
 
 def _get_jwk_thumbprint(jwk_dict: dict) -> str:
@@ -121,10 +136,16 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         if not allowed_issuers or issuer not in allowed_issuers:
             raise jwt.InvalidIssuerError("Unauthorized issuer")
 
-        allowed_audiences = tenant_policy.get("allowed_audiences", []) if tenant_policy else settings.ALLOWED_AUDIENCES
+        # Audience binding is mandatory: a role without its own list inherits the global
+        # ALLOWED_AUDIENCES, and an empty effective list fails closed like the issuer
+        # allowlist. Otherwise a trusted issuer's token minted for another service passes.
+        role_audiences = tenant_policy.get("allowed_audiences") if tenant_policy else None
+        allowed_audiences = _as_str_list(role_audiences) or _as_str_list(settings.ALLOWED_AUDIENCES)
+        if not allowed_audiences:
+            raise jwt.InvalidAudienceError("No allowed audiences configured")
 
         # Finding 1: Check audience before fetching JWKS over network
-        if allowed_audiences and unverified_claims.get("aud") not in allowed_audiences:
+        if not any(aud in allowed_audiences for aud in _as_str_list(unverified_claims.get("aud"))):
             raise jwt.InvalidAudienceError("Unauthorized audience")
 
         # Step 2: Fetch JWKS (cached) and get signing key non-blockingly
@@ -133,7 +154,9 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
         # Step 3: Verify the token signature and claims
         options_dict = {
             "verify_exp": True,
-            "verify_aud": bool(allowed_audiences),
+            "verify_aud": True,
+            "verify_iss": True,
+            "require": ["exp", "iss", "aud"],
         }
 
         # Finding 2: Offload CPU-bound PyJWT signature verification to avoid loop starvation
@@ -142,7 +165,8 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             token,
             signing_key.key,
             algorithms=["RS256", "ES256", "PS256"],
-            audience=allowed_audiences if allowed_audiences else None,
+            audience=allowed_audiences,
+            issuer=issuer,
             options=options_dict  # type: ignore
         )
 
@@ -170,9 +194,9 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             raise jwt.InvalidTokenError("DPoP proof missing iat")
 
         now = time.time()
-        if iat > now + 60:
+        if iat > now + _DPOP_CLOCK_SKEW_SECONDS:
             raise jwt.InvalidTokenError("DPoP proof iat is in the future")
-        if now - iat > 360:
+        if now - iat > _DPOP_MAX_AGE_SECONDS + _DPOP_CLOCK_SKEW_SECONDS:
             raise jwt.InvalidTokenError("DPoP proof expired (older than 5 minutes)")
 
         # RFC 9449 SS11.1: reject replayed proofs. A cryptographically valid, fresh
@@ -190,7 +214,13 @@ async def verify_agent_identity(request: Request, tenant_policy: Optional[Dict[s
             _dpop_replay_cache[replay_key] = True
 
         # Finding 3: 3-Tier Replay validation (Strict vs Lenient vs None)
-        expected_htu = str(request.url.replace(query=""))
+        # With PUBLIC_BASE_URL set, htu is bound to the operator's canonical origin
+        # rather than to a URL whose host comes from the client's Host header.
+        public_base_url = (settings.PUBLIC_BASE_URL or "").strip()
+        if public_base_url:
+            expected_htu = public_base_url.rstrip("/") + request.url.path
+        else:
+            expected_htu = str(request.url.replace(query=""))
         is_dpop_valid = True
         dpop_error_msg = ""
 

@@ -165,10 +165,23 @@ class YamlPolicyResolver(BasePolicyResolver):
             "egress_mode": role.get("egress_mode", "DEFAULT_BLOCK"),
             "allowed_domains": role.get("allowed_domains", []),
             "additional_denied_cidrs": role.get("additional_denied_cidrs", []),
+            "allowed_resources": role.get("allowed_resources", []),
         }
 
 app.dependency_overrides[get_mcp_policy_resolver] = lambda: YamlPolicyResolver()
 ```
+
+### Authentication and `resources/read`
+
+`/v1/mcp` authenticates callers like the guard API: the `X-Shield-Virtual-Key` (or `Authorization: Bearer`) value must be one of `VALID_VIRTUAL_KEYS`, otherwise the gateway answers HTTP 401 (JSON-RPC error `-32001`) before reading the body. With `OVERRIDE_CLIENT_AUTH=true` an unmatched caller is admitted as `anonymous`, and `X-Shield-Upstream-URL` is ignored for it (only `UPSTREAM_MCP_BASE_URL` is used). Bodies are capped at `MAX_PAYLOAD_SIZE_BYTES` (HTTP 413).
+
+`resources/read` is default-deny. Grant it per role with `allowed_resources`, a list of case-sensitive `fnmatch` patterns matched against the requested `uri` (`*` also matches `/`):
+
+```yaml
+    allowed_resources: ["file:///docs/*", "https://kb.internal.corp/*"]
+```
+
+A URI containing a `..` path segment is always refused. A fail-closed policy (an empty allowlist under `MCP_EMPTY_ALLOWLIST_MODE=DENY_ALL`, or a resolver failure) refuses every method, `tools/list` and `resources/read` included, without contacting the tool server.
 
 ---
 

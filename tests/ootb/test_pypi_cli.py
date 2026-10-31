@@ -116,21 +116,23 @@ async def async_test_client():
         yield client
 
 @pytest.mark.asyncio
-async def test_canary_tripwire_aborts_connection(async_test_client, httpx_mock):
+async def test_canary_tripwire_aborts_connection(async_test_client, httpx_mock, monkeypatch):
     """
     Validates that a prompt-extraction attack triggering the Canary Tripwire
     results in an immediate socket termination without freezing the loop.
     """
     from llm_shield_proxy.core.config import settings
-    settings.ENABLE_CANARY_TRIPWIRE = True
-    settings.CANARY_TOKEN = "[SHIELD_TRIPWIRE_X99]"
-    settings._valid_virtual_keys_set = frozenset(["sk-proxy-team-a"])
+    # monkeypatch restores every setting after the test: a leaked ENABLE_CANARY_TRIPWIRE
+    # injected a canary system message into later tests' upstream bodies.
+    monkeypatch.setattr(settings, "ENABLE_CANARY_TRIPWIRE", True)
+    monkeypatch.setattr(settings, "CANARY_TOKEN", "[SHIELD_TRIPWIRE_X99]")
+    monkeypatch.setattr(settings, "_valid_virtual_keys_set", frozenset(["sk-proxy-team-a"]))
     # The canary directive is derived from SHIELD_WATERMARK_SECRET and the upstream call
     # needs a credential. Both came from an untracked local `.env`, so in CI the request
     # failed before it ever reached the upstream: the mocked response went unrequested
     # and pytest-httpx errored at teardown. Red on main since 2026-08-30.
-    settings.SHIELD_WATERMARK_SECRET = "test-watermark-secret-not-a-real-secret"
-    settings.UPSTREAM_API_KEY = "sk-test-upstream-not-a-real-key"
+    monkeypatch.setattr(settings, "SHIELD_WATERMARK_SECRET", "test-watermark-secret-not-a-real-secret")
+    monkeypatch.setattr(settings, "UPSTREAM_API_KEY", "sk-test-upstream-not-a-real-key")
 
     payload = {
         "model": "gpt-4",

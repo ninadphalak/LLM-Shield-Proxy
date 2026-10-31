@@ -81,7 +81,26 @@ BASELINE_DENIED_CIDRS: Sequence[str] = (
 DEFAULT_DNS_TIMEOUT_SECONDS = 2.0
 MAX_WALK_DEPTH = 20
 
-_URL_FINDER = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+# Matches the scheme followed by ANY separator, not only `//`. WHATWG parsers (Node
+# fetch/undici, browsers) read `http:/host`, `http:host` and `http:\\host` as
+# `http://host`; requiring a literal `//` here let those forms skip the scan entirely.
+# `extract_host` then rejects every non-canonical form, so they fail closed. Something
+# that can start an authority must follow the separators (a letter or digit in any
+# script, `[`, a percent escape, or userinfo's `@` / `:`), so prose such as `https:)`
+# is not a URL.
+_URL_FINDER = re.compile(r"https?:(?=[\\/]*(?:[^\W_]|[\[%@:]))[^\s\"'<>]+", re.IGNORECASE)
+# `https:443`, `https:8443.` in prose: a bare scheme-colon-digits token. WHATWG reads the
+# digits as an IPv4 number; one in 1..2^24-1 without a leading zero is 0.x.y.z, which is
+# unroutable, so the token is not treated as a URL. `http:0` (0.0.0.0) and larger values
+# such as `http:2130706433` (127.0.0.1) still are.
+_PROSE_PORT = re.compile(r"https?:([1-9][0-9]{0,7})[).,;:!?\]]*", re.IGNORECASE)
+_WHATWG_ZERO_NET_LIMIT = 1 << 24
+# The one separator both urlsplit and WHATWG agree on: exactly `//` then a host character.
+_CANONICAL_PREFIX = re.compile(r"https?://[^/\\]", re.IGNORECASE)
+# WHATWG deletes ASCII tab/LF/CR anywhere in a URL before parsing it.
+_WHATWG_STRIPPED = re.compile(r"[\t\n\r]")
+# WHATWG trims leading/trailing C0 control characters and space.
+_C0_OR_SPACE = "".join(chr(c) for c in range(0x21))
 
 
 class EgressPolicyViolationError(Exception):
@@ -190,6 +209,15 @@ def is_public_ip(ip_str: str) -> bool:
 
 
 def extract_host(url: str) -> str:
+    # Fail closed on forms where Python's urlsplit and the WHATWG URL Standard disagree
+    # about the host. A backslash ends the authority for WHATWG but not for urlsplit
+    # (`http://internal\@public/` is `internal` to Node, `public` here), and a scheme
+    # followed by one slash, no slash or a backslash still names a host to WHATWG.
+    if "\\" in url:
+        raise EgressPolicyViolationError(url=url, host="", reason="ambiguous_url_backslash")
+    if not _CANONICAL_PREFIX.match(url):
+        if re.match(r"https?:", url, re.IGNORECASE):
+            raise EgressPolicyViolationError(url=url, host="", reason="non_canonical_url_form")
     parsed = urlsplit(url)
     if parsed.scheme.lower() not in ("http", "https"):
         raise EgressPolicyViolationError(url=url, host="", reason="unsupported_scheme")
@@ -349,23 +377,44 @@ async def resolve_pinned_target(
     return pin_url_to_ip(url, candidate_ips[0])
 
 
+def _is_prose_port(candidate: str) -> bool:
+    match = _PROSE_PORT.fullmatch(candidate)
+    return match is not None and int(match.group(1)) < _WHATWG_ZERO_NET_LIMIT
+
+
 def find_urls(value: Any, *, max_depth: int = MAX_WALK_DEPTH) -> List[str]:
     """Recursively AST-walks arbitrary JSON-RPC arguments, collecting http(s) URL substrings.
 
-    Traversal silently stops past `max_depth` rather than raising: a pathologically
-    nested payload is a job for the router's own payload-depth guard, not this scan.
+    Fails closed past `max_depth`: raises `EgressPolicyViolationError` rather than
+    silently skipping, because an unscanned value is still forwarded upstream.
     """
     found: List[str] = []
     seen: set = set()
 
+    def _add(candidate: str) -> None:
+        if candidate not in seen:
+            seen.add(candidate)
+            found.append(candidate)
+
     def _walk(v: Any, depth: int) -> None:
         if depth > max_depth:
-            return
+            raise EgressPolicyViolationError(url="", host="", reason="max_depth_exceeded")
         if isinstance(v, str):
+            # JSON-escaped text (`https:\/\/host\/x`) is un-escaped rather than refused for
+            # its backslash. WHATWG treats `\` as `/` in http(s) URLs, so the host is the
+            # same either way; any other backslash is still refused by extract_host.
+            v = v.replace("\\/", "/")
             for match in _URL_FINDER.findall(v):
-                if match not in seen:
-                    seen.add(match)
-                    found.append(match)
+                if _is_prose_port(match):
+                    continue
+                _add(match)
+            # A whole value that WHATWG would read as one URL once tab/LF/CR are deleted
+            # (`http://public.example\n@169.254.169.254/`) is evaluated in that form too.
+            trimmed = v.strip(_C0_OR_SPACE)
+            if _WHATWG_STRIPPED.search(trimmed):
+                collapsed = _WHATWG_STRIPPED.sub("", trimmed)
+                if re.match(r"https?:", collapsed, re.IGNORECASE):
+                    _add(collapsed)
         elif isinstance(v, dict):
             for item in v.values():
                 _walk(item, depth + 1)
