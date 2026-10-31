@@ -660,8 +660,36 @@ async def _upstream_error_response(
         content["error"]["upstream"] = upstream
     return JSONResponse(status_code=status_code, content=content)
 
+class UnsafeUpstreamPath(ValueError):
+    """The client's path would leave the operator's base path or smuggle a query."""
+
+
+def _check_client_path(path: str) -> None:
+    """Rejects a decoded catch-all path that is not a plain path under the base.
+
+    The ASGI server has already percent-decoded it, so `%3f`, `%23` and `%2e%2e` arrive
+    as `?`, `#` and `..`; httpx would then treat them as a query, a fragment and dot
+    segments, reaching routes outside a path-scoped UPSTREAM_BASE_URL with the proxy key.
+    """
+    from urllib.parse import unquote
+
+    if any(ch in path for ch in "?#\\") or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in path):
+        raise UnsafeUpstreamPath(path)
+    for segment in path.split("/"):
+        # A second decoding layer too: an upstream that decodes again must not see `..`.
+        if unquote(segment) in (".", "..") or segment in (".", ".."):
+            raise UnsafeUpstreamPath(path)
+    if any(ch in unquote(path) for ch in "?#"):
+        raise UnsafeUpstreamPath(path)
+
+
 def build_target_url(upstream_base: str, path: str) -> str:
-    """Construct sanitized upstream target URL, resolving provider-specific pathing."""
+    """Construct sanitized upstream target URL, resolving provider-specific pathing.
+
+    Raises UnsafeUpstreamPath for a path with `?`, `#`, a backslash, a control
+    character or a dot segment, so the result always stays under `upstream_base`.
+    """
+    _check_client_path(path)
     base = upstream_base.rstrip("/")
     p = path.lstrip("/")
     if p.startswith("v1/"):
@@ -769,7 +797,38 @@ def _provider_specific_key(hostname: str) -> Optional[str]:
     return getattr(settings, attr_name, None) or None
 
 
-def proxy_key_for_client_chosen_host(hostname: Optional[str]) -> Optional[str]:
+_DEFAULT_PORTS = {"https": 443, "http": 80}
+
+
+def _client_destination_is_bound(host: str, scheme: Optional[str], port: Optional[int]) -> bool:
+    """Whether a caller-picked scheme and port may carry a proxy key to `host`.
+
+    A provider key must cross the network over TLS to the provider's authenticated
+    endpoint: `http://api.openai.com` (or an odd port) would put it on the wire in clear.
+    The configured upstream host may use exactly the scheme and port the operator set.
+    """
+    if scheme is None:
+        return True  # caller did not supply a URL (legacy hostname-only check)
+    scheme = scheme.lower()
+    effective_port = port or _DEFAULT_PORTS.get(scheme)
+    configured = urlparse(settings.UPSTREAM_BASE_URL)
+    configured_host = (configured.hostname or "").lower().rstrip(".")
+    if configured_host and host == configured_host:
+        configured_scheme = (configured.scheme or "https").lower()
+        try:
+            configured_port = configured.port or _DEFAULT_PORTS.get(configured_scheme)
+        except ValueError:
+            return False
+        if scheme == configured_scheme and effective_port == configured_port:
+            return True
+    return scheme == "https" and effective_port == 443
+
+
+def proxy_key_for_client_chosen_host(
+    hostname: Optional[str],
+    scheme: Optional[str] = None,
+    port: Optional[int] = None,
+) -> Optional[str]:
     """The proxy-held key a host named by the CLIENT may receive, or None for none.
 
     X-Upstream-Base-Url and X-Shield-Fallback-Url let a caller pick the destination. A
@@ -778,9 +837,14 @@ def proxy_key_for_client_chosen_host(hostname: Optional[str]) -> Optional[str]:
     provider's key and nothing else) or the operator's configured upstream host.
     Anything else gets no key: the IP pinning stops SSRF to internal hosts, not a key
     being handed to a public host the caller runs.
+
+    When the caller's `scheme` (and `port`) are given, the key is also bound to them:
+    https on 443, or exactly the configured upstream's own scheme and port.
     """
     host = (hostname or "").strip().lower().rstrip(".")
     if not host:
+        return None
+    if not _client_destination_is_bound(host, scheme, port):
         return None
     configured = (urlparse(settings.UPSTREAM_BASE_URL).hostname or "").lower().rstrip(".")
     if configured and host == configured:
@@ -820,6 +884,157 @@ def resolve_upstream_key(hostname: str) -> Optional[str]:
             return key
 
     return settings.UPSTREAM_API_KEY
+
+
+def _policies_active() -> bool:
+    """A policies file is in force, even one whose flattened map is empty.
+
+    An empty map used to be read as "no policies", so removing the last mapping turned
+    the FAIL_CLOSED unmapped-key 403 off for every key.
+    """
+    return bool(getattr(settings, "_policies_loaded", False)) or bool(settings._flattened_policies)
+
+
+def _role_with_normalized_keys(role: Any) -> Optional[Dict[str, Any]]:
+    """The role as request_policy_ctx should see it.
+
+    The docs spell a role's provider key `upstream_api_key`; settings read
+    `UPSTREAM_API_KEY`. A copy is returned: the loaded role dicts are shared.
+    """
+    if not role:
+        return None
+    role = dict(role)
+    if role.get("upstream_api_key") and not role.get("UPSTREAM_API_KEY"):
+        role["UPSTREAM_API_KEY"] = role["upstream_api_key"]
+    return role
+
+
+async def enforce_key_policy(
+    request: Request,
+    virtual_key_id: str,
+    matched_key: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Response]]:
+    """The per-key policy layer every route that accepts a virtual key must run.
+
+    In order:
+      1. Role lookup in policies.yaml, by the configured key as the docs show it
+         (`matched_key`) or by its fingerprint (`virtual_key_id`), else `default_role`.
+      2. FAIL_CLOSED: when a policies file is loaded and the key has neither a role nor a
+         default_role, a 403 response is returned (also when the loaded map is empty).
+      3. request_policy_ctx is set to the role (or {}), so `settings` serves the role's
+         overrides from here on; a lowercase `upstream_api_key` is exposed as
+         `UPSTREAM_API_KEY`. Call this BEFORE choosing any upstream credential.
+      4. verify_agent_identity(request, role): raises HTTPException(401) on failure.
+      5. The per-key rate limiter: a 429 response when exhausted.
+
+    Args:
+        request: the incoming request. Sets request.state.applied_role_name (a role
+            label or fingerprint, never a raw key) and request.state.resolved_role.
+        virtual_key_id: get_virtual_key_id() of the caller's key, or "anonymous".
+        matched_key: the entry of VALID_VIRTUAL_KEYS the caller presented, or None for
+            BYOK / override callers. Used only for the lookup; never logged.
+
+    Returns:
+        (resolved_role, None) to continue, or (resolved_role, response) where `response`
+        must be returned to the client as is.
+    """
+    applied_role_name = "global_env"
+    resolved_role: Optional[Dict[str, Any]] = None
+    policies = settings._flattened_policies or {}
+
+    if _policies_active():
+        if matched_key and matched_key in policies:
+            resolved_role = policies[matched_key]
+            applied_role_name = virtual_key_id  # the fingerprint, never the raw key
+        elif virtual_key_id in policies:
+            resolved_role = policies[virtual_key_id]
+            applied_role_name = virtual_key_id
+        elif "default_role" in policies:
+            resolved_role = policies["default_role"]
+            applied_role_name = "default_role"
+        elif settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
+            request.state.applied_role_name = applied_role_name
+            request.state.resolved_role = None
+            request_policy_ctx.set({})
+            return None, JSONResponse(
+                status_code=403,
+                content={"error": {"message": "Unauthorized virtual key", "type": "security_error"}},
+            )
+
+    resolved_role = _role_with_normalized_keys(resolved_role)
+    request.state.applied_role_name = applied_role_name
+    request.state.resolved_role = resolved_role
+    request_policy_ctx.set(resolved_role or {})
+
+    # Agent Identity Enforcer (Edge-Level JWT/DPoP Validation)
+    from llm_shield_proxy.security.identity import verify_agent_identity
+
+    await verify_agent_identity(request, resolved_role)
+
+    from llm_shield_proxy.security.rate_limit import rate_limiter
+
+    if not await rate_limiter.acquire(virtual_key_id):
+        return resolved_role, JSONResponse(
+            status_code=429,
+            content={"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}},
+            headers={"Retry-After": "1"},
+        )
+    return resolved_role, None
+
+
+# Exceptions a client-shaped body raises in the redaction walk (e.g. an unhashable `role`).
+_CLIENT_SHAPE_ERRORS = (TypeError, AttributeError, KeyError, IndexError, UnicodeError)
+
+
+def _uninspectable_body_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "message": "Request body has a shape the proxy cannot inspect.",
+                "type": "invalid_request_error",
+            }
+        },
+    )
+
+
+def _dlp_failure_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "message": "DLP Inspection Failure: Request blocked by security policy",
+                "type": "dlp_failure",
+            }
+        },
+    )
+
+
+def _fail_open_text_redaction(payload: Any, vault: Any) -> Optional[bytes]:
+    """FAIL_OPEN's degraded mode: one text-level redaction pass, never the raw body.
+
+    Run over the canonical serialisation, not the client's bytes, so `\\u0040`-style
+    escapes cannot hide an identifier. None when the pass fails or breaks the JSON.
+    """
+    try:
+        text = orjson.dumps(payload).decode("utf-8")
+        redacted = pii_engine.redact_text(text, vault)
+        orjson.loads(redacted)
+        return redacted.encode("utf-8")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _unsafe_path_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "message": "Request path may not contain '?', '#', a backslash, control characters or dot segments.",
+                "type": "invalid_request_error",
+            }
+        },
+    )
 
 
 @app.api_route(
@@ -909,7 +1124,10 @@ async def _proxy_catch_all_internal(
         upstream_base = settings.UPSTREAM_BASE_URL
 
     # The host the CLIENT picked, when it picked one; see proxy_key_for_client_chosen_host.
+    # Its scheme and port are kept too: a proxy key is bound to TLS on the provider's port.
     client_chosen_host: Optional[str] = None
+    client_chosen_scheme: Optional[str] = None
+    client_chosen_port: Optional[int] = None
 
     # SSRF Protection on Dynamic Client Upstream Override
     if x_upstream_base_url and settings.ALLOW_CLIENT_UPSTREAM_OVERRIDE:
@@ -925,6 +1143,8 @@ async def _proxy_catch_all_internal(
                     content={"error": {"message": "Forbidden upstream hostname", "type": "security_error"}},
                 )
             client_chosen_host = hostname
+            client_chosen_scheme = parsed.scheme
+            client_chosen_port = parsed.port
             is_safe, resolved_ip = await _resolve_and_validate_hostname(hostname)
             if not is_safe or not resolved_ip:
                 return JSONResponse(
@@ -940,7 +1160,10 @@ async def _proxy_catch_all_internal(
     # Effective upstream hostname before SSRF IP pinning.
     upstream_host = sni_hostname or urlparse(upstream_base).hostname
 
-    target_url = build_target_url(upstream_base, path)
+    try:
+        target_url = build_target_url(upstream_base, path)
+    except UnsafeUpstreamPath:
+        return _unsafe_path_response()
 
     # Prepare forwarding headers
     headers = dict(request.headers)
@@ -999,31 +1222,63 @@ async def _proxy_catch_all_internal(
         else:
             virtual_key_id = "anonymous"
 
+    request_id = getattr(request.state, "request_id", None)
+    request.state.virtual_key_id = virtual_key_id
+
+    # Per-key policy BEFORE any credential is chosen: the role can carry its own upstream
+    # key, and request_policy_ctx must hold the role while the key is resolved.
+    resolved_role, policy_error = await enforce_key_policy(request, virtual_key_id, matched_key)
+    applied_role_name = getattr(request.state, "applied_role_name", "global_env")
+    if policy_error is not None:
+        return policy_error
+
+    def _client_host_key(host: Optional[str]) -> Optional[str]:
+        return proxy_key_for_client_chosen_host(host, client_chosen_scheme, client_chosen_port)
+
     # Set when the proxy, not the caller, supplies the credential on this request.
     proxy_key_in_use = is_virtual_key or (settings.OVERRIDE_CLIENT_AUTH and bool(settings.UPSTREAM_API_KEY))
-    if proxy_key_in_use and client_chosen_host and proxy_key_for_client_chosen_host(client_chosen_host) is None:
+    if proxy_key_in_use and client_chosen_host and _client_host_key(client_chosen_host) is None:
         return JSONResponse(
             status_code=403,
             content={
                 "error": {
                     "message": (
                         "X-Upstream-Base-Url names a host that may not receive the proxy's provider key. "
-                        "Use a known provider host, the configured upstream, or your own provider key."
+                        "Use https to a known provider host, the configured upstream, or your own provider key."
                     ),
                     "type": "security_error",
                 }
             },
         )
 
+    # A role's own provider key (policies.yaml `upstream_api_key`) replaces the global one,
+    # for the configured upstream only: it is never handed to a host the caller picked.
+    role_upstream_key = (resolved_role or {}).get("UPSTREAM_API_KEY")
+    if role_upstream_key and proxy_key_in_use and client_chosen_host:
+        configured_host = (urlparse(settings.UPSTREAM_BASE_URL).hostname or "").lower().rstrip(".")
+        if client_chosen_host.lower().rstrip(".") != configured_host:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": {
+                        "message": "This key's role pins its upstream; X-Upstream-Base-Url may not change it.",
+                        "type": "security_error",
+                    }
+                },
+            )
+
     # Centralized Virtual Key Swapping
     if is_virtual_key:
         parsed_url = urlparse(upstream_base)
         hostname = parsed_url.hostname or ""
-        resolved_key = (
-            proxy_key_for_client_chosen_host(client_chosen_host)
-            if client_chosen_host
-            else resolve_upstream_key(hostname)
-        )
+        if role_upstream_key:
+            resolved_key = role_upstream_key
+        else:
+            resolved_key = (
+                _client_host_key(client_chosen_host)
+                if client_chosen_host
+                else resolve_upstream_key(hostname)
+            )
 
         if resolved_key:
             headers["authorization"] = f"Bearer {resolved_key}"
@@ -1045,7 +1300,9 @@ async def _proxy_catch_all_internal(
                 },
             )
     elif settings.OVERRIDE_CLIENT_AUTH and settings.UPSTREAM_API_KEY:
-        injected = proxy_key_for_client_chosen_host(client_chosen_host) if client_chosen_host else None
+        injected = (
+            _client_host_key(client_chosen_host) if client_chosen_host and not role_upstream_key else None
+        )
         headers["authorization"] = f"Bearer {injected or settings.UPSTREAM_API_KEY}"
         headers.pop("x-api-key", None)
         headers.pop("x-goog-api-key", None)
@@ -1058,46 +1315,10 @@ async def _proxy_catch_all_internal(
         headers.pop("api-key", None)
 
     headers.pop("x-virtual-key-id", None)
-    request_id = getattr(request.state, "request_id", None)
-    request.state.virtual_key_id = virtual_key_id
-
-    applied_role_name = "global_env"
-    resolved_role = None
-
-    if settings._flattened_policies:
-        if virtual_key_id in settings._flattened_policies:
-            resolved_role = settings._flattened_policies[virtual_key_id]
-            applied_role_name = virtual_key_id
-        elif "default_role" in settings._flattened_policies:
-            resolved_role = settings._flattened_policies["default_role"]
-            applied_role_name = "default_role"
-        elif settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
-            return JSONResponse(
-                status_code=403,
-                content={"error": {"message": "Unauthorized virtual key", "type": "security_error"}},
-            )
-
-    if resolved_role:
-        request_policy_ctx.set(resolved_role)
-    else:
-        request_policy_ctx.set({})
-
-    # Agent Identity Enforcer (Edge-Level JWT/DPoP Validation)
-    from llm_shield_proxy.security.identity import verify_agent_identity
-    await verify_agent_identity(request, resolved_role)
 
     enable_canary_tripwire = settings.ENABLE_CANARY_TRIPWIRE
     enable_blast_radius_limits = settings.ENABLE_BLAST_RADIUS_LIMITS
     enable_finops_metering = settings.ENABLE_FINOPS_METERING
-
-    from llm_shield_proxy.security.rate_limit import rate_limiter
-
-    if not await rate_limiter.acquire(virtual_key_id):
-        return JSONResponse(
-            status_code=429,
-            content={"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}},
-            headers={"Retry-After": "1"},
-        )
 
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
     from llm_shield_proxy.engines.masking import MaskingMode, ScrubVault, resolve_masking_mode
@@ -1202,6 +1423,15 @@ async def _proxy_catch_all_internal(
             target_provider = None
             try:
                 is_json_rpc = isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
+                # The stateless branch is restorable by design: a SCRUB or HMAC mode must
+                # never hand values back, so those requests take the normal one-way path.
+                # Its SSE rehydrator has no response PII scan, so a streamed request with
+                # ENABLE_RESPONSE_PII_REDACTION on takes the normal path as well.
+                if is_json_rpc and (
+                    masking_mode in (MaskingMode.SCRUB, MaskingMode.HMAC)
+                    or (is_streaming and settings.ENABLE_RESPONSE_PII_REDACTION)
+                ):
+                    is_json_rpc = False
                 if is_json_rpc:
                     is_v3 = True
                     # Initialize the stateless engine with the configured encryption
@@ -1229,9 +1459,8 @@ async def _proxy_catch_all_internal(
                         # Augment schemas dynamically
                         payload = DynamicSchemaRewriter.rewrite(payload)
                         # Process AST Mutator (orjson avoids GIL blocking)
-                        redacted_bytes = await mutator.mutate(orjson.dumps(payload))
+                        redacted_bytes, entities_detected = await mutator.mutate_counted(orjson.dumps(payload))
                         redacted_payload = orjson.loads(redacted_bytes)
-                        entities_detected = 0 # Handled statelessly
                     except ASTDepthExceededException:
                         # RFC 7807 compliant HTTP 400 error
                         return JSONResponse(
@@ -1379,6 +1608,12 @@ async def _proxy_catch_all_internal(
                         },
                     )
                 raise ve
+            except _CLIENT_SHAPE_ERRORS as e:
+                # A body whose structure the walk cannot handle (a list where a string
+                # belongs) is the client's error, not an engine failure: it is refused
+                # in every failure mode, never forwarded uninspected under FAIL_OPEN.
+                logger.warning("Request body could not be inspected (%s)", type(e).__name__)
+                return _uninspectable_body_response()
             except Exception as e:
                 if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
                     logger.error(f"PII Engine failure (FAIL_CLOSED): {e}")
@@ -1392,8 +1627,15 @@ async def _proxy_catch_all_internal(
                         },
                     )
                 else:
-                    logger.error(f"PII Engine failure (FAIL_OPEN): {e}")
-                    redacted_bytes = body_bytes
+                    logger.error("PII Engine failure (FAIL_OPEN): %s", type(e).__name__)
+                    # FAIL_OPEN keeps traffic flowing, but never with the raw body: one
+                    # text-level pass over the canonical JSON, or nothing is sent.
+                    fallback_bytes = await asyncio.get_running_loop().run_in_executor(
+                        None, _fail_open_text_redaction, payload, vault
+                    )
+                    if fallback_bytes is None:
+                        return _dlp_failure_response()
+                    redacted_bytes = fallback_bytes
 
             x_shield_fallback_url = request.headers.get("x-shield-fallback-url")
             # SSRF guard: a client-supplied failover target is a routing override just like
@@ -1444,25 +1686,45 @@ async def _proxy_catch_all_internal(
                     if settings.FALLBACK_BASE_URL
                     else ""
                 )
+                fallback_forbidden = False
                 if configured_fallback_host and (fallback_sni_hostname or "").lower().rstrip(".") == configured_fallback_host:
                     # The caller named the operator's own fallback host: it gets what the
-                    # configured fallback gets, FALLBACK_API_KEY when one is set.
+                    # configured fallback gets, FALLBACK_API_KEY when one is set -- over the
+                    # configured scheme and port only, never downgraded to plain http.
                     fallback_key = settings.FALLBACK_API_KEY
+                    configured_fallback = urlparse(settings.FALLBACK_BASE_URL)
+                    configured_scheme = (configured_fallback.scheme or "https").lower()
+                    try:
+                        configured_port = configured_fallback.port or _DEFAULT_PORTS.get(configured_scheme)
+                    except ValueError:
+                        configured_port = None
+                    if proxy_key_in_use and (
+                        parsed_fallback.scheme.lower() != configured_scheme
+                        or (fallback_port or _DEFAULT_PORTS.get(parsed_fallback.scheme.lower())) != configured_port
+                    ):
+                        fallback_forbidden = True
                 elif proxy_key_in_use:
-                    fallback_key = proxy_key_for_client_chosen_host(fallback_sni_hostname)
-                    if fallback_key is None:
-                        return JSONResponse(
-                            status_code=403,
-                            content={
-                                "error": {
-                                    "message": (
-                                        "X-Shield-Fallback-Url names a host that may not receive the "
-                                        "proxy's provider key."
-                                    ),
-                                    "type": "security_error",
-                                }
-                            },
+                    fallback_key = (
+                        None
+                        if role_upstream_key  # the role pins its provider; no global key
+                        else proxy_key_for_client_chosen_host(
+                            fallback_sni_hostname, parsed_fallback.scheme, fallback_port
                         )
+                    )
+                    fallback_forbidden = fallback_key is None
+                if fallback_forbidden:
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": {
+                                "message": (
+                                    "X-Shield-Fallback-Url names a host that may not receive the "
+                                    "proxy's provider key."
+                                ),
+                                "type": "security_error",
+                            }
+                        },
+                    )
             elif settings.FALLBACK_API_KEY:
                 fallback_key = settings.FALLBACK_API_KEY
 
@@ -1529,6 +1791,11 @@ async def _proxy_catch_all_internal(
                                 fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
                                 if fallback_key:
                                     _replace_upstream_credential(current_headers, fallback_key, fallback_host)
+                                elif proxy_key_in_use:
+                                    # No FALLBACK_API_KEY: the fallback gets no proxy-held
+                                    # credential, never the first provider's key.
+                                    for credential_header in _CREDENTIAL_HEADERS:
+                                        current_headers.pop(credential_header, None)
                                 if fallback_host:
                                     current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
@@ -1664,6 +1931,11 @@ async def _proxy_catch_all_internal(
                                 fallback_host = fallback_sni_hostname or urlparse(fallback_url).hostname
                                 if fallback_key:
                                     _replace_upstream_credential(current_headers, fallback_key, fallback_host)
+                                elif proxy_key_in_use:
+                                    # No FALLBACK_API_KEY: the fallback gets no proxy-held
+                                    # credential, never the first provider's key.
+                                    for credential_header in _CREDENTIAL_HEADERS:
+                                        current_headers.pop(credential_header, None)
                                 if fallback_host:
                                     current_headers["host"] = fallback_host
                                 AuditLogger.log_provider_failover_triggered(x_session_id, request_id, virtual_key_id, fallback_url, applied_role_name=applied_role_name)
@@ -1710,7 +1982,14 @@ async def _proxy_catch_all_internal(
                             NonStreamingRehydrator,
                         )
                         rehydrator = NonStreamingRehydrator(v3_cipher)
-                        rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, res_json)
+                        v3_target = res_json
+                        if settings.ENABLE_RESPONSE_PII_REDACTION:
+                            # Model-originated PII is scanned on this branch too, before the
+                            # caller's own values are restored from their ciphertext siblings.
+                            v3_target = await loop.run_in_executor(
+                                None, _redact_v3_model_originated_tree, res_json, vault
+                            )
+                        rehydrated_res = await loop.run_in_executor(None, rehydrator.rehydrate, v3_target)
                     else:
                         # Response-path model-originated PII redaction for the non-streaming
                         # REST path: redact what the model produced that is not this session's
@@ -1727,11 +2006,11 @@ async def _proxy_catch_all_internal(
                         else:
                             rehydrated_res = await loop.run_in_executor(None, _rehydrate_json_response, scan_target, vault)
 
-                    if watermark_text:
+                    if watermark_text and isinstance(rehydrated_res, dict):
                         _append_watermark(rehydrated_res, watermark_text)
 
-                    # FinOps Usage Metering for REST
-                    if enable_finops_metering and background_tasks is not None:
+                    # FinOps Usage Metering for REST (an array reply carries no usage object)
+                    if enable_finops_metering and background_tasks is not None and isinstance(res_json, dict):
                         usage = res_json.get("usage", {})
                         if usage and isinstance(usage, dict):
                             prompt_tokens = usage.get("prompt_tokens", 0)
@@ -1752,8 +2031,8 @@ async def _proxy_catch_all_internal(
                                 background_tasks.add_task(_record_metrics, virtual_key_id, model, prompt_tokens, completion_tokens, total_tokens, x_session_id)
 
                     if settings.ANONYMOUS_USAGE_TRACKING and settings.TELEMETRY_ENDPOINT_URL:
-                        _usage = res_json.get("usage", {}) if res_json else {}
-                        _model = res_json.get("model", "unknown") if res_json else "unknown"
+                        _usage = res_json.get("usage", {}) if isinstance(res_json, dict) else {}
+                        _model = res_json.get("model", "unknown") if isinstance(res_json, dict) else "unknown"
                         _total_tokens = _usage.get("total_tokens", 0) if isinstance(_usage, dict) else 0
 
                         _tel_payload = {
@@ -1800,7 +2079,8 @@ async def _proxy_catch_all_internal(
                         headers=res_headers,
                     )
 
-    # Pass-through for non-POST requests
+    # Non-POST requests. Their bodies go out with the proxy's key like any POST body, so
+    # they are redacted too (or refused); body-less GET/DELETE/HEAD pass straight through.
     AuditLogger.log_proxy_event(x_session_id, path, request.method, virtual_key_id, 200, request_id, applied_role_name=applied_role_name)
     try:
         body_bytes = await read_body_with_limit(request)
@@ -1817,6 +2097,114 @@ async def _proxy_catch_all_internal(
             )
         body_bytes = b""
 
+    loop = asyncio.get_running_loop()
+    entities_detected = 0
+    if body_bytes.strip():
+        try:
+            body_payload: Any = orjson.loads(body_bytes)
+            body_is_json = True
+        except orjson.JSONDecodeError:
+            body_payload, body_is_json = None, False
+
+        if not body_is_json:
+            # Only JSON can be walked. FAIL_CLOSED refuses anything else; FAIL_OPEN still
+            # never forwards it raw: UTF-8 text gets one text-level pass, binary is refused.
+            text_body: Optional[str] = None
+            if settings.SHIELD_FAILURE_MODE != "FAIL_CLOSED":
+                try:
+                    text_body = body_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    text_body = None
+            if text_body is None:
+                return JSONResponse(
+                    status_code=415,
+                    content={
+                        "error": {
+                            "message": f"A {request.method} body must be JSON so the proxy can inspect it.",
+                            "type": "invalid_request_error",
+                        }
+                    },
+                )
+            try:
+                body_bytes = (
+                    await loop.run_in_executor(None, pii_engine.redact_text, text_body, vault)
+                ).encode("utf-8")
+            except Exception:  # noqa: BLE001
+                return _dlp_failure_response()
+        else:
+            active_profile = pii_engine.get_profile(virtual_key_id)
+            if resolved_role and resolved_role.get("ENABLE_TIER3_ONNX_NER") is False:
+                from llm_shield_proxy.engines.pii_engine import CompiledProfile
+
+                active_profile = CompiledProfile(
+                    name=active_profile.name,
+                    tier1_patterns=active_profile.tier1_patterns,
+                    tier3_ner_entities=set(),
+                )
+            old_entities_count = sum(vault.type_counters.values())
+            import contextvars
+
+            try:
+                redacted_body = await loop.run_in_executor(
+                    None, contextvars.copy_context().run, _redact_any_json_body, body_payload, vault, active_profile
+                )
+            except UnmappedBlobError as blob_error:
+                AuditLogger.log_unmapped_blob(
+                    json_path=blob_error.json_path,
+                    size_bytes=blob_error.size_bytes,
+                    virtual_key_id=virtual_key_id,
+                    request_id=request_id,
+                )
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": {"message": f"Uninspectable payload at '{blob_error.json_path}'.", "type": "unmapped_blob"}},
+                )
+            except ValueError as ve:
+                if str(ve) == "Maximum payload nesting depth exceeded":
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": {
+                                "message": "Payload nesting depth exceeded maximum limit (JSON bomb protection)",
+                                "type": "invalid_request_error",
+                            }
+                        },
+                    )
+                return _uninspectable_body_response()
+            except _CLIENT_SHAPE_ERRORS as e:
+                logger.warning("Request body could not be inspected (%s)", type(e).__name__)
+                return _uninspectable_body_response()
+            except Exception as e:  # noqa: BLE001
+                if settings.SHIELD_FAILURE_MODE == "FAIL_CLOSED":
+                    logger.error("PII Engine failure (FAIL_CLOSED): %s", type(e).__name__)
+                    return _dlp_failure_response()
+                logger.error("PII Engine failure (FAIL_OPEN): %s", type(e).__name__)
+                fallback_bytes = await loop.run_in_executor(None, _fail_open_text_redaction, body_payload, vault)
+                if fallback_bytes is None:
+                    return _dlp_failure_response()
+                body_bytes = fallback_bytes
+            else:
+                body_bytes = orjson.dumps(redacted_body)
+                entities_detected = sum(vault.type_counters.values()) - old_entities_count
+
+            if enable_blast_radius_limits and entities_detected > 0:
+                from llm_shield_proxy.security.rate_limit import blast_radius_limiter
+
+                if not await blast_radius_limiter.check_blast_radius(virtual_key_id, entities_detected):
+                    AuditLogger.log_blast_radius_exceeded(
+                        session_id=x_session_id,
+                        virtual_key_id=virtual_key_id,
+                        entities_count=entities_detected,
+                        path=path,
+                        request_id=request_id,
+                        applied_role_name=applied_role_name,
+                    )
+                    return JSONResponse(
+                        status_code=429,
+                        content={"error": {"message": "Data exfiltration threshold exceeded.", "type": "blast_radius_exceeded"}},
+                        headers={"Retry-After": "60"},
+                    )
+
     upstream_res = await http_client.request(
         method=request.method,
         url=target_url,
@@ -1829,11 +2217,56 @@ async def _proxy_catch_all_internal(
         # The provider's reason, with the credential the proxy attached removed first.
         return await _upstream_error_response(await _read_error_body(upstream_res), upstream_res.status_code, headers)
 
+    content = upstream_res.content
+    if content and (settings.ENABLE_RESPONSE_PII_REDACTION or entities_detected > 0):
+        # Retrieval routes (GET /v1/responses/{id}, stored chat completions) return the
+        # same model output the POST path redacts, so response redaction applies here too.
+        content = await loop.run_in_executor(
+            None,
+            _redact_passthrough_reply,
+            content,
+            vault,
+            bool(settings.ENABLE_RESPONSE_PII_REDACTION),
+            entities_detected > 0,
+        )
+
     return Response(
-        content=upstream_res.content,
+        content=content,
         status_code=upstream_res.status_code,
         headers=_without_framing_headers(upstream_res.headers),
     )
+
+
+def _redact_any_json_body(body: Any, vault: Any, active_profile: Any) -> Any:
+    """Redacts a request body of any JSON type: objects by request shape, the rest by walk."""
+    if isinstance(body, dict):
+        return pii_engine.redact_payload(body, vault, active_profile)
+    return pii_engine._redact_unexpected(body, vault, active_profile, 0, 20, "$")
+
+
+def _redact_passthrough_reply(content: bytes, vault: Any, redact: bool, rehydrate: bool) -> bytes:
+    """A non-POST reply, with model-originated PII redacted and the caller's values restored.
+
+    JSON is walked (any root type); other UTF-8 text is scanned as text. Bytes that are
+    not UTF-8 (a binary file download) cannot be scanned and are returned as they are.
+    """
+    try:
+        parsed = orjson.loads(content)
+    except orjson.JSONDecodeError:
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            return content
+        if redact:
+            text = redact_model_originated_text(text, vault)
+        if rehydrate:
+            text = vault.rehydrate(text)
+        return text.encode("utf-8")
+    if redact:
+        parsed = _redact_model_originated_json_response(parsed, vault)
+    if rehydrate:
+        parsed = _rehydrate_decoded_leaves(parsed, vault)
+    return orjson.dumps(parsed)
 
 
 # httpx decodes the body it was sent (the proxy drops the client's Accept-Encoding, so
@@ -1965,7 +2398,7 @@ def _rehydrate_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, 
     return res_copy
 
 
-def _redact_model_originated_json_response(res_json: Dict[str, Any], vault: Any) -> Dict[str, Any]:
+def _redact_model_originated_json_response(res_json: Any, vault: Any) -> Any:
     """Redact model-originated PII anywhere in a non-streaming response.
 
     This deliberately does NOT mirror `_rehydrate_json_response`'s shape walk. Rehydration
@@ -1978,7 +2411,35 @@ def _redact_model_originated_json_response(res_json: Dict[str, Any], vault: Any)
 
     Runs before rehydration, the same order the SSE path uses; see
     `redact_model_originated_tree` for the structural-key exception list.
+
+    Any JSON root is scanned: an array reply (Gemini without alt=sse) or a bare string
+    used to be returned untouched.
     """
-    if not isinstance(res_json, dict):
-        return res_json
-    return redact_model_originated_tree(res_json, vault)
+    if isinstance(res_json, (dict, list, str)):
+        return redact_model_originated_tree(res_json, vault)
+    return res_json
+
+
+def _redact_v3_model_originated_tree(node: Any, vault: Any, depth: int = 0) -> Any:
+    """Response PII scan for the stateless (JSON-RPC) branch.
+
+    Like `_redact_model_originated_json_response`, except that the AES-GCM siblings the
+    stateless rehydrator restores from (`_ctx_hash_*`, `_shield_ctx`) are left intact:
+    rewriting ciphertext would only break the restore, it discloses nothing.
+    """
+    if depth > _MAX_TOOL_INPUT_DEPTH:
+        raise ValueError("Response nesting exceeds the scan bound")
+    if isinstance(node, dict):
+        out: Dict[str, Any] = {}
+        for key, value in node.items():
+            if isinstance(key, str) and (key.startswith("_ctx_hash_") or key == "_shield_ctx"):
+                out[key] = value
+            elif isinstance(value, (dict, list)):
+                out[key] = _redact_v3_model_originated_tree(value, vault, depth + 1)
+            else:
+                # A one-key view keeps the structural-key exceptions (id, model, ...).
+                out[key] = redact_model_originated_tree({key: value}, vault)[key]
+        return out
+    if isinstance(node, list):
+        return [_redact_v3_model_originated_tree(item, vault, depth + 1) for item in node]
+    return redact_model_originated_tree(node, vault)
