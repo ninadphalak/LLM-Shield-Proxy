@@ -84,7 +84,7 @@ from llm_shield_proxy.streaming.streaming import (
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 
 
 class AppState:
