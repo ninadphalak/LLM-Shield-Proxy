@@ -69,6 +69,8 @@ async def test_invalid_issuer_fails(monkeypatch):
 @pytest.mark.asyncio
 async def test_successful_validation(monkeypatch):
     req = MockRequest(headers={"Authorization": "Bearer my_token", "DPoP": "my_dpop"})
+    # Audience binding is mandatory: an empty ALLOWED_AUDIENCES now fails closed.
+    monkeypatch.setattr(settings, "ALLOWED_AUDIENCES", ["https://my-api"])
 
     # Mock jwt.get_unverified_header
     monkeypatch.setattr(jwt, "get_unverified_header", lambda x: {"jwk": {"kty": "RSA"}})
@@ -84,7 +86,7 @@ async def test_successful_validation(monkeypatch):
     def mock_decode(token, *args, **kwargs):
         if kwargs.get("options", {}).get("verify_signature") is False:
             if token == "my_token":
-                return {"iss": "https://my-issuer.com"}
+                return {"iss": "https://my-issuer.com", "aud": "https://my-api"}
             elif token == "my_dpop":
                 return {"htm": "POST", "htu": "https://my-api", "iat": time.time(), "jti": "test-jti-1"}
 

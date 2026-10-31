@@ -11,15 +11,16 @@ This mode removes the need for an external Redis dependency for supported maskin
 ## How It Works (Request and Response Flow)
 
 1. **Detection:** The engine identifies a configured sensitive value.
-2. **Encryption:** The proxy encrypts the value using the configured 32-byte `SHIELD_ENCRYPTION_KEY` and emits an `[ENC_v1_...]` token in the request payload.
+2. **Encryption:** The proxy encrypts the value using the configured 32-byte `SHIELD_ENCRYPTION_KEY` and emits an `[ENC_v2_...]` token in the request payload. The token is bound to the caller's virtual key and `X-Session-ID` through the AES-GCM associated data.
 3. **Egress:** The transformed request is forwarded to the upstream LLM.
-4. **Rehydration:** If the upstream model returns the intact token in its response, the proxy decrypts the token on the fly and replaces it with the original value before sending the response back to the client.
+4. **Rehydration:** If the upstream model returns the intact token in its response, the proxy decrypts the token on the fly and replaces it with the original value before sending the response back to the client. Only a token minted for the same virtual key and session decrypts; another tenant's token (or one from another session) is left as is. The Envoy ext_proc service has no caller identity, so its tokens are bound to the stream that minted them.
 
 *Note: Models are not guaranteed to echo tokens intact. A model might omit, split, or alter the token. Always test your specific model and prompt patterns before relying heavily on stateless rehydration.*
 
 ## Security Properties & Limitations
 
-- **Authentication:** AES-GCM authenticates both the ciphertext and the associated data. Modified or malformed tokens will fail decryption.
+- **Authentication:** AES-GCM authenticates both the ciphertext and the associated data (the virtual key id and session). Modified or malformed tokens, and tokens presented by another key or session, fail decryption.
+- **Token version:** `[ENC_v1_...]` tokens from earlier releases carried no binding and are no longer decrypted.
 - **Key Management:** Security heavily depends on key entropy, nonce uniqueness, secure key rotation, and strict access controls. 
 - **Rotation Risk:** The standard implementation uses a single active key. If you rotate the key, any older in-flight tokens (from delayed model responses) will fail to decrypt. Key rotation must be coordinated with request draining.
 - **Compliance:** While removing Redis eliminates a datastore attack surface, it does not automatically establish compliance or eliminate data liability.

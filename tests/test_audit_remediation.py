@@ -284,7 +284,7 @@ async def test_dpop_enforcement_tiers():
         mock_thumbprint.return_value = "thumbprint"
 
         # Test Lenient Mode (should pass and set warning)
-        tenant_policy_lenient = {"agent_identity_enforcer": "lenient", "allowed_issuers": ["https://issuer.com"]}
+        tenant_policy_lenient = {"agent_identity_enforcer": "lenient", "allowed_issuers": ["https://issuer.com"], "allowed_audiences": ["shield"]}
         await verify_agent_identity(request, tenant_policy=tenant_policy_lenient)
         assert request.state.dpop_warning == "DPoP htm mismatch"
 
@@ -295,7 +295,7 @@ async def test_dpop_enforcement_tiers():
             {"cnf": {"jkt": "thumbprint"}, "sub": "agent1"},
             {"htm": "GET", "htu": "https://example.com/api", "iat": time.time(), "jti": "456"}
         ]
-        tenant_policy_strict = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"]}
+        tenant_policy_strict = {"agent_identity_enforcer": "strict", "allowed_issuers": ["https://issuer.com"], "allowed_audiences": ["shield"]}
         with pytest.raises(HTTPException) as exc:
             await verify_agent_identity(request, tenant_policy=tenant_policy_strict)
         assert exc.value.status_code == 401

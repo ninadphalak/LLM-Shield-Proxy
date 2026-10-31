@@ -38,6 +38,13 @@ def teardown_function(_fn) -> None:
     app.dependency_overrides.pop(get_mcp_policy_resolver, None)
 
 
+@pytest.fixture(autouse=True)
+def _mcp_caller_is_authenticated(monkeypatch):
+    """/v1/mcp now authenticates against VALID_VIRTUAL_KEYS (it used to trust any
+    asserted key), so the "test-key" these tests send has to be a configured key."""
+    monkeypatch.setattr(settings, "_valid_virtual_keys_set", frozenset({"test-key"}))
+
+
 def test_tools_call_authorized_execution_scrubs_pii(httpx_mock):
     """An allowed tool call is forwarded upstream with arguments scrubbed, and the response is scrubbed too."""
     _override_policy({"allowed_tools": ["search_docs"], "blocked_tools": []})

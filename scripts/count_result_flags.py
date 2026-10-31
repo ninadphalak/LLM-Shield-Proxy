@@ -15,17 +15,28 @@ from typing import Any, Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROWS_FILE = REPO_ROOT / "website" / "src" / "data" / "submitted-rows.json"
 DISPUTE_LABEL = "result-dispute"
+# gh lists newest first and stops at the limit, so a full page means older disputes were cut
+# off. Anyone can open labelled disputes, so a full page is treated as a read failure.
+DISPUTE_LIST_LIMIT = 500
 
 
 def open_disputes(repo: str) -> list[dict[str, Any]]:
     finished = subprocess.run(  # nosec B603 B607 - fixed argument list, resolved via PATH
         ["gh", "issue", "list", "--repo", repo, "--label", DISPUTE_LABEL,
-         "--state", "open", "--limit", "500", "--json", "number,body,title"],
+         "--state", "open", "--limit", str(DISPUTE_LIST_LIMIT), "--json", "number,body,title"],
         capture_output=True, text=True, timeout=120, check=False,
     )
     if finished.returncode != 0:
         raise RuntimeError((finished.stderr or "").strip()[:300])
-    return json.loads(finished.stdout or "[]")
+    disputes = json.loads(finished.stdout or "[]")
+    if not isinstance(disputes, list):
+        raise ValueError("gh returned something other than a list")
+    if len(disputes) >= DISPUTE_LIST_LIMIT:
+        raise RuntimeError(
+            f"{len(disputes)} open disputes reached the list limit of {DISPUTE_LIST_LIMIT}, so the list may "
+            "be truncated; counts are left unchanged rather than clearing flags of disputes not seen"
+        )
+    return disputes
 
 
 def count_by_issue(disputes: list[dict[str, Any]]) -> dict[int, int]:

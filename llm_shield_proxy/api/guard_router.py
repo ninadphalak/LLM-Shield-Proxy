@@ -27,11 +27,15 @@ plaintext PII, which makes it an exfiltration oracle if exposed weakly. It is
 gated more strictly than the proxy path: a configured virtual key is mandatory,
 and the ``ENABLE_OPEN_BYOK_PASSTHROUGH`` prefix match the proxy honors is
 deliberately NOT honored here. Holding an arbitrary provider-shaped key must not
-grant the ability to drain a vault.
+grant the ability to drain a vault. After the key match every route runs the
+proxy's per-key policy layer (``enforce_key_policy``: role lookup with the
+FAIL_CLOSED 403, agent identity, rate limit), and bodies are read under
+``MAX_PAYLOAD_SIZE_BYTES``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -42,7 +46,7 @@ from fastapi.responses import JSONResponse, Response
 
 from llm_shield_proxy.core.config import settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
-from llm_shield_proxy.engines.vault import vault_store
+from llm_shield_proxy.engines.vault import Vault, vault_store
 from llm_shield_proxy.streaming.streaming import SSERehydrationBuffer
 
 logger = logging.getLogger(__name__)
@@ -59,6 +63,31 @@ MAX_TOTAL_TEXT_CHARS = 1_000_000
 # hostile; either way it must not become an unbounded server-side allocation.
 MAX_CARRY_CHARS = 64 * 1024
 
+# Output ceiling for one rehydrate call (all texts together, UTF-8 bytes). Short
+# placeholders can stand for long values, so the output is bounded on its own.
+MAX_REHYDRATED_OUTPUT_BYTES = 16 * 1024 * 1024
+
+
+def _rehydrate_bounded(vault: Any, texts: List[str], budget: int) -> List[str]:
+    """Rehydrates complete texts under one shared byte budget; ValueError past it."""
+    from llm_shield_proxy.engines.vault import Vault as _Vault
+
+    capped = getattr(type(vault), "rehydrate", None) is _Vault.rehydrate
+    restored: List[str] = []
+    for text in texts:
+        # retention_length=0: these are complete texts, so there is no chunk
+        # boundary to protect against.
+        if capped:
+            out = vault.rehydrate(text, retention_length=0, max_output_bytes=budget)
+        else:
+            out = vault.rehydrate(text, retention_length=0)
+        size = len(out.encode("utf-8"))
+        if size > budget:
+            raise ValueError("Rehydrated output exceeded maximum safe length")
+        budget -= size
+        restored.append(out)
+    return restored
+
 
 def _error(status: int, message: str, err_type: str) -> JSONResponse:
     """Builds an OpenAI-shaped error envelope, matching the proxy path."""
@@ -68,7 +97,7 @@ def _error(status: int, message: str, err_type: str) -> JSONResponse:
     )
 
 
-def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONResponse]]:
+def _authenticate(request: Request) -> Tuple[Optional[str], Optional[str], Optional[JSONResponse]]:
     """Resolves the caller to a virtual key id, fail-closed.
 
     Deliberately stricter than the proxy path in ``api/main.py``. The proxy may
@@ -79,7 +108,10 @@ def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONRespons
     treated as authentication.
 
     Returns:
-        ``(virtual_key_id, None)`` when authenticated, else ``(None, response)``.
+        ``(virtual_key_id, matched_key, None)`` when authenticated, else
+        ``(None, None, response)``. ``matched_key`` is the configured key the caller
+        presented (None under OVERRIDE_CLIENT_AUTH); it is only used for the policy
+        lookup and never logged.
     """
     headers = request.headers
     client_auth = headers.get("authorization", "").strip()
@@ -97,50 +129,109 @@ def _authenticate(request: Request) -> Tuple[Optional[str], Optional[JSONRespons
             if hmac.compare_digest(client_auth, vk):
                 from llm_shield_proxy.api.main import get_virtual_key_id
 
-                return get_virtual_key_id(vk), None
+                return get_virtual_key_id(vk), vk, None
 
     # Local evaluation escape hatch, same flag the compose examples set. It is an
     # explicit operator decision, unlike a key-shape heuristic.
     if settings.OVERRIDE_CLIENT_AUTH:
-        return "anonymous", None
+        return "anonymous", None, None
 
     from llm_shield_proxy.api.main import INVALID_PROXY_KEY_MESSAGE
 
-    return None, _error(401, INVALID_PROXY_KEY_MESSAGE, "authentication_error")
+    return None, None, _error(401, INVALID_PROXY_KEY_MESSAGE, "authentication_error")
+
+
+async def _authorize(request: Request) -> Tuple[Optional[str], Optional[Response]]:
+    """Authenticates the caller, then runs the same per-key policy layer as the proxy.
+
+    enforce_key_policy applies the role lookup (FAIL_CLOSED 403 for an unmapped key),
+    sets request_policy_ctx so the role's settings apply here, verifies the agent
+    identity (JWT/DPoP) and takes a rate-limit token.
+    """
+    virtual_key_id, matched_key, auth_error = _authenticate(request)
+    if auth_error is not None:
+        return None, auth_error
+    assert virtual_key_id is not None
+    request.state.virtual_key_id = virtual_key_id
+
+    # Imported here: api.main imports this module.
+    from llm_shield_proxy.api.main import enforce_key_policy
+
+    _, policy_error = await enforce_key_policy(request, virtual_key_id, matched_key)
+    if policy_error is not None:
+        return None, policy_error
+    return virtual_key_id, None
 
 
 async def _resolve_vault(
     session_id: Optional[str],
     virtual_key_id: str,
     masking_mode_header: Optional[str],
-) -> Any:
-    """Selects the vault for this session, mirroring the proxy path's selection."""
+    create: bool = True,
+) -> Tuple[Any, Optional[Response]]:
+    """Selects the vault for this session, mirroring the proxy path's selection.
+
+    ``create=False`` (rehydration, or a redact with nothing to redact) never
+    allocates a store slot: a missing session gets an empty, unstored vault, so
+    cheap requests cannot fill the store and evict other sessions.
+
+    Returns ``(vault, None)``, or ``(None, response)`` when the role does not allow
+    the requested masking mode.
+    """
     from llm_shield_proxy.engines.crypto_vault import StatelessCryptoVault
     from llm_shield_proxy.engines.masking import (
         HmacVault,
         MaskingMode,
+        MaskingModeNotAllowed,
         ScrubVault,
+        masking_mode_not_allowed_response,
         resolve_masking_mode,
     )
 
-    masking_mode = resolve_masking_mode(masking_mode_header)
+    try:
+        masking_mode = resolve_masking_mode(masking_mode_header)
+    except MaskingModeNotAllowed:
+        return None, masking_mode_not_allowed_response()
 
     if masking_mode == MaskingMode.STATELESS_CRYPTO:
-        return StatelessCryptoVault()
+        # Bound to the caller's key and session: another tenant's token does not decrypt.
+        return StatelessCryptoVault(virtual_key_id, session_id), None
     if masking_mode == MaskingMode.SCRUB:
-        return ScrubVault()
+        return ScrubVault(), None
     if masking_mode == MaskingMode.HMAC:
-        return HmacVault()
+        return HmacVault(), None
 
-    vault = await vault_store.get_vault_async(session_id, virtual_key_id)
+    vault = None
+    if create:
+        vault = await vault_store.get_vault_async(session_id, virtual_key_id)
+    else:
+        peek = getattr(vault_store, "get_existing_vault_async", None)
+        if peek is not None:
+            vault = await peek(session_id, virtual_key_id)
+        else:
+            vault = await vault_store.get_vault_async(session_id, virtual_key_id)
+    if vault is None:
+        vault = Vault(virtual_key_id=virtual_key_id)
     vault.synthetic = masking_mode != MaskingMode.STRUCTURAL_TAG
-    return vault
+    return vault, None
 
 
 async def _read_json(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
-    """Parses the request body as a JSON object."""
+    """Parses the request body as a JSON object, read under MAX_PAYLOAD_SIZE_BYTES."""
+    from fastapi import HTTPException
+
+    from llm_shield_proxy.api.main import read_body_with_limit
+
     try:
-        raw = await request.body()
+        raw = await read_body_with_limit(request)
+    except ValueError:
+        return None, _error(
+            413,
+            f"Request payload exceeds maximum allowed limit of {settings.MAX_PAYLOAD_SIZE_BYTES} bytes",
+            "invalid_request_error",
+        )
+    except HTTPException:
+        raise
     except Exception:
         return None, _error(400, "Could not read request body", "invalid_request_error")
 
@@ -192,7 +283,7 @@ async def guard_redact(
     caller must send a stable ``X-Session-ID`` for the lifetime of one LLM
     request/response pair.
     """
-    virtual_key_id, auth_error = _authenticate(request)
+    virtual_key_id, auth_error = await _authorize(request)
     if auth_error is not None:
         return auth_error
     assert virtual_key_id is not None
@@ -207,7 +298,11 @@ async def guard_redact(
         return text_error
     assert texts is not None
 
-    vault = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    vault, mode_error = await _resolve_vault(
+        x_session_id, virtual_key_id, x_shield_masking_mode, create=any(texts)
+    )
+    if mode_error is not None:
+        return mode_error
     profile = pii_engine.get_profile(virtual_key_id)
 
     try:
@@ -229,7 +324,7 @@ async def guard_rehydrate(
     x_shield_masking_mode: Optional[str] = Header(None, alias="X-Shield-Masking-Mode"),
 ) -> Response:
     """Restores plaintext for a batch of complete, non-streaming texts."""
-    virtual_key_id, auth_error = _authenticate(request)
+    virtual_key_id, auth_error = await _authorize(request)
     if auth_error is not None:
         return auth_error
     assert virtual_key_id is not None
@@ -244,12 +339,18 @@ async def guard_rehydrate(
         return text_error
     assert texts is not None
 
-    vault = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    vault, mode_error = await _resolve_vault(
+        x_session_id, virtual_key_id, x_shield_masking_mode, create=False
+    )
+    if mode_error is not None:
+        return mode_error
 
     try:
-        # retention_length=0: these are complete texts, so there is no chunk
-        # boundary to protect against.
-        restored = [vault.rehydrate(text, retention_length=0) for text in texts]
+        # Off the event loop: CPU-bound on large batches.
+        restored = await asyncio.to_thread(_rehydrate_bounded, vault, texts, MAX_REHYDRATED_OUTPUT_BYTES)
+    except ValueError:
+        logger.warning("guard.rehydrate refused a batch: output limit")
+        return _error(413, "Rehydration limit exceeded", "invalid_request_error")
     except Exception:
         logger.exception("guard.rehydrate failed")
         return _error(500, "Rehydration failed", "rehydration_error")
@@ -278,7 +379,7 @@ async def guard_rehydrate_stream(
         client immediately; ``carry`` must be sent back on the next delta. When
         ``final`` is true the carry is flushed and comes back empty.
     """
-    virtual_key_id, auth_error = _authenticate(request)
+    virtual_key_id, auth_error = await _authorize(request)
     if auth_error is not None:
         return auth_error
     assert virtual_key_id is not None
@@ -301,13 +402,17 @@ async def guard_rehydrate_stream(
             413, f"'text' exceeds {MAX_TOTAL_TEXT_CHARS} characters", "invalid_request_error"
         )
 
-    vault = await _resolve_vault(x_session_id, virtual_key_id, x_shield_masking_mode)
+    vault, mode_error = await _resolve_vault(
+        x_session_id, virtual_key_id, x_shield_masking_mode, create=False
+    )
+    if mode_error is not None:
+        return mode_error
 
-    buffer = SSERehydrationBuffer(vault)
+    buffer = SSERehydrationBuffer(vault, max_output_bytes=MAX_REHYDRATED_OUTPUT_BYTES)
     buffer.content_buffer = carry
 
     try:
-        emitted = buffer.process_delta_text(text, is_final=is_final)
+        emitted = await asyncio.to_thread(buffer.process_delta_text, text, is_final)
     except ValueError as ve:
         # Backpressure ceiling or output-bound breach. Both are fail-closed by
         # design; do not emit the buffer.
