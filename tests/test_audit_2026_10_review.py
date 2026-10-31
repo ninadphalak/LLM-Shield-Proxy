@@ -244,3 +244,49 @@ def test_ordinary_resource_is_allowed(uri):
 def test_decoded_form_is_what_the_pattern_must_match():
     assert _is_resource_forbidden("file:///%64ocs-private/x", {"allowed_resources": ["file:///docs*"]}) is False
     assert _is_resource_forbidden("file:///%64ocs/x", {"allowed_resources": ["file:///internal/*"]})
+
+
+# --- 4. egress URL finder: prose is not a URL; divergent forms still blocked ------------
+
+
+async def _public(host):
+    return ["93.184.216.34"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the scheme is https:) and that is all",
+        "listen on https:443 for TLS",
+        "ports (https:443, http:8080).",
+        "see https:\\/\\/api.example.com\\/v1\\/x in the JSON",
+        '{"url":"https:\\/\\/api.example.com\\/a"}',
+    ],
+)
+async def test_prose_and_json_escaped_public_urls_pass(text):
+    await scan_arguments({"q": text}, None, resolver=_public)
+
+
+def test_json_escaped_url_is_unescaped_not_dropped():
+    assert find_urls("https:\\/\\/api.example.com\\/x") == ["https://api.example.com/x"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http:\\/\\/169.254.169.254\\/latest",
+        "http:0/admin",
+        "http:2130706433/",
+        "http:/169.254.169.254/",
+        "http:169.254.169.254/",
+        "http:\\\\169.254.169.254/",
+        "http:///169.254.169.254/",
+        "http://a.example\\@169.254.169.254/",
+        "http://93.184.216.34\n@169.254.169.254/",
+    ],
+)
+async def test_divergent_and_internal_forms_stay_blocked(url):
+    with pytest.raises(EgressPolicyViolationError):
+        await scan_arguments({"url": url}, None, resolver=_public)
