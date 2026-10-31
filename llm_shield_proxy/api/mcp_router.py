@@ -43,7 +43,6 @@ from llm_shield_proxy.engines.masking import ScrubVault
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.vault import Vault
 from llm_shield_proxy.observability.audit import AuditLogger
-from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
 from llm_shield_proxy.security.egress_guard import (
     EgressPolicyViolationError,
     PinnedTarget,
@@ -52,6 +51,7 @@ from llm_shield_proxy.security.egress_guard import (
     resolve_pinned_target,
     scan_arguments,
 )
+from llm_shield_proxy.security.key_fingerprint import get_virtual_key_id
 from llm_shield_proxy.security.tool_rbac import BasePolicyResolver, build_policy_resolver
 
 logger = logging.getLogger(__name__)

@@ -78,7 +78,7 @@ def zeroize_crypto_material() -> None:
 # Token format version. v2 tokens are bound to the minting principal through the
 # AES-GCM associated data. v1 tokens carried no binding (any key holder could decrypt
 # any tenant's token), so they no longer match TOKEN_REGEX and are never decrypted.
-TOKEN_PREFIX = "[ENC_v2_"
+TOKEN_PREFIX = "[ENC_v2_"  # nosec B105 - token format marker, not a secret
 _AAD_LABEL = b"llm-shield/enc_v2"
 
 

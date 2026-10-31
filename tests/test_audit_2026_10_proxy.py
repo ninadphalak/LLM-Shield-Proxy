@@ -9,13 +9,12 @@ import asyncio
 import json
 import os
 
-import httpx
 import orjson
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from llm_shield_proxy.api.main import app, build_target_url, UnsafeUpstreamPath
+from llm_shield_proxy.api.main import UnsafeUpstreamPath, app, build_target_url
 from llm_shield_proxy.core.config import request_policy_ctx, settings
 from llm_shield_proxy.engines.pii_engine import pii_engine
 from llm_shield_proxy.engines.stateless_mutation_engine.ast_mutator import StatelessASTVisitor

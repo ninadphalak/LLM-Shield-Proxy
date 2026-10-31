@@ -61,6 +61,7 @@ from llm_shield_proxy.observability.telemetry_dispatcher import dispatch_telemet
 from llm_shield_proxy.observability.tracing import propagator, tracer
 from llm_shield_proxy.security.circuit_breaker import CircuitBreakerTrippedException, check_circuit_breaker
 from llm_shield_proxy.security.egress_guard import is_public_ip
+
 # Re-exported: existing importers of these names from main keep working.
 from llm_shield_proxy.security.key_fingerprint import (
     _get_vkid_from_hash as _get_vkid_from_hash,
