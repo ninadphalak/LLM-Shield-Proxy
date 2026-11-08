@@ -131,7 +131,7 @@ jobs:
           cd /tmp && /tmp/clean/bin/mcp-ssrf-check --url http://127.0.0.1:18080/mcp --fetch-tool fetch
 
       - name: Keep the distributions for the publish jobs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mcp-ssrf-check-dist
           path: dist/
