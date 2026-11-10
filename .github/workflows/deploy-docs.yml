@@ -40,7 +40,7 @@ jobs:
           npm run build
 
       - name: Deploy to Firebase Hosting
-        uses: w9jds/firebase-action@35d0fd9b92b2c66dcd13f1b72dacc588e89e7567 # master, pinned 2026-09-12
+        uses: w9jds/firebase-action@613446dcc285a5102059fe40cdf29a09767a6ff9 # master, pinned 2026-09-12
         with:
           args: deploy --only hosting
         env:
