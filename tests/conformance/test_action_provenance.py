@@ -18,7 +18,7 @@ RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 SUBMITTING = ROOT / "website" / "docs" / "conformance" / "submitting.md"
 
 ATTEST_V4_SHA = "1e69f48acb82d1966a394da916b4c1698aa569d6"
-UPLOAD_ARTIFACT_V7_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+UPLOAD_ARTIFACT_V7_SHA = "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
 
 ROOT_ACTION_INPUTS = {
     "target-base-url": (True, None),
