@@ -17,8 +17,15 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     checkout = next(step for step in steps if step.get("name") == "Check out selected proxy source")
     assert checkout["with"]["ref"] == "${{ inputs.source_ref || github.sha }}"
     install = next(step for step in steps if step.get("name") == "Build and install the selected source")
-    assert "pip install ." in install["run"]
-    assert "pii-leak-benchmark[validate]==0.2.1" in install["run"]
+    # The proxy (needs benchmark >= 0.5.0) and the 0.2.1 instrument cannot share one
+    # environment: pip reports ResolutionImpossible. The proxy gets its own venv.
+    lines = install["run"].splitlines()
+    proxy_install = next(line for line in lines if "pip install ." in line)
+    assert proxy_install.strip().startswith('"$RUNNER_TEMP/venv-proxy/bin/python" -m pip install .')
+    instrument_install = next(line for line in lines if "pii-leak-benchmark[validate]==0.2.1" in line)
+    assert instrument_install.strip().startswith("python -m pip install ")
+    assert "venv-proxy" not in instrument_install
+    assert 'PROXY_PYTHON=$RUNNER_TEMP/venv-proxy/bin/python" >> "$GITHUB_ENV"' in install["run"]
     identity = next(step for step in steps if step.get("id") == "source")
     assert "source-identity.json" in identity["run"]
     assert "source_commit" in identity["run"]
@@ -30,12 +37,15 @@ def test_source_reproduction_workflow_uses_selected_source_and_pinned_instrument
     assert operator["with"]["submission-section"] == "false"
     assert "source" not in operator["with"]
     assert operator["with"]["artifact-name"] == ""
-    assert operator["with"]["start-command"].startswith("python -m uvicorn ")
+    assert operator["with"]["start-command"].startswith("${{ env.PROXY_PYTHON }} -m uvicorn ")
     staged = next(step for step in steps if step.get("name") == "Stage operator reports with the response pair")
     assert "current.json summary.md" in staged["run"]
     assert "current.raw.json" not in staged["run"]
     record = next(step for step in steps if step.get("name") == "Record source and environment")
     assert "set -euo pipefail" in record["run"]
+    assert '"$PROXY_PYTHON" - <<\'PY\'' in record["run"]
+    startup = next(step for step in steps if step.get("id") == "startup")
+    assert '"$PROXY_PYTHON" -m uvicorn ' in startup["run"]
 
 
 def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs():
@@ -45,6 +55,8 @@ def test_source_reproduction_workflow_keeps_both_response_arms_and_safe_outputs(
     response = next(step for step in steps if step.get("id") == "response")
     assert "run_arm true source-response-on" in response["run"]
     assert "run_arm false source-response-off" in response["run"]
+    assert '"$PROXY_PYTHON" -m uvicorn ' in response["run"]
+    assert "python -m pii_leak_benchmark.v2_emitter" in response["run"]
     assert "--oracle midpoint --seed a1b2c3d4e5f60001" in response["run"]
     assert "--upstream-port 8799 --model capture" in response["run"]
     assert "--validate" in response["run"]

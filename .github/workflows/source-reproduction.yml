@@ -63,7 +63,18 @@ jobs:
 
       - name: Build and install the selected source
         id: build
-        run: python -m pip install . 'pii-leak-benchmark[validate]==0.2.1'
+        run: |
+          set -euo pipefail
+          # The proxy and the measuring instrument get separate environments. Proxy 1.6.8 and
+          # later require pii-leak-benchmark 0.5.0 or newer, while the response instrument stays
+          # at 0.2.1, the revision every published result was measured with; one environment
+          # cannot hold both. The proxy server never imports the benchmark (only its
+          # `conformance` command does), so the proxy's own copy does not change what is measured.
+          python -m venv "$RUNNER_TEMP/venv-proxy"
+          "$RUNNER_TEMP/venv-proxy/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv-proxy/bin/python" -m pip install .
+          echo "PROXY_PYTHON=$RUNNER_TEMP/venv-proxy/bin/python" >> "$GITHUB_ENV"
+          python -m pip install 'pii-leak-benchmark[validate]==0.2.1'
 
       - name: Record source and environment
         id: source
@@ -74,10 +85,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/source-reproduction"
           git rev-parse HEAD > "$RUNNER_TEMP/source-reproduction/source-commit.txt"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          python -m pip freeze > "$RUNNER_TEMP/source-reproduction/installed-packages.txt"
-          python --version > "$RUNNER_TEMP/source-reproduction/python-version.txt" 2>&1
+          {
+            echo '# proxy environment'
+            "$PROXY_PYTHON" -m pip freeze
+            echo '# response instrument environment'
+            python -m pip freeze
+          } > "$RUNNER_TEMP/source-reproduction/installed-packages.txt"
+          "$PROXY_PYTHON" --version > "$RUNNER_TEMP/source-reproduction/python-version.txt" 2>&1
           uname -a > "$RUNNER_TEMP/source-reproduction/runner.txt"
-          python - <<'PY'
+          "$PROXY_PYTHON" - <<'PY'
           import importlib.metadata
           import json
           import os
@@ -105,7 +121,7 @@ jobs:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         run: |
           set -euo pipefail
-          python -m uvicorn llm_shield_proxy.api.main:app \
+          "$PROXY_PYTHON" -m uvicorn llm_shield_proxy.api.main:app \
             --host 127.0.0.1 --port 8815 --no-access-log \
             > "$RUNNER_TEMP/startup-preflight.log" 2>&1 &
           proxy_pid=$!
@@ -131,7 +147,7 @@ jobs:
           ENABLE_RESPONSE_PII_REDACTION: 'true'
         with:
           target-base-url: http://127.0.0.1:8815/v1
-          start-command: python -m uvicorn llm_shield_proxy.api.main:app --host 127.0.0.1 --port 8815 --no-access-log
+          start-command: ${{ env.PROXY_PYTHON }} -m uvicorn llm_shield_proxy.api.main:app --host 127.0.0.1 --port 8815 --no-access-log
           upstream-env: UPSTREAM_BASE_URL
           target-model: capture
           target-version: ${{ steps.source.outputs.sha }}
@@ -170,7 +186,7 @@ jobs:
             local enabled="$1"
             local label="$2"
             ENABLE_RESPONSE_PII_REDACTION="$enabled" \
-              python -m uvicorn llm_shield_proxy.api.main:app \
+              "$PROXY_PYTHON" -m uvicorn llm_shield_proxy.api.main:app \
                 --host 127.0.0.1 --port 8815 --no-access-log \
                 > "$RUNNER_TEMP/$label.log" 2>&1 &
             proxy_pid=$!
