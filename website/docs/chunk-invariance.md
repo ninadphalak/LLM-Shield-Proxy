@@ -41,6 +41,9 @@ pip install chunk-invariance     # Python, standard library only
 npm install chunk-invariance     # TypeScript: Vitest, Jest or node:test
 ```
 
+How this library relates to the leak benchmark, the specification and the proxy:
+[How the pieces fit](proxy.md#how-the-pieces-fit).
+
 ## What it catches
 
 - A filter that checks each chunk alone, so a value cut in two matches neither half.

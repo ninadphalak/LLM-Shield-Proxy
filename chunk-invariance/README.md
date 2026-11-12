@@ -36,6 +36,9 @@ pip install "chunk-invariance[tokens]"       # optional: real token boundaries (
 pip install "chunk-invariance[mcp]"          # optional MCP server for AI assistants
 ```
 
+This package installs on its own and does not install the proxy or the benchmark. How it relates
+to the specification, `pii-leak-benchmark` and LLM-Shield-Proxy: [How the pieces fit](https://github.com/ninadphalak/LLM-Shield-Proxy#how-the-pieces-fit).
+
 ## What it catches
 
 - A filter that evaluates each chunk alone, so a value cut across two chunks matches neither half.

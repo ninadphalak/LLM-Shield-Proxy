@@ -9,6 +9,9 @@ These tests verify how a streaming privacy gateway handles known test values. Th
 
 The lab is Apache-2.0 licensed. The specification, vectors, runner, report schema, and LLM-Shield-Proxy tools are fully inspectable and reusable without a license fee, account, hosted service, or paid edition.
 
+How the benchmark relates to the specification, `chunk-invariance` and the proxy:
+[How the pieces fit](../proxy.md#how-the-pieces-fit).
+
 ## Six Scored Domains
 
 | Domain | Question Answered |

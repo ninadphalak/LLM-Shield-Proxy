@@ -176,6 +176,33 @@ The proxy is one of four packages here. The other three are standalone and do no
    filtering it whole. Python on PyPI, and TypeScript on [npm](https://www.npmjs.com/package/chunk-invariance)
    ([`chunk-invariance-js/`](chunk-invariance-js/)).
 
+## How the pieces fit
+
+Three of the things in this repository are about one question: does a streaming filter let
+personal data through when a value arrives in pieces? Each answers it for a different reader.
+
+| | What it is | Who uses it | Analogy |
+|---|---|---|---|
+| [The specification](website/docs/conformance/specification-v1.md) | A written rulebook, with JSON schemas for the reports. No runtime code. | Anyone defining what "safe" means for streamed redaction | The safety standard |
+| [`pii-leak-benchmark`](pii-leak-benchmark/) | An outside tester. It talks to a running gateway over HTTP, plays both the client and the model provider, and scores what leaked. | Auditors, researchers, and teams checking a gateway they run | The crash-test lab |
+| [`chunk-invariance`](chunk-invariance/) | A test library a developer adds to their own test suite: the output must not depend on how the stream is cut | Developers building streaming filters | The gauge on the factory line |
+| LLM-Shield-Proxy | A working privacy gateway | Someone who needs a filter, or a gateway to compare against | A car built to the standard |
+
+The standard says what a safe car is. The crash-test lab tests finished cars from outside. The
+gauge checks parts while they are being made. The proxy is one car, and it goes through the
+same lab as any other: release [1.7.1](https://github.com/ninadphalak/LLM-Shield-Proxy/releases/tag/v1.7.1)
+fixed two streamed-response redaction cases in the proxy that new stream-shape tests exposed.
+
+`pii-leak-benchmark` and `chunk-invariance` install on their own and do not install the proxy:
+
+```bash
+pip install pii-leak-benchmark
+pip install chunk-invariance
+pip install llm-shield-proxy      # also installs pii-leak-benchmark, which it uses
+```
+
+`mcp-ssrf-check` is separate from this chain: it checks MCP servers, not streamed redaction.
+
 ## The benchmark: does a gateway leak in streams?
 
 ### Measure a gateway
