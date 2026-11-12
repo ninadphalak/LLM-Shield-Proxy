@@ -32,7 +32,7 @@ class ChunkInvarianceError(AssertionError):
             f"  split:    {self.chunks!r} (cut at {', '.join(map(str, cuts)) or 'nothing: one chunk'})\n"
             f"  whole:    {expected!r}\n"
             f"  streamed: {actual!r}\n"
-            f"  split #{splits_tried} in the order tried; generated splits run fewest parts first"
+            f"  split #{splits_tried} in the order tried; the whole input and single cuts run first"
         )
 
 
@@ -70,9 +70,40 @@ def all_splits(text: Text, max_parts: Optional[int] = None) -> Iterator[List[Tex
             yield _split_at(text, cuts)
 
 
+# Named split sets. "default" is the whole input, every single cut, then the stream shapes
+# real providers produce (see ``chunk_invariance.streams``).
+NAMED_SPLITS = ("default", "all-two-part", "all", "tokens", "punctuation", "fixed-size", "n-part", "streams")
+
+
+def _default_splits(text: Text) -> Iterator[List[Text]]:
+    from .streams import stream_splits
+
+    seen = set()
+    for chunks in all_splits(text, 2):
+        seen.add(tuple(_cut_points(chunks)))
+        yield chunks
+    for chunks in stream_splits(text):
+        key = tuple(_cut_points(chunks))
+        if key not in seen:
+            seen.add(key)
+            yield chunks
+
+
 def _resolve_splits(text: Text, splits: Splits) -> Iterable[Sequence[Text]]:
+    if splits == "default":
+        return _default_splits(text)
     if splits == "all-two-part":
         return all_splits(text, 2)
+    if splits in ("tokens", "punctuation", "fixed-size", "n-part", "streams"):
+        from . import streams
+
+        return {
+            "tokens": streams.token_splits,
+            "punctuation": streams.punctuation_splits,
+            "fixed-size": streams.fixed_size_splits,
+            "n-part": streams.n_part_splits,
+            "streams": streams.stream_splits,
+        }[splits](text)
     if splits == "all":
         if len(text) > ALL_SPLITS_MAX_LENGTH:
             raise ValueError(
@@ -81,11 +112,13 @@ def _resolve_splits(text: Text, splits: Splits) -> Iterable[Sequence[Text]]:
             )
         return all_splits(text)
     if isinstance(splits, bool):
-        raise TypeError("splits must be 'all-two-part', 'all', an int, or an iterable of chunk lists")
+        raise TypeError("splits must be a named set (" + ", ".join(NAMED_SPLITS) + "), an int, or chunk lists")
     if isinstance(splits, int):
         return all_splits(text, splits)
     if isinstance(splits, (str, bytes)):
-        raise ValueError(f"unknown splits value {splits!r}; use 'all-two-part', 'all', an int, or chunk lists")
+        raise ValueError(
+            f"unknown splits value {splits!r}; use one of " + ", ".join(map(repr, NAMED_SPLITS)) + ", an int, or chunk lists"
+        )
     return splits
 
 
@@ -98,17 +131,26 @@ def assert_chunk_invariant(
     whole_filter: WholeFilter,
     text: Text,
     *,
-    splits: Splits = "all-two-part",
+    splits: Splits = "default",
 ) -> int:
     """Assert that streaming ``text`` in any of ``splits`` gives what filtering it whole gives.
 
     ``stream_filter`` takes an iterable of input chunks and returns or yields output chunks; it is
     called once per split, so it must start from fresh state each call. ``whole_filter`` takes the
-    whole input. ``splits`` is ``"all-two-part"`` (the default: the input whole, then every single
-    cut), ``"all"`` (every split, for short inputs), an int (every split into at most that many
-    parts), or an iterable of explicit chunk lists, which must each join back to ``text``.
+    whole input. ``splits`` is one of:
 
-    Raises ``ChunkInvarianceError`` on the first split, fewest parts first, whose concatenated
+    - ``"default"``: the input whole, every single cut, then the stream shapes below;
+    - ``"all-two-part"``: the input whole and every single cut;
+    - ``"tokens"``: a token stream, one token per chunk and in batches of 2, 3 and 4;
+    - ``"punctuation"``: chunks that end right after a ``.``, ``?`` or ``!`` inside a value;
+    - ``"fixed-size"``: chunks of 1, 2, 3, 4 and 8 characters;
+    - ``"n-part"``: seeded random splits into exactly 3, 4, 6 and 8 parts;
+    - ``"streams"``: tokens, punctuation, fixed-size and n-part together;
+    - ``"all"``: every split, for inputs up to 16 characters;
+    - an int: every split into at most that many parts;
+    - an iterable of explicit chunk lists, which must each join back to ``text``.
+
+    Raises ``ChunkInvarianceError`` on the first split, in the order tried, whose concatenated
     output differs. Returns the number of splits checked.
     """
     expected = whole_filter(text)
@@ -129,7 +171,7 @@ async def assert_chunk_invariant_async(
     whole_filter: Callable[[Any], Any],
     text: Text,
     *,
-    splits: Splits = "all-two-part",
+    splits: Splits = "default",
 ) -> int:
     """``assert_chunk_invariant`` for an async generator filter, for use inside an async test.
 

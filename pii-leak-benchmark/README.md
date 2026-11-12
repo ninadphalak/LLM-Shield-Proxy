@@ -23,7 +23,7 @@ a negative control, and writes a job summary with results for each tested data t
 It saves reports even when the check fails. An optional baseline shows new failures and fixes.
 
 ```yaml
-- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.6.0
+- uses: ninadphalak/LLM-Shield-Proxy@benchmark-v0.7.0
   with:
     target-base-url: http://127.0.0.1:4000/v1
     start-command: ./scripts/start-test-gateway.sh
@@ -43,7 +43,7 @@ pii-leak-benchmark ci --target-base-url http://127.0.0.1:4000/v1 --out pii-check
 ```
 
 To pin the source rather than the package, install
-`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.6.0#subdirectory=pii-leak-benchmark`.
+`git+https://github.com/ninadphalak/LLM-Shield-Proxy@benchmark-v0.7.0#subdirectory=pii-leak-benchmark`.
 
 The local command expects upstream routing to `http://127.0.0.1:8765/v1`. It writes a Markdown
 summary, raw measurements and a versioned operator report. These smoke checks are separate
@@ -136,6 +136,17 @@ fragment on what it looks like it is a weak one: `--exhaustive-splits` cuts at e
 offset and fails the case if any split leaks. Measured against a live Presidio, it moved
 `LeakRate(adversarial)` from 0.50 to 1.00. Use it before quoting a `DeltaFrag` from any
 context-scored or validating detector.
+
+**Stream shapes are a separate check.** Providers rarely cut a value once: many send about one
+token per event, so a value arrives in many small pieces, and a piece can end right after a `.`
+inside it (`user@example.`). `pii-leak-benchmark-stream-shapes` (or
+`python -m pii_leak_benchmark.stream_shapes`) sends each adversarial case's value as a token
+stream (one token per event, and 2, 3 and 4 per event), cut right after each `.`, `?` or `!`
+inside it, one character per event, and in seeded random 3, 4, 6 and 8 part splits, and reports
+which shapes let the whole value reach the client. It takes the same `--only`, `--seed`,
+`--gateway-url` and `--upstream-port` options and writes its own JSON under its own schema id.
+It never changes the v2 report, its rates or its `inspector_sha256`. It does not yet place two
+different values in one reply, so it does not test two detectors firing on the same stream.
 
 **Partial emission is scored separately, as its own tier.** `LeakRate` counts a case as
 leaked only when the complete injected value can be recovered from the response. A gateway

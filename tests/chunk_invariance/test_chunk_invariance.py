@@ -109,8 +109,9 @@ def test_per_chunk_gives_every_stream_fresh_state():
         return chunk
 
     assert_chunk_invariant(per_chunk(process), lambda t: t, "abc")
-    # One chunk, then two chunks twice: counts restart at 1 for each stream.
-    assert seen == [1, 1, 2, 1, 2]
+    # One chunk, two chunks twice, then one character per chunk: counts restart at 1 for
+    # each stream.
+    assert seen == [1, 1, 2, 1, 2, 1, 2, 3]
 
 
 def test_bytes_inputs_are_joined_as_bytes():
@@ -118,7 +119,8 @@ def test_bytes_inputs_are_joined_as_bytes():
         for chunk in chunks:
             yield chunk.upper()
 
-    assert assert_chunk_invariant(upper_stream, bytes.upper, b"abc") == 3
+    # Whole, the two single cuts, and one byte per chunk (the stream shapes, deduplicated).
+    assert assert_chunk_invariant(upper_stream, bytes.upper, b"abc") == 4
 
 
 async def _async_design_a(chunks):
@@ -151,7 +153,8 @@ def test_async_assertion_runs_inside_an_event_loop():
         return redact(text)
 
     async def scenario():
-        assert await assert_chunk_invariant_async(_async_hold_back, whole, TEXT) == len(TEXT)
+        assert await assert_chunk_invariant_async(_async_hold_back, whole, TEXT, splits="all-two-part") == len(TEXT)
+        assert await assert_chunk_invariant_async(_async_hold_back, whole, TEXT) > len(TEXT)
         with pytest.raises(ChunkInvarianceError):
             await assert_chunk_invariant_async(_async_design_a, redact, TEXT)
         with pytest.raises(RuntimeError, match="assert_chunk_invariant_async"):

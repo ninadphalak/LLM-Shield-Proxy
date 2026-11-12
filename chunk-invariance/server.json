@@ -3,7 +3,7 @@
   "name": "io.github.ninadphalak/chunk-invariance",
   "title": "chunk-invariance",
   "description": "Checks whether your streaming redactor leaks a secret split across chunks; writes a pytest for it.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "repository": {
     "url": "https://github.com/ninadphalak/LLM-Shield-Proxy",
     "source": "github",
@@ -15,13 +15,13 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "chunk-invariance",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
           "type": "named",
           "name": "--from",
-          "value": "chunk-invariance[mcp]==0.2.0",
+          "value": "chunk-invariance[mcp]==0.3.0",
           "description": "The MCP server needs the mcp extra; the core package has no dependencies."
         },
         {
