@@ -208,6 +208,7 @@ def test_benchmark_declares_httpx_and_nothing_else():
     assert scripts == {
         "pii-leak-benchmark": "pii_leak_benchmark.cli:main",
         "pii-leak-benchmark-v2": "pii_leak_benchmark.v2_cli:main",
+        "pii-leak-benchmark-stream-shapes": "pii_leak_benchmark.stream_shapes:main",
     }
 
 

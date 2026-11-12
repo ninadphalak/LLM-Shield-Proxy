@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chunk-invariance"
-version = "0.2.0"
+version = "0.3.0"
 description = "Test that a streaming redactor or LLM guardrail cannot leak a secret split across chunks."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -47,6 +47,9 @@ dependencies = []
 
 [project.optional-dependencies]
 hypothesis = ["hypothesis>=6"]
+# Real byte-pair token boundaries for the token-stream splits. Without it a small word and
+# punctuation tokenizer is used; only chunk_invariance.streams imports it.
+tokens = ["tiktoken>=0.7"]
 # The MCP server for AI coding assistants. Only chunk_invariance.mcp_server imports it; the SDK needs Python 3.10+.
 mcp = ["mcp>=2.3.0,<3; python_version >= '3.10'"]
 

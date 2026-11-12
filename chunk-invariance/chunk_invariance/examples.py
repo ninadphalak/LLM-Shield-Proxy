@@ -8,6 +8,9 @@ The pattern is a fixed-length key, ``sk-`` plus eight letters or digits, replace
 - ``design_a`` redacts each chunk on its own. A key cut in two is never seen whole.
 - ``design_b`` prepends a fixed carryover from the previous chunk and redacts the join. The match
   fires, but the start of the key already left with the previous chunk.
+- ``lookahead_one`` holds one chunk back and checks it together with the next. Every single
+  cut passes, because two chunks always hold the whole key. A key spread over three or more
+  chunks, as a token stream delivers it, leaks.
 
 Run ``assert_chunk_invariant(design_a, redact, "use sk-AbCd1234 now")`` to see the failure.
 """
@@ -73,3 +76,21 @@ def design_b(chunks: Iterable[str], carry: int = KEY_LENGTH - 1) -> Iterator[str
         joined = previous + chunk
         yield redact(joined)[len(previous) :]
         previous = joined[-carry:] if carry else ""
+
+
+def lookahead_one(chunks: Iterable[str]) -> Iterator[str]:
+    """Leaks only across three or more chunks: holds one chunk and checks it with the next.
+
+    Passes every two-part split. Run it with ``splits="tokens"`` or the default set to see a
+    key that arrives in many small pieces get through.
+    """
+    pending = ""
+    for chunk in chunks:
+        joined = pending + chunk
+        if KEY.search(joined):
+            yield redact(joined)
+            pending = ""
+        else:
+            yield pending
+            pending = chunk
+    yield redact(pending)

@@ -39,6 +39,13 @@ _SSE_STRUCTURAL_KEYS = frozenset(
 # The ordered channels the retention buffer owns.
 _BUFFERED_CHANNEL_KEYS = frozenset({"content", "text", "arguments"})
 
+# Chat-delta fields that carry a model's reasoning as streamed prose. They are ordered text
+# exactly like `content`, so each gets its own retention window: scanned only per event,
+# a value delivered one token per event left all but its last pieces with the client.
+# Not added to `_BUFFERED_CHANNEL_KEYS`, so the sibling sweep still scans them wherever
+# they appear in a shape this routing does not cover.
+_REASONING_DELTA_KEYS = ("reasoning_content", "reasoning")
+
 # How many retention windows one stream may open.
 MAX_STREAM_WINDOWS = 256
 
@@ -518,13 +525,50 @@ class SSERehydrationBuffer:
         return self.vault.rehydrate(text, retention_length=retention_length)
 
     def _response_retention_length(self, text: str) -> int:
-        """Characters to hold back so a detectable value cannot straddle the boundary."""
+        """Characters to hold back so a detectable value cannot straddle the boundary.
+
+        The last ``RESPONSE_PII_SCAN_WINDOW`` characters are held, not just the last word.
+        Holding only the text after the last space let a value that contains spaces (a
+        card or IBAN printed in groups) leave one group at a time whenever chunks ended at
+        those spaces, as a one-token-per-event stream does: each group passed the scan
+        alone. The cut is then moved forward to the end of the word it falls in, so a word
+        is never split, and back to the start of any detected value it would cut, so a
+        complete value is always scanned in one piece. A value is protected when it is at
+        most the window long; that is the documented bound. The hold never exceeds twice the
+        window, so a match that keeps growing cannot hold the stream back.
+        """
         if not text:
             return 0
-        window = min(len(text), settings.RESPONSE_PII_SCAN_WINDOW)
-        tail = text[len(text) - window:]
-        boundary = tail.rfind(" ")
-        return window - boundary - 1 if boundary != -1 else window
+        window = settings.RESPONSE_PII_SCAN_WINDOW
+        if len(text) <= window:
+            return len(text)
+        cut = len(text) - window
+        if not text[cut - 1].isspace() and not text[cut].isspace():
+            for index in range(cut, len(text)):
+                if text[index].isspace():
+                    cut = index
+                    break
+        from llm_shield_proxy.engines.pii_engine import pii_engine
+
+        try:
+            spans = pii_engine.detect_spans(text)
+        except Exception:  # noqa: BLE001
+            # The prefix scan that follows fails the same way and logs it; holding the
+            # window here keeps this path no worse than that one.
+            return len(text) - cut
+        # A value up to the window long that crosses the cut starts no earlier than this.
+        # Never moving the cut back past it keeps the hold bounded: an open-ended match (a
+        # digit run or encoded blob still growing) would otherwise pin the cut at its start,
+        # and the buffer, and the rescan of it on every event, would grow with the stream.
+        floor = max(0, len(text) - 2 * window)
+        moved = True
+        while moved:
+            moved = False
+            for start, end, _entity_type, _matched in spans:
+                if floor <= start < cut < end:
+                    cut = start
+                    moved = True
+        return len(text) - cut
 
     def _redact_model_originated(self, text: str) -> str:
         """Delegate to the module-level scanner so the non-streaming path can reuse it."""
@@ -591,12 +635,17 @@ class SSERehydrationBuffer:
             if len(self.content_buffer) > 64 * 1024:
                 raise StreamCapacityExceeded("SSE buffer exceeded maximum safety threshold (backpressure protection)")
 
-            # In a fast-path, empty token_to_original can just skip rehydrate
+            # Fast path: with nothing to restore and no response scan, there is no work.
+            # The response scan must still run when the vault is empty: a request that
+            # carried no PII leaves the vault empty, and skipping here forwarded every
+            # model-originated value except the held-back tail.
             token_to_original = getattr(self.vault, "token_to_original", None)
+            response_hold = 0
             if (
                 token_to_original is not None
                 and not token_to_original
                 and type(self.vault).__name__ != "StatelessCryptoVault"
+                and not settings.ENABLE_RESPONSE_PII_REDACTION
             ):
                 pass
             else:
@@ -608,9 +657,10 @@ class SSERehydrationBuffer:
                     # emit boundary. The vault bound covers only this session's own
                     # tokens, and a value the model invented is not among them.
                     retention_length = max(
-                        retention_length,
-                        self._response_retention_length(self.content_buffer),
+                        retention_length, self._response_retention_length(self.content_buffer)
                     )
+                    # Everything from here on is unscanned and must stay held below.
+                    response_hold = retention_length
                     scanned_to = len(self.content_buffer) - retention_length
                     if scanned_to > 0:
                         self.content_buffer = (
@@ -625,13 +675,15 @@ class SSERehydrationBuffer:
 
             # Recalculate retention in case replacements modified the tail
             retention_length = self._calculate_retention_length(self.content_buffer)
-            if settings.ENABLE_RESPONSE_PII_REDACTION and not is_final:
-                # Redaction rewrote the buffer, so the tail bound has to be recomputed
-                # against the new text or an unscanned suffix is emitted.
-                retention_length = max(
-                    retention_length,
-                    self._response_retention_length(self.content_buffer),
-                )
+            if settings.ENABLE_RESPONSE_PII_REDACTION:
+                # Redaction rewrote only the scanned prefix; the held tail is unchanged, so
+                # the same hold applies. Never shorter, or an unscanned suffix is emitted.
+                # This holds on the final call too: a caller that passes its last text with
+                # `is_final=True` (the ext_proc body hook does) gets the tail scanned by the
+                # end-of-stream branch below instead of emitted here unscanned.
+                if not response_hold:
+                    response_hold = self._response_retention_length(self.content_buffer)
+                retention_length = max(retention_length, response_hold)
 
             if retention_length == 0 or len(self.content_buffer) <= retention_length:
                 if retention_length == 0:
@@ -690,7 +742,7 @@ async def rehydrate_sse_stream(
         def _channel_vault(key: _WindowKey) -> Any:
             """The vault a channel restores against: escaped for JSON, raw for prose."""
             nonlocal json_vault
-            if key[1] is None:
+            if key[1] is None or isinstance(key[1], str):
                 return vault
             if json_vault is None:
                 json_vault = _JsonStringVaultView(vault)
@@ -720,7 +772,7 @@ async def rehydrate_sse_stream(
 
         def _tool_windows_of(choice_index: int) -> tuple:
             """This choice's tool-call windows, in tool-call index order."""
-            return tuple(sorted(k for k in buffers if k[0] == choice_index and k[1] is not None))
+            return tuple(sorted(k for k in buffers if k[0] == choice_index and isinstance(k[1], int)))
 
         def _flush_tool_windows_into(
             delta: dict, choice_index: int
@@ -743,12 +795,23 @@ async def rehydrate_sse_stream(
             windows are normally already empty here, having been flushed into their
             finishing event; this is the net for a stream that stopped without one.
             """
-            # `None` sorts before any int so a choice's content precedes its tool calls.
-            for key in sorted(buffers, key=lambda k: (k[0], -1 if k[1] is None else k[1])):
+            # Per choice: reasoning first, then content, then tool calls in ordinal order.
+            def _order(k: _WindowKey) -> tuple:
+                if isinstance(k[1], str):
+                    return (k[0], 0, 0, k[1])
+                if k[1] is None:
+                    return (k[0], 1, 0, "")
+                return (k[0], 2, k[1], "")
+
+            for key in sorted(buffers, key=_order):
                 remaining = _flush_window(key)
                 if not remaining:
                     continue
                 choice_index, tool_index = key
+                if isinstance(tool_index, str):
+                    flush_obj = {"choices": [{"index": choice_index, "delta": {tool_index: remaining}}]}
+                    yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
+                    continue
                 if tool_index is None and choice_index in completion_choices:
                     flush_obj: dict = {"choices": [{"index": choice_index, "text": remaining}]}
                     yield f"data: {json.dumps(flush_obj).decode('utf-8')}\n\n".encode()
@@ -988,6 +1051,15 @@ async def rehydrate_sse_stream(
                                             content_window = _buffer_for((choice_index, None))
                                             delta["content"] = content_window.process_delta_text(delta["content"])
                                             sibling_buffer = content_window
+                                        # Streamed reasoning is ordered prose too: one window per field.
+                                        for reasoning_key in _REASONING_DELTA_KEYS:
+                                            if isinstance(delta.get(reasoning_key), str):
+                                                scanned_line = True
+                                                reasoning_window = _buffer_for((choice_index, reasoning_key))
+                                                delta[reasoning_key] = reasoning_window.process_delta_text(
+                                                    delta[reasoning_key]
+                                                )
+                                                sibling_buffer = sibling_buffer or reasoning_window
                                         # Tool arguments are model-generated text on their own ordered channel.
                                         for tool_index, function in _tool_argument_fragments(delta):
                                             scanned_line = True
@@ -1049,6 +1121,15 @@ async def rehydrate_sse_stream(
                                             delta["partial_json"]
                                         )
                                         line = _tool_call_line(tool_ordinal, restored)
+                                    elif isinstance(delta.get("thinking"), str):
+                                        # Streamed thinking is ordered prose: its own window, so a
+                                        # value sent one token per event is scanned whole. The event
+                                        # keeps its shape; the held tail leaves at the block's stop.
+                                        scanned_line = True
+                                        delta["thinking"] = _buffer_for((0, "thinking")).process_delta_text(
+                                            delta["thinking"]
+                                        )
+                                        line = f"data: {json.dumps(data_obj).decode('utf-8')}"
                                     else:
                                         pass  # Skip deltas carrying neither text nor tool input
                                 # 3. Anthropic Content Block Start / Generic text delta
@@ -1082,6 +1163,14 @@ async def rehydrate_sse_stream(
                                 elif data_obj.get("type") == "content_block_stop":
                                     # This block's arguments are complete here.
                                     stopped = anthropic_tool_ordinals.get(_entry_index(data_obj))
+                                    thinking_tail = _flush_window((0, "thinking"))
+                                    if thinking_tail:
+                                        thinking_event = {
+                                            "type": "content_block_delta",
+                                            "index": data_obj.get("index", 0),
+                                            "delta": {"type": "thinking_delta", "thinking": thinking_tail},
+                                        }
+                                        pre_lines.append(f"data: {json.dumps(thinking_event).decode('utf-8')}")
                                     if stopped is not None:
                                         stopped_tail = _flush_window((0, stopped))
                                         if stopped_tail:
@@ -1109,8 +1198,10 @@ async def rehydrate_sse_stream(
                                                 "not scanned"
                                             )
                                     if sweep_buffer is not None:
+                                        # With the per-path tails, so a value this shape carries
+                                        # across events is caught at the join, not only whole.
                                         swept = _redact_sibling_strings(
-                                            data_obj, sweep_buffer, skip_content=False
+                                            data_obj, sweep_buffer, skip_content=False, tails=sibling_tails
                                         )
                                         if swept != data_obj:
                                             line = f"data: {json.dumps(swept).decode('utf-8')}"

@@ -32,6 +32,7 @@ chunk_invariance.core.ChunkInvarianceError: stream filter is not chunk-invariant
 ```bash
 pip install chunk-invariance
 pip install "chunk-invariance[hypothesis]"   # optional Hypothesis strategies
+pip install "chunk-invariance[tokens]"       # optional: real token boundaries (tiktoken)
 pip install "chunk-invariance[mcp]"          # optional MCP server for AI assistants
 ```
 
@@ -43,8 +44,37 @@ pip install "chunk-invariance[mcp]"          # optional MCP server for AI assist
 - A hold-back that is shorter than the pattern, a missing end-of-stream flush, and output that is
   corrupted rather than leaked (any difference from the whole-input output fails).
 
-`chunk_invariance.examples` has one correct filter (`hold_back`) and the two wrong designs
-(`design_a`, `design_b`) for the same pattern, as a worked comparison.
+- A filter that is right whenever a value spans two chunks but wrong when it spans many, as a
+  one-token-per-event stream delivers it, or when a chunk ends right after a `.`, `?` or `!`
+  inside the value.
+
+`chunk_invariance.examples` has one correct filter (`hold_back`) and three wrong designs for the
+same pattern, as a worked comparison: `design_a`, `design_b`, and `lookahead_one`, which passes
+every single cut and fails a token stream.
+
+## Stream shapes
+
+Real providers do not cut a reply once. Many send about one tokenizer token per event, so a
+value arrives in many small pieces (`555`, `.`, `867`, `.`, `530`, `9`), and a piece often ends
+right after a mark inside the value. Others batch a few tokens per event. The default check
+therefore runs, after the whole input and every single cut:
+
+| Named set | Splits |
+|---|---|
+| `"tokens"` | one token per chunk, then 2, 3 and 4 tokens per chunk |
+| `"punctuation"` | for each `.`, `?` or `!` followed by a non-space character: a chunk that ends right after it, alone and inside the token stream |
+| `"fixed-size"` | chunks of 1, 2, 3, 4 and 8 characters (1 is one character per chunk) |
+| `"n-part"` | seeded random splits into exactly 3, 4, 6 and 8 parts |
+| `"streams"` | all four, duplicates removed |
+
+Pass any of them as `splits=` to run only that set, or `splits="all-two-part"` for the previous
+default (the whole input and every single cut). The extra shapes add a few dozen splits per
+input, so the default stays fast. The same generators are importable (`token_splits`,
+`punctuation_splits`, `fixed_size_splits`, `n_part_splits`, `stream_splits`, `tokenize`).
+
+Token boundaries come from tiktoken (`o200k_base`) when it is installed, and otherwise from a
+small built-in tokenizer that splits words, digit groups of up to three and punctuation the same
+way. The base install stays standard library only.
 
 ## What it does not catch
 
@@ -53,10 +83,11 @@ are decided by an upstream model, a network and an SSE parser. For that, use
 [`pii-leak-benchmark`](https://pypi.org/project/pii-leak-benchmark/), which sends
 fragmented responses through the gateway and checks what reaches the client.
 
-It checks the splits you ask for. The default is the whole input plus every single cut, which
-catches a value cut in two. `splits="all"` tries every split of a short input (up to 16
-characters); `splits=3` tries every split into at most three parts; an explicit list of chunk
-lists runs exactly those. It cannot prove a filter correct for inputs you did not give it.
+It checks the splits you ask for. The default is the whole input, every single cut, and the
+stream shapes above. `splits="all"` tries every split of a short input (up to 16 characters);
+`splits=3` tries every split into at most three parts; an explicit list of chunk lists runs
+exactly those. It cannot prove a filter correct for inputs you did not give it, and the token
+shapes come from one tokenizer, not from every provider's.
 
 ## Use it from your AI assistant
 
@@ -118,10 +149,12 @@ test file is up to you and your assistant.
 
 | Name | Does |
 |---|---|
-| `assert_chunk_invariant(stream_filter, whole_filter, text, *, splits="all-two-part")` | Raises `ChunkInvarianceError` (an `AssertionError`) on the first failing split, fewest parts first. Returns the number of splits checked. Works on `str` and `bytes`. |
+| `assert_chunk_invariant(stream_filter, whole_filter, text, *, splits="default")` | Raises `ChunkInvarianceError` (an `AssertionError`) on the first failing split, in the order tried (the whole input and single cuts first). Returns the number of splits checked. Works on `str` and `bytes`. |
 | `assert_chunk_invariant_async(...)` | The same, for an async generator filter, inside an async test. |
 | `two_part_splits(text)` | Every split into two non-empty parts. |
 | `all_splits(text, max_parts=None)` | Every split into at most `max_parts` non-empty parts, the whole input first. |
+| `token_splits`, `punctuation_splits`, `fixed_size_splits`, `n_part_splits`, `stream_splits` | The stream-shape generators behind the named sets. |
+| `tokenize(text, encoding="auto")` | Token boundaries: tiktoken when installed, the built-in tokenizer otherwise. |
 | `per_chunk(process, *, state=dict, flush=None)` | Adapts `process(chunk, state) -> output` and `flush(state) -> output`, with fresh state per stream. |
 | `from_async(async_stream_filter)` | Adapts an async generator filter for the synchronous assertion. |
 | `strategies.splits_of(text, max_parts=None)` | Hypothesis strategy: random splits of `text`, shrinking toward fewer cuts. |
@@ -134,5 +167,5 @@ test file is up to you and your assistant.
 The invariant and the two wrong designs are described in Phalak, N. (2026), *Split-Boundary
 Leaks in Streaming Guardrails*, Zenodo, [10.5281/zenodo.22909585](https://doi.org/10.5281/zenodo.22909585).
 
-Standard library only (the `mcp` extra adds the MCP SDK, for the server alone). Apache-2.0. A TypeScript version with the same API is published on npm
-as `chunk-invariance`.
+Standard library only (the `mcp` extra adds the MCP SDK, for the server alone; `tokens` adds tiktoken). Apache-2.0. A TypeScript version with the same core API (without the stream shapes yet) is
+published on npm as `chunk-invariance`.

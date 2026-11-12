@@ -92,7 +92,18 @@ def _synthetic_for(fake: Any, entity_type: str, seed: int) -> str:
         return f"AKIA{''.join(random.Random(seed).choices(alphabet, k=16))}"  # nosec B311 noqa: S311
     if "GPE" in entity_type or "LOC" in entity_type:
         return fake.city()
-    return fake.word()
+    rng = random.Random(seed)  # nosec B311 noqa: S311 - synthetic identifier, not crypto
+    if "NINO" in entity_type:
+        # The "QQ" prefix is never issued; it is the prefix of published example numbers.
+        return f"QQ{rng.randrange(10**6):06d}{rng.choice('ABCD')}"
+    if "DIGIT" in entity_type or "MRN" in entity_type:
+        # A digit run stays a digit run. Twelve digits starting 9 do not occur in prose.
+        return "9" + "".join(rng.choices("0123456789", k=11))
+    # Every other type (an encoded value, a type this function does not name) gets an
+    # opaque reference that ordinary text never contains. This used to be `fake.word()`, a
+    # common English word, and restoring a reply then put the caller's value wherever the
+    # model happened to write that word ("where", "his", "call").
+    return "ref_" + "".join(rng.choices("abcdefghijkmnpqrstuvwxyz23456789", k=12))
 
 
 class Vault:
