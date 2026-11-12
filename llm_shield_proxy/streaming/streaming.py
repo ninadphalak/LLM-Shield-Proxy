@@ -534,7 +534,8 @@ class SSERehydrationBuffer:
         alone. The cut is then moved forward to the end of the word it falls in, so a word
         is never split, and back to the start of any detected value it would cut, so a
         complete value is always scanned in one piece. A value is protected when it is at
-        most the window long; that is the documented bound.
+        most the window long; that is the documented bound. The hold never exceeds twice the
+        window, so a match that keeps growing cannot hold the stream back.
         """
         if not text:
             return 0
@@ -555,11 +556,16 @@ class SSERehydrationBuffer:
             # The prefix scan that follows fails the same way and logs it; holding the
             # window here keeps this path no worse than that one.
             return len(text) - cut
+        # A value up to the window long that crosses the cut starts no earlier than this.
+        # Never moving the cut back past it keeps the hold bounded: an open-ended match (a
+        # digit run or encoded blob still growing) would otherwise pin the cut at its start,
+        # and the buffer, and the rescan of it on every event, would grow with the stream.
+        floor = max(0, len(text) - 2 * window)
         moved = True
         while moved:
             moved = False
             for start, end, _entity_type, _matched in spans:
-                if start < cut < end:
+                if floor <= start < cut < end:
                     cut = start
                     moved = True
         return len(text) - cut

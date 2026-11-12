@@ -422,3 +422,16 @@ def test_a_final_call_that_carries_text_scans_its_tail(kind, chunks, response_re
     assert "219-09-9999" not in out
     assert "4111 1111 1111 1111" not in out
     assert "_REDACTED]" in out
+
+
+@pytest.mark.parametrize("blob", ["".join(str(i % 10) for i in range(6000)), "QUJD" * 1500], ids=["digit-run", "base64"])
+def test_a_match_that_keeps_growing_does_not_grow_the_hold(blob, response_redaction_on):
+    """An open-ended match (a long digit run or encoded blob streamed a few characters at a
+    time) must not pin the hold at its start: the buffer, and the scan of it on every event,
+    would grow with the stream."""
+    buffer = SSERehydrationBuffer(Vault(synthetic=False))
+    window = settings.RESPONSE_PII_SCAN_WINDOW
+    for i in range(0, len(blob), 3):
+        buffer.process_delta_text(blob[i : i + 3])
+        assert len(buffer.content_buffer) <= 2 * window + 3
+    buffer.process_delta_text("", is_final=True)
