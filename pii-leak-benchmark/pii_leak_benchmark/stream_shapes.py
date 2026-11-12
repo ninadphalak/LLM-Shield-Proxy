@@ -161,7 +161,9 @@ def probe_case(
         "partitions_tried": 0,
         "complete_leak_partitions": 0,
         "partial_emission_partitions": 0,
-        "example_leaking_pieces": None,
+        # Offsets only. The pieces themselves would put a recoverable specimen into the
+        # JSON report, which CI uploads as an artefact.
+        "example_leaking_cuts": None,
         "transport_error": None,
     }
     state = UpstreamState(segments=segments, case=case)
@@ -195,9 +197,8 @@ def probe_case(
                 complete = _leak_tier(needle, sse) is not None
                 if complete:
                     row["complete_leak_partitions"] += 1
-                    if row["example_leaking_pieces"] is None:
-                        bounds = (0, *cuts, len(rendered))
-                        row["example_leaking_pieces"] = [rendered[a:b] for a, b in zip(bounds, bounds[1:])]
+                    if row["example_leaking_cuts"] is None:
+                        row["example_leaking_cuts"] = list(cuts)
                 elif specific_run(needle, response_haystacks(sse), benign) >= MIN_SPECIFIC_RUN:
                     row["partial_emission_partitions"] += 1
     finally:

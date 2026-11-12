@@ -30,7 +30,7 @@ FALLBACK_TYPES = [
 ]
 SIGNED_URL = (
     "https://backups.example.com/exports/customers.csv?X-Amz-Algorithm=AWS4-HMAC-SHA256"
-    "&X-Amz-Credential=AKIAQWERTYUIOPASDFGH%2F20261112%2Fus-east-1%2Fs3%2Faws4_request"
+    "&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261112%2Fus-east-1%2Fs3%2Faws4_request"
     "&X-Amz-Signature=" + "0123456789abcdef" * 4
 )
 WORDS = sorted(set(LoremProvider.word_list))

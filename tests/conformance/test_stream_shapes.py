@@ -105,3 +105,22 @@ def test_report_and_cli(tmp_path, capsys):
     assert report["cases_leaked"] == 0 and report["cases_scored"] == 16
     assert len(report["instrument"]["stream_shapes_sha256"]) == 16
     assert "retention-plus-decoding" in capsys.readouterr().out
+
+
+def test_a_leaking_report_names_cut_offsets_never_the_value(tmp_path):
+    """The JSON report is uploaded as a CI artefact, so it may say where a leaking stream was
+    cut but must not carry the pieces of the value."""
+    out = tmp_path / "shapes.json"
+    code = ss.main(
+        ["--only", "chunk-local", "--family", "token-aligned", "--seed", "a1b2c3d4e5f60001", "--json-out", str(out)]
+    )
+    assert code == 1
+    text = out.read_text()
+    report = __import__("json").loads(text)[0]
+    assert report["cases_leaked"] > 0
+    segments = v2.build_segments("a1b2c3d4e5f60001")
+    for value in segments.injection.values():
+        assert value not in text
+        for piece in ss.simple_tokens(value):
+            if len(piece) >= 4:
+                assert f'"{piece}"' not in text
