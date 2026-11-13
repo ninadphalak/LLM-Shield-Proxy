@@ -1,6 +1,6 @@
 # Multi-stage security-hardened non-root Dockerfile for LLM-Shield-Proxy
 # Stage 1: Build Dependencies
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 WORKDIR /build
 
@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir --user ./pii-leak-benchmark && \
     pip install --no-cache-dir --user -r requirements.txt .
 
 # Stage 2: Production Distroless-style Non-Root Runtime
-FROM python:3.14-slim AS runner
+FROM python:3.15-slim AS runner
 
 WORKDIR /app
 
