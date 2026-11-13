@@ -30,6 +30,7 @@ permissions:
 jobs:
   operator-action:
     name: Operator Action Detects a Gateway Regression
+    if: github.event_name != 'release' || ((startsWith(github.event.release.tag_name, 'v') || startsWith(github.event.release.tag_name, 'benchmark-v')) && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -68,6 +69,7 @@ jobs:
 
   presidio-reproduction:
     name: Pinned Presidio Integration Reproduction
+    if: github.event_name != 'release' || ((startsWith(github.event.release.tag_name, 'v') || startsWith(github.event.release.tag_name, 'benchmark-v')) && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ubuntu-latest
     # The run takes about two minutes. A stalled image download from mcr.microsoft.com
     # once held this job for the six-hour default, so it is bounded.
@@ -104,6 +106,7 @@ jobs:
 
   evidence-integrity:
     name: Recompute Published Evidence
+    if: github.event_name != 'release' || ((startsWith(github.event.release.tag_name, 'v') || startsWith(github.event.release.tag_name, 'benchmark-v')) && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -178,6 +181,7 @@ jobs:
     # -- page and reports can never disagree on main -- with none of that. The regenerated
     # page is uploaded either way, so a fork run produces its own copy.
     name: Results Page Matches The Reports
+    if: github.event_name != 'release' || ((startsWith(github.event.release.tag_name, 'v') || startsWith(github.event.release.tag_name, 'benchmark-v')) && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -222,6 +226,7 @@ jobs:
     # depend on the host, which is what an independent reproducer needs to know before
     # treating a mismatch on their machine as a finding.
     name: Reproduce Fragmentation Result (${{ matrix.os }}, py${{ matrix.python }})
+    if: github.event_name != 'release' || ((startsWith(github.event.release.tag_name, 'v') || startsWith(github.event.release.tag_name, 'benchmark-v')) && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -266,6 +271,7 @@ jobs:
 
   benchmark:
     name: Run Streaming Privacy Conformance
+    if: github.event_name != 'release' || ((startsWith(github.event.release.tag_name, 'v') || startsWith(github.event.release.tag_name, 'benchmark-v')) && !contains(github.event.release.tag_name, 'evidence'))
     runs-on: ubuntu-latest
     env:
       TELEMETRY_ENABLED: "false"
