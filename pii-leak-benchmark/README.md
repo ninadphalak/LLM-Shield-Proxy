@@ -15,6 +15,9 @@ writes the report a published row needs; start with `selfcheck`.
 
 Standard library plus `httpx`. You should not have to install one gateway to measure another.
 
+This package installs on its own and does not install any gateway. How it relates to the
+specification, `chunk-invariance` and LLM-Shield-Proxy: [How the pieces fit](https://github.com/ninadphalak/LLM-Shield-Proxy#how-the-pieces-fit).
+
 ## A gateway check in your pull request
 
 Use the [GitHub Action and regression guide](https://llmshieldproxy.com/docs/conformance/ci).

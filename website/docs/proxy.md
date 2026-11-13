@@ -50,6 +50,21 @@ from openai import OpenAI
 client = OpenAI(api_key="sk-my-client-key", base_url="http://localhost:8000/v1")
 ```
 
+## How the pieces fit
+
+| | What it is | Who uses it | Analogy |
+| :--- | :--- | :--- | :--- |
+| [The specification](conformance/specification-v1.md) | A written rulebook, with JSON schemas for the reports. No runtime code. | Anyone defining what "safe" means for streamed redaction | The safety standard |
+| [`pii-leak-benchmark`](conformance/index.md) | An outside tester. It talks to a running gateway over HTTP, plays both the client and the model provider, and scores what leaked. | Auditors, researchers, and teams checking a gateway they run | The crash-test lab |
+| [`chunk-invariance`](chunk-invariance.md) | A test library a developer adds to their own test suite: the output must not depend on how the stream is cut | Developers building streaming filters | The gauge on the factory line |
+| LLM-Shield-Proxy | A working privacy gateway | Someone who needs a filter, or a gateway to compare against | A car built to the standard |
+
+The proxy goes through the same lab as any other gateway: release
+[1.7.1](https://github.com/ninadphalak/LLM-Shield-Proxy/releases/tag/v1.7.1) fixed two
+streamed-response redaction cases in the proxy that new stream-shape tests exposed.
+`pip install pii-leak-benchmark` and `pip install chunk-invariance` each install on their own,
+without the proxy. `pip install llm-shield-proxy` also installs `pii-leak-benchmark`.
+
 ## Next steps
 
 | You want to | Read |
