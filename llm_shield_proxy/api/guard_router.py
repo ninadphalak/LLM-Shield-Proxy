@@ -55,8 +55,16 @@ guard_router = APIRouter()
 
 # Bounds. Invariant 1 (no unbounded buffering) applies to this surface exactly as
 # it does to the proxy path; a gateway is free to send a pathological batch.
-MAX_TEXTS_PER_REQUEST = 256
-MAX_TOTAL_TEXT_CHARS = 1_000_000
+#
+# Bound from Settings rather than hardcoded: the defaults (256 texts / 1M chars)
+# are correct for a caller sending one message batch, but a gateway that posts a
+# WHOLE conversation per request (LiteLLM's llm_shield_proxy adapter does) hits
+# them on ordinary traffic, and its adapter turns the resulting 413 into a refused
+# request rather than a skipped guard. Operators raise GUARD_MAX_TEXTS_PER_REQUEST
+# and GUARD_MAX_TOTAL_TEXT_CHARS for that integration; a restart is required
+# because these are bound at import.
+MAX_TEXTS_PER_REQUEST = settings.GUARD_MAX_TEXTS_PER_REQUEST
+MAX_TOTAL_TEXT_CHARS = settings.GUARD_MAX_TOTAL_TEXT_CHARS
 
 # The carry-over is bounded by the vault's retention window, which is at most
 # max_placeholder_length - 1. A caller returning a huge carry is either buggy or
