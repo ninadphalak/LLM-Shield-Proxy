@@ -379,6 +379,30 @@ class Settings(BaseSettings):
     MAX_PAYLOAD_SIZE_BYTES: int = Field(
         default=10 * 1024 * 1024, description="Maximum allowed request payload size in bytes (10MB default)"
     )
+    # Guard-API batch bounds. These are per-call anti-DoS limits, not a statement
+    # about how large a conversation may be: a gateway that posts one text per
+    # message for the WHOLE conversation (LiteLLM's llm_shield_proxy adapter and
+    # similar) reaches them on ordinary agent traffic and then cannot use the
+    # guard at all, because its adapter turns the 413 into a refused request.
+    # Raise both when the caller batches conversations; keep them low otherwise.
+    GUARD_MAX_TEXTS_PER_REQUEST: int = Field(
+        default=256,
+        gt=0,
+        description=(
+            "Maximum number of texts accepted by one /v1/guard/redact, rehydrate or "
+            "rehydrate/stream call. Default is a per-call bound; raise it when the gateway "
+            "posts a whole conversation as one batch."
+        ),
+    )
+    GUARD_MAX_TOTAL_TEXT_CHARS: int = Field(
+        default=1_000_000,
+        gt=0,
+        description=(
+            "Maximum total characters accepted by one /v1/guard call. Bounds the memory and "
+            "scan time of a single call; raise it for whole-conversation gateways. Scan cost is "
+            "superlinear in match count, so a large raise trades latency for coverage."
+        ),
+    )
     MAX_SSE_LINE_LENGTH: int = Field(
         default=1024 * 1024,
         description="Maximum allowed SSE line length in bytes to prevent Slowloris buffer poisoning (1MB default)",
